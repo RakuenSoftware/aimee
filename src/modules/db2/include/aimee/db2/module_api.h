@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "dde679d48e544006fca714bd9386b7ecee3c491db7521d9ad23d8863a253b0db"
+#define AIMEE_DB2_CONTRACT_SHA256 "efb26df88453b88c31e0be9d92ff9075961cbd14c175fa72d3aca914dd0759d0"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -215,6 +215,16 @@
 #define AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX             1.0
 #define AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX             2147483647u
 #define AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX            2147483647u
+#define AIMEE_DB2_EVENT_L2_MEMORY_IDS                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_L2_MEMORY_IDS                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_L2_MEMORY_IDS                 13u
+#define AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN               24u
+#define AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MIN_LEN          28u
+#define AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN          16412u
+#define AIMEE_DB2_L2_MEMORY_IDS_ERROR_LEN                 24u
+#define AIMEE_DB2_L2_MEMORY_IDS_MAX                       2048u
+#define AIMEE_DB2_L2_MEMORY_ID_MIN                        1u
+#define AIMEE_DB2_L2_MEMORY_ID_MAX                        9223372036854775807ull
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1334,6 +1344,79 @@ static inline int aimee_db2_effectiveness_stats_reply_decode(
    stats->avg_effectiveness = average;
    stats->low_effectiveness_count = low;
    stats->high_impact_count = high;
+   return 0;
+}
+
+static inline int aimee_db2_l2_memory_ids_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_L2_MEMORY_IDS, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_l2_memory_ids_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_L2_MEMORY_IDS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_l2_memory_ids_reply_encode(const uint64_t *memory_ids, uint32_t count,
+                                                       uint8_t *output, size_t capacity,
+                                                       uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) ||
+       count > AIMEE_DB2_L2_MEMORY_IDS_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_L2_MEMORY_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_L2_MEMORY_ID_MAX)
+         return -1;
+   uint32_t payload_len = 4u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_L2_MEMORY_IDS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 4u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_l2_memory_ids_reply_decode(const uint8_t *input, size_t input_len,
+                                                       uint64_t *memory_ids, uint32_t capacity,
+                                                       uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_L2_MEMORY_IDS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_L2_MEMORY_IDS_MAX || header.payload_len != 4u + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
+      if (value < AIMEE_DB2_L2_MEMORY_ID_MIN || value > AIMEE_DB2_L2_MEMORY_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }
+   *count = decoded;
    return 0;
 }
 

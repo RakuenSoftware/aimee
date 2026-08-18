@@ -377,6 +377,26 @@ class ContractTests(unittest.TestCase):
              "short", "long"],
         )
 
+    def test_l2_memory_ids_vectors_cover_bounded_identifier_list(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][22]
+        self.assertEqual(operation["name"], "l2_memory_ids")
+        self.assertEqual(operation["request"]["maximum_ids"], 2048)
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["memory_ids"]) for row in operation["reply"]["positive"]],
+            [(0, [7, 19, 9223372036854775807]), (0, [])],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_count",
+             "count_exceeds_payload", "count_below_payload", "count_above_maximum",
+             "identifier_zero", "identifier_above_maximum", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -806,6 +826,27 @@ class ContractTests(unittest.TestCase):
             (lambda value: value["operations"][21]["reply"]["fields"].pop(),
              "effectiveness-stats-reply"),
             (lambda value: value["operations"][21].__setitem__("transaction", "single-statement"),
+             "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_l2_memory_ids_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][22].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][22].__setitem__("results", ["ok", "not_found"]),
+             "operation-results"),
+            (lambda value: value["operations"][22]["request"]["policy"].__setitem__(
+                "maximum_ids", 4096), "l2-memory-ids-request"),
+            (lambda value: value["operations"][22]["reply"]["field"].__setitem__(
+                "item_minimum", 0), "l2-memory-ids-reply"),
+            (lambda value: value["operations"][22]["reply"]["field"].__setitem__(
+                "maximum_items", 4096), "l2-memory-ids-reply"),
+            (lambda value: value["operations"][22]["reply"].__setitem__(
+                "encoded_size_max_ok", 16413), "l2-memory-ids-reply"),
+            (lambda value: value["operations"][22].__setitem__("transaction", "single-statement"),
              "operation-semantics"),
         )
         for mutate, rule in cases:

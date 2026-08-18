@@ -52,6 +52,9 @@ static double effectiveness_stats_low_threshold;
 static double effectiveness_stats_average_value;
 static int effectiveness_stats_low_value;
 static int effectiveness_stats_high_value;
+static int list_l2_memory_ids_result;
+static int list_l2_memory_ids_calls;
+static int64_t list_l2_memory_ids_first;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -73,7 +76,9 @@ static uint32_t dimension_reset_force;
 static uint32_t dimension_reset_dry_run;
 static aimee_db2_dimension_reset_t dimension_reset_status;
 static aimee_module_call_result_t transport_result;
-static uint8_t transport_response[AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN];
+/* Sized for the largest reply any operation can produce, so one shared buffer
+ * serves every typed-client test. */
+static uint8_t transport_response[AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN];
 static uint32_t transport_response_len;
 static int transport_calls;
 static int transport_expect_dimension;
@@ -89,6 +94,7 @@ static int transport_expect_effectiveness_update;
 static int transport_expect_retention_enforce;
 static int transport_expect_effectiveness_demote;
 static int transport_expect_effectiveness_stats;
+static int transport_expect_l2_memory_ids;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -361,6 +367,27 @@ static int effectiveness_stats(double low_threshold, double *avg_effectiveness,
                                    high_impact);
 }
 
+static int list_l2_memory_ids_impl(int64_t *out, int max)
+{
+   list_l2_memory_ids_calls++;
+   if (list_l2_memory_ids_result < 0)
+      return list_l2_memory_ids_result;
+   int listed = 0;
+   for (; listed < list_l2_memory_ids_result && listed < max; listed++)
+      out[listed] = listed == 0 ? list_l2_memory_ids_first : (int64_t)(listed + 1) * 11;
+   return listed;
+}
+
+int db2_memory_health_list_l2_memory_ids(int64_t *out, int max)
+{
+   return list_l2_memory_ids_impl(out, max);
+}
+
+static int list_l2_memory_ids(int64_t *out, int max)
+{
+   return list_l2_memory_ids_impl(out, max);
+}
+
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
                     long *stuck, long *poisoned)
 {
@@ -533,6 +560,9 @@ static void reset(void)
    effectiveness_stats_average_value = 0.5;
    effectiveness_stats_low_value = 3;
    effectiveness_stats_high_value = 1;
+   list_l2_memory_ids_result = 3;
+   list_l2_memory_ids_calls = 0;
+   list_l2_memory_ids_first = 7;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -567,6 +597,7 @@ static void reset(void)
    transport_expect_retention_enforce = 0;
    transport_expect_effectiveness_demote = 0;
    transport_expect_effectiveness_stats = 0;
+   transport_expect_l2_memory_ids = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -587,7 +618,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_effectiveness_stats       ? AIMEE_DB2_EVENT_EFFECTIVENESS_STATS
+       transport_expect_l2_memory_ids             ? AIMEE_DB2_EVENT_L2_MEMORY_IDS
+       : transport_expect_effectiveness_stats     ? AIMEE_DB2_EVENT_EFFECTIVENESS_STATS
        : transport_expect_effectiveness_demote    ? AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE
        : transport_expect_retention_enforce       ? AIMEE_DB2_EVENT_RETENTION_ENFORCE
        : transport_expect_effectiveness_update    ? AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE
@@ -610,7 +642,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_effectiveness_stats       ? AIMEE_DB2_STAGE_EFFECTIVENESS_STATS
+       transport_expect_l2_memory_ids             ? AIMEE_DB2_STAGE_L2_MEMORY_IDS
+       : transport_expect_effectiveness_stats     ? AIMEE_DB2_STAGE_EFFECTIVENESS_STATS
        : transport_expect_effectiveness_demote    ? AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE
        : transport_expect_retention_enforce       ? AIMEE_DB2_STAGE_RETENTION_ENFORCE
        : transport_expect_effectiveness_update    ? AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE
@@ -636,7 +669,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_effectiveness_stats)
+   if (transport_expect_l2_memory_ids)
+      assert(aimee_db2_l2_memory_ids_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_effectiveness_stats)
       assert(aimee_db2_effectiveness_stats_request_decode(request_body, request_len) == 0);
    else if (transport_expect_effectiveness_demote)
       assert(aimee_db2_effectiveness_demote_request_decode(request_body, request_len) == 0);
@@ -1323,6 +1358,58 @@ static void test_effectiveness_stats_wire(void)
    assert(aimee_db2_effectiveness_stats_reply_decode(reply, reply_len, &decoded) == -1);
    aimee_db2_put_u64(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 0x3ff0000000000001ULL);
    assert(aimee_db2_effectiveness_stats_reply_decode(reply, reply_len, &decoded) == -1);
+}
+
+static void test_l2_memory_ids_wire(void)
+{
+   uint8_t request[AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN] = {0};
+   assert(aimee_db2_l2_memory_ids_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_l2_memory_ids_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12u, 1u);
+   assert(aimee_db2_l2_memory_ids_request_decode(request, sizeof(request)) == -1);
+
+   static uint8_t reply[AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN];
+   static uint64_t decoded[AIMEE_DB2_L2_MEMORY_IDS_MAX];
+   const uint64_t ids[] = {7, 19, AIMEE_DB2_L2_MEMORY_ID_MAX};
+   uint32_t reply_len = 99, count = 99;
+   assert(aimee_db2_l2_memory_ids_reply_encode(ids, 3u, reply, sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + 3u * 8u);
+   assert(aimee_db2_l2_memory_ids_reply_decode(reply, reply_len, decoded,
+                                               AIMEE_DB2_L2_MEMORY_IDS_MAX, &count) == 0);
+   assert(count == 3 && decoded[0] == 7 && decoded[1] == 19 &&
+          decoded[2] == AIMEE_DB2_L2_MEMORY_ID_MAX);
+
+   /* An empty list is the shortest legal reply, not an error. */
+   assert(aimee_db2_l2_memory_ids_reply_encode(NULL, 0u, reply, sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MIN_LEN);
+   assert(aimee_db2_l2_memory_ids_reply_decode(reply, reply_len, decoded,
+                                               AIMEE_DB2_L2_MEMORY_IDS_MAX, &count) == 0 &&
+          count == 0);
+
+   /* Identifiers are positive and bounded on both sides of the wire. */
+   const uint64_t zero_id[] = {0};
+   assert(aimee_db2_l2_memory_ids_reply_encode(zero_id, 1u, reply, sizeof(reply), &reply_len) ==
+          -1);
+   const uint64_t huge_id[] = {(uint64_t)AIMEE_DB2_L2_MEMORY_ID_MAX + 1u};
+   assert(aimee_db2_l2_memory_ids_reply_encode(huge_id, 1u, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(reply_len == 0);
+
+   /* The declared bound holds, and a short caller buffer is refused rather
+    * than overrun. */
+   assert(aimee_db2_l2_memory_ids_reply_encode(ids, AIMEE_DB2_L2_MEMORY_IDS_MAX + 1u, reply,
+                                               sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_l2_memory_ids_reply_encode(ids, 3u, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_l2_memory_ids_reply_decode(reply, reply_len, decoded, 2u, &count) == -1 &&
+          count == 0);
+
+   /* A count that disagrees with the payload length must not be trusted. */
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 2u);
+   assert(aimee_db2_l2_memory_ids_reply_decode(reply, reply_len, decoded,
+                                               AIMEE_DB2_L2_MEMORY_IDS_MAX, &count) == -1);
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 4u);
+   assert(aimee_db2_l2_memory_ids_reply_decode(reply, reply_len, decoded,
+                                               AIMEE_DB2_L2_MEMORY_IDS_MAX, &count) == -1);
 }
 
 static void test_pool_status_wire(void)
@@ -2116,6 +2203,49 @@ static void test_effectiveness_stats_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_l2_memory_ids_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.list_l2_memory_ids = list_l2_memory_ids};
+   uint8_t request[AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN];
+   static uint8_t response[AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN];
+   static uint64_t decoded[AIMEE_DB2_L2_MEMORY_IDS_MAX];
+   uint32_t response_len = 99, count = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_L2_MEMORY_IDS};
+   assert(aimee_db2_l2_memory_ids_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(list_l2_memory_ids_calls == 1);
+   assert(aimee_db2_l2_memory_ids_reply_decode(response, response_len, decoded,
+                                               AIMEE_DB2_L2_MEMORY_IDS_MAX, &count) == 0);
+   assert(count == 3 && decoded[0] == 7 && decoded[1] == 22 && decoded[2] == 33);
+
+   /* An empty corpus still answers, with the shortest legal reply. */
+   list_l2_memory_ids_result = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(response_len == AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MIN_LEN);
+
+   /* A backend error and a non-positive identifier are both refused. */
+   list_l2_memory_ids_result = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   list_l2_memory_ids_result = 3;
+   list_l2_memory_ids_first = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   list_l2_memory_ids_first = -5;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   list_l2_memory_ids_first = 7;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -2652,6 +2782,26 @@ static void test_effectiveness_stats_typed_client(void)
           received.high_impact_count == 1 && transport_calls == 1);
 }
 
+static void test_l2_memory_ids_typed_client(void)
+{
+   reset();
+   transport_expect_l2_memory_ids = 1;
+   static uint64_t received[AIMEE_DB2_L2_MEMORY_IDS_MAX];
+   const uint64_t ids[] = {7, 19, 4242};
+   uint32_t count = 99;
+   assert(aimee_db2_l2_memory_ids_call(NULL, NULL, 77, 88, received, AIMEE_DB2_L2_MEMORY_IDS_MAX,
+                                       &count, NULL, NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(count == 0);
+   assert(aimee_db2_l2_memory_ids_reply_encode(ids, 3u, transport_response,
+                                               sizeof(transport_response),
+                                               &transport_response_len) == 0);
+   assert(aimee_db2_l2_memory_ids_call(transport, (void *)0x1234, 77, 88, received,
+                                       AIMEE_DB2_L2_MEMORY_IDS_MAX, &count, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(count == 3 && received[0] == 7 && received[1] == 19 && received[2] == 4242 &&
+          transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -2835,6 +2985,7 @@ int main(void)
    test_retention_enforce_wire();
    test_effectiveness_demote_wire();
    test_effectiveness_stats_wire();
+   test_l2_memory_ids_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -2857,6 +3008,7 @@ int main(void)
    test_retention_enforce_handler();
    test_effectiveness_demote_handler();
    test_effectiveness_stats_handler();
+   test_l2_memory_ids_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -2879,6 +3031,7 @@ int main(void)
    test_retention_enforce_typed_client();
    test_effectiveness_demote_typed_client();
    test_effectiveness_stats_typed_client();
+   test_l2_memory_ids_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

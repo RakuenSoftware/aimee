@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "dde679d48e544006fca714bd9386b7ecee3c491db7521d9ad23d8863a253b0db"
+const ContractSHA256 = "efb26df88453b88c31e0be9d92ff9075961cbd14c175fa72d3aca914dd0759d0"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -147,6 +147,12 @@ const EffectivenessStatsAvgMin = 0.0
 const EffectivenessStatsAvgMax = 1.0
 const EffectivenessStatsLowMax uint32 = 2147483647
 const EffectivenessStatsHighMax uint32 = 2147483647
+const EventL2MemoryIDs = EventMemory
+const StageL2MemoryIDs = FamilyMemory
+const OperationL2MemoryIDs uint32 = 13
+const L2MemoryIDsMax uint32 = 2048
+const L2MemoryIDMin uint64 = 1
+const L2MemoryIDMax uint64 = 9223372036854775807
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -984,6 +990,76 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// EncodeL2MemoryIDsRequest emits the empty request for the fixed identifier bound.
+func EncodeL2MemoryIDsRequest() []byte {
+	header, err := EncodeRequestHeader(OperationL2MemoryIDs, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeL2MemoryIDsRequest validates the exact empty operation envelope.
+func DecodeL2MemoryIDsRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationL2MemoryIDs || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	if len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeL2MemoryIDsReply emits the counted, bounded L2 identifier list.
+func EncodeL2MemoryIDsReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > L2MemoryIDsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < L2MemoryIDMin || id > L2MemoryIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationL2MemoryIDs, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeL2MemoryIDsReply validates the operation and every bounded identifier.
+func DecodeL2MemoryIDsReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationL2MemoryIDs || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > L2MemoryIDsMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < L2MemoryIDMin || id > L2MemoryIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
 }
 
 // EncodeEffectivenessStatsRequest emits the empty request for the fixed low-threshold policy.

@@ -254,6 +254,13 @@ int main(int argc, char **argv)
    assert(stats.avg_effectiveness == 0.0 && stats.low_effectiveness_count == 0 &&
           stats.high_impact_count == 0);
 
+   uint64_t l2_ids[AIMEE_DB2_L2_MEMORY_IDS_MAX];
+   uint32_t l2_count = 99;
+   assert(aimee_db2_l2_memory_ids_call(call_client, &client, 9034, 0, l2_ids,
+                                       AIMEE_DB2_L2_MEMORY_IDS_MAX, &l2_count, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(l2_count == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

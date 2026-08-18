@@ -849,18 +849,49 @@ def validate_catalog(value: object) -> dict[str, object]:
                              "maximum": 0x7fffffff}):
                 fail("effectiveness-stats-reply",
                      "reply must contain the bounded average and the two bounded counts")
+        elif key == ("memory", 13) and name == "l2_memory_ids" and \
+                operation["wire_format"] == "db2-envelope-u64-list-v1":
+            if operation["c_symbols"] != ["db2_memory_health_list_l2_memory_ids"]:
+                fail("operation-c-symbols",
+                     "l2_memory_ids C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "l2_memory_ids results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "l2_memory_ids.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"maximum_ids": 2048}):
+                fail("l2-memory-ids-request",
+                     "request must carry no payload and use the fixed canonical identifier bound")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "field"},
+                          "l2_memory_ids.reply")
+            reply_field = _keys(reply["field"],
+                                {"name", "type", "minimum_items", "maximum_items",
+                                 "item_minimum", "item_maximum"},
+                                "l2_memory_ids.reply.field")
+            maximum_ids = request["policy"]["maximum_ids"]
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + maximum_ids * 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "memory_ids", "type": "u64-list",
+                                    "minimum_items": 0, "maximum_items": maximum_ids,
+                                    "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
+                fail("l2-memory-ids-reply",
+                     "reply must be a counted identifier list bounded by the request policy")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 22 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 23 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
             "level3_count", "level2_count", "orphaned_l0_count", "total_count",
             "session_l2_count", "key_exists", "find_id_by_key_kind",
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
-            "effectiveness_demote", "effectiveness_stats"]:
+            "effectiveness_demote", "effectiveness_stats", "l2_memory_ids"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-two supported operations exactly once")
+             "the partial generator requires the twenty-three supported operations exactly once")
     return catalog
 
 
@@ -1006,6 +1037,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     retention_enforce = catalog["operations"][19]
     effectiveness_demote = catalog["operations"][20]
     effectiveness_stats = catalog["operations"][21]
+    l2_memory_ids = catalog["operations"][22]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1244,6 +1276,18 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_stats_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_stats["id"]), 0,
         _put_u64(effectiveness_stats_average_bits) + _put_u32(3) + _put_u32(1),
+    )
+    l2_memory_ids_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(l2_memory_ids["id"]), 0, b"",
+    )
+    l2_memory_ids_values = (7, 19, 9223372036854775807)
+    l2_memory_ids_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(l2_memory_ids["id"]), 0,
+        _put_u32(len(l2_memory_ids_values)) + b"".join(
+            _put_u64(value) for value in l2_memory_ids_values),
+    )
+    l2_memory_ids_empty = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(l2_memory_ids["id"]), 0, _put_u32(0),
     )
 
     value = {
@@ -2281,6 +2325,51 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                      (effectiveness_stats_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": l2_memory_ids["family"],
+            "id": l2_memory_ids["id"],
+            "name": l2_memory_ids["name"],
+            "request": {
+                "positive": l2_memory_ids_request.hex(),
+                "maximum_ids": l2_memory_ids["request"]["policy"]["maximum_ids"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(l2_memory_ids_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(l2_memory_ids_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": l2_memory_ids_request[:-1].hex()},
+                    {"mutation": "long", "hex": (l2_memory_ids_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "memory_ids": list(l2_memory_ids_values),
+                     "hex": l2_memory_ids_ok.hex()},
+                    {"result": 0, "memory_ids": [], "hex": l2_memory_ids_empty.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(l2_memory_ids_ok, 8, 12).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(l2_memory_ids_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_count", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(l2_memory_ids["id"]), 0, b"").hex()},
+                    {"mutation": "count_exceeds_payload", "hex":
+                     mutate_u32(l2_memory_ids_ok, ENVELOPE_HEADER_LEN, 4).hex()},
+                    {"mutation": "count_below_payload", "hex":
+                     mutate_u32(l2_memory_ids_ok, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "count_above_maximum", "hex":
+                     mutate_u32(l2_memory_ids_ok, ENVELOPE_HEADER_LEN, 2049).hex()},
+                    {"mutation": "identifier_zero", "hex":
+                     (l2_memory_ids_ok[:ENVELOPE_HEADER_LEN + 4] + _put_u64(0) +
+                      l2_memory_ids_ok[ENVELOPE_HEADER_LEN + 12:]).hex()},
+                    {"mutation": "identifier_above_maximum", "hex":
+                     (l2_memory_ids_ok[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": l2_memory_ids_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (l2_memory_ids_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2315,6 +2404,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     retention_enforce = catalog["operations"][19]
     effectiveness_demote = catalog["operations"][20]
     effectiveness_stats = catalog["operations"][21]
+    l2_memory_ids = catalog["operations"][22]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -2610,6 +2700,23 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{effectiveness_stats['reply']['fields'][1]['maximum']}u"),
         ("AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX",
          f"{effectiveness_stats['reply']['fields'][2]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_L2_MEMORY_IDS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_L2_MEMORY_IDS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_L2_MEMORY_IDS", f"{l2_memory_ids['id']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN",
+         f"{l2_memory_ids['request']['encoded_size']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MIN_LEN",
+         f"{l2_memory_ids['reply']['encoded_size_min_ok']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN",
+         f"{l2_memory_ids['reply']['encoded_size_max_ok']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_ERROR_LEN",
+         f"{l2_memory_ids['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_MAX",
+         f"{l2_memory_ids['reply']['field']['maximum_items']}u"),
+        ("AIMEE_DB2_L2_MEMORY_ID_MIN",
+         f"{l2_memory_ids['reply']['field']['item_minimum']}u"),
+        ("AIMEE_DB2_L2_MEMORY_ID_MAX",
+         f"{l2_memory_ids['reply']['field']['item_maximum']}ull"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -3758,6 +3865,79 @@ static inline int aimee_db2_effectiveness_stats_reply_decode(
    return 0;
 }}
 
+static inline int aimee_db2_l2_memory_ids_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_L2_MEMORY_IDS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_l2_memory_ids_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_L2_MEMORY_IDS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_l2_memory_ids_reply_encode(const uint64_t *memory_ids, uint32_t count,
+                                                       uint8_t *output, size_t capacity,
+                                                       uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) ||
+       count > AIMEE_DB2_L2_MEMORY_IDS_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_L2_MEMORY_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_L2_MEMORY_ID_MAX)
+         return -1;
+   uint32_t payload_len = 4u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_L2_MEMORY_IDS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 4u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_l2_memory_ids_reply_decode(const uint8_t *input, size_t input_len,
+                                                       uint64_t *memory_ids, uint32_t capacity,
+                                                       uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_L2_MEMORY_IDS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_L2_MEMORY_IDS_MAX || header.payload_len != 4u + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {{
+      uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
+      if (value < AIMEE_DB2_L2_MEMORY_ID_MIN || value > AIMEE_DB2_L2_MEMORY_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }}
+   *count = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -4669,6 +4849,11 @@ extern "C"
        aimee_db2_effectiveness_stats_t *stats, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_l2_memory_ids_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -5110,6 +5295,35 @@ aimee_db2_effectiveness_stats_call(aimee_db2_call_fn call, void *call_context, u
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_l2_memory_ids_call(aimee_db2_call_fn call, void *call_context,
+                                                        uint64_t trace_id, uint64_t deadline_ns,
+                                                        uint64_t *memory_ids, uint32_t capacity,
+                                                        uint32_t *count,
+                                                        aimee_module_cancelled_fn cancelled,
+                                                        void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_l2_memory_ids_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_L2_MEMORY_IDS, AIMEE_DB2_STAGE_L2_MEMORY_IDS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_l2_memory_ids_reply_decode(response, response_len, memory_ids, capacity, count) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -5371,6 +5585,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     retention_enforce = catalog["operations"][19]
     effectiveness_demote = catalog["operations"][20]
     effectiveness_stats = catalog["operations"][21]
+    l2_memory_ids = catalog["operations"][22]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -5519,6 +5734,12 @@ const EffectivenessStatsAvgMin = {_binary64_literal(effectiveness_stats['reply']
 const EffectivenessStatsAvgMax = {_binary64_literal(effectiveness_stats['reply']['fields'][0]['maximum_binary64_bits'])}
 const EffectivenessStatsLowMax uint32 = {effectiveness_stats['reply']['fields'][1]['maximum']}
 const EffectivenessStatsHighMax uint32 = {effectiveness_stats['reply']['fields'][2]['maximum']}
+const EventL2MemoryIDs = EventMemory
+const StageL2MemoryIDs = FamilyMemory
+const OperationL2MemoryIDs uint32 = {l2_memory_ids['id']}
+const L2MemoryIDsMax uint32 = {l2_memory_ids['reply']['field']['maximum_items']}
+const L2MemoryIDMin uint64 = {l2_memory_ids['reply']['field']['item_minimum']}
+const L2MemoryIDMax uint64 = {l2_memory_ids['reply']['field']['item_maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -6354,6 +6575,76 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// EncodeL2MemoryIDsRequest emits the empty request for the fixed identifier bound.
+func EncodeL2MemoryIDsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationL2MemoryIDs, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeL2MemoryIDsRequest validates the exact empty operation envelope.
+func DecodeL2MemoryIDsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationL2MemoryIDs || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	if len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeL2MemoryIDsReply emits the counted, bounded L2 identifier list.
+func EncodeL2MemoryIDsReply(memoryIDs []uint64) ([]byte, error) {{
+	if uint32(len(memoryIDs)) > L2MemoryIDsMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for _, id := range memoryIDs {{
+		if id < L2MemoryIDMin || id > L2MemoryIDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationL2MemoryIDs, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {{
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}}
+	return reply, nil
+}}
+
+// DecodeL2MemoryIDsReply validates the operation and every bounded identifier.
+func DecodeL2MemoryIDsReply(reply []byte) ([]uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationL2MemoryIDs || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > L2MemoryIDsMax || header.PayloadLen != 4+count*8 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {{
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < L2MemoryIDMin || id > L2MemoryIDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+		memoryIDs[index] = id
+	}}
+	return memoryIDs, nil
 }}
 
 // EncodeEffectivenessStatsRequest emits the empty request for the fixed low-threshold policy.

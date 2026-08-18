@@ -44,6 +44,7 @@ typedef struct
    int (*demote_effectiveness)(double threshold);
    int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
                               int *low_effectiveness, int *high_impact);
+   int (*list_l2_memory_ids)(int64_t *out, int max);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -91,6 +92,7 @@ static int set_effectiveness_calls;
 static int retention_delete_calls;
 static int demote_effectiveness_calls;
 static int effectiveness_stats_calls;
+static int list_l2_memory_ids_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -335,6 +337,26 @@ static int effectiveness_stats(double low_threshold, double *avg_effectiveness,
 {
    return effectiveness_stats_impl(low_threshold, avg_effectiveness, low_effectiveness,
                                    high_impact);
+}
+
+static int list_l2_memory_ids_impl(int64_t *out, int max)
+{
+   list_l2_memory_ids_calls++;
+   static const int64_t rows[] = {7, 19, 4242};
+   int listed = 0;
+   for (; listed < (int)(sizeof(rows) / sizeof(rows[0])) && listed < max; listed++)
+      out[listed] = rows[listed];
+   return listed;
+}
+
+int db2_memory_health_list_l2_memory_ids(int64_t *out, int max)
+{
+   return list_l2_memory_ids_impl(out, max);
+}
+
+static int list_l2_memory_ids(int64_t *out, int max)
+{
+   return list_l2_memory_ids_impl(out, max);
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -604,6 +626,7 @@ int main(void)
        .retention_delete = retention_delete,
        .demote_effectiveness = demote_effectiveness,
        .effectiveness_stats = effectiveness_stats,
+       .list_l2_memory_ids = list_l2_memory_ids,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -715,6 +738,14 @@ int main(void)
           AIMEE_MODULE_CALL_OK);
    assert(stats.avg_effectiveness == 0.5 && stats.low_effectiveness_count == 3 &&
           stats.high_impact_count == 1 && effectiveness_stats_calls == 1);
+
+   uint64_t l2_ids[AIMEE_DB2_L2_MEMORY_IDS_MAX];
+   uint32_t l2_count = 99;
+   assert(aimee_db2_l2_memory_ids_call(call_client, &client, 7032, 0, l2_ids,
+                                       AIMEE_DB2_L2_MEMORY_IDS_MAX, &l2_count, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(l2_count == 3 && l2_ids[0] == 7 && l2_ids[1] == 19 && l2_ids[2] == 4242 &&
+          list_l2_memory_ids_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

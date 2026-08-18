@@ -128,6 +128,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .retention_delete = db2_memory_health_delete_by_sensitivity,
        .demote_effectiveness = db2_memory_health_demote_low_effectiveness,
        .effectiveness_stats = db2_memory_health_effectiveness_stats,
+       .list_l2_memory_ids = db2_memory_health_list_l2_memory_ids,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -391,6 +392,30 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          };
          if (aimee_db2_effectiveness_stats_reply_encode(&stats, response_body, response_capacity,
                                                         response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_l2_memory_ids_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->list_l2_memory_ids)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int64_t rows[AIMEE_DB2_L2_MEMORY_IDS_MAX];
+         int listed = backend->list_l2_memory_ids(rows, (int)AIMEE_DB2_L2_MEMORY_IDS_MAX);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (listed < 0 || listed > (int)AIMEE_DB2_L2_MEMORY_IDS_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         uint64_t memory_ids[AIMEE_DB2_L2_MEMORY_IDS_MAX];
+         for (int index = 0; index < listed; index++)
+         {
+            if (rows[index] < (int64_t)AIMEE_DB2_L2_MEMORY_ID_MIN)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            memory_ids[index] = (uint64_t)rows[index];
+         }
+         if (aimee_db2_l2_memory_ids_reply_encode(memory_ids, (uint32_t)listed, response_body,
+                                                  response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

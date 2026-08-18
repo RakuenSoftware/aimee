@@ -16475,9 +16475,15 @@
           "line": 45
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.l2_memory_ids operation hands the bounded L2 identifier set across the boundary so the host can join it against DB1 surfacing evidence while DB2 keeps the canonical relational tier."
+      },
       "signature": "int db2_memory_health_list_l2_memory_ids ( int64_t * out , int max )",
       "signature_sha256": "955d6d91daa19ba4cff77b8af126938bc4a6aa3b0c9ea57b29615aa146cb19ba",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_list_l2_memory_ids"
     },
     {
@@ -25698,15 +25704,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "030156f4c7105e5d8024d3551c0b6094cdf7792d5612c8dd279977b1580d94da",
+  "fingerprint": "dc1f196baa1e5400ef18e8a1ff49532b88c41b33b7bf0de7da4a0be96b064ea8",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 679,
+    "audit_pending": 678,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 279
+    "reviewed": 280
   }
 }

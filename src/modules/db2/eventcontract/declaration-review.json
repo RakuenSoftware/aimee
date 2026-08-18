@@ -1476,6 +1476,14 @@
       "reason": "The typed memory.effectiveness_stats operation returns the aggregate effectiveness summary under the fixed host low-effectiveness threshold while DB2 owns the canonical relational memory corpus."
     },
     {
+      "symbol": "db2_memory_health_list_l2_memory_ids",
+      "signature_sha256": "955d6d91daa19ba4cff77b8af126938bc4a6aa3b0c9ea57b29615aa146cb19ba",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.l2_memory_ids operation hands the bounded L2 identifier set across the boundary so the host can join it against DB1 surfacing evidence while DB2 keeps the canonical relational tier."
+    },
+    {
       "symbol": "db2_memory_health_prune_old",
       "signature_sha256": "72dc451b17a01e95eb74f03a61f51af72057b38fdbe34f82a9db392a02b4a760",
       "disposition": "private-db2",

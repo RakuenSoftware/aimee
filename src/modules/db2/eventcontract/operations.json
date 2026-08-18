@@ -635,6 +635,32 @@
           {"name": "high_impact_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
         ]
       }
+    },
+    {
+      "family": "memory",
+      "id": 13,
+      "name": "l2_memory_ids",
+      "wire_format": "db2-envelope-u64-list-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Canonical L2 memory identifiers are relational DB2 authority; the host joins them against DB1 surfacing evidence, so the identifiers cross the boundary rather than the join.",
+      "c_symbols": ["db2_memory_health_list_l2_memory_ids"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"maximum_ids": 2048}
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 16412,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list",
+                  "minimum_items": 0, "maximum_items": 2048,
+                  "item_minimum": 1, "item_maximum": 9223372036854775807}
+      }
     }
   ]
 }
