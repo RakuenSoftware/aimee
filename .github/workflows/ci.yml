@@ -960,6 +960,34 @@ jobs:
           sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
+      # actions/checkout leaves refs/remotes/origin/HEAD unset -- it clones
+      # shallow and detached, and never records which branch the remote calls
+      # default. aimee's git surface resolves a session's worktree base from
+      # exactly that ref, so the harness's MCP git_status call failed here and
+      # only here, reporting "aimee-server unavailable after retries" while the
+      # checks either side reached that same server happily. The real reason
+      # was on mcp-serve's stderr:
+      #
+      #   cannot resolve the session worktree base for '/home/runner/work/aimee/aimee'.
+      #   The default is the REMOTE default branch (origin/HEAD); it is unset
+      #   or unreachable here. Fix the remote (git remote set-head ...)
+      #
+      # So do what it says. Set it, rather than skipping the check: an
+      # environment missing a ref every real checkout has is a gap in the
+      # environment, not a capability aimee lacks. The fallback covers a runner
+      # that cannot reach the remote to ask.
+      - name: Give the checkout an origin/HEAD
+        run: |
+          set -eu
+          # `-a` asks the remote which branch is default and writes a symbolic
+          # ref to refs/remotes/origin/<that>. In this job that ref does not
+          # exist: the checkout is shallow and single-branch, so pointing
+          # origin/HEAD at it would leave the base just as unresolvable. Fetch
+          # the base first, then point at what is actually there.
+          base="${GITHUB_BASE_REF:-testing}"
+          git fetch --no-tags --depth=1 origin "$base"
+          git remote set-head origin "$base"
+          git symbolic-ref refs/remotes/origin/HEAD
       - name: Client/server integration harness
         run: cd src && make -j$(nproc) integration-tests
 

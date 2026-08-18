@@ -343,44 +343,58 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
       memset(&row, 0, sizeof row);
       row.agent_name = field[0];
       row.role = field[1];
-      if (parse_int(field[2], &row.prompt_tokens) != 0)
+      int member_2 = 0;
+      if (parse_int(field[2], &member_2) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[3], &row.completion_tokens) != 0)
+      row.prompt_tokens = member_2;
+      int member_3 = 0;
+      if (parse_int(field[3], &member_3) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[4], &row.latency_ms) != 0)
+      row.completion_tokens = member_3;
+      int member_4 = 0;
+      if (parse_int(field[4], &member_4) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[5], &row.success) != 0)
+      row.latency_ms = member_4;
+      int member_5 = 0;
+      if (parse_int(field[5], &member_5) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.success = member_5;
       row.error = field[6];
-      if (parse_int(field[7], &row.turns) != 0)
+      int member_7 = 0;
+      if (parse_int(field[7], &member_7) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[8], &row.tool_calls) != 0)
+      row.turns = member_7;
+      int member_8 = 0;
+      if (parse_int(field[8], &member_8) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[9], &row.confidence) != 0)
+      row.tool_calls = member_8;
+      int member_9 = 0;
+      if (parse_int(field[9], &member_9) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.confidence = member_9;
       row.session_id = field[10];
-      int64_t produced = db1_agent_log_insert(&row);
+      long long produced = db1_agent_log_insert(&row);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1442,7 +1456,7 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_coord_job_create(parsed0, parsed1);
+      int produced = db1_coord_job_create(parsed0, parsed1);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1479,7 +1493,7 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_coord_job_add_task(parsed0, parsed1, field[2], field[3], field[4], field[5], field[6]);
+      int produced = db1_coord_job_add_task(parsed0, parsed1, field[2], field[3], field[4], field[5], field[6]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -2151,32 +2165,42 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
       snprintf(row.skills[5], sizeof row.skills[5], "%s", field[13]);
       snprintf(row.skills[6], sizeof row.skills[6], "%s", field[14]);
       snprintf(row.skills[7], sizeof row.skills[7], "%s", field[15]);
-      if (parse_int(field[16], &row.skill_count) != 0)
+      int member_16 = 0;
+      if (parse_int(field[16], &member_16) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.skill_count = member_16;
       snprintf(row.deliver_target, sizeof row.deliver_target, "%s", field[17]);
-      if (parse_int(field[18], &row.deliver_only_if_changed) != 0)
+      int member_18 = 0;
+      if (parse_int(field[18], &member_18) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[19], &row.deliver_first_run_silent) != 0)
+      row.deliver_only_if_changed = member_18;
+      int member_19 = 0;
+      if (parse_int(field[19], &member_19) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[20], &row.pre_wake_gate) != 0)
+      row.deliver_first_run_silent = member_19;
+      int member_20 = 0;
+      if (parse_int(field[20], &member_20) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[21], &row.enabled) != 0)
+      row.pre_wake_gate = member_20;
+      int member_21 = 0;
+      if (parse_int(field[21], &member_21) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.enabled = member_21;
       rc = db1_cron_job_upsert(&row);
       break;
    }
@@ -2424,7 +2448,7 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_cron_job_record_run(field[0], field[1], parsed2, parsed3, field[4], field[5], field[6]);
+      int produced = db1_cron_job_record_run(field[0], field[1], parsed2, parsed3, field[4], field[5], field[6]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];

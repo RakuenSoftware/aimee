@@ -220,7 +220,8 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
       snprintf(sid, sizeof(sid), "traj-%ld-%03d-%s", (long)getpid(), i + 1, safe);
 
       char *tp = task_payload(&tasks[i], toolset);
-      (void)ie_record(sid, IE_USER_TURN, "user", tp ? tp : "{}", "ok");
+      (void)db1_interaction_event_record(sid, ie_event_type_name(IE_USER_TURN), "user",
+                                         tp ? tp : "{}", "ok");
       free(tp);
 
       agent_result_t ar;
@@ -228,7 +229,8 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
                          0, &ar);
       int passed = task_passed(&tasks[i], &ar, rc);
       char *rp = result_payload(&ar, passed, toolset);
-      (void)ie_record(sid, IE_AGENT_TURN, "agent", rp ? rp : "{}", passed ? "ok" : "error");
+      (void)db1_interaction_event_record(sid, ie_event_type_name(IE_AGENT_TURN), "agent",
+                                         rp ? rp : "{}", passed ? "ok" : "error");
       free(rp);
 
       char *traj = NULL;

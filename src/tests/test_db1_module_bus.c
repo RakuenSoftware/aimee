@@ -46,6 +46,9 @@
 #include "model_catalog.h"
 #include "web_page_cache.h"
 #include "runtime_state.h"
+#include "cost_fold.h"
+#include "diagnose.h"
+#include "interaction_events.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -81,7 +84,7 @@ static void write_grant(const char *policy_dir, const char *executable)
        AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
        AIMEE_DB1_EVENT_CONVERSATION,     AIMEE_DB1_EVENT_AGENT_WORK,
        AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
-       AIMEE_DB1_EVENT_RUNTIME,
+       AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
    };
    fprintf(file, "version=1\nprincipal_class=1\nprincipal_ref=30\nuid=self\nexecutable=%s\nserve=",
            executable);
@@ -119,6 +122,7 @@ static void start_module(const char *executable, const char *socket_path, const 
           obs_bus_module_available(AIMEE_DB1_EVENT_DELEGATION) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_SESSIONS) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_RUNTIME) &&
+          obs_bus_module_available(AIMEE_DB1_EVENT_TELEMETRY) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_CONVERSATION) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_GIT_OWNERSHIP))
          return;
@@ -615,6 +619,46 @@ static void test_a_bulk_replace_and_what_it_reads_back(void)
    printf("  PASS: a bulk replace and what it reads back\n");
 }
 
+static void test_costs_ids_and_a_nested_row(void)
+{
+   /* A cost is returned as a double: rounding it here would bill differently
+      on each side of the boundary. */
+   must(db1_cost_fold_record("parent-1", "child-1", 0.25, "delegate") >= 0, "fold a cost");
+   must(db1_cost_fold_record("parent-1", "child-2", 0.75, "delegate") >= 0, "fold another");
+   double total = db1_cost_fold_total("parent-1");
+   must(total > 0.99 && total < 1.01, "the total came back as the number it is");
+
+   /* A list of ids going in: the frame carries one cell per id. */
+   /* The return is the eviction pass's answer, not an id -- which is what it
+      always was, and what the wire carries verbatim. */
+   must(db1_interaction_event_record("sess-ie", "user_turn", NULL, "{}", "ok") == 0,
+        "record an event, defaulting its actor from the type name");
+   must(db1_interaction_event_record("sess-ie", "agent_turn", NULL, "{}", "ok") == 0,
+        "record another");
+   ie_event_row_t events[8];
+   int found = db1_interaction_event_list_for_session("sess-ie", events, 8);
+   must(found == 2, "both events came back");
+   must(strcmp(events[0].actor, "user") == 0 || strcmp(events[1].actor, "user") == 0,
+        "the actor the type name defaulted to crossed with the row");
+   int ids[2] = {events[0].id, events[1].id};
+   must(db1_interaction_event_mark_reflected(ids, 2) >= 0, "mark both by id");
+
+   /* A row whose first member is itself a row. */
+   int diag = db1_diagnose_start("the module answers slowly");
+   must(diag > 0, "start a diagnosis");
+   must(db1_diagnose_add_hypothesis(diag, "the queue is deep") > 0,
+        "add a hypothesis, which answers with its new id");
+   diagnosis_ranking_t ranked[4];
+   memset(ranked, 0, sizeof ranked);
+   int ranks = db1_diagnose_rank_hypotheses(diag, ranked, 4);
+   must(ranks >= 1, "rank them");
+   must(strcmp(ranked[0].hypothesis.content, "the queue is deep") == 0,
+        "the nested row arrived as its own members, not as one opaque cell");
+   must(ranked[0].hypothesis.diagnosis_id == diag, "including the ones after the text");
+
+   printf("  PASS: costs, ids and a nested row\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -657,6 +701,7 @@ int main(int argc, char **argv)
    test_a_job_row_carries_what_the_store_allocated();
    test_the_callee_allocates_what_the_caller_frees();
    test_a_bulk_replace_and_what_it_reads_back();
+   test_costs_ids_and_a_nested_row();
 
    stop_module();
    obs_bus_stop();

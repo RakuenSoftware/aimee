@@ -67,7 +67,10 @@ cleanup_active() {
         wait "$ACTIVE_KB_PID" 2>/dev/null || true
     fi
     if [ -n "$ACTIVE_TMPHOME" ] && [ -d "$ACTIVE_TMPHOME" ]; then
-        rm -rf "$ACTIVE_TMPHOME"
+        # `|| true` regardless: teardown of a temporary directory must never
+        # decide the exit status. Even with the waits, anything else holding a
+        # file open here would taint a run that has nothing left to do.
+        rm -rf "$ACTIVE_TMPHOME" || true
     fi
     ACTIVE_TMPHOME=""
     ACTIVE_SERVER_PID=""
