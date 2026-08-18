@@ -11004,9 +11004,15 @@
           "line": 372
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON response builder is a process-local compatibility facade; the learning proposal lookup becomes a bounded typed operation and JSON presentation remains with its caller."
+      },
       "signature": "cJSON * db2_kb_service_learning_get_json ( int id )",
       "signature_sha256": "9dd27e1e2c8bababa5057a656f302898147c6479f34aeb98d7bda861877292c2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_learning_get_json"
     },
     {
@@ -11019,9 +11025,15 @@
           "line": 371
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON list adapter cannot cross the typed bus; a bounded learning list operation returns fixed proposal records while the caller owns JSON serialization."
+      },
       "signature": "cJSON * db2_kb_service_learning_list_json ( const char * state , const char * sink , int max_rows )",
       "signature_sha256": "b4ec63ed391c36d26fa4411727fd8a159241841c55a12eb2839f4d96cec469bd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_learning_list_json"
     },
     {
@@ -11050,9 +11062,15 @@
           "line": 373
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
+      },
       "signature": "cJSON * db2_kb_service_learning_reject_json ( int id )",
       "signature_sha256": "15ea66d2e6845fc0dc7456b583e26bd99c3bad2782d7c73b58d485a416bec49a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_learning_reject_json"
     },
     {
@@ -12434,9 +12452,15 @@
           "line": 375
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON scene-list facade is process-local presentation code; the existing fixed scene rows define a bounded memory operation reply instead."
+      },
       "signature": "cJSON * db2_kb_service_scene_list_json ( int max_rows )",
       "signature_sha256": "2593262bb0b8ddccaebf5907e9a3ce393db0c84dcbbb4774755d90d4a4b447dd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_scene_list_json"
     },
     {
@@ -12449,9 +12473,15 @@
           "line": 376
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
+      },
       "signature": "cJSON * db2_kb_service_scene_members_json ( int64_t scene_id , int max_rows )",
       "signature_sha256": "cd890d7fc480daa25fe93685549bc47d2276d1d33417392b425f6240f65f00da",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_scene_members_json"
     },
     {
@@ -24660,15 +24690,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ef62b2787a492ec1a6d67e8c525df7317e3fc80f5587606ca0b9b662ad2f0952",
+  "fingerprint": "ea89bfe4aa6296a7bcd8f62bb19c6e3d6ef30222cf7064da089c42e21d3bb7d4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 852,
+    "audit_pending": 847,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 106
+    "reviewed": 111
   }
 }

@@ -92,6 +92,46 @@
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
     },
     {
+      "symbol": "db2_kb_service_learning_get_json",
+      "signature_sha256": "9dd27e1e2c8bababa5057a656f302898147c6479f34aeb98d7bda861877292c2",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON response builder is a process-local compatibility facade; the learning proposal lookup becomes a bounded typed operation and JSON presentation remains with its caller."
+    },
+    {
+      "symbol": "db2_kb_service_learning_list_json",
+      "signature_sha256": "b4ec63ed391c36d26fa4411727fd8a159241841c55a12eb2839f4d96cec469bd",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON list adapter cannot cross the typed bus; a bounded learning list operation returns fixed proposal records while the caller owns JSON serialization."
+    },
+    {
+      "symbol": "db2_kb_service_learning_reject_json",
+      "signature_sha256": "15ea66d2e6845fc0dc7456b583e26bd99c3bad2782d7c73b58d485a416bec49a",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
+    },
+    {
+      "symbol": "db2_kb_service_scene_list_json",
+      "signature_sha256": "2593262bb0b8ddccaebf5907e9a3ce393db0c84dcbbb4774755d90d4a4b447dd",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON scene-list facade is process-local presentation code; the existing fixed scene rows define a bounded memory operation reply instead."
+    },
+    {
+      "symbol": "db2_kb_service_scene_members_json",
+      "signature_sha256": "cd890d7fc480daa25fe93685549bc47d2276d1d33417392b425f6240f65f00da",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
+    },
+    {
       "symbol": "db2_kb_txn_begin",
       "signature_sha256": "349a811accb8cd0d8fbbe80bab6cce0ab28350eb3a64791f675dad2f519a9cde",
       "disposition": "private-db2",
