@@ -324,6 +324,62 @@
       "reason": "The cJSON retirement facade is caller-specific serialization; a typed learning mutation performs the rule transition atomically."
     },
     {
+      "symbol": "db2_kb_service_curiosity_create_json",
+      "signature_sha256": "dad2e66367fe01a767501c080405a1a6a80452ef29673ebe7aaab5effee75614",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON creation facade is caller presentation code; a typed learning mutation bounds gap evidence, scores, and source before persistence."
+    },
+    {
+      "symbol": "db2_kb_service_curiosity_get_json",
+      "signature_sha256": "32d2b6e12bca6a98a45bef36119ee932bbaf06f59546d162d1d316fee50490d7",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON lookup result cannot define the stable bus; DB2 returns a bounded typed curiosity record for caller serialization."
+    },
+    {
+      "symbol": "db2_kb_service_curiosity_list_json",
+      "signature_sha256": "ef322cd696c9d4a3de4e659e2d6372dca15d080d374367a4619aeda334af97f2",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON list builder remains local presentation; a typed learning operation returns a state-filtered bounded record set."
+    },
+    {
+      "symbol": "db2_kb_service_curiosity_rescore_json",
+      "signature_sha256": "52b844e6c4ad7f60f739ecead3ac0bc9738e86a7a76c8c335e5215a8fc7de2ff",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON maintenance report stays outside the wire contract; DB2 rescoring returns bounded typed aggregate evidence."
+    },
+    {
+      "symbol": "db2_kb_service_curiosity_route_top_json",
+      "signature_sha256": "410918d449d35107adaad842522adb932ea3e515d55361aae76bf8c3e25a352b",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON routing response is caller-specific serialization; a typed operation bounds the limit and source session and returns routed identifiers."
+    },
+    {
+      "symbol": "db2_kb_service_curiosity_sweep_json",
+      "signature_sha256": "2f346a2feb7a08dff9639caf140d1e0e49f8d6431a3644f5a6e75a885d0fea2e",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON sweep report is not transported; one typed learning maintenance operation owns the sweep and returns bounded counts."
+    },
+    {
+      "symbol": "db2_kb_service_curiosity_update_state_json",
+      "signature_sha256": "2687c31e2ef3e6ce66489cce92d920782f745155ed55278f9c9bb7d96a35d1a5",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON state-update facade stays local; a typed learning mutation validates the closed state and returns the updated bounded record."
+    },
+    {
       "symbol": "db2_kb_service_learning_get_json",
       "signature_sha256": "9dd27e1e2c8bababa5057a656f302898147c6479f34aeb98d7bda861877292c2",
       "disposition": "private-db2",
