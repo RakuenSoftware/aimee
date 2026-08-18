@@ -39,6 +39,7 @@
      "  scan             Scan workspaces and (re)build the index (--force)\n"
      "  watch <name> <root>  Install git hooks that re-index after branch changes\n"
      "  blast-radius     Show files affected by changes to a file\n"
+     "  ast-grep --lang LANG [--path PATH] '<pattern>'  Structural pattern search\n"
      "  structure        Show file structure\n"
      "  span <file> [start] [end]  Read an exact line range (chainable with &&)\n"
      "  callers          Find callers of a symbol\n"
@@ -80,6 +81,8 @@
     {"mcp", "MCP registry and OSV package gate", AIMEE_CMD_TIER_CORE, 0,
      "  audit            List registered MCP servers and last OSV verdict\n"
      "  recheck [name]   Force a fresh OSV query for all servers or one name\n"},
+    {"tool", "Call any Aimee capability by its registered tool name", AIMEE_CMD_TIER_CORE, 0,
+     "  call <tool> [--key value|key=value ...]  Same implementation exposed through MCP\n"},
     {"hooks", "Pre/post tool hooks", AIMEE_CMD_TIER_CORE, 1, NULL},
     {"worktree", "Manage session worktrees (gc abandoned ones)", AIMEE_CMD_TIER_ADVANCED, 0,
      "  gc               Garbage-collect abandoned session worktrees\n"
