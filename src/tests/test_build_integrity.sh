@@ -1663,6 +1663,27 @@ else
     pass "liveness probe targets the configured endpoint"
 fi
 
+# 2b. The SAME rule on Windows. The checks above read posix/cli_client.c only,
+#     which is exactly how Windows kept both banned behaviours after the POSIX
+#     cutover: it still probed the well-known socket AND auto-spawned
+#     aimee-server.exe, while its own cli_start_server() told the user local
+#     servers were unsupported. A guard that names one platform does not enforce
+#     a rule; it enforces it there.
+#     Comment lines are skipped so the note recording WHY this is banned (which
+#     names the removed functions) does not trip its own guard.
+if grep -nE 'spawn_server|AIMEE_NO_AUTOSTART' windows/cli_client.c \
+        | grep -qvE '^[0-9]+: *(\*|/\*|//)'; then
+    fail "windows/cli_client.c can still start a local aimee-server; the CLI is a pure client on every platform"
+else
+    pass "windows client never starts a local aimee-server"
+fi
+
+if grep -nE 'cli_existing_server_for_method' -A12 windows/cli_client.c | grep -qE 'cli_default_socket_path'; then
+    fail "windows/cli_client.c still DISCOVERS a co-located server via the well-known socket; only an explicit AIMEE_SOCK is allowed"
+else
+    pass "windows client does not discover a co-located server"
+fi
+
 # 3. No user-facing message may tell an operator to start a server locally.
 #    This is how the anti-pattern spread: the advice appeared exactly when
 #    someone was stuck, and following it "fixed" the symptom.
