@@ -3,7 +3,8 @@
 
 Two committed outputs (regenerate with `make -C src docs-gen`):
   docs/gen/cli-commands.md  : every `aimee` CLI command + subcommands, from the
-                               client help table (src/cli_help_data.h).
+                               command catalogue the server serves
+                               (src/server/cli_command_defs_data.h).
   docs/gen/configuration.md : every config key: the `aimee config get/set`
                                scalar allowlist (src/modules/config/config_fields.c) plus the
                                config-file (JSON) sections parsed by src/config*.c.
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 GEN = ROOT / "docs" / "gen"
 
-# ─── CLI commands (src/cli_help_data.h) ──────────────────────────────────────
+# ─── CLI commands (src/server/cli_command_defs_data.h) ───────────────────────
 # Each entry: {"name", "description", CLIENT_TIER_X, hidden_flag, subcmd_or_NULL}
 # where subcmd is a (possibly multi-line, concatenated) C string of lines like
 #   "  sub   description\n"
@@ -36,7 +37,7 @@ def _c_strings(blob):
 
 
 def parse_cli_commands():
-    text = (SRC / "cli_help_data.h").read_text(encoding="utf-8")
+    text = (SRC / "server" / "cli_command_defs_data.h").read_text(encoding="utf-8")
     # Each entry begins with {"<name>", and ends at the matching `},` at the
     # entry's top level. Split on the entry-start sentinel instead of brace
     # counting (the subcmd strings contain no braces).
@@ -46,7 +47,7 @@ def parse_cli_commands():
     # split into entries on `},\n` boundaries that precede a new `{"`
     raw = re.split(r'\},\s*(?=\{")', body)
     for chunk in raw:
-        m = re.match(r'\s*\{\s*"([^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*CLIENT_TIER_(\w+)\s*,\s*(\d+)\s*,\s*(.*)$',
+        m = re.match(r'\s*\{\s*"([^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*AIMEE_CMD_TIER_(\w+)\s*,\s*(\d+)\s*,\s*(.*)$',
                      chunk, re.S)
         if not m:
             continue
@@ -60,7 +61,7 @@ def parse_cli_commands():
 def render_cli(entries):
     out = ["# CLI Command Reference",
            "",
-           "> Auto-generated from `src/cli_help_data.h` by `scripts/gen-reference-docs.py`.",
+           "> Auto-generated from `src/server/cli_command_defs_data.h` by `scripts/gen-reference-docs.py`.",
            "> Do not edit by hand; run `make -C src docs-gen` to regenerate.",
            "",
            "`aimee` is a thin client: each command either runs a small local "
@@ -1536,21 +1537,50 @@ def render_limitations():
     ]).rstrip() + "\n"
 
 
+def _require(what: str, rows, source: str):
+    """Refuse to emit a document a parser came back empty for.
+
+    Every extractor here scrapes C source with a regex, so a rename on the C
+    side does not break the parse -- it silently matches NOTHING, and the
+    generator writes a hollow document and exits 0. That is exactly what
+    happened when the CLI command rows moved and their tier enum was renamed
+    from CLIENT_TIER_ to AIMEE_CMD_TIER_: docs/gen/cli-commands.md went from 812
+    lines to 8 with no error, and docs-gen-check would have reported it as an
+    ordinary content change because all it does is diff the output against git.
+
+    An empty extraction is never a legitimate state for any of these tables, so
+    treat it as the failure it is and name the source file, which is where the
+    rename will be.
+    """
+    if not rows:
+        raise SystemExit(
+            f"gen-reference-docs: FAIL - parsed 0 {what} from {source}. "
+            "The extractor matched nothing, which usually means the C side was "
+            "renamed. Fix the pattern rather than committing an empty document."
+        )
+    return rows
+
+
 def main():
     check = "--check" in sys.argv
     GEN.mkdir(parents=True, exist_ok=True)
-    cli = render_cli(parse_cli_commands())
-    fields = parse_config_fields()
+    cli = render_cli(_require("CLI commands", parse_cli_commands(),
+                              "src/server/cli_command_defs_data.h"))
+    fields = _require("config fields", parse_config_fields(), "src/modules/config/")
     sections, flat = parse_config_sections()
+    _require("config sections", sections, "src/modules/config/")
     # a key that is a CLI-settable scalar (or a section name) is not also a stray
     # "other top-level" key: subtract both so nothing is double-listed.
     flat = flat - {k for k, _, _ in fields} - set(sections)
     cfg = render_config(fields, sections, flat)
     cfg = (cfg.rstrip() + "\n\n"
-           + render_env(parse_env_vars()).rstrip() + "\n\n"
-           + render_external_env(parse_external_env()).rstrip() + "\n\n"
-           + render_workflow(parse_block_catalog(), parse_engine_default_rounds()).rstrip() + "\n\n"
-           + render_config_files(parse_agent_fields()).rstrip() + "\n\n"
+           + render_env(_require("env vars", parse_env_vars(), "src/")).rstrip() + "\n\n"
+           + render_external_env(_require("external env vars", parse_external_env(),
+                                          "src/")).rstrip() + "\n\n"
+           + render_workflow(_require("workflow blocks", parse_block_catalog(), "src/"),
+                             parse_engine_default_rounds()).rstrip() + "\n\n"
+           + render_config_files(_require("agent fields", parse_agent_fields(),
+                                          "src/")).rstrip() + "\n\n"
            + render_limitations())
     targets = {GEN / "cli-commands.md": cli, GEN / "configuration.md": cfg}
 

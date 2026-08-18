@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Guard that the thin client's method -> /v1 route map is in sync with the
-server registry.
+"""Guard that every method the CLI can dispatch is actually reachable.
 
-The map is generated from src/server/server_http_routes.c by
-scripts/gen-cli-v1-routes.py and lives inline in the thin-client TU
-(src/cli_v1_routes*.c) between the @@GEN-CLI-V1-ROUTES BEGIN/END markers. This
-check regenerates the block and diffs it against what's committed in the file, so
-a registry change that isn't reflected in the committed map fails `make lint`
-instead of silently leaving the client without its first-class /v1 route.
+The client no longer carries a copy of the method -> /v1 route map; it fetches
+it from the server (GET /v1/cli/manifest), so there is no second copy to drift
+and nothing here to diff. The route set below is read from the server registry
+(via gen-cli-v1-routes.py, kept as the extractor) because that is now the only
+place it exists.
 
-Beyond that sync check, three independent directions must hold for a command to
+Three independent directions must hold for a command to
 actually work. Each has its own check, and each shipped broken at least once:
 
   route + marshaller, no dispatch row  -> unreachable_methods()
@@ -42,18 +40,6 @@ def committed_block():
 
 
 def main() -> int:
-    fname, committed = committed_block()
-    if committed is None:
-        print("check-cli-v1-routes: FAIL — @@GEN-CLI-V1-ROUTES markers not found in "
-              "src/cli_v1_routes*.c; run scripts/gen-cli-v1-routes.py")
-        return 1
-    fresh = subprocess.run([sys.executable, str(GEN), "--stdout"],
-                           check=True, capture_output=True, text=True).stdout.strip("\n")
-    if committed != fresh:
-        print("check-cli-v1-routes: FAIL — the generated /v1 route map is stale vs "
-              "server_http_routes.c; run scripts/gen-cli-v1-routes.py and commit.")
-        return 1
-    n = sum(1 for ln in fresh.splitlines() if ln.lstrip().startswith('{"'))
 
     orphans = unreachable_methods()
     if orphans:
@@ -85,8 +71,8 @@ def main() -> int:
             print(f"  {m}")
         return 1
 
-    print(f"check-cli-v1-routes: ok ({n} client /v1 routes in sync, all reachable, "
-          f"all marshalled, all routed)")
+    print("check-cli-v1-routes: ok (all dispatchable methods reachable, marshalled "
+          "and routed; the route map itself is served by the server)")
     return 0
 
 
@@ -197,10 +183,14 @@ PATHID_RE = re.compile(
 
 def dispatchable_without_route():
     """Methods the CLI dispatches that resolve to no /v1 route at all."""
-    routed = set()
+    # The server registry is the only place the route map lives now, so ask the
+    # extractor for it rather than scraping the client (which no longer has one).
+    fresh = subprocess.run([sys.executable, str(GEN), "--stdout"],
+                           check=True, capture_output=True, text=True).stdout
+    routed = set(ROUTE_RE.findall(fresh))
     for f in sorted(glob.glob(TARGET_GLOB)):
         text = Path(f).read_text(encoding="utf-8")
-        routed |= set(ROUTE_RE.findall(text))    # generated sync + async, and bespoke[]
+        routed |= set(ROUTE_RE.findall(text))    # bespoke[] rows still client-side
         routed |= set(PATHID_RE.findall(text))   # {id}-bearing prefix routes
     src = Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")
     table = RPC_TABLE_RE.search(src)

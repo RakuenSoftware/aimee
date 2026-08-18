@@ -133,6 +133,36 @@ typedef struct
 
 typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 
+typedef enum
+{
+   RM_EXACT,  /* path == entry->path */
+   RM_PREFIX, /* path == entry->path + <id> ( + entry->suffix ), <id> one segment */
+} route_match_kind_t;
+
+/* One row of the /v1 route registry. `op`, when non-NULL, derives the required
+ * capability from the NDJSON method twin (server_capability_for_method) so the
+ * HTTP route inherits exactly its socket-method capability; otherwise `caps` is
+ * used verbatim. `handler` is NULL for streaming routes (see file header). */
+typedef struct
+{
+   const char *verb;   /* "GET" / "POST" / "PUT" / "DELETE" */
+   const char *path;   /* exact path, or static prefix for RM_PREFIX */
+   const char *suffix; /* trailing segment for RM_PREFIX (e.g. "/stop"), else NULL */
+   route_match_kind_t kind;
+   const char *op;           /* NDJSON method twin for cap derivation, or NULL */
+   uint32_t caps;            /* required caps when op == NULL */
+   route_handler_fn handler; /* buffered handler, or NULL for streaming routes */
+} http_route_t;
+
+/* The /v1 route registry (server_http_routes.c). Shared so the CLI manifest
+ * handler can enumerate it from the sibling TU rather than keeping a second
+ * copy of what the server can do — the same reason the thin client stopped
+ * carrying one. NULL-verb terminated. */
+extern const http_route_t g_v1_routes[];
+int rh_dispatch_op(const route_req_t *rq, char *resp, int cap);
+int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap);
+int rh_cli_manifest(const route_req_t *rq, char *resp, int cap);
+
 /* First slab for a request body. Bodies are overwhelmingly small, so this is the
  * only allocation most requests ever make; http_body_reserve (server_http_body.c)
  * doubles from here as bytes actually arrive, rather than trusting the declared

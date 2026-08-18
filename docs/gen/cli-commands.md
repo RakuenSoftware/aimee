@@ -1,6 +1,6 @@
 # CLI Command Reference
 
-> Auto-generated from `src/cli_help_data.h` by `scripts/gen-reference-docs.py`.
+> Auto-generated from `src/server/cli_command_defs_data.h` by `scripts/gen-reference-docs.py`.
 > Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.

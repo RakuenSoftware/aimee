@@ -33,9 +33,28 @@ class RemoteHandler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length:
             self.rfile.read(length)
-        body = json.dumps(
-            {"status": "ok", "agents": [], "any_delegate_available": False}
-        ).encode()
+        # The client asks the server which methods it routes before it can route
+        # anything (GET /v1/cli/manifest); it no longer carries a compiled-in
+        # map. A stand-in server therefore has to answer that too, or every
+        # command fails before the request under test is ever made. Only the
+        # methods this test drives need rows.
+        if self.path.startswith("/v1/cli/manifest"):
+            body = json.dumps(
+                {
+                    "manifest_version": 1,
+                    "server_version": "stub",
+                    "routes": [
+                        {"op": "model.list", "verb": "GET", "path": "/v1/models"},
+                        {"op": "agent.list", "verb": "GET", "path": "/v1/agents"},
+                        {"op": "memory.search", "verb": "POST", "path": "/v1/memory/search"},
+                        {"op": "config.show", "verb": "GET", "path": "/v1/config"},
+                    ],
+                }
+            ).encode()
+        else:
+            body = json.dumps(
+                {"status": "ok", "agents": [], "any_delegate_available": False}
+            ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
