@@ -143,6 +143,12 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    case AIMEE_DB1_STAGE_DELEGATION:
       return aimee_db1_stage_delegation(request_body, request_len, response_body, response_capacity,
                                         response_len);
+   case AIMEE_DB1_STAGE_SESSIONS:
+      return aimee_db1_stage_sessions(request_body, request_len, response_body, response_capacity,
+                                      response_len);
+   case AIMEE_DB1_STAGE_RUNTIME:
+      return aimee_db1_stage_runtime(request_body, request_len, response_body, response_capacity,
+                                     response_len);
    default:
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }

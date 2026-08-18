@@ -19,7 +19,7 @@ static void test_roundtrip(void)
    assert(db1_web_page_put(url, "hello page text", "93.184.216.34") == 0);
 
    long age = -1;
-   char pinned[64] = "";
+   char pinned[DB1_WEB_PAGE_ADDR_LEN] = "";
    char *got = db1_web_page_get(url, &age, pinned, sizeof(pinned));
    assert(got && strcmp(got, "hello page text") == 0);
    assert(age >= 0);
@@ -109,7 +109,7 @@ static void test_overwrite(void)
    const char *url = "https://example.com/overwrite";
    assert(db1_web_page_put(url, "first", "1.1.1.1") == 0);
    assert(db1_web_page_put(url, "second", "2.2.2.2") == 0);
-   char pinned[64] = "";
+   char pinned[DB1_WEB_PAGE_ADDR_LEN] = "";
    char *got = db1_web_page_get(url, NULL, pinned, sizeof(pinned));
    assert(got && strcmp(got, "second") == 0);
    assert(strcmp(pinned, "2.2.2.2") == 0);

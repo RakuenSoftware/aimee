@@ -213,6 +213,102 @@
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_RECORD                43u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_INJECT_PROMPT         44u
 
+/* Family 6: server and webchat session rows: who is talking, when they last
+ * spoke, and what the conversation was called. */
+
+#define AIMEE_DB1_EVENT_SESSIONS 11782u
+#define AIMEE_DB1_STAGE_SESSIONS 6u
+
+#define AIMEE_DB1_OP_SERVER_SESSION_CREATE                 1u
+#define AIMEE_DB1_OP_SERVER_SESSION_GET                    2u
+#define AIMEE_DB1_OP_SERVER_SESSION_SET_OUTCOME            3u
+#define AIMEE_DB1_OP_SERVER_SESSION_DELETE                 4u
+#define AIMEE_DB1_OP_SERVER_SESSION_LIST_RECENT            5u
+#define AIMEE_DB1_OP_SERVER_SESSION_SEARCH_BY_TITLE        6u
+#define AIMEE_DB1_OP_SERVER_SESSION_COUNT                  7u
+#define AIMEE_DB1_OP_SERVER_SESSION_LIST_EXPIRED           8u
+#define AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED         9u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_SAVE                  10u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_LOAD                  11u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_DELETE                12u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT          13u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH          14u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST            15u
+#define AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD             16u
+#define AIMEE_DB1_OP_SESSION_STALE_READS                   17u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET            18u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER 19u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND           20u
+#define AIMEE_DB1_OP_WEBCHAT_LIVE_SET                      21u
+#define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                      22u
+
+/* Family 7: machine-local runtime state: caches, this box's operator and
+ * clones, the model catalogue it fetched, and the snapshots it took. */
+
+#define AIMEE_DB1_EVENT_RUNTIME 11783u
+#define AIMEE_DB1_STAGE_RUNTIME 7u
+
+#define AIMEE_DB1_OP_RUNTIME_STATE_SET                    1u
+#define AIMEE_DB1_OP_RUNTIME_STATE_GET                    2u
+#define AIMEE_DB1_OP_RUNTIME_STATE_ADD_INT                3u
+#define AIMEE_DB1_OP_PROJECT_CLONE_UPSERT                 4u
+#define AIMEE_DB1_OP_PROJECT_CLONE_GET                    5u
+#define AIMEE_DB1_OP_PROJECT_CLONE_DELETE                 6u
+#define AIMEE_DB1_OP_PROJECT_CLONE_LIST                   7u
+#define AIMEE_DB1_OP_PROJECT_CLONE_LIST_BY_PROJECT        8u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_UPSERT                9u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_GET                   10u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_GET_ACTIVE            11u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_SET_ACTIVE            12u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_DELETE                13u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_LIST                  14u
+#define AIMEE_DB1_OP_ENV_CAPABILITY_SET                   15u
+#define AIMEE_DB1_OP_ENV_CAPABILITY_GET                   16u
+#define AIMEE_DB1_OP_ENV_CAPABILITY_LIST                  17u
+#define AIMEE_DB1_OP_MAINTENANCE_STATE_LOAD               18u
+#define AIMEE_DB1_OP_MAINTENANCE_STATE_SAVE               19u
+#define AIMEE_DB1_OP_MODEL_CATALOG_IS_FRESH               20u
+#define AIMEE_DB1_OP_MODEL_CATALOG_GET                    21u
+#define AIMEE_DB1_OP_MODEL_CATALOG_REPLACE                22u
+#define AIMEE_DB1_OP_MODEL_PRICE_GET                      23u
+#define AIMEE_DB1_OP_MODEL_PRICE_SET                      24u
+#define AIMEE_DB1_OP_MODEL_PRICE_DELETE                   25u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_OBSERVE        26u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_LIST           27u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_GET            28u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_RESET_FIELD    29u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_SET          30u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_GET          31u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_DELETE       32u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_LIST         33u
+#define AIMEE_DB1_OP_CONTEXT_CACHE_GET                    34u
+#define AIMEE_DB1_OP_CONTEXT_CACHE_PUT                    35u
+#define AIMEE_DB1_OP_CONTEXT_CACHE_INVALIDATE             36u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_INSERT              37u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_COUNT_MIN_SAMPLES   38u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_IDS_MIN_SAMPLES     39u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_COUNT_FOR_MEMORY    40u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_SESSIONS_FOR_MEMORY 41u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_HAS_MEMORY          42u
+#define AIMEE_DB1_OP_AGENT_CACHE_GET                      43u
+#define AIMEE_DB1_OP_AGENT_CACHE_PUT                      44u
+#define AIMEE_DB1_OP_WEB_PAGE_GET                         45u
+#define AIMEE_DB1_OP_WEB_PAGE_PUT                         46u
+#define AIMEE_DB1_OP_WEB_PAGE_DROP                        47u
+#define AIMEE_DB1_OP_WEB_PAGE_CANONICAL_URL               48u
+#define AIMEE_DB1_OP_FSNAP_CREATE                         49u
+#define AIMEE_DB1_OP_FSNAP_GET_OR_CREATE                  50u
+#define AIMEE_DB1_OP_FSNAP_RECORD_FILE                    51u
+#define AIMEE_DB1_OP_FSNAP_PRUNE                          52u
+#define AIMEE_DB1_OP_FSNAP_LIST                           53u
+#define AIMEE_DB1_OP_FSNAP_RESTORE                        54u
+#define AIMEE_DB1_OP_FSNAP_GET                            55u
+#define AIMEE_DB1_OP_DECISION_RECORD                      56u
+#define AIMEE_DB1_OP_MCP_OSV_CACHE_GET                    57u
+#define AIMEE_DB1_OP_MCP_OSV_CACHE_UPSERT                 58u
+#define AIMEE_DB1_OP_MCP_OSV_CACHE_LIST                   59u
+#define AIMEE_DB1_OP_MCP_OSV_AUDIT                        60u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry
@@ -220,7 +316,7 @@
    frame already bounds what arrived. */
 #define AIMEE_DB1_STATE_MAX  6144u
 #define AIMEE_DB1_VALUE_MAX  1048576u
-#define AIMEE_DB1_FIELDS_MAX 33u
+#define AIMEE_DB1_FIELDS_MAX 513u
 
 #define AIMEE_DB1_STATUS_OK       0u
 #define AIMEE_DB1_STATUS_MISSING  1u
