@@ -1268,6 +1268,14 @@
       "reason": "Content transaction rollback stays inside DB2; failed, denied, or cancelled composite index operations roll back before returning and cannot leave caller-owned database state."
     },
     {
+      "symbol": "db2_kind_lifecycle_load",
+      "signature_sha256": "c7ffcd64f834194499787f7d080a8abdcf5b5a1ac565c22ed6c27180f9aac2fd",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Per-kind promotion, demotion, and expiry thresholds are a private input to the tier-cycle operations that apply them; exposing the lookup alone would let a caller act on thresholds DB2 had already superseded."
+    },
+    {
       "symbol": "db2_lease_end",
       "signature_sha256": "95d4dcf624e3c0ca7a478db19bc628afa3e18fc7a0343f966e58f2435ce6cefc",
       "disposition": "private-db2",
@@ -1538,6 +1546,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
+    },
+    {
+      "symbol": "db2_memory_promotion_list_kinds_in_tier",
+      "signature_sha256": "8c8d53bd4b7fd1a3b266e4973f3bb77d83c5e9e93df2ce6922a825a94d16d312",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Enumerating the kinds present in a tier is a private pre-step of the tier-cycle operations; each one iterates the kinds it finds inside a single DB2 action rather than exposing a snapshot that can go stale between calls."
     },
     {
       "symbol": "db2_memory_provenance_delete",
