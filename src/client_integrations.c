@@ -1,6 +1,7 @@
 #include "client_constants.h"
 #include "client_integrations.h"
 #include "aimee_client.h"
+#include "cli_client.h"
 #include "aimee_home.h"
 #include "yaml.h"
 #include "platform_path.h"
@@ -166,6 +167,15 @@ static client_tool_surface_requirements_t client_tool_surface_requirements_from_
 static client_tool_surface_requirements_t client_projected_surface_requirements(void)
 {
    client_tool_surface_requirements_t req = {.complete = 1};
+   /* A thin client pointed at a remote must not reach for the local socket.
+    * aimee_client_request falls back to the UDS when it cannot resolve the
+    * remote itself -- which it cannot when the endpoint arrived as a flag
+    * rather than config -- and that fallback is exactly what the
+    * remote-exclusive contract forbids. Skipping leaves the conservative
+    * default already in `req`: no known MCP-only requirement, so planning
+    * stays CLI-first, which is where it should land without evidence anyway. */
+   if (cli_v1_remote_endpoint_is_network())
+      return req;
    int status = 0;
    aimee_client_suppress_conn_errors(1);
    char *body = aimee_client_request("GET", "/v1/capabilities", NULL, &status);

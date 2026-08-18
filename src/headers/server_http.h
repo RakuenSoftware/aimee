@@ -417,6 +417,9 @@ extern "C"
     * server_native_register() at startup (defined in server/server_api.c). */
    typedef char *(*server_http_json_provider)(void);
    void server_http_set_rules_provider(server_http_json_provider fn);
+   /* Optional kb projection merged into GET /v1/capabilities. The provider
+    * returns a heap {cli_only:[...],mcp_only:[...]} object; the route frees it. */
+   void server_http_set_kb_agent_surfaces_provider(server_http_json_provider fn);
 
    /* GET /v1/dashboard/memory provider (arg-less JSON body, like rules). */
    void server_http_set_dashboard_memory_provider(server_http_json_provider fn);

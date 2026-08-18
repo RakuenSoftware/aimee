@@ -15,6 +15,10 @@
 
 #include <stddef.h>
 
+struct cJSON;
+
+void kb_http_capabilities_json(char *out, size_t out_cap, struct cJSON *surfaces);
+
 /* Copy the string value of `key` into out (NUL-terminated, truncated to
  * out_cap). Returns 1 when the key was found and was a string, else 0 with
  * out set to "". Backslash escapes are unescaped one level. */

@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "command_registry.h"
 #include <aimee/core/connection/auth.h>
 #include "server_http.h"
 #include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
@@ -533,18 +534,6 @@ int route_health(char *resp, int cap)
 int route_version(char *resp, int cap)
 {
    snprintf(resp, (size_t)cap, "{\"version\":\"%s\",\"service\":\"aimee-server\"}", AIMEE_VERSION);
-   return 200;
-}
-
-int route_capabilities(char *resp, int cap)
-{
-   /* The resources this HTTP surface currently serves; grows with the API. */
-   snprintf(resp, (size_t)cap,
-            "{\"capabilities\":[\"personas\",\"sessions\",\"models\",\"chat\",\"embeddings\","
-            "\"responses\",\"rules\",\"kb\",\"memory\",\"notes\",\"dashboard\",\"agents\","
-            "\"roadmap\",\"curiosity\",\"runs\",\"openapi\"],"
-            "\"version\":\"%s\",\"service\":\"aimee-server\"}",
-            AIMEE_VERSION);
    return 200;
 }
 
