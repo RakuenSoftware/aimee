@@ -108,6 +108,14 @@
       "reason": "The typed lifecycle.pool_status operation replaces the production health caller; PostgreSQL pool occupancy and counters remain DB2 process authority."
     },
     {
+      "symbol": "db2_probe_embedder_dim",
+      "signature_sha256": "89cdbb38a35593f980b1890b15a5b6a6daba5c3c6312045b3c68635ea0d438a6",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The injected embedder callback is a process-local bootstrap seam and cannot cross the bus; dimension-reset requests invoke it inside the standalone DB2 owner when no explicit target dimension is supplied."
+    },
+    {
       "symbol": "db2_reembed_clear_maintenance",
       "signature_sha256": "fb2c499ea00edb05993508e40379e520976b5810f94265c9e0ad49e0773e4bda",
       "disposition": "wire-operation",

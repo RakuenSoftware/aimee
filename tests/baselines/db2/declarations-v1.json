@@ -18556,9 +18556,15 @@
           "line": 105
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "The injected embedder callback is a process-local bootstrap seam and cannot cross the bus; dimension-reset requests invoke it inside the standalone DB2 owner when no explicit target dimension is supplied."
+      },
       "signature": "int db2_probe_embedder_dim ( int budget_ms , int * out )",
       "signature_sha256": "89cdbb38a35593f980b1890b15a5b6a6daba5c3c6312045b3c68635ea0d438a6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_probe_embedder_dim"
     },
     {
@@ -24528,15 +24534,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c52bc70df73a33340a3dd6a2f981dad9c72cee1af0dccfc6dfb468e7d7ab3c21",
+  "fingerprint": "bb7bf642a2346707516b1fc83009f0cd2115d43ce259ee5751585f838d8e6c60",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 874,
+    "audit_pending": 873,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 84
+    "reviewed": 85
   }
 }
