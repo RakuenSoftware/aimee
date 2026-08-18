@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "de38a9df125bcfffadca373c50cc55dfa47d97ea6cb23d76fd86e33d628a2ba8"
+const ContractSHA256 = "e54fde5f7ba2f47afcf05144a19983dbf840cf500e455b9dfe534fd530e4a8c5"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -257,6 +257,12 @@ const OperationValidAt uint32 = 30
 const ValidAtMemoryIDMax uint64 = 9223372036854775807
 const ValidAtAsOfMax = 63
 const ValidAtMax uint32 = 1
+const EventHasScopeType = EventMemory
+const StageHasScopeType = FamilyMemory
+const OperationHasScopeType uint32 = 31
+const HasScopeTypeMemoryIDMax uint64 = 9223372036854775807
+const HasScopeTypeScopeMax = 63
+const HasScopeTypeMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1001,6 +1007,75 @@ func DecodeValidAtReply(reply []byte) (uint32, uint32, error) {
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return header.Result, inForce, nil
+}
+
+// EncodeHasScopeTypeRequest emits the memory and the scope kind to probe for.
+func EncodeHasScopeTypeRequest(memoryID uint64, scopeType string) ([]byte, error) {
+	if memoryID == 0 || memoryID > HasScopeTypeMemoryIDMax || len(scopeType) == 0 ||
+		len(scopeType) > HasScopeTypeScopeMax || hasNUL(scopeType) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 12 + len(scopeType)
+	header, err := EncodeRequestHeader(OperationHasScopeType, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(scopeType)))
+	copy(payload[12:], scopeType)
+	return request, nil
+}
+
+// DecodeHasScopeTypeRequest validates the envelope, memory, and scope kind.
+func DecodeHasScopeTypeRequest(request []byte) (uint64, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHasScopeType || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	scopeLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > HasScopeTypeMemoryIDMax || scopeLen == 0 ||
+		scopeLen > uint32(HasScopeTypeScopeMax) || 12+scopeLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	scopeType := string(payload[12 : 12+scopeLen])
+	if hasNUL(scopeType) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return memoryID, scopeType, nil
+}
+
+// EncodeHasScopeTypeReply emits the Boolean attribution flag.
+func EncodeHasScopeTypeReply(present uint32) ([]byte, error) {
+	if present > HasScopeTypeMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationHasScopeType, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], present)
+	return reply, nil
+}
+
+// DecodeHasScopeTypeReply validates the operation and the Boolean bound.
+func DecodeHasScopeTypeReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHasScopeType || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	present := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if present > HasScopeTypeMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return present, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

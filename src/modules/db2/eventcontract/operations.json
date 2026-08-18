@@ -1118,6 +1118,33 @@
         "encoded_size_error": 24,
         "field": {"name": "in_force", "type": "u32", "minimum": 0, "maximum": 1}
       }
+    },
+    {
+      "family": "memory",
+      "id": 31,
+      "name": "has_scope_type",
+      "wire_format": "db2-envelope-u64-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Scope attribution rows are canonical relational DB2 joins rather than portable ANN state.",
+      "c_symbols": ["db2_memory_has_scope_type"],
+      "request": {
+        "encoded_size_min": 37,
+        "encoded_size_max": 99,
+        "fields": [
+          {"name": "memory_id", "type": "u64", "minimum": 1,
+           "maximum": 9223372036854775807},
+          {"name": "scope_type", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 63}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "present", "type": "u32", "minimum": 0, "maximum": 1}
+      }
     }
   ]
 }

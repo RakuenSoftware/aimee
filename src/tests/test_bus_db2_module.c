@@ -75,6 +75,7 @@ typedef struct
    int (*touch)(int64_t memory_id);
    int (*link_delete)(int64_t link_id);
    int (*valid_at)(int64_t memory_id, const char *as_of);
+   int (*has_scope_type)(int64_t memory_id, const char *scope_type);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -124,6 +125,8 @@ static int link_delete_calls;
 static int64_t link_delete_last;
 static int valid_at_calls;
 static char valid_at_last[64];
+static int scope_type_calls;
+static char scope_type_last[64];
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -782,6 +785,21 @@ static int valid_at(int64_t memory_id, const char *as_of)
    return -1;
 }
 
+int db2_memory_has_scope_type(int64_t memory_id, const char *scope_type)
+{
+   (void)memory_id;
+   (void)scope_type;
+   return 0;
+}
+
+static int has_scope_type(int64_t memory_id, const char *scope_type)
+{
+   (void)memory_id;
+   scope_type_calls++;
+   snprintf(scope_type_last, sizeof(scope_type_last), "%s", scope_type);
+   return strcmp(scope_type, "workspace") == 0 ? 1 : 0;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1111,6 +1129,7 @@ int main(void)
        .touch = touch,
        .link_delete = link_delete,
        .valid_at = valid_at,
+       .has_scope_type = has_scope_type,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1343,6 +1362,14 @@ int main(void)
    assert(aimee_db2_valid_at_call(call_client, &client, 7056, 0, 44u, "2026-08-18 12:00:00",
                                   &valid_result, &in_force, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(valid_result == AIMEE_DB2_RESULT_INVALID_STATE && in_force == 0);
+
+   uint32_t scoped = 99u;
+   assert(aimee_db2_has_scope_type_call(call_client, &client, 7057, 0, 42u, "workspace", &scoped,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(scoped == 1 && scope_type_calls == 1 && strcmp(scope_type_last, "workspace") == 0);
+   assert(aimee_db2_has_scope_type_call(call_client, &client, 7058, 0, 42u, "project", &scoped,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(scoped == 0 && scope_type_calls == 2);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

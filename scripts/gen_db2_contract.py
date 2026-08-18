@@ -1465,9 +1465,46 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
                     field != {"name": "in_force", "type": "u32", "minimum": 0, "maximum": 1}):
                 fail("valid-at-reply", "reply must contain one Boolean validity verdict")
+        elif key == ("memory", 31) and name == "has_scope_type" and \
+                operation["wire_format"] == "db2-envelope-u64-string-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_has_scope_type"]:
+                fail("operation-c-symbols",
+                     "has_scope_type C symbol differs from the reviewed backend")
+            # Unlike valid_at, which shares this format, the backend here folds
+            # a fault into a miss, so there is no unevaluated state to report.
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "has_scope_type results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "has_scope_type.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 2:
+                fail("has-scope-type-request", "request must carry the memory and the scope kind")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "has_scope_type.request.fields[0]")
+            scope_field = _keys(request_fields[1],
+                                {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                "has_scope_type.request.fields[1]")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 13 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 63 or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    scope_field != {"name": "scope_type", "type": "utf8", "minimum_bytes": 1,
+                                    "maximum_bytes": 63}):
+                fail("has-scope-type-request",
+                     "request must name one positive memory and one non-empty bounded scope kind")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "has_scope_type.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "has_scope_type.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "present", "type": "u32", "minimum": 0, "maximum": 1}):
+                fail("has-scope-type-reply", "reply must contain one Boolean attribution flag")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 40 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 41 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1479,9 +1516,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "expire", "demote", "promote_stable", "reclassify_directives",
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
             "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
-            "valid_at"]:
+            "valid_at", "has_scope_type"]:
         fail("unsupported-operation",
-             "the partial generator requires the forty supported operations exactly once")
+             "the partial generator requires the forty-one supported operations exactly once")
     return catalog
 
 
@@ -1645,6 +1682,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     touch = catalog["operations"][37]
     link_delete = catalog["operations"][38]
     valid_at = catalog["operations"][39]
+    has_scope_type = catalog["operations"][40]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1858,6 +1896,14 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     valid_at_unevaluated = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(valid_at["id"]), 5, b"",
+    )
+    has_scope_type_scope = b"workspace"
+    has_scope_type_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(has_scope_type["id"]), 0,
+        _put_u64(42) + _put_u32(len(has_scope_type_scope)) + has_scope_type_scope,
+    )
+    has_scope_type_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(has_scope_type["id"]), 0, _put_u32(1),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -3805,6 +3851,56 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (valid_at_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": has_scope_type["family"],
+            "id": has_scope_type["id"],
+            "name": has_scope_type["name"],
+            "request": {
+                "positive": has_scope_type_request.hex(),
+                "memory_id": 42,
+                "scope_type": has_scope_type_scope.decode("ascii"),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(has_scope_type_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(has_scope_type_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(has_scope_type["id"]), 0,
+                               _put_u64(0) + _put_u32(len(has_scope_type_scope)) +
+                               has_scope_type_scope).hex()},
+                    {"mutation": "empty_scope", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(has_scope_type["id"]), 0,
+                               _put_u64(42) + _put_u32(0)).hex()},
+                    {"mutation": "scope_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(has_scope_type["id"]), 0,
+                               _put_u64(42) + _put_u32(len(has_scope_type_scope) + 1) +
+                               has_scope_type_scope).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(has_scope_type["id"]), 0,
+                               _put_u64(42) + _put_u32(len(has_scope_type_scope)) +
+                               has_scope_type_scope[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": has_scope_type_request[:-1].hex()},
+                    {"mutation": "long", "hex": (has_scope_type_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "present": 1, "hex": has_scope_type_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(has_scope_type_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(has_scope_type_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(has_scope_type["id"]), 0, b"").hex()},
+                    {"mutation": "flag_too_large", "hex":
+                     (has_scope_type_ok[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex": has_scope_type_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (has_scope_type_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -3857,6 +3953,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     touch = catalog["operations"][37]
     link_delete = catalog["operations"][38]
     valid_at = catalog["operations"][39]
+    has_scope_type = catalog["operations"][40]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -4417,6 +4514,23 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{valid_at['request']['fields'][1]['maximum_bytes']}u"),
         ("AIMEE_DB2_VALID_AT_MAX",
          f"{valid_at['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_HAS_SCOPE_TYPE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HAS_SCOPE_TYPE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HAS_SCOPE_TYPE", f"{has_scope_type['id']}u"),
+        ("AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MIN_LEN",
+         f"{has_scope_type['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MAX_LEN",
+         f"{has_scope_type['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN",
+         f"{has_scope_type['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HAS_SCOPE_TYPE_ERROR_LEN",
+         f"{has_scope_type['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HAS_SCOPE_TYPE_MEMORY_ID_MAX",
+         f"{has_scope_type['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX",
+         f"{has_scope_type['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_HAS_SCOPE_TYPE_MAX",
+         f"{has_scope_type['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -6359,6 +6473,99 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    return 0;
 }}
 
+static inline int aimee_db2_has_scope_type_request_encode(uint64_t memory_id,
+                                                         const char *scope_type,
+                                                         uint8_t *output, size_t capacity,
+                                                         uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!scope_type || !output || !output_len)
+      return -1;
+   size_t scope_len = 0u;
+   while (scope_len <= AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX && scope_type[scope_len])
+      ++scope_len;
+   size_t payload_len = 12u + scope_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_HAS_SCOPE_TYPE_MEMORY_ID_MAX ||
+       scope_len == 0u || scope_len > AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HAS_SCOPE_TYPE, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)scope_len);
+   memcpy(payload + 12u, scope_type, scope_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_has_scope_type_request_decode(const uint8_t *input, size_t input_len,
+                                                          uint64_t *memory_id, char *scope_type,
+                                                          size_t scope_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (scope_type && scope_capacity)
+      scope_type[0] = '\\0';
+   if (!memory_id || !scope_type ||
+       scope_capacity < (size_t)AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_HAS_SCOPE_TYPE || header.payload_len < 13u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t scope_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u || decoded_memory_id > AIMEE_DB2_HAS_SCOPE_TYPE_MEMORY_ID_MAX ||
+       scope_len == 0u || scope_len > AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX ||
+       (uint32_t)12u + scope_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < scope_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   memcpy(scope_type, payload + 12u, scope_len);
+   scope_type[scope_len] = '\\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}}
+
+static inline int aimee_db2_has_scope_type_reply_encode(uint32_t present, uint8_t *output,
+                                                        size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || present > AIMEE_DB2_HAS_SCOPE_TYPE_MAX ||
+       capacity < AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HAS_SCOPE_TYPE, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, present);
+   *output_len = AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_has_scope_type_reply_decode(const uint8_t *input, size_t input_len,
+                                                        uint32_t *present)
+{{
+   if (present)
+      *present = 0u;
+   if (!present)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_HAS_SCOPE_TYPE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_HAS_SCOPE_TYPE_MAX)
+      return -1;
+   *present = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_valid_at_request_encode(uint64_t memory_id, const char *as_of,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
@@ -7826,6 +8033,11 @@ extern "C"
        uint64_t memory_id, const char *as_of, uint32_t *domain_result, uint32_t *in_force,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_has_scope_type_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *scope_type, uint32_t *present,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -8749,6 +8961,34 @@ aimee_module_call_result_t aimee_db2_valid_at_call(aimee_db2_call_fn call, void 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_has_scope_type_call(aimee_db2_call_fn call, void *call_context,
+                                                         uint64_t trace_id, uint64_t deadline_ns,
+                                                         uint64_t memory_id, const char *scope_type,
+                                                         uint32_t *present,
+                                                         aimee_module_cancelled_fn cancelled,
+                                                         void *cancel_context)
+{
+   if (!call || !present)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *present = 0u;
+   uint8_t request[AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_has_scope_type_request_encode(memory_id, scope_type, request, sizeof(request),
+                                               &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HAS_SCOPE_TYPE, AIMEE_DB2_STAGE_HAS_SCOPE_TYPE, trace_id,
+            deadline_ns, request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_has_scope_type_reply_decode(response, response_len, present) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -9028,6 +9268,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     touch = catalog["operations"][37]
     link_delete = catalog["operations"][38]
     valid_at = catalog["operations"][39]
+    has_scope_type = catalog["operations"][40]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -9286,6 +9527,12 @@ const OperationValidAt uint32 = {valid_at['id']}
 const ValidAtMemoryIDMax uint64 = {valid_at['request']['fields'][0]['maximum']}
 const ValidAtAsOfMax = {valid_at['request']['fields'][1]['maximum_bytes']}
 const ValidAtMax uint32 = {valid_at['reply']['field']['maximum']}
+const EventHasScopeType = EventMemory
+const StageHasScopeType = FamilyMemory
+const OperationHasScopeType uint32 = {has_scope_type['id']}
+const HasScopeTypeMemoryIDMax uint64 = {has_scope_type['request']['fields'][0]['maximum']}
+const HasScopeTypeScopeMax = {has_scope_type['request']['fields'][1]['maximum_bytes']}
+const HasScopeTypeMax uint32 = {has_scope_type['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -10028,6 +10275,75 @@ func DecodeValidAtReply(reply []byte) (uint32, uint32, error) {{
 		return 0, 0, ErrMalformedEnvelope
 	}}
 	return header.Result, inForce, nil
+}}
+
+// EncodeHasScopeTypeRequest emits the memory and the scope kind to probe for.
+func EncodeHasScopeTypeRequest(memoryID uint64, scopeType string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > HasScopeTypeMemoryIDMax || len(scopeType) == 0 ||
+		len(scopeType) > HasScopeTypeScopeMax || hasNUL(scopeType) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 12 + len(scopeType)
+	header, err := EncodeRequestHeader(OperationHasScopeType, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(scopeType)))
+	copy(payload[12:], scopeType)
+	return request, nil
+}}
+
+// DecodeHasScopeTypeRequest validates the envelope, memory, and scope kind.
+func DecodeHasScopeTypeRequest(request []byte) (uint64, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHasScopeType || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	scopeLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > HasScopeTypeMemoryIDMax || scopeLen == 0 ||
+		scopeLen > uint32(HasScopeTypeScopeMax) || 12+scopeLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	scopeType := string(payload[12 : 12+scopeLen])
+	if hasNUL(scopeType) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return memoryID, scopeType, nil
+}}
+
+// EncodeHasScopeTypeReply emits the Boolean attribution flag.
+func EncodeHasScopeTypeReply(present uint32) ([]byte, error) {{
+	if present > HasScopeTypeMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationHasScopeType, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], present)
+	return reply, nil
+}}
+
+// DecodeHasScopeTypeReply validates the operation and the Boolean bound.
+func DecodeHasScopeTypeReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHasScopeType || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	present := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if present > HasScopeTypeMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return present, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

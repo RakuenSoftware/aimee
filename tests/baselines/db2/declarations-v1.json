@@ -16352,9 +16352,15 @@
           "line": 125
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.has_scope_type operation replaces the existence probe over scope attribution rows, preserving its hit-or-miss result; the caller names the scope kind and learns only whether one exists, never which scope value."
+      },
       "signature": "int db2_memory_has_scope_type ( int64_t memory_id , const char * scope_type )",
       "signature_sha256": "a4af0ed0efe65338bbd76bc17e4ee2046cd5699c6483724e4ac93be8271d3962",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_has_scope_type"
     },
     {
@@ -25836,15 +25842,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d8112c5a6bb5b2b23cb6556007f0f0eb531859d8279079c2ec5ffcb1c798779f",
+  "fingerprint": "d2001f7522b7a2ca18c8839cfe932463e86bcbd1a7fd1ff880805c141b7a4f0f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 656,
+    "audit_pending": 655,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 302
+    "reviewed": 303
   }
 }

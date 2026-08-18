@@ -45,6 +45,9 @@ static int link_delete_calls;
 static int valid_at_value;
 static int valid_at_calls;
 static char valid_at_last[64];
+static int scope_type_value;
+static int scope_type_calls;
+static char scope_type_last[64];
 static int64_t link_delete_last;
 static int64_t workspace_tag_last;
 static int64_t total_count_value;
@@ -377,6 +380,21 @@ static int valid_at(int64_t memory_id, const char *as_of)
    valid_at_calls++;
    snprintf(valid_at_last, sizeof(valid_at_last), "%s", as_of);
    return valid_at_value;
+}
+
+int db2_memory_has_scope_type(int64_t memory_id, const char *scope_type)
+{
+   (void)memory_id;
+   (void)scope_type;
+   return 0;
+}
+
+static int has_scope_type(int64_t memory_id, const char *scope_type)
+{
+   (void)memory_id;
+   scope_type_calls++;
+   snprintf(scope_type_last, sizeof(scope_type_last), "%s", scope_type);
+   return scope_type_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1044,6 +1062,9 @@ static void reset(void)
    valid_at_value = 1;
    valid_at_calls = 0;
    valid_at_last[0] = '\0';
+   scope_type_value = 1;
+   scope_type_calls = 0;
+   scope_type_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2333,6 +2354,41 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_has_scope_type_wire(void)
+{
+   static uint8_t request[AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MAX_LEN];
+   uint32_t request_len = 99;
+   uint64_t memory_id = 99;
+   char scope_kind[AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX + 1] = "";
+   assert(aimee_db2_has_scope_type_request_encode(42u, "workspace", request, sizeof(request),
+                                                  &request_len) == 0);
+   assert(aimee_db2_has_scope_type_request_decode(request, request_len, &memory_id, scope_kind,
+                                                  sizeof(scope_kind)) == 0);
+   assert(memory_id == 42 && strcmp(scope_kind, "workspace") == 0);
+
+   assert(aimee_db2_has_scope_type_request_encode(0u, "workspace", request, sizeof(request),
+                                                  &request_len) == -1);
+   assert(aimee_db2_has_scope_type_request_encode(42u, "", request, sizeof(request),
+                                                  &request_len) == -1);
+   char too_long[AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX + 2];
+   memset(too_long, 'x', sizeof(too_long) - 1);
+   too_long[sizeof(too_long) - 1] = '\0';
+   assert(aimee_db2_has_scope_type_request_encode(42u, too_long, request, sizeof(request),
+                                                  &request_len) == -1);
+
+   uint8_t reply[AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, present = 99;
+   assert(aimee_db2_has_scope_type_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_has_scope_type_reply_decode(reply, reply_len, &present) == 0 && present == 1);
+   assert(aimee_db2_has_scope_type_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_has_scope_type_reply_decode(reply, reply_len, &present) == 0 && present == 0);
+   assert(aimee_db2_has_scope_type_reply_encode(2, reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_has_scope_type_reply_encode(1, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_has_scope_type_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_has_scope_type_reply_decode(reply, reply_len, &present) == -1 && present == 0);
 }
 
 static void test_valid_at_wire(void)
@@ -3869,6 +3925,45 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_has_scope_type_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.has_scope_type = has_scope_type};
+   static uint8_t request[AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99, present = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_HAS_SCOPE_TYPE};
+   assert(aimee_db2_has_scope_type_request_encode(42u, "workspace", request, sizeof(request),
+                                                  &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(scope_type_calls == 1 && strcmp(scope_type_last, "workspace") == 0);
+   assert(aimee_db2_has_scope_type_reply_decode(response, response_len, &present) == 0 &&
+          present == 1);
+
+   /* Unlike valid_at, which shares this wire format, this backend folds a
+    * fault into a miss, so zero is all a caller ever learns from a failure. */
+   scope_type_value = 0;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_has_scope_type_reply_decode(response, response_len, &present) == 0 &&
+          present == 0);
+
+   scope_type_value = 2;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   scope_type_value = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   scope_type_value = 1;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_valid_at_handler(void)
 {
    reset();
@@ -5072,6 +5167,7 @@ int main(void)
    test_touch_wire();
    test_link_delete_wire();
    test_valid_at_wire();
+   test_has_scope_type_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5112,6 +5208,7 @@ int main(void)
    test_touch_handler();
    test_link_delete_handler();
    test_valid_at_handler();
+   test_has_scope_type_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

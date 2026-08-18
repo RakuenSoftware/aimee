@@ -278,6 +278,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .touch = db2_memory_touch,
        .link_delete = db2_memory_link_delete,
        .valid_at = db2_memory_valid_at,
+       .has_scope_type = db2_memory_has_scope_type,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -962,6 +963,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          uint32_t in_force = (verdict > 0) ? 1u : 0u;
          if (aimee_db2_valid_at_reply_encode(domain, in_force, response_body, response_capacity,
                                              response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t scope_memory_id = 0u;
+      char scope_kind[AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX + 1];
+      if (aimee_db2_has_scope_type_request_decode(request_body, request_len, &scope_memory_id,
+                                                  scope_kind, sizeof(scope_kind)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->has_scope_type)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* LIMIT 1, so anything but zero or one means the probe changed shape. */
+         int present = backend->has_scope_type((int64_t)scope_memory_id, scope_kind);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (present < 0 || (uint32_t)present > AIMEE_DB2_HAS_SCOPE_TYPE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_has_scope_type_reply_encode((uint32_t)present, response_body,
+                                                   response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

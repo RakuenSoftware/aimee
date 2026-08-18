@@ -62,6 +62,7 @@ typedef struct
    int (*touch)(int64_t memory_id);
    int (*link_delete)(int64_t link_id);
    int (*valid_at)(int64_t memory_id, const char *as_of);
+   int (*has_scope_type)(int64_t memory_id, const char *scope_type);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

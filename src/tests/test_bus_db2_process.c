@@ -419,6 +419,19 @@ int main(int argc, char **argv)
    assert(aimee_db2_valid_at_call(call_client, &client, 9063, 0, 42u, "", &valid_result, &in_force,
                                   NULL, NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* No scope rows exist on a fresh schema, so the probe misses. Replayed
+    * because a pure read must give the same answer twice. */
+   uint32_t scoped = 99;
+   assert(aimee_db2_has_scope_type_call(call_client, &client, 9064, 0, 42u, "workspace", &scoped,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(scoped == 0);
+   scoped = 99;
+   assert(aimee_db2_has_scope_type_call(call_client, &client, 9065, 0, 42u, "workspace", &scoped,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(scoped == 0);
+   assert(aimee_db2_has_scope_type_call(call_client, &client, 9066, 0, 42u, "", &scoped, NULL,
+                                        NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
