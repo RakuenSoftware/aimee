@@ -145,7 +145,7 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
 
 #define COORD_POLL_INTERVAL_SECS 10
 #define COORD_MAX_ACTIVE_JOBS    32
-#define COORD_PROMPT_MAX         16384
+#define COORD_PROMPT_MAX         DB1_COORD_PROMPT_LEN
 #define COORD_FILES_MAX          DB1_COORD_FILES_LEN
 #define COORD_CWD_MAX            DB1_COORD_CWD_LEN
 #define COORD_ROLE_MAX           DB1_COORD_ROLE_LEN

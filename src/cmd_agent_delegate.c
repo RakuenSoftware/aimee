@@ -1460,9 +1460,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          agent_http_init();
 
          /* Inject prior attempt context from checkpoint */
-         char ckpt_steps[2048] = "";
-         char ckpt_error[512] = "";
-         char ckpt_output[2048] = "";
+         char ckpt_steps[DB1_CHECKPOINT_STEPS_LEN] = "";
+         char ckpt_error[DB1_CHECKPOINT_ERROR_LEN] = "";
+         char ckpt_output[DB1_CHECKPOINT_OUTPUT_LEN] = "";
          if (db1_delegation_checkpoint_load(deleg_id, ckpt_steps, sizeof(ckpt_steps), ckpt_error,
                                             sizeof(ckpt_error), ckpt_output,
                                             sizeof(ckpt_output)) == 0)

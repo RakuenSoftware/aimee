@@ -232,12 +232,14 @@ int db1_payload_rewrite_state_get(const char *session_id, payload_rewrite_state_
    char slot6[32];
    char slot7[32];
    char slot8[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {out->session_id, slot1, slot2, out->last_prefix_hash, slot4, out->last_rewrite_at, slot6, slot7, slot8, out->rewrite_reason, out->updated_at};
    const size_t caps[] = {sizeof out->session_id, sizeof slot1, sizeof slot2, sizeof out->last_prefix_hash, sizeof slot4, sizeof out->last_rewrite_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof out->rewrite_reason, sizeof out->updated_at};
-   memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_REWRITE_STATE_GET, fields, 1, values, caps, 11, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_REWRITE_STATE_GET, fields, 1, values, caps, 11, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->payload_epoch = (int64_t)strtoll(slot1, NULL, 10);
    out->compaction_epoch = (int64_t)strtoll(slot2, NULL, 10);
    out->last_payload_tokens = (int)strtol(slot4, NULL, 10);
@@ -283,12 +285,14 @@ int db1_wm_get(const char *session_id, const char *key, wm_entry_t *out)
       return -1;
    const char *fields[] = {session_id, key};
    char slot0[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, out->session_id, out->key, out->value, out->category, out->created_at, out->updated_at, out->expires_at};
    const size_t caps[] = {sizeof slot0, sizeof out->session_id, sizeof out->key, sizeof out->value, sizeof out->category, sizeof out->created_at, sizeof out->updated_at, sizeof out->expires_at};
-   memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_WM_GET, fields, 2, values, caps, 8, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_WM_GET, fields, 2, values, caps, 8, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->id = (int64_t)strtoll(slot0, NULL, 10);
    return 0;
 }
@@ -361,8 +365,8 @@ char *db1_wm_assemble_context(const char *session_id)
       return NULL;
    char *const values[] = {value};
    const size_t caps[] = {524288u};
-   int status = call_stage(AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT, fields, 1, values, caps, 1, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   int wire_status = call_stage(AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
    {
       free(value);
       return NULL;
@@ -431,8 +435,8 @@ int64_t db1_conv_record_event(const char *session_id, const char *tool_name, con
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int status = call_stage(AIMEE_DB1_OP_CONV_RECORD_EVENT, fields, 5, values, caps, 1, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_CONV_RECORD_EVENT, fields, 5, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int64_t)strtoll(slot0, NULL, 10);
 }
@@ -465,8 +469,8 @@ int64_t db1_conv_insert_chain(const char *session_id, int64_t event_id_first, in
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int status = call_stage(AIMEE_DB1_OP_CONV_INSERT_CHAIN, fields, 7, values, caps, 1, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_CONV_INSERT_CHAIN, fields, 7, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int64_t)strtoll(slot0, NULL, 10);
 }
@@ -735,8 +739,8 @@ int db1_conv_state_get(const char *session_id, int64_t *last_event_id_out, int *
    char slot2[32];
    char *const values[] = {slot0, slot1, slot2};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2};
-   int status = call_stage(AIMEE_DB1_OP_CONV_STATE_GET, fields, 1, values, caps, 3, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_CONV_STATE_GET, fields, 1, values, caps, 3, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    *last_event_id_out = (int64_t)strtoll(slot0, NULL, 10);
    *chain_count_out = (int)strtol(slot1, NULL, 10);
@@ -767,8 +771,8 @@ int db1_windows_session_scan_state(const char *session_id, int *count_out, int *
    char slot1[32];
    char *const values[] = {slot0, slot1};
    const size_t caps[] = {sizeof slot0, sizeof slot1};
-   int status = call_stage(AIMEE_DB1_OP_WINDOW_SCAN_STATE, fields, 1, values, caps, 2, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_SCAN_STATE, fields, 1, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    *count_out = (int)strtol(slot0, NULL, 10);
    *max_seq_out = (int)strtol(slot1, NULL, 10);
@@ -784,8 +788,8 @@ int db1_window_session_id(int64_t window_id, char *out, size_t out_sz)
    const char *fields[] = {arg0};
    char *const values[] = {out};
    const size_t caps[] = {out_sz};
-   int status = call_stage(AIMEE_DB1_OP_WINDOW_SESSION_ID, fields, 1, values, caps, 1, NULL);
-   return read_result(status, out);
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_SESSION_ID, fields, 1, values, caps, 1, NULL);
+   return read_result(wire_status, out);
 }
 
 int64_t db1_window_create_raw(const char *session_id, int seq, const char *summary, const char *created_at)
@@ -798,8 +802,8 @@ int64_t db1_window_create_raw(const char *session_id, int seq, const char *summa
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int status = call_stage(AIMEE_DB1_OP_WINDOW_CREATE_RAW, fields, 4, values, caps, 1, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_CREATE_RAW, fields, 4, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int64_t)strtoll(slot0, NULL, 10);
 }
@@ -1133,8 +1137,8 @@ int db1_user_memory_any()
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int status = call_stage(AIMEE_DB1_OP_USER_MEMORY_ANY, fields, 0, values, caps, 1, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_USER_MEMORY_ANY, fields, 0, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int64_t)strtoll(slot0, NULL, 10);
 }
