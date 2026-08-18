@@ -6549,9 +6549,15 @@
           "line": 138
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.dimension_reset operation keeps schema replacement, maintenance marking, and requeue accounting inside one DB2-owned operator transaction while returning only bounded structured evidence."
+      },
       "signature": "int db2_dim_change_reset ( int target_dim , int force , int dry_run , db2_reembed_plan_t * out )",
       "signature_sha256": "8f32ca424989ca4e817c4f2bf3787162e3709076b26bf5a7ad4a530a0885bac5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_dim_change_reset"
     },
     {
@@ -18560,7 +18566,7 @@
         "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
-        "reason": "The injected embedder callback is a process-local bootstrap seam and cannot cross the bus; dimension-reset requests invoke it inside the standalone DB2 owner when no explicit target dimension is supplied."
+        "reason": "The injected embedder callback is a process-local compatibility seam and cannot cross the bus; callers resolve the running endpoint's dimension before submitting the typed reset operation, which always carries an explicit target."
       },
       "signature": "int db2_probe_embedder_dim ( int budget_ms , int * out )",
       "signature_sha256": "89cdbb38a35593f980b1890b15a5b6a6daba5c3c6312045b3c68635ea0d438a6",
@@ -24534,15 +24540,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "bb7bf642a2346707516b1fc83009f0cd2115d43ce259ee5751585f838d8e6c60",
+  "fingerprint": "1f514a2c5c26727a4a962032ff09513a68f9435afb8473a915090984e03a25a6",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 873,
+    "audit_pending": 872,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 85
+    "reviewed": 86
   }
 }

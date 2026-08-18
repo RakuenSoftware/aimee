@@ -160,7 +160,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 9 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 10 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -168,7 +168,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[5].Name != "reembed_status" ||
 		baseline.Operations[6].Name != "reembed_clear" ||
 		baseline.Operations[7].Name != "reembed_clear_maintenance" ||
-		baseline.Operations[8].Name != "embedder_serving_id" {
+		baseline.Operations[8].Name != "embedder_serving_id" ||
+		baseline.Operations[9].Name != "dimension_reset" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -202,6 +203,50 @@ func TestEmbedderServingIDMatchesEverySharedCVector(t *testing.T) {
 		result, servingID, err := DecodeEmbedderServingIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || servingID != "" {
 			t.Fatalf("negative reply %s = (%d, %q, %v)", vector.Mutation, result, servingID, err)
+		}
+	}
+}
+
+func TestDimensionResetMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[9]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	gotRequest, err := EncodeDimensionResetRequest(384, 0, 1)
+	if err != nil || string(gotRequest) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", gotRequest, err, wantRequest)
+	}
+	target, force, dryRun, err := DecodeDimensionResetRequest(gotRequest)
+	if err != nil || target != 384 || force != 0 || dryRun != 1 {
+		t.Fatalf("decoded request = (%d, %d, %d, %v)", target, force, dryRun, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		target, force, dryRun, err := DecodeDimensionResetRequest(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || target != 0 || force != 0 || dryRun != 0 {
+			t.Fatalf("negative request %s = (%d, %d, %d, %v)",
+				vector.Mutation, target, force, dryRun, err)
+		}
+	}
+	expected := DimensionReset{
+		RecordedDimension: 768, TargetDimension: 384, TablesDiscovered: 6,
+		RowsCleared: 1234,
+	}
+	for _, vector := range operation.Reply.Positive {
+		status := expected
+		if vector.Result == ResultInvalidState {
+			status = DimensionReset{}
+		}
+		got, err := EncodeDimensionResetReply(vector.Result, status)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		result, decoded, err := DecodeDimensionResetReply(got)
+		if err != nil || result != vector.Result || decoded != status {
+			t.Fatalf("decode = (%d, %+v, %v)", result, decoded, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, status, err := DecodeDimensionResetReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || status != (DimensionReset{}) {
+			t.Fatalf("negative reply %s = (%d, %+v, %v)", vector.Mutation, result, status, err)
 		}
 	}
 }

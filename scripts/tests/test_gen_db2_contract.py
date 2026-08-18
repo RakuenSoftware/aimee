@@ -257,6 +257,25 @@ class ContractTests(unittest.TestCase):
              "embedded_nul", "short", "long"],
         )
 
+    def test_dimension_reset_vectors_cover_closed_results_and_bounds(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][9]
+        self.assertEqual(operation["name"], "dimension_reset")
+        self.assertEqual(
+            [row["result"] for row in operation["reply"]["positive"]],
+            [0, 2, 3, 5],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "target_zero", "target_too_large",
+             "invalid_force", "invalid_dry_run", "short", "long"],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "error_with_payload", "target_zero", "tables_too_large", "short", "long"],
+        )
+
     def test_root_and_version_mutations(self) -> None:
         cases = (
             (lambda value: value.__setitem__("extra", 1), "keys"),
@@ -326,7 +345,7 @@ class ContractTests(unittest.TestCase):
         self.assert_rule(
             lambda value: value["operations"].append({
                 **copy.deepcopy(value["operations"][0]),
-                "id": 10,
+                "id": 11,
                 "name": "health_second",
                 "c_symbols": ["db2_health_second"],
             }),
@@ -467,6 +486,27 @@ class ContractTests(unittest.TestCase):
                 "encoded_size_max_ok", 188), "embedder-serving-id-reply"),
             (lambda value: value["operations"][8]["reply"]["field"].__setitem__(
                 "maximum_bytes", 160), "embedder-serving-id-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_dimension_reset_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][9].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][9].__setitem__("results", ["ok"]),
+             "operation-results"),
+            (lambda value: value["operations"][9]["request"].__setitem__("encoded_size", 35),
+             "dimension-reset-request"),
+            (lambda value: value["operations"][9]["request"]["fields"][0].__setitem__(
+                "maximum", 4001), "dimension-reset-request"),
+            (lambda value: value["operations"][9]["reply"].__setitem__(
+                "encoded_size_payload", 55), "dimension-reset-reply"),
+            (lambda value: value["operations"][9]["reply"].__setitem__(
+                "payload_results", ["ok"]), "dimension-reset-reply"),
+            (lambda value: value["operations"][9].__setitem__("transaction", "none"),
+             "operation-semantics"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

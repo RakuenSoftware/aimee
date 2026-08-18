@@ -70,6 +70,23 @@ static int production_postgres_status(aimee_db2_postgres_status_t *status)
    return aimee_db2_postgres_status_valid(status) ? 0 : -1;
 }
 
+static int production_dimension_reset(uint32_t target_dimension, uint32_t force, uint32_t dry_run,
+                                      aimee_db2_dimension_reset_t *status)
+{
+   if (!status)
+      return -1;
+   db2_reembed_plan_t plan = {0};
+   int result = db2_dim_change_reset((int)target_dimension, (int)force, (int)dry_run, &plan);
+   status->recorded_dimension = plan.recorded_dim >= 0 ? (uint32_t)plan.recorded_dim : UINT32_MAX;
+   status->target_dimension = plan.target_dim >= 0 ? (uint32_t)plan.target_dim : UINT32_MAX;
+   status->tables_discovered = plan.n_tables >= 0 ? (uint32_t)plan.n_tables : UINT32_MAX;
+   status->tables_dropped = plan.n_dropped >= 0 ? (uint32_t)plan.n_dropped : UINT32_MAX;
+   status->rows_cleared = plan.rows_cleared >= 0 ? (uint64_t)plan.rows_cleared : UINT64_MAX;
+   status->curator_requeued = plan.curator_requeued;
+   status->evidence_requeued = plan.evidence_requeued;
+   return result;
+}
+
 static int production_reembed_status(aimee_db2_reembed_status_t *status)
 {
    if (!status)
@@ -102,6 +119,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .reembed_clear = db2_reembed_in_progress_clear,
        .reembed_clear_maintenance = db2_reembed_clear_maintenance,
        .embedder_serving_id = db2_embedder_serving_id,
+       .dimension_reset = production_dimension_reset,
    };
    return &backend;
 }
@@ -295,6 +313,36 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          return AIMEE_MODULE_STATUS_CANCELLED;
       if (aimee_db2_reembed_clear_maintenance_reply_encode(result, reply_status, response_body,
                                                            response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+
+   uint32_t reset_target = 0u, reset_force = 0u, reset_dry_run = 0u;
+   if (aimee_db2_dimension_reset_request_decode(request_body, request_len, &reset_target,
+                                                &reset_force, &reset_dry_run) == 0)
+   {
+      if (response_capacity < AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!backend || !backend->dimension_reset)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      aimee_db2_dimension_reset_t status = {0};
+      int backend_result =
+          backend->dimension_reset(reset_target, reset_force, reset_dry_run, &status);
+      uint32_t result = backend_result == 0    ? AIMEE_DB2_RESULT_OK
+                        : backend_result == -2 ? AIMEE_DB2_RESULT_CONFLICT
+                        : backend_result == -3 ? AIMEE_DB2_RESULT_DENIED
+                                               : AIMEE_DB2_RESULT_INVALID_STATE;
+      const aimee_db2_dimension_reset_t *reply_status =
+          result == AIMEE_DB2_RESULT_INVALID_STATE ? NULL : &status;
+      if (reply_status && !aimee_db2_dimension_reset_valid(reply_status))
+      {
+         result = AIMEE_DB2_RESULT_INVALID_STATE;
+         reply_status = NULL;
+      }
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (aimee_db2_dimension_reset_reply_encode(result, reply_status, response_body,
+                                                 response_capacity, response_len) != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       return AIMEE_MODULE_STATUS_OK;
    }

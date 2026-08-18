@@ -12,6 +12,14 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_dim_change_reset",
+      "signature_sha256": "8f32ca424989ca4e817c4f2bf3787162e3709076b26bf5a7ad4a530a0885bac5",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.dimension_reset operation keeps schema replacement, maintenance marking, and requeue accounting inside one DB2-owned operator transaction while returning only bounded structured evidence."
+    },
+    {
       "symbol": "db2_embedder_serving_id",
       "signature_sha256": "5898a1bdc571792a4b16c259f8fdabbbe26d17272c55d0670cf98d7488917972",
       "disposition": "wire-operation",
@@ -113,7 +121,7 @@
       "disposition": "private-db2",
       "family": "lifecycle",
       "db3_placement": "retained-db2",
-      "reason": "The injected embedder callback is a process-local bootstrap seam and cannot cross the bus; dimension-reset requests invoke it inside the standalone DB2 owner when no explicit target dimension is supplied."
+      "reason": "The injected embedder callback is a process-local compatibility seam and cannot cross the bus; callers resolve the running endpoint's dimension before submitting the typed reset operation, which always carries an explicit target."
     },
     {
       "symbol": "db2_reembed_clear_maintenance",

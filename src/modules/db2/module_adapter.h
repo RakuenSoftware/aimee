@@ -17,6 +17,8 @@ typedef struct
    int (*reembed_clear)(void);
    int (*reembed_clear_maintenance)(int force, int *was_in_progress, int *recorded, int *running);
    const char *(*embedder_serving_id)(void);
+   int (*dimension_reset)(uint32_t target_dimension, uint32_t force, uint32_t dry_run,
+                          aimee_db2_dimension_reset_t *status);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

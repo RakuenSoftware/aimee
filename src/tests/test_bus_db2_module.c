@@ -37,6 +37,8 @@ typedef struct
    int (*reembed_clear)(void);
    int (*reembed_clear_maintenance)(int force, int *was_in_progress, int *recorded, int *running);
    const char *(*embedder_serving_id)(void);
+   int (*dimension_reset)(uint32_t target_dimension, uint32_t force, uint32_t dry_run,
+                          aimee_db2_dimension_reset_t *status);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -189,6 +191,14 @@ static int reembed_status(aimee_db2_reembed_status_t *status)
    return 1;
 }
 
+static int dimension_reset(uint32_t target_dimension, uint32_t force, uint32_t dry_run,
+                           aimee_db2_dimension_reset_t *status)
+{
+   assert(target_dimension == 384 && force == 0 && dry_run == 1);
+   *status = (aimee_db2_dimension_reset_t){768, 384, 6, 0, 1234, -1, 7};
+   return 0;
+}
+
 int db2_reembed_in_progress_clear(void)
 {
    return 0;
@@ -215,6 +225,23 @@ const char *db2_embedder_serving_id(void)
       serving_id[sizeof(serving_id) - 1] = '\0';
    }
    return serving_id;
+}
+
+int db2_probe_embedder_dim(int budget_ms, int *out)
+{
+   (void)budget_ms;
+   if (out)
+      *out = 384;
+   return 0;
+}
+
+int db2_dim_change_reset(int target_dim, int force, int dry_run, void *out)
+{
+   (void)target_dim;
+   (void)force;
+   (void)dry_run;
+   (void)out;
+   return -1;
 }
 
 static void *run_process(void *argument)
@@ -356,6 +383,7 @@ int main(void)
        .reembed_clear = db2_reembed_in_progress_clear,
        .reembed_clear_maintenance = db2_reembed_clear_maintenance,
        .embedder_serving_id = db2_embedder_serving_id,
+       .dimension_reset = dimension_reset,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -448,6 +476,15 @@ int main(void)
           strlen(serving_id) == AIMEE_DB2_EMBEDDER_SERVING_ID_MAX);
    for (size_t index = 0; index < strlen(serving_id); ++index)
       assert(serving_id[index] == 'x');
+
+   aimee_db2_dimension_reset_t reset = {0};
+   domain_result = 9;
+   assert(aimee_db2_dimension_reset_call(call_client, &client, 7018, 0, 384, 0, 1, &domain_result,
+                                         &reset, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && reset.recorded_dimension == 768 &&
+          reset.target_dimension == 384 && reset.tables_discovered == 6 &&
+          reset.tables_dropped == 0 && reset.rows_cleared == 1234 && reset.curator_requeued == -1 &&
+          reset.evidence_requeued == 7);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

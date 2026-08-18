@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "0dd4a7eafad04ab29bea122867df27d241883d0fc0d595608a6359f4863d29f4"
+const ContractSHA256 = "81af618a00a5748d1a803a28d3b60354d7ca43c4ce97faaf939a4143ea9f3247"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -76,6 +76,10 @@ const EventEmbedderServingID = EventLifecycle
 const StageEmbedderServingID = FamilyLifecycle
 const OperationEmbedderServingID uint32 = 9
 const EmbedderServingIDMax = 159
+const EventDimensionReset = EventLifecycle
+const StageDimensionReset = FamilyLifecycle
+const OperationDimensionReset uint32 = 10
+const DimensionResetTablesMax uint32 = 16
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -763,6 +767,116 @@ func DecodeEmbedderServingIDReply(reply []byte) (uint32, string, error) {
 		return 0, "", ErrMalformedEnvelope
 	}
 	return header.Result, servingID, nil
+}
+
+type DimensionReset struct {
+	RecordedDimension uint32
+	TargetDimension   uint32
+	TablesDiscovered  uint32
+	TablesDropped     uint32
+	RowsCleared       uint64
+	CuratorRequeued   int32
+	EvidenceRequeued  int32
+}
+
+func validDimensionReset(status DimensionReset) bool {
+	return status.RecordedDimension <= ReembedDimensionMax &&
+		status.TargetDimension >= ReembedDimensionMin &&
+		status.TargetDimension <= ReembedDimensionMax &&
+		status.TablesDiscovered <= DimensionResetTablesMax &&
+		status.TablesDropped <= status.TablesDiscovered &&
+		status.CuratorRequeued >= -1 && status.EvidenceRequeued >= -1
+}
+
+func EncodeDimensionResetRequest(targetDimension, force, dryRun uint32) ([]byte, error) {
+	if targetDimension < ReembedDimensionMin || targetDimension > ReembedDimensionMax ||
+		force > 1 || dryRun > 1 {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDimensionReset, 0, 12)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 12)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], targetDimension)
+	binary.LittleEndian.PutUint32(payload[4:8], force)
+	binary.LittleEndian.PutUint32(payload[8:12], dryRun)
+	return request, nil
+}
+
+func DecodeDimensionResetRequest(request []byte) (uint32, uint32, uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDimensionReset || header.Flags != 0 ||
+		header.PayloadLen != 12 {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	targetDimension := binary.LittleEndian.Uint32(payload[0:4])
+	force := binary.LittleEndian.Uint32(payload[4:8])
+	dryRun := binary.LittleEndian.Uint32(payload[8:12])
+	if targetDimension < ReembedDimensionMin || targetDimension > ReembedDimensionMax ||
+		force > 1 || dryRun > 1 {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	return targetDimension, force, dryRun, nil
+}
+
+func EncodeDimensionResetReply(result uint32, status DimensionReset) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK || result == ResultConflict || result == ResultDenied {
+		if !validDimensionReset(status) {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = 32
+	} else if result != ResultInvalidState || status != (DimensionReset{}) {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDimensionReset, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.RecordedDimension)
+	binary.LittleEndian.PutUint32(payload[4:8], status.TargetDimension)
+	binary.LittleEndian.PutUint32(payload[8:12], status.TablesDiscovered)
+	binary.LittleEndian.PutUint32(payload[12:16], status.TablesDropped)
+	binary.LittleEndian.PutUint64(payload[16:24], status.RowsCleared)
+	binary.LittleEndian.PutUint32(payload[24:28], uint32(status.CuratorRequeued))
+	binary.LittleEndian.PutUint32(payload[28:32], uint32(status.EvidenceRequeued))
+	return reply, nil
+}
+
+func DecodeDimensionResetReply(reply []byte) (uint32, DimensionReset, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDimensionReset {
+		return 0, DimensionReset{}, ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, DimensionReset{}, nil
+	}
+	if (header.Result != ResultOK && header.Result != ResultConflict &&
+		header.Result != ResultDenied) || header.PayloadLen != 32 {
+		return 0, DimensionReset{}, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	status := DimensionReset{
+		RecordedDimension: binary.LittleEndian.Uint32(payload[0:4]),
+		TargetDimension:   binary.LittleEndian.Uint32(payload[4:8]),
+		TablesDiscovered:  binary.LittleEndian.Uint32(payload[8:12]),
+		TablesDropped:     binary.LittleEndian.Uint32(payload[12:16]),
+		RowsCleared:       binary.LittleEndian.Uint64(payload[16:24]),
+		CuratorRequeued:   int32(binary.LittleEndian.Uint32(payload[24:28])),
+		EvidenceRequeued:  int32(binary.LittleEndian.Uint32(payload[28:32])),
+	}
+	if !validDimensionReset(status) {
+		return 0, DimensionReset{}, ErrMalformedEnvelope
+	}
+	return header.Result, status, nil
 }
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

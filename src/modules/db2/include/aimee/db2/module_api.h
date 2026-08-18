@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "0dd4a7eafad04ab29bea122867df27d241883d0fc0d595608a6359f4863d29f4"
+#define AIMEE_DB2_CONTRACT_SHA256 "81af618a00a5748d1a803a28d3b60354d7ca43c4ce97faaf939a4143ea9f3247"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -102,6 +102,13 @@
 #define AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN 187u
 #define AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN        24u
 #define AIMEE_DB2_EMBEDDER_SERVING_ID_MAX              159u
+#define AIMEE_DB2_EVENT_DIMENSION_RESET                AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_DIMENSION_RESET                AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_DIMENSION_RESET            10u
+#define AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN          36u
+#define AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN         56u
+#define AIMEE_DB2_DIMENSION_RESET_ERROR_LEN            24u
+#define AIMEE_DB2_DIMENSION_RESET_TABLES_MAX           16u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -164,6 +171,17 @@ typedef struct
    uint32_t recorded_dimension;
    uint32_t running_dimension;
 } aimee_db2_reembed_clear_maintenance_t;
+
+typedef struct
+{
+   uint32_t recorded_dimension;
+   uint32_t target_dimension;
+   uint32_t tables_discovered;
+   uint32_t tables_dropped;
+   uint64_t rows_cleared;
+   int32_t curator_requeued;
+   int32_t evidence_requeued;
+} aimee_db2_dimension_reset_t;
 
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {
@@ -982,6 +1000,142 @@ static inline int aimee_db2_embedder_serving_id_reply_decode(
    memcpy(serving_id, payload + 4, decoded_len);
    serving_id[decoded_len] = '\0';
    *result = header.result;
+   return 0;
+}
+
+static inline int aimee_db2_dimension_reset_valid(const aimee_db2_dimension_reset_t *status)
+{
+   return status && status->recorded_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX &&
+          status->target_dimension >= AIMEE_DB2_REEMBED_DIMENSION_MIN &&
+          status->target_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX &&
+          status->tables_discovered <= AIMEE_DB2_DIMENSION_RESET_TABLES_MAX &&
+          status->tables_dropped <= status->tables_discovered &&
+          status->curator_requeued >= -1 && status->evidence_requeued >= -1;
+}
+
+static inline int aimee_db2_dimension_reset_request_encode(
+    uint32_t target_dimension, uint32_t force, uint32_t dry_run, uint8_t *output,
+    size_t capacity)
+{
+   if (target_dimension < AIMEE_DB2_REEMBED_DIMENSION_MIN ||
+       target_dimension > AIMEE_DB2_REEMBED_DIMENSION_MAX || force > 1u || dry_run > 1u ||
+       !output || capacity < AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DIMENSION_RESET, 0u, 12u,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, target_dimension);
+   aimee_db2_put_u32(payload + 4, force);
+   aimee_db2_put_u32(payload + 8, dry_run);
+   return 0;
+}
+
+static inline int aimee_db2_dimension_reset_request_decode(
+    const uint8_t *input, size_t input_len, uint32_t *target_dimension, uint32_t *force,
+    uint32_t *dry_run)
+{
+   if (target_dimension)
+      *target_dimension = 0u;
+   if (force)
+      *force = 0u;
+   if (dry_run)
+      *dry_run = 0u;
+   aimee_db2_request_header_t header = {0};
+   if (!target_dimension || !force || !dry_run ||
+       aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DIMENSION_RESET || header.flags != 0u ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_target = aimee_db2_get_u32(payload);
+   uint32_t decoded_force = aimee_db2_get_u32(payload + 4);
+   uint32_t decoded_dry_run = aimee_db2_get_u32(payload + 8);
+   if (decoded_target < AIMEE_DB2_REEMBED_DIMENSION_MIN ||
+       decoded_target > AIMEE_DB2_REEMBED_DIMENSION_MAX || decoded_force > 1u ||
+       decoded_dry_run > 1u)
+      return -1;
+   *target_dimension = decoded_target;
+   *force = decoded_force;
+   *dry_run = decoded_dry_run;
+   return 0;
+}
+
+static inline int aimee_db2_dimension_reset_reply_encode(
+    uint32_t result, const aimee_db2_dimension_reset_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK || result == AIMEE_DB2_RESULT_CONFLICT ||
+       result == AIMEE_DB2_RESULT_DENIED)
+   {
+      if (!aimee_db2_dimension_reset_valid(status) ||
+          capacity < AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN)
+         return -1;
+      payload_len = 32u;
+   }
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_DIMENSION_RESET_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DIMENSION_RESET, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->recorded_dimension);
+      aimee_db2_put_u32(payload + 4, status->target_dimension);
+      aimee_db2_put_u32(payload + 8, status->tables_discovered);
+      aimee_db2_put_u32(payload + 12, status->tables_dropped);
+      aimee_db2_put_u64(payload + 16, status->rows_cleared);
+      aimee_db2_put_u32(payload + 24, (uint32_t)status->curator_requeued);
+      aimee_db2_put_u32(payload + 28, (uint32_t)status->evidence_requeued);
+   }
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_dimension_reset_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_dimension_reset_t *status)
+{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_dimension_reset_t){0};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_DIMENSION_RESET)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if ((header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_CONFLICT &&
+        header.result != AIMEE_DB2_RESULT_DENIED) ||
+       header.payload_len != 32u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_dimension_reset_t decoded = {
+       .recorded_dimension = aimee_db2_get_u32(payload),
+       .target_dimension = aimee_db2_get_u32(payload + 4),
+       .tables_discovered = aimee_db2_get_u32(payload + 8),
+       .tables_dropped = aimee_db2_get_u32(payload + 12),
+       .rows_cleared = aimee_db2_get_u64(payload + 16),
+       .curator_requeued = (int32_t)aimee_db2_get_u32(payload + 24),
+       .evidence_requeued = (int32_t)aimee_db2_get_u32(payload + 28),
+   };
+   if (!aimee_db2_dimension_reset_valid(&decoded))
+      return -1;
+   *result = header.result;
+   *status = decoded;
    return 0;
 }
 
