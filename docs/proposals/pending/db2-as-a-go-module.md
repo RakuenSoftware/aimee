@@ -13,9 +13,11 @@
   symbols; missing or failed initialization refuses attachment without logging the DSN. Its
   descriptor also owns deterministic SQL-to-header generation, so a clean runtime-bundle build no
   longer depends on a prior monolithic build writing `src/schema_data.h`. Its standalone repository
-  now materializes the descriptor's explicit 54-header compatibility closure, keeps those files
+  now materializes the descriptor's explicit 55-header compatibility closure, keeps those files
   distinct from DB2 ownership, and includes them in the reproducible source pin; all 138 DB2
-  translation units compile and link from the isolated export. This is
+  translation units compile and link from the isolated export. The first live S3 replay group now
+  starts that packaged executable against fresh PostgreSQL, crosses an executable-bound event bus,
+  compares canonical health bytes, and verifies the recorded dimension and schema effects. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -624,13 +626,24 @@ SQLite test shim. SQLite compatibility remains tested separately, but its weak D
 SQLite-only runtime imports are not dependencies of the deployable C or Go DB2 owner.
 
 The standalone repository no longer relies on undeclared monorepo headers. `c_build` records the
-54-header compatibility closure consumed by the retained C implementation; export and runtime
+55-header compatibility closure consumed by the retained C implementation; export and runtime
 admission validate normalized real header paths, reject module-local ownership laundering, copy the
 inputs into the isolated repository, and bind them into its source digest. This is packaging for the
 reviewed transitional C closure, not a claim that DB2 owns audit, config, CSS, DB1, guardrails,
 learning, memory, vault, or shared host contracts. The isolated export compiles and links all 138
 translation units against only that declared header set, `aimee-core`, and the 139 audited system
 links.
+
+The first S3 replay group fixes the standalone startup configuration gap and makes the proof
+blocking. `module_init.c` injects the single config-owned embedding-width default, preserves
+`EMBEDDER_DIMS` as an operator pin, and still refuses attachment when the DSN or initialization
+fails. The `db2-replay` target launches the packaged executable with its exact principal-29 grant
+against fresh pgvector PostgreSQL, compares raw response bytes to the generated health codec,
+repeats the call through the typed client, checks schema/extension/KB-table evidence, and terminates
+the process cleanly. CI separately verifies `kb_meta.schema_embedding_dim` and representative
+tables, and the stable `unit-tests` aggregate now requires this job. This proves the current health
+operation and schema bootstrap through the real process boundary; it does not claim the remaining
+catalog handlers, tenant, concurrency, cancellation, ambiguity, or durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
 standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is

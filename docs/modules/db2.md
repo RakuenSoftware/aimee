@@ -457,6 +457,9 @@ The wire contains capability bits only. DSNs, SQL, row contents, identities, and
 not cross the bus. Runtime admission continues to pin the executable path, UID, principal class,
 principal reference, and event-kind grant. The process reads `AIMEE_DB2_URL` during initialization,
 never echoes it or a libpq diagnostic, and refuses bus attachment on missing or failed initialization.
+Before opening PostgreSQL it also applies the existing `EMBEDDER_DIMS` contract: a valid value is an
+operator pin, while an unset or malformed value uses the one declared config default. This preserves
+the in-process dimension precedence without linking the config implementation into DB2.
 
 ## Supported journeys
 
@@ -467,12 +470,21 @@ continues to cover every response and failure shape without providing a producti
 The descriptor declares both canonical DB2 SQL inputs for deterministic text embedding. Runtime
 bundles generate `schema_data.h` in a temporary build directory, and standalone exports emit the
 equivalent CMake rule and copy those exact inputs; neither path requires or modifies a source-tree
-generated header. The same descriptor declares the 54 non-owned compatibility headers required by
+generated header. The same descriptor declares the 55 non-owned compatibility headers required by
 the retained C implementation. Export validation requires sorted, normalized, real `.h` inputs,
 copies them without claiming DB2 ownership, includes them in the repository source digest, and
 rejects module-local entries that belong in `private_headers` or `public_headers`. A clean isolated
 export now compiles and links the same 138 translation units without reaching back into the
 monorepo.
+
+The `db2-replay` target starts that packaged executable as principal 29 against a fresh pgvector
+PostgreSQL database and an executable-bound bus grant. It compares the returned health bytes with
+the generated reference codec, repeats the request through the typed client, verifies all schema,
+`pg_trgm`, and KB-table evidence bits, terminates the process cleanly, and leaves the recorded
+embedding dimension and representative schema tables for a separate database-effect assertion.
+The required CI job runs this target and is part of the stable `unit-tests` aggregate. This is the
+first live S3 replay group; the remaining operation families and fault fixtures still gate S3
+completion and activation.
 
 ## Tests and failure behavior
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "0d122a77119b36e51d7c03ec4d614609751d849d",
+  "source_revision": "9d44b1b81f0be0edc94136db7d69f035fdf1343c",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
@@ -6526,9 +6526,9 @@
     },
     {
       "source": "src/modules/db2/c/db2_test_shim.c",
-      "header": "modules/config/config_embedder_dims.h",
-      "resolved": "src/modules/config/config_embedder_dims.h",
-      "classification": "module-private-api",
+      "header": "config_embedder_dims.h",
+      "resolved": "src/headers/config_embedder_dims.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -7260,5 +7260,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "038a6b01b3567b22ad305cd5a0d368f2831bde65e74df824192b3577f150e902"
+  "fingerprint": "cbf80d08cc7f25fa3f971696a367ed746e56ffdec0c4cf6f768d6bf9efb508a6"
 }

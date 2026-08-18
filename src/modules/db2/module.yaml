@@ -353,6 +353,7 @@
   ],
   "tests": [
     "src/tests/test_bus_db2_module.c",
+    "src/tests/test_bus_db2_process.c",
     "src/tests/test_bus_db3.c",
     "src/tests/test_db2_cert_serial_support.c",
     "src/tests/test_db2_cjson_support.c",
@@ -413,6 +414,7 @@
       "src/headers/code_audit_graph.h",
       "src/headers/code_match.h",
       "src/headers/collab_rules.h",
+      "src/headers/config_embedder_dims.h",
       "src/headers/context_discover.h",
       "src/headers/dstr.h",
       "src/headers/embed_input_type.h",

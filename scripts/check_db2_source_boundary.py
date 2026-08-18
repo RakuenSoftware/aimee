@@ -629,6 +629,27 @@ def enforce_shrink_only(previous: object, current: object) -> None:
             )
             if promoted is not None and count <= promoted[0]:
                 continue
+            # The embedder dimension limit is a configuration-independent ABI
+            # constant.  Promote that exact leaf header from config's private
+            # tree to the shared host boundary without admitting a new DB2
+            # dependency or a broader include-spelling exception.
+            embedder_dims_promoted = next(
+                (
+                    value
+                    for (old_source, old_header, old_resolved), value
+                    in previous_dependencies.items()
+                    if old_source == source == "src/modules/db2/c/db2_test_shim.c"
+                    and old_header == "modules/config/config_embedder_dims.h"
+                    and old_resolved == "src/modules/config/config_embedder_dims.h"
+                    and header == "config_embedder_dims.h"
+                    and resolved == "src/headers/config_embedder_dims.h"
+                    and value[1] == "module-private-api"
+                    and classification == "host-api"
+                ),
+                None,
+            )
+            if embedder_dims_promoted is not None and count <= embedder_dims_promoted[0]:
+                continue
             # DB2 may internalize its pinned cJSON input under the exact
             # descriptor support boundary. This is a directional ownership
             # reduction, not dependency growth: require the same source/include

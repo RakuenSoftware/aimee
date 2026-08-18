@@ -3319,7 +3319,8 @@ unit-test-db2-module-contract: $(TESTPREFIX)/unit-test-db2-module-contract
 	$<
 
 $(OBJDIR)/tests/test_db2_module_init.o: C_FLAGS += -Imodules/db2
-$(OBJDIR)/modules/db2/module_init.o: C_FLAGS += -Imodules/db2 -Imodules/db2/c
+$(OBJDIR)/modules/db2/module_init.o: C_FLAGS += -Imodules/db2 -Imodules/db2/c \
+                                                   -Imodules/config -Iheaders
 $(TESTPREFIX)/unit-test-db2-module-init: $(OBJDIR)/tests/test_db2_module_init.o \
                                         $(OBJDIR)/modules/db2/module_init.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
@@ -3356,6 +3357,31 @@ $(TESTPREFIX)/unit-test-bus-db2-module: \
 .PHONY: unit-test-bus-db2-module
 unit-test-bus-db2-module: $(TESTPREFIX)/unit-test-bus-db2-module
 	$<
+
+$(OBJDIR)/tests/test_bus_db2_process.o: C_FLAGS += -Icore/event_bus/include \
+                                                    -Imodules/db2/include
+$(TESTPREFIX)/unit-test-bus-db2-process: \
+                                        $(OBJDIR)/tests/test_bus_db2_process.o \
+                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(OBJDIR)/core/event_bus/module_client.o \
+                                        $(OBJDIR)/core/event_bus/module_protocol.o \
+                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                        $(OBJDIR)/core/event_bus/bus_client.o \
+                                        $(OBJDIR)/core/event_bus/bus_attach.o \
+                                        $(OBJDIR)/core/event_bus/bus_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_route.o \
+                                        $(OBJDIR)/core/event_bus/bus_region.o \
+                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_ring.o \
+                                        $(OBJDIR)/core/event_bus/bus_arena.o \
+                                        $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: db2-replay
+db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2
+	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
+	$< $(abspath $(OBJDIR)/aimee-module-db2)
 
 $(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
 $(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
