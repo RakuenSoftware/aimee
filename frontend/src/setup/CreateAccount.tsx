@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@rakuensoftware/smoothgui';
 
 function csrf(): string {
@@ -18,6 +18,52 @@ export default function CreateAccount({ onCreated }: { onCreated: (username: str
   const [confirmation, setConfirmation] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // The replacement form assumes you are signed in AS the temporary login. If
+  // you created your account another way you never can be — its password is not
+  // recoverable — so the server offers retirement instead, and this step showed
+  // a form that could only ever be refused. Ask which one applies.
+  const [retireOnly, setRetireOnly] = useState<boolean | null>(null);
+  const [bootstrapUser, setBootstrapUser] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const response = await fetch('/api/setup/account', { headers: { 'X-CSRF-Token': csrf() } });
+        const data = await response.json().catch(() => ({}));
+        if (!live) return;
+        setRetireOnly(response.ok && data.retire_only === true);
+        setBootstrapUser(typeof data.username === 'string' ? data.username : '');
+      } catch {
+        // Fall back to the replacement form rather than blocking the step on a
+        // failed probe: it is the flow that was always here.
+        if (live) setRetireOnly(false);
+      }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  async function retire() {
+    setSaving(true);
+    setError('');
+    try {
+      const response = await fetch('/api/setup/account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
+        body: JSON.stringify({ retire_bootstrap: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error || `Could not retire the temporary login (${response.status}).`);
+        return;
+      }
+      onCreated(typeof data.username === 'string' ? data.username : '');
+    } catch {
+      setError('aimee-server unavailable');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function create() {
     const user = username.trim();
@@ -66,6 +112,34 @@ export default function CreateAccount({ onCreated }: { onCreated: (username: str
     } finally {
       setSaving(false);
     }
+  }
+
+  if (retireOnly === null) {
+    return (
+      <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', marginBottom: 8 }}>
+        Checking the temporary login…
+      </div>
+    );
+  }
+
+  if (retireOnly) {
+    return (
+      <div style={{ display: 'grid', gap: 12, marginBottom: 8 }}>
+        <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
+          You are already signed in with your own account, so there is nothing to create here — but
+          the temporary login{' '}
+          <code style={{ fontFamily: 'ui-monospace, monospace' }}>{bootstrapUser || 'created at first boot'}</code>{' '}
+          is still a way into this instance. Close it to finish setup. Your own login is unaffected,
+          and this account becomes the administrator for policy changes.
+        </div>
+        {error && <div style={{ color: 'var(--sg-danger-dark)', fontSize: 12.5 }}>{error}</div>}
+        <div>
+          <Button variant="primary" disabled={saving} onClick={retire}>
+            {saving ? 'Closing…' : 'Close the temporary login & continue'}
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (

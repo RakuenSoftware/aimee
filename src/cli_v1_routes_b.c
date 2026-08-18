@@ -1406,44 +1406,9 @@ typedef cJSON *(*marshal_method_fn)(const char *method, int argc, char **argv);
  * exact tables are consulted before the prefix fallbacks so an exact method
  * (e.g. agent.episodes) is never shadowed by a prefix (agent.*). */
 static const char *const MARSHAL_NO_ARGS[] = {
-    "api.disable",
-    "api.status",
-    "audit.checkpoint",
-    "audit.seal",
-    "audit.snapshot",
-    "audit.verify",
-    "aux.config_show",
-    "calibration.readiness",
-    "cert.list",
-    "config.deploy_env",
-    "config.show",
-    "cron.list",
-    "delegate.backend_list",
-    "delegate.sandbox_list",
-    "demotion.check",
-    "doctor.forensics",
-    "economizer.stats",
-    "episode.list",
-    "hud.status",
-    "identity.show",
-    "kb.curator",
-    "kb.health",
-    "kb.ingest.status",
-    "mcp.audit",
-    "memory.stats",
-    "catalog.refresh",
-    "notes.list",
-    "provider.get",
-    "ranker.export_view",
-    "ranker.fit",
-    "rules.generate",
-    "rules.list",
-    "server.health",
-    "toolset.list",
-    "vault.list",
-    "vault.lock",
-    "workers",
-    "workspace.list",
+/* Rows live in server/cli_marshal_defs_data.h: the server serves them, and
+ * this compiled-in copy is the last resort when it cannot be asked. */
+#include "server/cli_marshal_defs_data.h"
 };
 
 static const struct
@@ -1702,6 +1667,15 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       cJSON_AddStringToObject(req, "name", argv[0]);
       return req;
    }
+   /* What the SERVER says the body should be, before this build's own list.
+    *
+    * Without this, serving routes/catalogue/dispatch still left a new no-arg
+    * command unusable: the client could find it and address it, then refused to
+    * send anything because it had no row saying the body is empty. A client
+    * preferring its own list here would reintroduce exactly that. */
+   if (cli_v1_manifest_method_takes_no_args(method))
+      return marshal_no_args(method);
+
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
       if (strcmp(method, MARSHAL_NO_ARGS[i]) == 0)

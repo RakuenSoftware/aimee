@@ -8,11 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-void db1_model_catalog_free(provider_model_t *models, int n)
-{
-   (void)n; /* one contiguous block; no per-row owned pointers */
-   free(models);
-}
+/* db1_model_catalog_free lives in src/model_catalog_release.c: it frees what
+   the caller was handed, which after the migration is the client's block. */
 
 int db1_model_catalog_is_fresh(const char *provider, int ttl_seconds)
 {

@@ -693,7 +693,6 @@ ENV_DESC = {
     "AIMEE_TUI_SESSION": ("Client & session", "Identifies the TUI session."),
     "AIMEE_ATTACH_ID": ("Client & session", "Presence attach id used when joining an existing session."),
     "AIMEE_HOOK_CLIENT": ("Client & session", "Identifies the calling hook client (e.g. claude/codex) for hook routing."),
-    "AIMEE_NO_AUTOSTART": ("Client & session", "If set, the client does not auto-start a local aimee-server."),
     "AIMEE_NO_CLIENT_INTEGRATIONS": ("Client & session", "If set (to any value other than 0/false), aimee does not auto-register itself into detected AI-tool user configs (Claude Code, Gemini, Copilot, Codex). Overrides the client_integrations_enabled config; honored by the aimee binary and by install.sh/configure-hooks.sh."),
     "AIMEE_MODEL": ("Client & session", "Override the primary model for the session."),
     "AIMEE_EFFORT": ("Client & session", "Reasoning-effort hint for the session/model."),
