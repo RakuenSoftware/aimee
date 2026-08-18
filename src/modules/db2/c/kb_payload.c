@@ -6,7 +6,6 @@
 #include "aimee.h"
 #include "artifacts.h"
 #include "../support/db2_runtime_config.h"
-#include "memory.h"
 #include "pgvec_transport.h"
 
 #include "db_postgres.h"
@@ -15,12 +14,35 @@
 #include "../support/db2_log.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define KBP_ERRBUF 256
+
+static db2_embed_fn g_embed_provider;
+
+void aimee_db2_register_embed_provider(db2_embed_fn provider)
+{
+   g_embed_provider = provider;
+}
+
+int db2_kb_embed_text(const char *text, const char *command, int input_type, float *out,
+                      int max_dim)
+{
+   if (!text || !command || !command[0] || !out || max_dim <= 0 ||
+       (input_type != DB2_EMBED_DOCUMENT && input_type != DB2_EMBED_QUERY) || !g_embed_provider)
+      return 0;
+   int dim = g_embed_provider(text, command, input_type, out, max_dim);
+   if (dim <= 0 || dim > max_dim)
+      return 0;
+   for (int i = 0; i < dim; ++i)
+      if (!isfinite(out[i]))
+         return 0;
+   return dim;
+}
 
 char *db2_kb_build_document_payload(int64_t doc_id)
 {
@@ -1090,7 +1112,7 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
       if (embed_cmd && embed_cmd[0])
       {
          float qvec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
+         int dim = db2_kb_embed_text(query, embed_cmd, DB2_EMBED_QUERY, qvec, EMBED_MAX_DIM);
          if (dim > 0)
          {
             /* Request enough candidates to fill the remaining result budget even after
