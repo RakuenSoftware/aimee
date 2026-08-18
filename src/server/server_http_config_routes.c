@@ -7,6 +7,7 @@
 #include "server_http_internal.h"
 #include "cli_command_defs.h"  /* the command catalogue served in the CLI manifest */
 #include "cli_dispatch_defs.h" /* cmd/verb -> method rows, served alongside it */
+#include "cli_marshal_defs.h"  /* which methods need no request body */
 #include "server_http.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -1231,6 +1232,12 @@ int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
    cJSON *dispatch = cli_dispatch_defs_to_json();
    if (dispatch)
       cJSON_AddItemToObject(root, "dispatch", dispatch);
+   /* The last link: a client that knows a command exists, how to address it and
+    * how to reach it still refuses to send anything unless it knows what body
+    * to build. "Takes no arguments" is the part of that which is pure data. */
+   cJSON *marshal = cli_marshal_defs_to_json();
+   if (marshal)
+      cJSON_AddItemToObject(root, "marshal", marshal);
 
    char *s = cJSON_PrintUnformatted(root);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
