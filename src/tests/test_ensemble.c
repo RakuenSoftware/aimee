@@ -68,7 +68,7 @@ static void test_create_and_progress(void)
    cJSON *assignments = make_assignments();
    int id = 0;
    char err[256] = "";
-   assert(db1_ensemble_create(tmpdir, "code-review", "review", assignments, &id, err,
+   assert(db1_ensemble_create(tmpdir, NULL, "code-review", "review", assignments, &id, err,
                               sizeof(err)) == 0);
    cJSON_Delete(assignments);
 
@@ -135,7 +135,7 @@ static void test_wrong_agent_rejected(void)
    cJSON *assignments = make_assignments();
    int id = 0;
    char err[256] = "";
-   assert(db1_ensemble_create(tmpdir, "code-review", "review", assignments, &id, err,
+   assert(db1_ensemble_create(tmpdir, NULL, "code-review", "review", assignments, &id, err,
                               sizeof(err)) == 0);
    cJSON_Delete(assignments);
 
@@ -177,12 +177,14 @@ static void test_list_and_json(void)
    /* Create two sessions */
    cJSON *a1 = make_assignments();
    int id1 = 0;
-   assert(db1_ensemble_create(tmpdir, "code-review", "review-a", a1, &id1, err, sizeof(err)) == 0);
+   assert(db1_ensemble_create(tmpdir, NULL, "code-review", "review-a", a1, &id1, err,
+                              sizeof(err)) == 0);
    cJSON_Delete(a1);
 
    cJSON *a2 = make_assignments();
    int id2 = 0;
-   assert(db1_ensemble_create(tmpdir, "code-review", "review-b", a2, &id2, err, sizeof(err)) == 0);
+   assert(db1_ensemble_create(tmpdir, NULL, "code-review", "review-b", a2, &id2, err,
+                              sizeof(err)) == 0);
    cJSON_Delete(a2);
 
    /* Pause the second one and check list sees both with correct status */
@@ -247,14 +249,14 @@ static void test_current_by_channel_prefers_active(void)
 
    cJSON *first = make_assignments();
    int paused_id = 0;
-   assert(db1_ensemble_create(tmpdir, "code-review", "shared", first, &paused_id, err,
+   assert(db1_ensemble_create(tmpdir, NULL, "code-review", "shared", first, &paused_id, err,
                               sizeof(err)) == 0);
    cJSON_Delete(first);
    assert(db1_ensemble_pause(paused_id, "manual", err, sizeof(err)) == 0);
 
    cJSON *second = make_assignments();
    int active_id = 0;
-   assert(db1_ensemble_create(tmpdir, "code-review", "shared", second, &active_id, err,
+   assert(db1_ensemble_create(tmpdir, NULL, "code-review", "shared", second, &active_id, err,
                               sizeof(err)) == 0);
    cJSON_Delete(second);
 

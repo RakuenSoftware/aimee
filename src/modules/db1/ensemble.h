@@ -42,15 +42,19 @@ extern "C"
       char updated_at[32];
    } ensemble_info_t;
 
-   /* Template helpers (no DB). */
-   int db1_ensemble_template_path(const char *project_root, const char *name, char *buf,
-                                  size_t bufsz);
-   cJSON *db1_ensemble_template_load(const char *project_root, const char *name, char *err,
-                                     size_t errlen);
-   int db1_ensemble_role_needs_dissent(const char *role);
-
-   int db1_ensemble_create(const char *project_root, const char *template_name, const char *channel,
-                           cJSON *assignments, int *out_id, char *err, size_t errlen);
+   /* Template resolution, phase walking and prompt building are NOT declared
+    * here: they have no caller outside ensemble.c and they are the ensemble's
+    * behaviour rather than its surface. Publishing them made the boundary look
+    * wider than it is.
+    *
+    * create() takes both roots rather than resolving the second itself. The
+    * store is a separate process and cannot read the daemon's configuration --
+    * the same reason db1_module_init.c refuses to guess the database path. A
+    * module that guessed "the default location" would keep working until an
+    * operator moved it, and then quietly resolve templates somewhere else. */
+   int db1_ensemble_create(const char *project_root, const char *config_dir,
+                           const char *template_name, const char *channel, cJSON *assignments,
+                           int *out_id, char *err, size_t errlen);
    int db1_ensemble_get(int id, ensemble_info_t *out, char **prompt_out, char **context_out,
                         char *err, size_t errlen);
    int db1_ensemble_pause(int id, const char *reason, char *err, size_t errlen);

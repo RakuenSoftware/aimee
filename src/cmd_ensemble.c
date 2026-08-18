@@ -134,7 +134,8 @@ void session_subcmd_start(app_ctx_t *ctx, int argc, char **argv)
       cwd[0] = '\0';
 
    int id = 0;
-   if (db1_ensemble_create(cwd, template_name, channel, assignments, &id, err, sizeof(err)) != 0)
+   if (db1_ensemble_create(cwd, config_default_dir(), template_name, channel, assignments, &id, err,
+                           sizeof(err)) != 0)
    {
       fprintf(stderr, "ensemble start: %s\n", err);
       cJSON_Delete(assignments);

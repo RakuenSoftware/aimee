@@ -5,6 +5,7 @@
 #include "headers/primary_session_adapter.h"
 #include "server_http.h"
 #include "agent_config.h"
+#include "config.h"
 #include "persona.h"
 #include "role_templates.h"
 #include "util.h" /* safe_strdup */
@@ -177,7 +178,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
                int id = 0;
                if (!getcwd(cwd, sizeof(cwd)))
                   cwd[0] = '\0';
-               rc = db1_ensemble_create(cwd, jt->valuestring,
+               rc = db1_ensemble_create(cwd, config_default_dir(), jt->valuestring,
                                         (cJSON_IsString(jc) && jc->valuestring[0]) ? jc->valuestring
                                                                                    : "general",
                                         assignments, &id, errbuf, sizeof(errbuf));
