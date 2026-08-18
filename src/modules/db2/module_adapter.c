@@ -7,6 +7,7 @@
 #include "c/db2_pool.h"
 #include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
+#include "c/memory_lifecycle.h"
 #include "c/memory_payload.h"
 #include "c/memory_promotion.h"
 #include "c/memory_query.h"
@@ -269,6 +270,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .reclassify_directives = db2_memory_promotion_reclassify_directives,
        .record_l4_approval = db2_memory_promotion_record_l4_approval,
        .prune_orphaned_l0 = db2_memory_prune_orphaned_l0,
+       .lifecycle_sweep_expired = db2_memory_lifecycle_sweep_expired,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -815,6 +817,28 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_prune_orphaned_l0_reply_encode((uint32_t)deleted, response_body,
                                                       response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_lifecycle_sweep_expired_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->lifecycle_sweep_expired)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* This backend reports a connection or statement failure as zero
+          * rather than a negative value, so a fault and an empty sweep are the
+          * same answer here. That is the existing contract of the symbol and
+          * of the already-migrated promote_stable and demote operations; it is
+          * preserved rather than quietly changed under a bus migration. A
+          * negative value is still refused in case that contract is tightened. */
+         int archived = backend->lifecycle_sweep_expired();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (archived < 0 || (uint32_t)archived > AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_lifecycle_sweep_expired_reply_encode((uint32_t)archived, response_body,
+                                                            response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

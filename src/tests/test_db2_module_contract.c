@@ -27,6 +27,8 @@ static int orphaned_l0_count_value;
 static int orphaned_l0_count_calls;
 static int prune_orphaned_l0_value;
 static int prune_orphaned_l0_calls;
+static int lifecycle_sweep_value;
+static int lifecycle_sweep_calls;
 static int64_t total_count_value;
 static int total_count_calls;
 static int session_l2_count_value;
@@ -265,6 +267,18 @@ static int prune_orphaned_l0(void)
 {
    prune_orphaned_l0_calls++;
    return prune_orphaned_l0_value;
+}
+
+int db2_memory_lifecycle_sweep_expired(void)
+{
+   lifecycle_sweep_calls++;
+   return lifecycle_sweep_value;
+}
+
+static int lifecycle_sweep_expired(void)
+{
+   lifecycle_sweep_calls++;
+   return lifecycle_sweep_value;
 }
 
 int64_t db2_memory_count(void)
@@ -912,6 +926,8 @@ static void reset(void)
    orphaned_l0_count_calls = 0;
    prune_orphaned_l0_value = 3;
    prune_orphaned_l0_calls = 0;
+   lifecycle_sweep_value = 4;
+   lifecycle_sweep_calls = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2201,6 +2217,36 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_lifecycle_sweep_expired_wire(void)
+{
+   /* Both lifecycle states and the archive reason are compiled-in policy that
+    * must match the reviewed catalog; they are never encoded. */
+   assert(strcmp(AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_SOURCE_STATE, "pending") == 0);
+   assert(strcmp(AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_TARGET_STATE, "archived") == 0);
+   assert(strcmp(AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REASON, "pending_ttl_expired") == 0);
+
+   uint8_t request[AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REQUEST_LEN] = {0};
+   assert(aimee_db2_lifecycle_sweep_expired_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_lifecycle_sweep_expired_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_lifecycle_sweep_expired_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, archived = 99;
+   assert(aimee_db2_lifecycle_sweep_expired_reply_encode(4, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_lifecycle_sweep_expired_reply_decode(reply, reply_len, &archived) == 0 &&
+          archived == 4);
+   assert(aimee_db2_lifecycle_sweep_expired_reply_encode(
+              AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_COUNT_MAX + 1u, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(aimee_db2_lifecycle_sweep_expired_reply_encode(4, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_lifecycle_sweep_expired_reply_encode(4, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_lifecycle_sweep_expired_reply_decode(reply, reply_len, &archived) == -1 &&
+          archived == 0);
 }
 
 static void test_record_l4_approval_wire(void)
@@ -3512,6 +3558,43 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_lifecycle_sweep_expired_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.lifecycle_sweep_expired = lifecycle_sweep_expired};
+   uint8_t request[AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN];
+   uint32_t response_len = 99, archived = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_LIFECYCLE_SWEEP_EXPIRED};
+   assert(aimee_db2_lifecycle_sweep_expired_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(lifecycle_sweep_calls == 1);
+   assert(aimee_db2_lifecycle_sweep_expired_reply_decode(response, response_len, &archived) == 0 &&
+          archived == 4);
+
+   /* The backend reports both an empty sweep and a database fault as zero, so
+    * zero must stay a success here. Pinning it keeps that known limitation
+    * visible instead of letting a later reader assume a fault would surface. */
+   lifecycle_sweep_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_lifecycle_sweep_expired_reply_decode(response, response_len, &archived) == 0 &&
+          archived == 0);
+
+   /* Refused in case the backend contract is later tightened to signal faults. */
+   lifecycle_sweep_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   lifecycle_sweep_value = 4;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_record_l4_approval_handler(void)
 {
    reset();
@@ -4460,6 +4543,7 @@ int main(void)
    test_reclassify_directives_wire();
    test_record_l4_approval_wire();
    test_prune_orphaned_l0_wire();
+   test_lifecycle_sweep_expired_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4493,6 +4577,7 @@ int main(void)
    test_reclassify_directives_handler();
    test_record_l4_approval_handler();
    test_prune_orphaned_l0_handler();
+   test_lifecycle_sweep_expired_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

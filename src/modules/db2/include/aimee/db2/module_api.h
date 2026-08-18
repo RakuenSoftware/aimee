@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "e46a7a1e85c69d57f61e640989b25d2123d5f1f97296d813759d97605b4df661"
+#define AIMEE_DB2_CONTRACT_SHA256 "c94cee99636b82d8724df363d156291a353ac543579d375a5f9267bf219f3a7f"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -322,6 +322,16 @@
 #define AIMEE_DB2_PRUNE_ORPHANED_L0_TIER                  "L0"
 #define AIMEE_DB2_PRUNE_ORPHANED_L0_MAX_AGE               "-7 days"
 #define AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX             2147483647u
+#define AIMEE_DB2_EVENT_LIFECYCLE_SWEEP_EXPIRED           AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LIFECYCLE_SWEEP_EXPIRED           AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LIFECYCLE_SWEEP_EXPIRED       24u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REQUEST_LEN     24u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN    28u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_ERROR_LEN       24u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_SOURCE_STATE    "pending"
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_TARGET_STATE    "archived"
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REASON          "pending_ttl_expired"
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_COUNT_MAX       2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2235,6 +2245,62 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_lifecycle_sweep_expired_request_encode(uint8_t *output,
+                                                                  size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LIFECYCLE_SWEEP_EXPIRED, 0u, 0u,
+                                           output, capacity);
+}
+
+static inline int aimee_db2_lifecycle_sweep_expired_request_decode(const uint8_t *input,
+                                                                   size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_LIFECYCLE_SWEEP_EXPIRED &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_lifecycle_sweep_expired_reply_encode(uint32_t archived_count,
+                                                                 uint8_t *output, size_t capacity,
+                                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len ||
+       archived_count > AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_COUNT_MAX ||
+       capacity < AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_LIFECYCLE_SWEEP_EXPIRED,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, archived_count);
+   *output_len = AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_lifecycle_sweep_expired_reply_decode(const uint8_t *input,
+                                                                 size_t input_len,
+                                                                 uint32_t *archived_count)
+{
+   if (archived_count)
+      *archived_count = 0u;
+   if (!archived_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_LIFECYCLE_SWEEP_EXPIRED ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_COUNT_MAX)
+      return -1;
+   *archived_count = decoded;
    return 0;
 }
 

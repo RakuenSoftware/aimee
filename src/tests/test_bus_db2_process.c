@@ -328,6 +328,19 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(pruned == 0);
 
+   /* No pending row exists on a fresh schema, so nothing has a time-to-live to
+    * outlive and the sweep archives nothing. Replayed for the same reason as
+    * the prune above: the comparison is against now, so a second call is what
+    * actually demonstrates the catalog's `safe` claim. */
+   uint32_t archived = 99;
+   assert(aimee_db2_lifecycle_sweep_expired_call(call_client, &client, 9046, 0, &archived, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(archived == 0);
+   archived = 99;
+   assert(aimee_db2_lifecycle_sweep_expired_call(call_client, &client, 9047, 0, &archived, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(archived == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

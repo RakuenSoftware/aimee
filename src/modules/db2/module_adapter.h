@@ -55,6 +55,7 @@ typedef struct
    int (*reclassify_directives)(int require_approval);
    int (*record_l4_approval)(int64_t memory_id, const char *approver, const char *note);
    int (*prune_orphaned_l0)(void);
+   int (*lifecycle_sweep_expired)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

@@ -947,6 +947,31 @@
         "field": {"name": "deleted_count", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "memory",
+      "id": 24,
+      "name": "lifecycle_sweep_expired",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Archiving canonical relational memory rows whose pending time-to-live has passed is DB2 lifecycle authority and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_lifecycle_sweep_expired"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"source_state": "pending", "target_state": "archived",
+                   "archive_reason": "pending_ttl_expired"}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "archived_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }

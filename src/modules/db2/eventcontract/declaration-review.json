@@ -1548,6 +1548,14 @@
       "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
     },
     {
+      "symbol": "db2_memory_lifecycle_sweep_expired",
+      "signature_sha256": "a376eab483cc4e760da1f31e68d1358cb1d233584830b790ef1a162eefd4fa4b",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_sweep_expired operation replaces the pending time-to-live archival pass; the source state, target state, and archive reason stay fixed policy behind the handler so no caller can archive a different set of rows."
+    },
+    {
       "symbol": "db2_memory_promotion_delete_l0",
       "signature_sha256": "912605e89f87fb0961d3e301d51dfbf71edd4ea9bec00ac6c3cfb73f1dc30938",
       "disposition": "wire-operation",

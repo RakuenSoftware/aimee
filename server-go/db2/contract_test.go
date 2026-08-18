@@ -83,6 +83,7 @@ type wireBaseline struct {
 				Dimension             uint32            `json:"dimension"`
 				Count                 uint64            `json:"count"`
 				DeletedCount          uint32            `json:"deleted_count"`
+				ArchivedCount         uint32            `json:"archived_count"`
 				DemotedCount          uint32            `json:"demoted_count"`
 				AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
 				LowEffectivenessCount uint32            `json:"low_effectiveness_count"`
@@ -218,7 +219,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 33 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 34 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -250,7 +251,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[29].Name != "promote_stable" ||
 		baseline.Operations[30].Name != "reclassify_directives" ||
 		baseline.Operations[31].Name != "record_l4_approval" ||
-		baseline.Operations[32].Name != "prune_orphaned_l0" {
+		baseline.Operations[32].Name != "prune_orphaned_l0" ||
+		baseline.Operations[33].Name != "lifecycle_sweep_expired" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -381,6 +383,53 @@ func TestPruneOrphanedL0MatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || deleted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, deleted, err)
 		}
+	}
+}
+
+func TestLifecycleSweepExpiredMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[33]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeLifecycleSweepExpiredRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeLifecycleSweepExpiredRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeLifecycleSweepExpiredRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeLifecycleSweepExpiredReply(vector.ArchivedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		archived, err := DecodeLifecycleSweepExpiredReply(got)
+		if err != nil || archived != vector.ArchivedCount {
+			t.Fatalf("decode = (%d, %v)", archived, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		archived, err := DecodeLifecycleSweepExpiredReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || archived != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, archived, err)
+		}
+	}
+}
+
+func TestLifecycleSweepExpiredPolicyIsFixed(t *testing.T) {
+	// Both states and the reason are compiled in on each side; a drift would
+	// have the two implementations archiving different rows, or labelling them
+	// with a reason the other never writes.
+	if LifecycleSweepExpiredSourceState != "pending" ||
+		LifecycleSweepExpiredTargetState != "archived" ||
+		LifecycleSweepExpiredReason != "pending_ttl_expired" {
+		t.Fatalf("policy = (%q, %q, %q)", LifecycleSweepExpiredSourceState,
+			LifecycleSweepExpiredTargetState, LifecycleSweepExpiredReason)
+	}
+	if _, err := EncodeLifecycleSweepExpiredReply(LifecycleSweepExpiredCountMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("count past the bound encoded: %v", err)
 	}
 }
 

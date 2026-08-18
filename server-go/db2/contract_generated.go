@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "e46a7a1e85c69d57f61e640989b25d2123d5f1f97296d813759d97605b4df661"
+const ContractSHA256 = "c94cee99636b82d8724df363d156291a353ac543579d375a5f9267bf219f3a7f"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -219,6 +219,13 @@ const OperationPruneOrphanedL0 uint32 = 23
 const PruneOrphanedL0Tier = "L0"
 const PruneOrphanedL0MaxAge = "-7 days"
 const PruneOrphanedL0CountMax uint32 = 2147483647
+const EventLifecycleSweepExpired = EventMemory
+const StageLifecycleSweepExpired = FamilyMemory
+const OperationLifecycleSweepExpired uint32 = 24
+const LifecycleSweepExpiredSourceState = "pending"
+const LifecycleSweepExpiredTargetState = "archived"
+const LifecycleSweepExpiredReason = "pending_ttl_expired"
+const LifecycleSweepExpiredCountMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -568,6 +575,54 @@ func DecodePruneOrphanedL0Reply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return deletedCount, nil
+}
+
+// EncodeLifecycleSweepExpiredRequest emits the empty request envelope; the
+// lifecycle states and archive reason are fixed policy and never travel.
+func EncodeLifecycleSweepExpiredRequest() []byte {
+	header, err := EncodeRequestHeader(OperationLifecycleSweepExpired, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeLifecycleSweepExpiredRequest validates the exact memory-family envelope.
+func DecodeLifecycleSweepExpiredRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleSweepExpired ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeLifecycleSweepExpiredReply emits one bounded u32 archived count.
+func EncodeLifecycleSweepExpiredReply(archivedCount uint32) ([]byte, error) {
+	if archivedCount > LifecycleSweepExpiredCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationLifecycleSweepExpired, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], archivedCount)
+	return reply, nil
+}
+
+// DecodeLifecycleSweepExpiredReply validates the operation and bounded count.
+func DecodeLifecycleSweepExpiredReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationLifecycleSweepExpired ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	archivedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if archivedCount > LifecycleSweepExpiredCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return archivedCount, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.
