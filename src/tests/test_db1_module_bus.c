@@ -43,6 +43,9 @@
 #include "primary_sessions.h"
 #include "server_sessions.h"
 #include "webchat_live.h"
+#include "model_catalog.h"
+#include "web_page_cache.h"
+#include "runtime_state.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -78,6 +81,7 @@ static void write_grant(const char *policy_dir, const char *executable)
        AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
        AIMEE_DB1_EVENT_CONVERSATION,     AIMEE_DB1_EVENT_AGENT_WORK,
        AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
+       AIMEE_DB1_EVENT_RUNTIME,
    };
    fprintf(file, "version=1\nprincipal_class=1\nprincipal_ref=30\nuid=self\nexecutable=%s\nserve=",
            executable);
@@ -114,6 +118,7 @@ static void start_module(const char *executable, const char *socket_path, const 
       if (obs_bus_module_available(AIMEE_DB1_EVENT_AGENT_WORK) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_DELEGATION) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_SESSIONS) &&
+          obs_bus_module_available(AIMEE_DB1_EVENT_RUNTIME) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_CONVERSATION) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_GIT_OWNERSHIP))
          return;
@@ -555,6 +560,61 @@ static void test_the_callee_allocates_what_the_caller_frees(void)
    printf("  PASS: the callee allocates what the caller frees\n");
 }
 
+static void test_a_bulk_replace_and_what_it_reads_back(void)
+{
+   must(db1_runtime_state_set("boot-count", "3") == 0, "set a runtime value");
+   char value[64] = "";
+   must(db1_runtime_state_get("boot-count", value, sizeof value) == 0,
+        "read it back, answering 0 as it always did");
+   must(strcmp(value, "3") == 0, "the value crossed");
+
+   /* An array of rows going IN: the frame carries one group of cells per
+      model, and a frame that is not a whole number of rows is refused. */
+   provider_model_t models[3];
+   memset(models, 0, sizeof models);
+   for (int i = 0; i < 3; i++)
+   {
+      snprintf(models[i].id, sizeof models[i].id, "model-%d", i);
+      snprintf(models[i].display_name, sizeof models[i].display_name, "Model %d", i);
+      models[i].context_window = 1000 * (i + 1);
+      models[i].max_output = 100 * (i + 1);
+      models[i].deprecated = (i == 2);
+   }
+   must(db1_model_catalog_replace("anthropic", models, 3) == 0, "replace the catalogue");
+   must(db1_model_catalog_is_fresh("anthropic", 3600) == 1, "and it is fresh");
+
+   /* An array of rows coming BACK, allocated by the callee, with the count
+      through a parameter rather than the return. */
+   provider_model_t *back = NULL;
+   int n = -1;
+   must(db1_model_catalog_get("anthropic", &back, &n) == 0, "read the catalogue back");
+   must(n == 3, "all three rows came back");
+   must(back != NULL, "in an array this side allocated");
+   must(strcmp(back[0].id, "model-0") == 0, "the first row is its own");
+   must(back[1].context_window == 2000, "a numeric member survived the crossing");
+   must(strcmp(back[2].id, "model-2") == 0 && back[2].deprecated == 1,
+        "and the last row did not run into the one before it");
+   db1_model_catalog_free(back, n);
+
+   /* A returned document with values beside it: the body is the answer, and the
+      age and pinned address are ordinary out-parameters. */
+   must(db1_web_page_put("https://example.invalid/x", "<html>hi</html>", "203.0.113.7") == 0,
+        "cache a page");
+   long age = -1;
+   char pinned[DB1_WEB_PAGE_ADDR_LEN] = "";
+   char *body = db1_web_page_get("https://example.invalid/x", &age, pinned, sizeof pinned);
+   must(body != NULL, "the page came back");
+   must(strcmp(body, "<html>hi</html>") == 0, "and it is the document that was stored");
+   must(age >= 0, "the age came with it");
+   must(strcmp(pinned, "203.0.113.7") == 0, "and so did the pinned address");
+   free(body);
+
+   must(db1_web_page_get("https://example.invalid/nothing", &age, pinned, sizeof pinned) == NULL,
+        "a page nobody cached is nothing rather than an empty page");
+
+   printf("  PASS: a bulk replace and what it reads back\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -596,6 +656,7 @@ int main(int argc, char **argv)
    test_a_cron_job_carries_its_array_member();
    test_a_job_row_carries_what_the_store_allocated();
    test_the_callee_allocates_what_the_caller_frees();
+   test_a_bulk_replace_and_what_it_reads_back();
 
    stop_module();
    obs_bus_stop();

@@ -10,6 +10,12 @@
 #ifndef DEC_DB1_ENV_H
 #define DEC_DB1_ENV_H 1
 
+/* The capability row's widths, stated here because they cross the module
+   boundary and the stage cannot see the caller's buffers. */
+#define DB1_ENV_KEY_LEN   128
+#define DB1_ENV_VALUE_LEN 512
+#define DB1_ENV_TS_LEN    32
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,9 +28,9 @@ extern "C"
 
    typedef struct
    {
-      char key[128];
-      char value[512];
-      char detected_at[32];
+      char key[DB1_ENV_KEY_LEN];
+      char value[DB1_ENV_VALUE_LEN];
+      char detected_at[DB1_ENV_TS_LEN];
    } db1_env_capability_t;
 
    /* Insert or replace a capability row. Returns 0 on success, -1 on error. */
