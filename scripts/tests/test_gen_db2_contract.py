@@ -310,7 +310,7 @@ class ContractTests(unittest.TestCase):
         self.assert_rule(
             lambda value: value["operations"].append({
                 **copy.deepcopy(value["operations"][0]),
-                "id": 8,
+                "id": 9,
                 "name": "health_second",
                 "c_symbols": ["db2_health_second"],
             }),
@@ -418,6 +418,25 @@ class ContractTests(unittest.TestCase):
             (lambda value: value["operations"][6]["reply"].__setitem__("encoded_size_ok", 25),
              "reembed-clear-reply"),
             (lambda value: value["operations"][6].__setitem__("transaction", "none"),
+             "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_reembed_clear_maintenance_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][7].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][7].__setitem__("results", ["ok"]),
+             "operation-results"),
+            (lambda value: value["operations"][7]["request"].__setitem__("encoded_size", 24),
+             "reembed-clear-maintenance-request"),
+            (lambda value: value["operations"][7]["reply"].__setitem__(
+                "encoded_size_payload", 35), "reembed-clear-maintenance-reply"),
+            (lambda value: value["operations"][7]["reply"].__setitem__(
+                "payload_results", ["ok"]), "reembed-clear-maintenance-reply"),
+            (lambda value: value["operations"][7].__setitem__("transaction", "none"),
              "operation-semantics"),
         )
         for mutate, rule in cases:

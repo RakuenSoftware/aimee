@@ -15,6 +15,7 @@ typedef struct
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
    int (*reembed_status)(aimee_db2_reembed_status_t *status);
    int (*reembed_clear)(void);
+   int (*reembed_clear_maintenance)(int force, int *was_in_progress, int *recorded, int *running);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

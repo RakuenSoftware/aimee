@@ -100,6 +100,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .postgres_status = production_postgres_status,
        .reembed_status = production_reembed_status,
        .reembed_clear = db2_reembed_in_progress_clear,
+       .reembed_clear_maintenance = db2_reembed_clear_maintenance,
    };
    return &backend;
 }
@@ -128,8 +129,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
           !backend->kb_health_probe)
          return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
       int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
-      if (backend->is_initialized() <= 0 ||
-          backend->health_probe(&schema_ok, &have_pg_trgm) != 0 ||
+      if (backend->is_initialized() <= 0 || backend->health_probe(&schema_ok, &have_pg_trgm) != 0 ||
           backend->kb_health_probe(&kb_tables_ok) != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       if (aimee_module_invocation_cancelled(invocation))
@@ -237,6 +237,46 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       if (aimee_db2_reembed_status_reply_encode(
               result, result == AIMEE_DB2_RESULT_OK ? &status : NULL, response_body,
               response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+
+   uint32_t maintenance_force = 0u;
+   if (aimee_db2_reembed_clear_maintenance_request_decode(request_body, request_len,
+                                                          &maintenance_force) == 0)
+   {
+      if (response_capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!backend || !backend->reembed_clear_maintenance)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int was = 0, recorded = 0, running = 0;
+      int backend_result =
+          backend->reembed_clear_maintenance((int)maintenance_force, &was, &recorded, &running);
+      aimee_db2_reembed_clear_maintenance_t status = {
+          .was_in_progress = was >= 0 ? (uint32_t)was : 2u,
+          .recorded_dimension = recorded >= 0 ? (uint32_t)recorded : UINT32_MAX,
+          .running_dimension = running >= 0 ? (uint32_t)running : UINT32_MAX,
+      };
+      uint32_t result = AIMEE_DB2_RESULT_INVALID_STATE;
+      const aimee_db2_reembed_clear_maintenance_t *reply_status = NULL;
+      if (aimee_db2_reembed_clear_maintenance_valid(&status))
+      {
+         if (backend_result == 0)
+         {
+            result = AIMEE_DB2_RESULT_OK;
+            reply_status = &status;
+         }
+         else if (backend_result == -1 && status.recorded_dimension > 0u &&
+                  status.recorded_dimension != status.running_dimension)
+         {
+            result = AIMEE_DB2_RESULT_CONFLICT;
+            reply_status = &status;
+         }
+      }
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (aimee_db2_reembed_clear_maintenance_reply_encode(result, reply_status, response_body,
+                                                           response_capacity, response_len) != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       return AIMEE_MODULE_STATUS_OK;
    }

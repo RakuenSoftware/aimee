@@ -26,6 +26,12 @@ static int embedding_refusals_result;
 static int postgres_status_result;
 static int reembed_status_result;
 static int reembed_clear_result;
+static int reembed_maintenance_result;
+static int reembed_maintenance_force;
+static int reembed_maintenance_was;
+static int reembed_maintenance_recorded;
+static int reembed_maintenance_running;
+static int reembed_maintenance_calls;
 static aimee_module_call_result_t transport_result;
 static uint8_t transport_response[AIMEE_DB2_POOL_STATUS_RESPONSE_LEN];
 static uint32_t transport_response_len;
@@ -36,6 +42,7 @@ static int transport_expect_refusals;
 static int transport_expect_postgres;
 static int transport_expect_reembed;
 static int transport_expect_reembed_clear;
+static int transport_expect_reembed_maintenance;
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -175,6 +182,19 @@ int db2_reembed_in_progress_clear(void)
    return reembed_clear_result;
 }
 
+int db2_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded, int *running)
+{
+   reembed_maintenance_calls++;
+   reembed_maintenance_force = force;
+   if (was_in_progress)
+      *was_in_progress = reembed_maintenance_was;
+   if (recorded)
+      *recorded = reembed_maintenance_recorded;
+   if (running)
+      *running = reembed_maintenance_running;
+   return reembed_maintenance_result;
+}
+
 static void reset(void)
 {
    cancelled = 0;
@@ -195,6 +215,12 @@ static void reset(void)
    postgres_status_result = 0;
    reembed_status_result = 1;
    reembed_clear_result = 0;
+   reembed_maintenance_result = 0;
+   reembed_maintenance_force = -1;
+   reembed_maintenance_was = 1;
+   reembed_maintenance_recorded = 384;
+   reembed_maintenance_running = 384;
+   reembed_maintenance_calls = 0;
    transport_result = AIMEE_MODULE_CALL_OK;
    transport_response_len = AIMEE_DB2_RESPONSE_LEN;
    transport_calls = 0;
@@ -204,6 +230,7 @@ static void reset(void)
    transport_expect_postgres = 0;
    transport_expect_reembed = 0;
    transport_expect_reembed_clear = 0;
+   transport_expect_reembed_maintenance = 0;
    assert(aimee_db2_health_response_encode(AIMEE_DB2_FLAG_SCHEMA | AIMEE_DB2_FLAG_KB_TABLES,
                                            transport_response, sizeof(transport_response)) == 0);
 }
@@ -215,25 +242,36 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
           aimee_module_cancelled_fn cancelled_fn, void *cancel_context)
 {
    assert(context == (void *)0x1234);
-   uint32_t expected_event = transport_expect_reembed_clear ? AIMEE_DB2_EVENT_REEMBED_CLEAR
-                             : transport_expect_reembed     ? AIMEE_DB2_EVENT_REEMBED_STATUS
-                             : transport_expect_postgres    ? AIMEE_DB2_EVENT_POSTGRES_STATUS
-                             : transport_expect_refusals    ? AIMEE_DB2_EVENT_EMBEDDING_REFUSALS
-                             : transport_expect_pool        ? AIMEE_DB2_EVENT_POOL_STATUS
-                             : transport_expect_dimension   ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
-                                                            : AIMEE_DB2_EVENT_HEALTH;
-   uint32_t expected_stage = transport_expect_reembed_clear ? AIMEE_DB2_STAGE_REEMBED_CLEAR
-                             : transport_expect_reembed     ? AIMEE_DB2_STAGE_REEMBED_STATUS
-                             : transport_expect_postgres    ? AIMEE_DB2_STAGE_POSTGRES_STATUS
-                             : transport_expect_refusals    ? AIMEE_DB2_STAGE_EMBEDDING_REFUSALS
-                             : transport_expect_pool        ? AIMEE_DB2_STAGE_POOL_STATUS
-                             : transport_expect_dimension   ? AIMEE_DB2_STAGE_EMBEDDING_DIMENSION
-                                                            : AIMEE_DB2_STAGE_HEALTH;
+   uint32_t expected_event = transport_expect_reembed_maintenance
+                                 ? AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR
+                             : transport_expect_reembed_clear ? AIMEE_DB2_EVENT_REEMBED_CLEAR
+                             : transport_expect_reembed       ? AIMEE_DB2_EVENT_REEMBED_STATUS
+                             : transport_expect_postgres      ? AIMEE_DB2_EVENT_POSTGRES_STATUS
+                             : transport_expect_refusals      ? AIMEE_DB2_EVENT_EMBEDDING_REFUSALS
+                             : transport_expect_pool          ? AIMEE_DB2_EVENT_POOL_STATUS
+                             : transport_expect_dimension     ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
+                                                              : AIMEE_DB2_EVENT_HEALTH;
+   uint32_t expected_stage = transport_expect_reembed_maintenance
+                                 ? AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR
+                             : transport_expect_reembed_clear ? AIMEE_DB2_STAGE_REEMBED_CLEAR
+                             : transport_expect_reembed       ? AIMEE_DB2_STAGE_REEMBED_STATUS
+                             : transport_expect_postgres      ? AIMEE_DB2_STAGE_POSTGRES_STATUS
+                             : transport_expect_refusals      ? AIMEE_DB2_STAGE_EMBEDDING_REFUSALS
+                             : transport_expect_pool          ? AIMEE_DB2_STAGE_POOL_STATUS
+                             : transport_expect_dimension     ? AIMEE_DB2_STAGE_EMBEDDING_DIMENSION
+                                                              : AIMEE_DB2_STAGE_HEALTH;
    assert(event_kind == expected_event);
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_reembed_clear)
+   if (transport_expect_reembed_maintenance)
+   {
+      uint32_t force = 99;
+      assert(aimee_db2_reembed_clear_maintenance_request_decode(request_body, request_len,
+                                                                &force) == 0);
+      assert(force == 1);
+   }
+   else if (transport_expect_reembed_clear)
       assert(aimee_db2_reembed_clear_request_decode(request_body, request_len) == 0);
    else if (transport_expect_reembed)
       assert(aimee_db2_reembed_status_request_decode(request_body, request_len) == 0);
@@ -636,6 +674,52 @@ static void test_reembed_clear_wire(void)
                                                &reply_len) == -1);
 }
 
+static void test_reembed_clear_maintenance_wire(void)
+{
+   uint8_t request[AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN] = {0};
+   uint32_t force = 99;
+   assert(aimee_db2_reembed_clear_maintenance_request_encode(1, request, sizeof(request)) == 0);
+   assert(aimee_db2_reembed_clear_maintenance_request_decode(request, sizeof(request), &force) ==
+          0);
+   assert(force == 1);
+   assert(aimee_db2_reembed_clear_maintenance_request_encode(2, request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + AIMEE_DB2_ENVELOPE_HEADER_LEN, 2);
+   assert(aimee_db2_reembed_clear_maintenance_request_decode(request, sizeof(request), &force) ==
+          -1);
+   assert(force == 0);
+
+   uint8_t reply[AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN] = {0};
+   const aimee_db2_reembed_clear_maintenance_t ok = {1, 384, 384};
+   const aimee_db2_reembed_clear_maintenance_t conflict = {1, 768, 384};
+   aimee_db2_reembed_clear_maintenance_t decoded = {0};
+   uint32_t reply_len = 99, result = 99;
+   assert(aimee_db2_reembed_clear_maintenance_reply_encode(AIMEE_DB2_RESULT_OK, &ok, reply,
+                                                           sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_reembed_clear_maintenance_reply_decode(reply, reply_len, &result, &decoded) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_OK && decoded.was_in_progress == 1 &&
+          decoded.recorded_dimension == 384 && decoded.running_dimension == 384);
+   assert(aimee_db2_reembed_clear_maintenance_reply_encode(AIMEE_DB2_RESULT_CONFLICT, &conflict,
+                                                           reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_reembed_clear_maintenance_reply_decode(reply, reply_len, &result, &decoded) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_CONFLICT && decoded.recorded_dimension == 768);
+   assert(aimee_db2_reembed_clear_maintenance_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, NULL,
+                                                           reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_reembed_clear_maintenance_reply_decode(reply, reply_len, &result, &decoded) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && decoded.running_dimension == 0);
+
+   assert(aimee_db2_reembed_clear_maintenance_reply_encode(AIMEE_DB2_RESULT_CONFLICT, &ok, reply,
+                                                           sizeof(reply), &reply_len) == -1);
+   aimee_db2_reembed_clear_maintenance_t bad = ok;
+   bad.running_dimension = 0;
+   assert(aimee_db2_reembed_clear_maintenance_reply_encode(AIMEE_DB2_RESULT_OK, &bad, reply,
+                                                           sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_reembed_clear_maintenance_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, &ok,
+                                                           reply, sizeof(reply), &reply_len) == -1);
+}
+
 static aimee_module_status_t invoke(const aimee_db2_module_backend_t *backend,
                                     aimee_module_invocation_t *invocation, uint8_t *request,
                                     uint32_t request_len, uint8_t *response,
@@ -886,6 +970,54 @@ static void test_reembed_clear_handler(void)
    assert(result == AIMEE_DB2_RESULT_INVALID_STATE);
 }
 
+static void test_reembed_clear_maintenance_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.reembed_clear_maintenance =
+                                                   db2_reembed_clear_maintenance};
+   uint8_t request[AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN];
+   uint32_t response_len = 99, result = 99;
+   aimee_db2_reembed_clear_maintenance_t status = {0};
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR};
+   assert(aimee_db2_reembed_clear_maintenance_request_encode(1, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(reembed_maintenance_calls == 1 && reembed_maintenance_force == 1);
+   assert(aimee_db2_reembed_clear_maintenance_reply_decode(response, response_len, &result,
+                                                           &status) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && status.was_in_progress == 1 &&
+          status.recorded_dimension == 384 && status.running_dimension == 384);
+
+   reembed_maintenance_result = -1;
+   reembed_maintenance_recorded = 768;
+   assert(aimee_db2_reembed_clear_maintenance_request_encode(0, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_reembed_clear_maintenance_reply_decode(response, response_len, &result,
+                                                           &status) == 0);
+   assert(result == AIMEE_DB2_RESULT_CONFLICT && status.recorded_dimension == 768 &&
+          status.running_dimension == 384);
+
+   reembed_maintenance_result = -2;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_reembed_clear_maintenance_reply_decode(response, response_len, &result,
+                                                           &status) == 0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && status.running_dimension == 0);
+
+   reembed_maintenance_result = 0;
+   reembed_maintenance_running = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_reembed_clear_maintenance_reply_decode(response, response_len, &result,
+                                                           &status) == 0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE);
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+}
+
 static void test_typed_client(void)
 {
    reset();
@@ -1039,6 +1171,33 @@ static void test_reembed_clear_typed_client(void)
    assert(domain_result == AIMEE_DB2_RESULT_OK);
 }
 
+static void test_reembed_clear_maintenance_typed_client(void)
+{
+   reset();
+   transport_expect_reembed_maintenance = 1;
+   const aimee_db2_reembed_clear_maintenance_t expected = {1, 768, 384};
+   uint32_t domain_result = 9;
+   aimee_db2_reembed_clear_maintenance_t status = {0};
+   assert(aimee_db2_reembed_clear_maintenance_reply_encode(
+              AIMEE_DB2_RESULT_CONFLICT, &expected, transport_response, sizeof(transport_response),
+              &transport_response_len) == 0);
+   assert(aimee_db2_reembed_clear_maintenance_call(transport, (void *)0x1234, 77, 88, 1,
+                                                   &domain_result, &status, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_CONFLICT && status.was_in_progress == 1 &&
+          status.recorded_dimension == 768 && status.running_dimension == 384);
+
+   domain_result = 9;
+   status.running_dimension = 9;
+   assert(aimee_db2_reembed_clear_maintenance_call(NULL, NULL, 77, 88, 1, &domain_result, &status,
+                                                   NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(domain_result == 0 && status.running_dimension == 0);
+   assert(aimee_db2_reembed_clear_maintenance_call(transport, (void *)0x1234, 77, 88, 2,
+                                                   &domain_result, &status, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+}
+
 int main(void)
 {
    test_wire_contract();
@@ -1049,6 +1208,7 @@ int main(void)
    test_postgres_status_wire();
    test_reembed_status_wire();
    test_reembed_clear_wire();
+   test_reembed_clear_maintenance_wire();
    test_handler_success_and_failures();
    test_embedding_dimension_handler();
    test_pool_status_handler();
@@ -1056,6 +1216,7 @@ int main(void)
    test_postgres_status_handler();
    test_reembed_status_handler();
    test_reembed_clear_handler();
+   test_reembed_clear_maintenance_handler();
    test_typed_client();
    test_embedding_dimension_typed_client();
    test_pool_status_typed_client();
@@ -1063,6 +1224,7 @@ int main(void)
    test_postgres_status_typed_client();
    test_reembed_status_typed_client();
    test_reembed_clear_typed_client();
+   test_reembed_clear_maintenance_typed_client();
    puts("test_db2_module_contract: ok");
    return 0;
 }

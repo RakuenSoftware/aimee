@@ -18778,9 +18778,15 @@
           "line": 145
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.reembed_clear_maintenance operation keeps the dimension-consistency check, optional force override, diagnostic snapshot, and marker delete inside one DB2 action."
+      },
       "signature": "int db2_reembed_clear_maintenance ( int force , int * was_in_progress , int * recorded , int * running )",
       "signature_sha256": "fb2c499ea00edb05993508e40379e520976b5810f94265c9e0ad49e0773e4bda",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_reembed_clear_maintenance"
     },
     {
@@ -24498,15 +24504,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1b45dcc8088c80d4aaed18c61d5e25f38dd4b9067fd4bdc620c87f4ba327d7f5",
+  "fingerprint": "781b8b4ef3707c0b4516cb06a3cf78d39339020ada37a51979d23105fb63b1db",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 879,
+    "audit_pending": 878,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 79
+    "reviewed": 80
   }
 }

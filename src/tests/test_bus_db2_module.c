@@ -35,6 +35,7 @@ typedef struct
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
    int (*reembed_status)(aimee_db2_reembed_status_t *status);
    int (*reembed_clear)(void);
+   int (*reembed_clear_maintenance)(int force, int *was_in_progress, int *recorded, int *running);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -192,6 +193,18 @@ int db2_reembed_in_progress_clear(void)
    return 0;
 }
 
+int db2_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded, int *running)
+{
+   (void)force;
+   if (was_in_progress)
+      *was_in_progress = 1;
+   if (recorded)
+      *recorded = 384;
+   if (running)
+      *running = 384;
+   return 0;
+}
+
 static void *run_process(void *argument)
 {
    process_thread_t *thread = argument;
@@ -329,6 +342,7 @@ int main(void)
        .postgres_status = postgres_status,
        .reembed_status = reembed_status,
        .reembed_clear = db2_reembed_in_progress_clear,
+       .reembed_clear_maintenance = db2_reembed_clear_maintenance,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -403,6 +417,14 @@ int main(void)
    assert(aimee_db2_reembed_clear_call(call_client, &client, 7015, 0, &domain_result, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK);
+
+   aimee_db2_reembed_clear_maintenance_t maintenance = {0};
+   domain_result = 9;
+   assert(aimee_db2_reembed_clear_maintenance_call(call_client, &client, 7016, 0, 1, &domain_result,
+                                                   &maintenance, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && maintenance.was_in_progress == 1 &&
+          maintenance.recorded_dimension == 384 && maintenance.running_dimension == 384);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "ada390ccf7dd5255ff1cf610b84c231b716220df41e518e56cf2a6bc95205c52"
+#define AIMEE_DB2_CONTRACT_SHA256 "0cc50e3bca47848fa213031cc85844a921cacaa0e3966ea67d6595645b9013c4"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -87,6 +87,12 @@
 #define AIMEE_DB2_OPERATION_REEMBED_CLEAR          7u
 #define AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN        24u
 #define AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN       24u
+#define AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR        AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR        AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR    8u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN  28u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN 36u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN    24u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -142,6 +148,13 @@ typedef struct
    uint32_t target_dimension;
    uint64_t started_epoch;
 } aimee_db2_reembed_status_t;
+
+typedef struct
+{
+   uint32_t was_in_progress;
+   uint32_t recorded_dimension;
+   uint32_t running_dimension;
+} aimee_db2_reembed_clear_maintenance_t;
 
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {
@@ -759,6 +772,118 @@ static inline int aimee_db2_reembed_clear_reply_decode(const uint8_t *input, siz
        (header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_INVALID_STATE))
       return -1;
    *result = header.result;
+   return 0;
+}
+
+static inline int aimee_db2_reembed_clear_maintenance_valid(
+    const aimee_db2_reembed_clear_maintenance_t *status)
+{
+   return status && status->was_in_progress <= 1u &&
+          status->recorded_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX &&
+          status->running_dimension >= AIMEE_DB2_REEMBED_DIMENSION_MIN &&
+          status->running_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX;
+}
+
+static inline int aimee_db2_reembed_clear_maintenance_request_encode(
+    uint32_t force, uint8_t *output, size_t capacity)
+{
+   if (force > 1u || !output || capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR, 0u, 4u,
+                                       output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, force);
+   return 0;
+}
+
+static inline int aimee_db2_reembed_clear_maintenance_request_decode(
+    const uint8_t *input, size_t input_len, uint32_t *force)
+{
+   if (force)
+      *force = 0u;
+   aimee_db2_request_header_t header = {0};
+   if (!force || aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR || header.flags != 0u ||
+       header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > 1u)
+      return -1;
+   *force = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_reembed_clear_maintenance_reply_encode(
+    uint32_t result, const aimee_db2_reembed_clear_maintenance_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK || result == AIMEE_DB2_RESULT_CONFLICT)
+   {
+      if (!aimee_db2_reembed_clear_maintenance_valid(status) ||
+          (result == AIMEE_DB2_RESULT_CONFLICT &&
+           (status->recorded_dimension == 0u ||
+            status->recorded_dimension == status->running_dimension)) ||
+          capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (status)
+   {
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->was_in_progress);
+      aimee_db2_put_u32(payload + 4, status->recorded_dimension);
+      aimee_db2_put_u32(payload + 8, status->running_dimension);
+   }
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_reembed_clear_maintenance_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_reembed_clear_maintenance_t *status)
+{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_clear_maintenance_t){0};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if ((header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_CONFLICT) ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_reembed_clear_maintenance_t decoded = {
+       .was_in_progress = aimee_db2_get_u32(payload),
+       .recorded_dimension = aimee_db2_get_u32(payload + 4),
+       .running_dimension = aimee_db2_get_u32(payload + 8),
+   };
+   if (!aimee_db2_reembed_clear_maintenance_valid(&decoded) ||
+       (header.result == AIMEE_DB2_RESULT_CONFLICT &&
+        (decoded.recorded_dimension == 0u ||
+         decoded.recorded_dimension == decoded.running_dimension)))
+      return -1;
+   *result = header.result;
+   *status = decoded;
    return 0;
 }
 

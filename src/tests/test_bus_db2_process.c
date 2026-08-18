@@ -222,6 +222,14 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK);
 
+   aimee_db2_reembed_clear_maintenance_t maintenance = {0};
+   domain_result = 9;
+   assert(aimee_db2_reembed_clear_maintenance_call(call_client, &client, 9016, 0, 0, &domain_result,
+                                                   &maintenance, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && maintenance.was_in_progress == 0 &&
+          maintenance.recorded_dimension == 384 && maintenance.running_dimension == 384);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

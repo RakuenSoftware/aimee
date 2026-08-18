@@ -202,7 +202,8 @@ def validate_catalog(value: object) -> dict[str, object]:
         if order and position <= order[-1]:
             fail("operation-order", "operations must be sorted by family id then operation id")
         order.append(position)
-        expected_transaction = "single-statement" if name == "reembed_clear" else "none"
+        expected_transaction = ("single-statement" if name == "reembed_clear" else
+                                "single" if name == "reembed_clear_maintenance" else "none")
         if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != "safe":
             fail("operation-semantics",
@@ -383,13 +384,46 @@ def validate_catalog(value: object) -> dict[str, object]:
             if reply != {"encoded_size_ok": ENVELOPE_HEADER_LEN,
                          "encoded_size_error": ENVELOPE_HEADER_LEN, "fields": []}:
                 fail("reembed-clear-reply", "reply must be an empty closed-result envelope")
+        elif key == ("lifecycle", 8) and name == "reembed_clear_maintenance" and \
+                operation["wire_format"] == "db2-envelope-reembed-clear-maintenance-v1":
+            if operation["c_symbols"] != ["db2_reembed_clear_maintenance"]:
+                fail("operation-c-symbols",
+                     "reembed_clear_maintenance C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "conflict", "invalid_state"]:
+                fail("operation-results",
+                     "reembed_clear_maintenance results must equal "
+                     "['ok', 'conflict', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "field"},
+                            "reembed_clear_maintenance.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "reembed_clear_maintenance.request.field")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_payload", "encoded_size_error", "payload_results",
+                           "fields"}, "reembed_clear_maintenance.reply")
+            expected_fields = [
+                {"name": "was_in_progress", "type": "u32", "minimum": 0, "maximum": 1},
+                {"name": "recorded_dimension", "type": "u32", "minimum": 0, "maximum": 4000},
+                {"name": "running_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
+            ]
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 4 or
+                    request_field != {"name": "force", "type": "u32", "minimum": 0,
+                                      "maximum": 1}):
+                fail("reembed-clear-maintenance-request",
+                     "request must contain one canonical boolean u32")
+            if (reply["encoded_size_payload"] != ENVELOPE_HEADER_LEN + 12 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["payload_results"] != ["ok", "conflict"] or
+                    reply["fields"] != expected_fields):
+                fail("reembed-clear-maintenance-reply",
+                     "ok/conflict replies must contain the canonical consistency snapshot")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 7 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 8 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
-            "postgres_status", "reembed_status", "reembed_clear"]:
+            "postgres_status", "reembed_status", "reembed_clear",
+            "reembed_clear_maintenance"]:
         fail("unsupported-operation",
-             "the partial generator requires the seven supported lifecycle operations exactly once")
+             "the partial generator requires the eight supported lifecycle operations exactly once")
     return catalog
 
 
@@ -509,6 +543,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     postgres_status = catalog["operations"][4]
     reembed_status = catalog["operations"][5]
     reembed_clear = catalog["operations"][6]
+    reembed_clear_maintenance = catalog["operations"][7]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -602,6 +637,22 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     reembed_clear_invalid = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear["id"]), 5, b"",
+    )
+    maintenance_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reembed_clear_maintenance["id"]), 0, _put_u32(0),
+    )
+    maintenance_ok_payload = _put_u32(1) + _put_u32(384) + _put_u32(384)
+    maintenance_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear_maintenance["id"]), 0,
+        maintenance_ok_payload,
+    )
+    maintenance_conflict_payload = _put_u32(1) + _put_u32(768) + _put_u32(384)
+    maintenance_conflict = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear_maintenance["id"]), 2,
+        maintenance_conflict_payload,
+    )
+    maintenance_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear_maintenance["id"]), 5, b"",
     )
 
     value = {
@@ -938,6 +989,57 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (reembed_clear_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": reembed_clear_maintenance["family"],
+            "id": reembed_clear_maintenance["id"],
+            "name": reembed_clear_maintenance["name"],
+            "request": {
+                "positive": maintenance_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(maintenance_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(maintenance_request, 16, 0).hex()},
+                    {"mutation": "invalid_force", "hex":
+                     mutate_u32(maintenance_request, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "short", "hex": maintenance_request[:-1].hex()},
+                    {"mutation": "long", "hex": (maintenance_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "was_in_progress": 1, "recorded_dimension": 384,
+                     "running_dimension": 384, "hex": maintenance_ok.hex()},
+                    {"result": 2, "was_in_progress": 1, "recorded_dimension": 768,
+                     "running_dimension": 384, "hex": maintenance_conflict.hex()},
+                    {"result": 5, "was_in_progress": 0, "recorded_dimension": 0,
+                     "running_dimension": 0, "hex": maintenance_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(maintenance_ok, 8, 7).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(maintenance_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_clear_maintenance["id"]), 0, b"").hex()},
+                    {"mutation": "conflict_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_clear_maintenance["id"]), 2, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(maintenance_ok, 12, 5).hex()},
+                    {"mutation": "invalid_was_in_progress", "hex":
+                     mutate_u32(maintenance_ok, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "recorded_too_large", "hex":
+                     mutate_u32(maintenance_ok, ENVELOPE_HEADER_LEN + 4, 4001).hex()},
+                    {"mutation": "zero_running_dimension", "hex":
+                     mutate_u32(maintenance_ok, ENVELOPE_HEADER_LEN + 8, 0).hex()},
+                    {"mutation": "conflict_without_mismatch", "hex":
+                     mutate_u32(maintenance_conflict, ENVELOPE_HEADER_LEN + 4, 384).hex()},
+                    {"mutation": "short", "hex": maintenance_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (maintenance_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -957,6 +1059,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     postgres_status = catalog["operations"][4]
     reembed_status = catalog["operations"][5]
     reembed_clear = catalog["operations"][6]
+    reembed_clear_maintenance = catalog["operations"][7]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -1046,6 +1149,16 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{reembed_clear['request']['encoded_size']}u"),
         ("AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN",
          f"{reembed_clear['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR",
+         f"{reembed_clear_maintenance['id']}u"),
+        ("AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN",
+         f"{reembed_clear_maintenance['request']['encoded_size']}u"),
+        ("AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN",
+         f"{reembed_clear_maintenance['reply']['encoded_size_payload']}u"),
+        ("AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN",
+         f"{reembed_clear_maintenance['reply']['encoded_size_error']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -1126,6 +1239,13 @@ typedef struct
    uint32_t target_dimension;
    uint64_t started_epoch;
 }} aimee_db2_reembed_status_t;
+
+typedef struct
+{{
+   uint32_t was_in_progress;
+   uint32_t recorded_dimension;
+   uint32_t running_dimension;
+}} aimee_db2_reembed_clear_maintenance_t;
 
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {{
@@ -1746,6 +1866,118 @@ static inline int aimee_db2_reembed_clear_reply_decode(const uint8_t *input, siz
    return 0;
 }}
 
+static inline int aimee_db2_reembed_clear_maintenance_valid(
+    const aimee_db2_reembed_clear_maintenance_t *status)
+{{
+   return status && status->was_in_progress <= 1u &&
+          status->recorded_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX &&
+          status->running_dimension >= AIMEE_DB2_REEMBED_DIMENSION_MIN &&
+          status->running_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_request_encode(
+    uint32_t force, uint8_t *output, size_t capacity)
+{{
+   if (force > 1u || !output || capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR, 0u, 4u,
+                                       output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, force);
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_request_decode(
+    const uint8_t *input, size_t input_len, uint32_t *force)
+{{
+   if (force)
+      *force = 0u;
+   aimee_db2_request_header_t header = {{0}};
+   if (!force || aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR || header.flags != 0u ||
+       header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > 1u)
+      return -1;
+   *force = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_reply_encode(
+    uint32_t result, const aimee_db2_reembed_clear_maintenance_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK || result == AIMEE_DB2_RESULT_CONFLICT)
+   {{
+      if (!aimee_db2_reembed_clear_maintenance_valid(status) ||
+          (result == AIMEE_DB2_RESULT_CONFLICT &&
+           (status->recorded_dimension == 0u ||
+            status->recorded_dimension == status->running_dimension)) ||
+          capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->was_in_progress);
+      aimee_db2_put_u32(payload + 4, status->recorded_dimension);
+      aimee_db2_put_u32(payload + 8, status->running_dimension);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_reembed_clear_maintenance_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_clear_maintenance_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if ((header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_CONFLICT) ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_reembed_clear_maintenance_t decoded = {{
+       .was_in_progress = aimee_db2_get_u32(payload),
+       .recorded_dimension = aimee_db2_get_u32(payload + 4),
+       .running_dimension = aimee_db2_get_u32(payload + 8),
+   }};
+   if (!aimee_db2_reembed_clear_maintenance_valid(&decoded) ||
+       (header.result == AIMEE_DB2_RESULT_CONFLICT &&
+        (decoded.recorded_dimension == 0u ||
+         decoded.recorded_dimension == decoded.running_dimension)))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
 {{
    if (!output || capacity < AIMEE_DB2_REQUEST_LEN)
@@ -1861,6 +2093,11 @@ extern "C"
    aimee_module_call_result_t aimee_db2_reembed_clear_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_reembed_clear_maintenance_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t force, uint32_t *domain_result, aimee_db2_reembed_clear_maintenance_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #ifdef __cplusplus
 }
@@ -2079,6 +2316,34 @@ aimee_module_call_result_t aimee_db2_reembed_clear_call(aimee_db2_call_fn call, 
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_reembed_clear_maintenance_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t force, uint32_t *domain_result, aimee_db2_reembed_clear_maintenance_t *status,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_clear_maintenance_t){0};
+   if (!call || !domain_result || !status || force > 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_reembed_clear_maintenance_request_encode(force, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR, AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reembed_clear_maintenance_reply_decode(response, response_len, domain_result,
+                                                        status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
 '''
     return text.encode("utf-8")
 
@@ -2097,6 +2362,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     postgres_status = catalog["operations"][4]
     reembed_status = catalog["operations"][5]
     reembed_clear = catalog["operations"][6]
+    reembed_clear_maintenance = catalog["operations"][7]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -2167,6 +2433,9 @@ const ReembedDimensionMax uint32 = 4000
 const EventReembedClear = EventLifecycle
 const StageReembedClear = FamilyLifecycle
 const OperationReembedClear uint32 = {reembed_clear['id']}
+const EventReembedClearMaintenance = EventLifecycle
+const StageReembedClearMaintenance = FamilyLifecycle
+const OperationReembedClearMaintenance uint32 = {reembed_clear_maintenance['id']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -2688,6 +2957,95 @@ func DecodeReembedClearReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return header.Result, nil
+}}
+
+type ReembedClearMaintenance struct {{
+	WasInProgress     uint32
+	RecordedDimension uint32
+	RunningDimension  uint32
+}}
+
+func validReembedClearMaintenance(status ReembedClearMaintenance) bool {{
+	return status.WasInProgress <= 1 && status.RecordedDimension <= ReembedDimensionMax &&
+		status.RunningDimension >= ReembedDimensionMin &&
+		status.RunningDimension <= ReembedDimensionMax
+}}
+
+func EncodeReembedClearMaintenanceRequest(force uint32) ([]byte, error) {{
+	if force > 1 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationReembedClearMaintenance, 0, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], force)
+	return request, nil
+}}
+
+func DecodeReembedClearMaintenanceRequest(request []byte) (uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedClearMaintenance || header.Flags != 0 ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	force := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if force > 1 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return force, nil
+}}
+
+func EncodeReembedClearMaintenanceReply(result uint32,
+	status ReembedClearMaintenance) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK || result == ResultConflict {{
+		if !validReembedClearMaintenance(status) || result == ResultConflict &&
+			(status.RecordedDimension == 0 || status.RecordedDimension == status.RunningDimension) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 12
+	}} else if result != ResultInvalidState || status != (ReembedClearMaintenance{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReembedClearMaintenance, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.WasInProgress)
+	binary.LittleEndian.PutUint32(payload[4:8], status.RecordedDimension)
+	binary.LittleEndian.PutUint32(payload[8:12], status.RunningDimension)
+	return reply, nil
+}}
+
+func DecodeReembedClearMaintenanceReply(reply []byte) (uint32, ReembedClearMaintenance, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedClearMaintenance {{
+		return 0, ReembedClearMaintenance{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, ReembedClearMaintenance{{}}, nil
+	}}
+	if (header.Result != ResultOK && header.Result != ResultConflict) || header.PayloadLen != 12 {{
+		return 0, ReembedClearMaintenance{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	status := ReembedClearMaintenance{{
+		WasInProgress:     binary.LittleEndian.Uint32(payload[0:4]),
+		RecordedDimension: binary.LittleEndian.Uint32(payload[4:8]),
+		RunningDimension:  binary.LittleEndian.Uint32(payload[8:12]),
+	}}
+	if !validReembedClearMaintenance(status) || header.Result == ResultConflict &&
+		(status.RecordedDimension == 0 || status.RecordedDimension == status.RunningDimension) {{
+		return 0, ReembedClearMaintenance{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
 }}
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

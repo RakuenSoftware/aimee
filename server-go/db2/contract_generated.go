@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "ada390ccf7dd5255ff1cf610b84c231b716220df41e518e56cf2a6bc95205c52"
+const ContractSHA256 = "0cc50e3bca47848fa213031cc85844a921cacaa0e3966ea67d6595645b9013c4"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -69,6 +69,9 @@ const ReembedDimensionMax uint32 = 4000
 const EventReembedClear = EventLifecycle
 const StageReembedClear = FamilyLifecycle
 const OperationReembedClear uint32 = 7
+const EventReembedClearMaintenance = EventLifecycle
+const StageReembedClearMaintenance = FamilyLifecycle
+const OperationReembedClearMaintenance uint32 = 8
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -592,6 +595,95 @@ func DecodeReembedClearReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return header.Result, nil
+}
+
+type ReembedClearMaintenance struct {
+	WasInProgress     uint32
+	RecordedDimension uint32
+	RunningDimension  uint32
+}
+
+func validReembedClearMaintenance(status ReembedClearMaintenance) bool {
+	return status.WasInProgress <= 1 && status.RecordedDimension <= ReembedDimensionMax &&
+		status.RunningDimension >= ReembedDimensionMin &&
+		status.RunningDimension <= ReembedDimensionMax
+}
+
+func EncodeReembedClearMaintenanceRequest(force uint32) ([]byte, error) {
+	if force > 1 {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationReembedClearMaintenance, 0, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], force)
+	return request, nil
+}
+
+func DecodeReembedClearMaintenanceRequest(request []byte) (uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedClearMaintenance || header.Flags != 0 ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	force := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if force > 1 {
+		return 0, ErrMalformedEnvelope
+	}
+	return force, nil
+}
+
+func EncodeReembedClearMaintenanceReply(result uint32,
+	status ReembedClearMaintenance) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK || result == ResultConflict {
+		if !validReembedClearMaintenance(status) || result == ResultConflict &&
+			(status.RecordedDimension == 0 || status.RecordedDimension == status.RunningDimension) {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = 12
+	} else if result != ResultInvalidState || status != (ReembedClearMaintenance{}) {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationReembedClearMaintenance, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.WasInProgress)
+	binary.LittleEndian.PutUint32(payload[4:8], status.RecordedDimension)
+	binary.LittleEndian.PutUint32(payload[8:12], status.RunningDimension)
+	return reply, nil
+}
+
+func DecodeReembedClearMaintenanceReply(reply []byte) (uint32, ReembedClearMaintenance, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedClearMaintenance {
+		return 0, ReembedClearMaintenance{}, ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, ReembedClearMaintenance{}, nil
+	}
+	if (header.Result != ResultOK && header.Result != ResultConflict) || header.PayloadLen != 12 {
+		return 0, ReembedClearMaintenance{}, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	status := ReembedClearMaintenance{
+		WasInProgress:     binary.LittleEndian.Uint32(payload[0:4]),
+		RecordedDimension: binary.LittleEndian.Uint32(payload[4:8]),
+		RunningDimension:  binary.LittleEndian.Uint32(payload[8:12]),
+	}
+	if !validReembedClearMaintenance(status) || header.Result == ResultConflict &&
+		(status.RecordedDimension == 0 || status.RecordedDimension == status.RunningDimension) {
+		return 0, ReembedClearMaintenance{}, ErrMalformedEnvelope
+	}
+	return header.Result, status, nil
 }
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

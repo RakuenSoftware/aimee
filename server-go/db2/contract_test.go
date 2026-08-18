@@ -61,6 +61,9 @@ type wireBaseline struct {
 				ReplicaLag    uint64 `json:"replica_lag_bytes"`
 				TargetDim     uint32 `json:"target_dimension"`
 				StartedEpoch  uint64 `json:"started_epoch"`
+				WasInProgress uint32 `json:"was_in_progress"`
+				RecordedDim   uint32 `json:"recorded_dimension"`
+				RunningDim    uint32 `json:"running_dimension"`
 				Hex           string `json:"hex"`
 			} `json:"positive"`
 			Negative []struct {
@@ -156,13 +159,14 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 7 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 8 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
 		baseline.Operations[4].Name != "postgres_status" ||
 		baseline.Operations[5].Name != "reembed_status" ||
-		baseline.Operations[6].Name != "reembed_clear" {
+		baseline.Operations[6].Name != "reembed_clear" ||
+		baseline.Operations[7].Name != "reembed_clear_maintenance" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -193,6 +197,46 @@ func TestReembedClearMatchesEverySharedCVector(t *testing.T) {
 		result, err := DecodeReembedClearReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, result, err)
+		}
+	}
+}
+
+func TestReembedClearMaintenanceMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[7]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	gotRequest, err := EncodeReembedClearMaintenanceRequest(0)
+	if err != nil || string(gotRequest) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", gotRequest, err, wantRequest)
+	}
+	force, err := DecodeReembedClearMaintenanceRequest(gotRequest)
+	if err != nil || force != 0 {
+		t.Fatalf("decoded force = (%d, %v)", force, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		force, err := DecodeReembedClearMaintenanceRequest(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || force != 0 {
+			t.Fatalf("negative request %s = (%d, %v)", vector.Mutation, force, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		status := ReembedClearMaintenance{
+			WasInProgress: vector.WasInProgress, RecordedDimension: vector.RecordedDim,
+			RunningDimension: vector.RunningDim,
+		}
+		got, err := EncodeReembedClearMaintenanceReply(vector.Result, status)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		result, decoded, err := DecodeReembedClearMaintenanceReply(got)
+		if err != nil || result != vector.Result || decoded != status {
+			t.Fatalf("decode = (%d, %+v, %v)", result, decoded, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, status, err := DecodeReembedClearMaintenanceReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 ||
+			status != (ReembedClearMaintenance{}) {
+			t.Fatalf("negative reply %s = (%d, %+v, %v)", vector.Mutation, result, status, err)
 		}
 	}
 }

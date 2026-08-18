@@ -250,6 +250,33 @@
       "c_symbols": ["db2_reembed_in_progress_clear"],
       "request": {"encoded_size": 24, "payload": "none"},
       "reply": {"encoded_size_ok": 24, "encoded_size_error": 24, "fields": []}
+    },
+    {
+      "family": "lifecycle",
+      "id": 8,
+      "name": "reembed_clear_maintenance",
+      "wire_format": "db2-envelope-reembed-clear-maintenance-v1",
+      "scope": "none",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": ["ok", "conflict", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The consistency check and maintenance-marker delete must remain one DB2-owned transactional operator action.",
+      "c_symbols": ["db2_reembed_clear_maintenance"],
+      "request": {
+        "encoded_size": 28,
+        "field": {"name": "force", "type": "u32", "minimum": 0, "maximum": 1}
+      },
+      "reply": {
+        "encoded_size_payload": 36,
+        "encoded_size_error": 24,
+        "payload_results": ["ok", "conflict"],
+        "fields": [
+          {"name": "was_in_progress", "type": "u32", "minimum": 0, "maximum": 1},
+          {"name": "recorded_dimension", "type": "u32", "minimum": 0, "maximum": 4000},
+          {"name": "running_dimension", "type": "u32", "minimum": 1, "maximum": 4000}
+        ]
+      }
     }
   ]
 }
