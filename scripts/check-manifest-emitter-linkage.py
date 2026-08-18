@@ -19,6 +19,12 @@ objects whose sources call them; then require every Rules.mk target linking a
 calling object to link the provider too. Adding a provider function, or a new
 caller, now fails at lint naming the target -- not in a build naming a symbol.
 
+The SAME omission then broke CMake, which keeps its own source lists for the
+macOS and Windows builds: adding cli_argspec.c to src/Makefile left
+CMakeLists.txt without it, and three jobs failed on the identical symbol. So
+this checks both -- a provider source must appear in every CMake list that
+carries a caller source, for the same reason and by the same derivation.
+
 Scoped to these providers on purpose: they are small leaf objects that exist to
 be linked alongside their caller, which is exactly the shape that keeps being
 forgotten. A whole-program link check is a different tool (check-linking).
@@ -29,6 +35,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RULES = ROOT / "src/tests/Rules.mk"
+CMAKE = ROOT / "CMakeLists.txt"
 
 # provider object -> the source that defines its exported functions.
 PROVIDERS = {
@@ -117,6 +124,46 @@ def rules(text):
     return out
 
 
+def cmake_lists():
+    """Each set(<NAME> ...) block in CMakeLists.txt, as (name, body)."""
+    text = CMAKE.read_text(encoding="utf-8", errors="replace")
+    out = []
+    for m in re.finditer(r"^set\((\w+)\n(.*?)^\)", text, re.S | re.M):
+        out.append((m.group(1), m.group(2)))
+    if not out:
+        raise SystemExit("check-manifest-emitter-linkage: no set() source lists found in "
+                         f"{CMAKE}; the extractor has drifted")
+    return out
+
+
+def check_cmake(edges):
+    """CMake keeps its own lists for the macOS and Windows builds.
+
+    Adding the interpreter to src/Makefile and not here failed three jobs on the
+    same `undefined reference to cli_argspec_build` the Rules.mk half of this
+    check exists to prevent. A list carrying a caller source must carry the
+    provider source too.
+    """
+    problems = []
+    lists = cmake_lists()
+    checked = 0
+    for name, body in lists:
+        for caller_obj, provider_obj in edges:
+            caller_src = next(s for s, o in CALLERS.items() if o == caller_obj)
+            provider_src = PROVIDERS[provider_obj]
+            # Paths in CMake are ${AIMEE_SRC_DIR}-relative, so compare on the
+            # part after src/.
+            caller_rel = caller_src[len("src/"):]
+            provider_rel = provider_src[len("src/"):]
+            if f"/{caller_rel}" not in body:
+                continue
+            checked += 1
+            if f"/{provider_rel}" not in body:
+                problems.append(f"  CMakeLists.txt set({name})\n      lists {caller_rel} but not "
+                                f"{provider_rel}, which it calls into")
+    return problems, checked
+
+
 def main():
     plant = "--plant-test" in sys.argv
     text = _RULES_TEXT if _RULES_TEXT is not None else RULES.read_text(encoding="utf-8")
@@ -155,13 +202,16 @@ def main():
               "fail the check; it is decoration", file=sys.stderr)
         return 1
 
+    cmake_problems, cmake_checked = check_cmake(edges)
+    problems += cmake_problems
+
     if problems:
         print("check-manifest-emitter-linkage: FAIL", file=sys.stderr)
         print("\n".join(sorted(set(problems))), file=sys.stderr)
         return 1
 
     print(f"check-manifest-emitter-linkage: ok ({len(edges)} caller->provider edges, "
-          f"{checked} target linkages verified)")
+          f"{checked} test-target linkages and {cmake_checked} CMake list(s) verified)")
     return 0
 
 
