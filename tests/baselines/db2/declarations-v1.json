@@ -16552,9 +16552,15 @@
           "line": 755
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
+      },
       "signature": "int db2_memory_key_exists_in_tier_pair ( const char * key , const char * tier_a , const char * tier_b )",
       "signature_sha256": "d9032f68571caf1550933d1e1de205afa0312510cd5f2344b0bd329a02a30e3d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_key_exists_in_tier_pair"
     },
     {
@@ -25638,15 +25644,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "97ecbc62397358a9891ca7687e7bc14745f61737fb8f6c67e193a59d87d52a76",
+  "fingerprint": "8c35aeaf8f1701b5353660901f4c4417fd0fcae47dc1a6f4ae4420807f07734e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 689,
+    "audit_pending": 688,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 269
+    "reviewed": 270
   }
 }

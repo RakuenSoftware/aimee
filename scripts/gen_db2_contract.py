@@ -673,16 +673,61 @@ def validate_catalog(value: object) -> dict[str, object]:
                                  "maximum": 0x7fffffffffffffff}):
                 fail("find-id-by-key-kind-reply",
                      "reply must contain consistent found and bounded identifier fields")
+        elif key == ("memory", 8) and name == "key_exists_in_tier_pair" and \
+                operation["wire_format"] == "db2-envelope-string-triple-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_key_exists_in_tier_pair"]:
+                fail("operation-c-symbols",
+                     "key_exists_in_tier_pair C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "key_exists_in_tier_pair results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "key_exists_in_tier_pair.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("key-exists-in-tier-pair-request",
+                     "request must contain exactly three fields")
+            request_key = _keys(request_fields[0],
+                                {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                "key_exists_in_tier_pair.request.fields[0]")
+            request_tier_a = _keys(request_fields[1],
+                                   {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                   "key_exists_in_tier_pair.request.fields[1]")
+            request_tier_b = _keys(request_fields[2],
+                                   {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                   "key_exists_in_tier_pair.request.fields[2]")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "key_exists_in_tier_pair.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "key_exists_in_tier_pair.reply.field")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 15 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 511 + 15 + 15 or
+                    request_key != {"name": "key", "type": "utf8", "minimum_bytes": 1,
+                                    "maximum_bytes": 511} or
+                    request_tier_a != {"name": "tier_a", "type": "utf8", "minimum_bytes": 1,
+                                       "maximum_bytes": 15} or
+                    request_tier_b != {"name": "tier_b", "type": "utf8", "minimum_bytes": 1,
+                                       "maximum_bytes": 15}):
+                fail("key-exists-in-tier-pair-request",
+                     "request must contain bounded non-empty canonical key and tier fields")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "exists", "type": "u32", "minimum": 0,
+                                    "maximum": 1}):
+                fail("key-exists-in-tier-pair-reply",
+                     "reply must contain one boolean u32 value")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 17 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 18 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
             "level3_count", "level2_count", "orphaned_l0_count", "total_count",
-            "session_l2_count", "key_exists", "find_id_by_key_kind"]:
+            "session_l2_count", "key_exists", "find_id_by_key_kind",
+            "key_exists_in_tier_pair"]:
         fail("unsupported-operation",
-             "the partial generator requires the seventeen supported operations exactly once")
+             "the partial generator requires the eighteen supported operations exactly once")
     return catalog
 
 
@@ -812,6 +857,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     session_l2_count = catalog["operations"][14]
     key_exists = catalog["operations"][15]
     find_id_by_key_kind = catalog["operations"][16]
+    key_exists_in_tier_pair = catalog["operations"][17]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1008,6 +1054,17 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     find_id_by_key_kind_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(find_id_by_key_kind["id"]), 0,
         _put_u32(1) + _put_u64(42),
+    )
+    lookup_tier_a = b"L3"
+    lookup_tier_b = b"L4"
+    key_exists_in_tier_pair_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(key_exists_in_tier_pair["id"]), 0,
+        _put_u32(len(memory_key)) + memory_key +
+        _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+        _put_u32(len(lookup_tier_b)) + lookup_tier_b,
+    )
+    key_exists_in_tier_pair_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(key_exists_in_tier_pair["id"]), 0, _put_u32(1),
     )
 
     value = {
@@ -1781,6 +1838,99 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (find_id_by_key_kind_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": key_exists_in_tier_pair["family"],
+            "id": key_exists_in_tier_pair["id"],
+            "name": key_exists_in_tier_pair["name"],
+            "request": {
+                "positive": key_exists_in_tier_pair_request.hex(),
+                "key": memory_key.decode(),
+                "tier_a": lookup_tier_a.decode(),
+                "tier_b": lookup_tier_b.decode(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request, 12, 1).hex()},
+                    {"mutation": "empty_key", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(0) +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "key_length_mismatch", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request, ENVELOPE_HEADER_LEN,
+                                len(memory_key) + 1).hex()},
+                    {"mutation": "key_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(512) + b"x" * 512 +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "key_embedded_nul", "hex":
+                     (key_exists_in_tier_pair_request[:ENVELOPE_HEADER_LEN + 4] + b"\0" +
+                      key_exists_in_tier_pair_request[ENVELOPE_HEADER_LEN + 5:]).hex()},
+                    {"mutation": "empty_tier_a", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key + _put_u32(0) +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "tier_a_length_mismatch", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request,
+                                ENVELOPE_HEADER_LEN + 4 + len(memory_key),
+                                len(lookup_tier_a) + 1).hex()},
+                    {"mutation": "tier_a_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key +
+                               _put_u32(16) + b"x" * 16 +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "tier_a_embedded_nul", "hex":
+                     (key_exists_in_tier_pair_request[
+                         :ENVELOPE_HEADER_LEN + 8 + len(memory_key)] + b"\0" +
+                      key_exists_in_tier_pair_request[
+                          ENVELOPE_HEADER_LEN + 9 + len(memory_key):]).hex()},
+                    {"mutation": "empty_tier_b", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(0)).hex()},
+                    {"mutation": "tier_b_length_mismatch", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request,
+                                ENVELOPE_HEADER_LEN + 8 + len(memory_key) + len(lookup_tier_a),
+                                len(lookup_tier_b) + 1).hex()},
+                    {"mutation": "tier_b_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(16) + b"x" * 16).hex()},
+                    {"mutation": "tier_b_embedded_nul", "hex":
+                     (key_exists_in_tier_pair_request[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex":
+                     key_exists_in_tier_pair_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (key_exists_in_tier_pair_request + b"x").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "exists": 1, "hex": key_exists_in_tier_pair_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(key_exists_in_tier_pair_ok, 8, 7).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(key_exists_in_tier_pair_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0, b"").hex()},
+                    {"mutation": "exists_too_large", "hex":
+                     (key_exists_in_tier_pair_ok[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex": key_exists_in_tier_pair_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (key_exists_in_tier_pair_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -1810,6 +1960,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     session_l2_count = catalog["operations"][14]
     key_exists = catalog["operations"][15]
     find_id_by_key_kind = catalog["operations"][16]
+    key_exists_in_tier_pair = catalog["operations"][17]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -2025,6 +2176,26 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{find_id_by_key_kind['reply']['fields'][0]['maximum']}u"),
         ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX",
          f"{find_id_by_key_kind['reply']['fields'][1]['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR",
+         f"{key_exists_in_tier_pair['id']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MIN_LEN",
+         f"{key_exists_in_tier_pair['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN",
+         f"{key_exists_in_tier_pair['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN",
+         f"{key_exists_in_tier_pair['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_ERROR_LEN",
+         f"{key_exists_in_tier_pair['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX",
+         f"{key_exists_in_tier_pair['request']['fields'][0]['maximum_bytes']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX",
+         f"{key_exists_in_tier_pair['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX",
+         f"{key_exists_in_tier_pair['request']['fields'][2]['maximum_bytes']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX",
+         f"{key_exists_in_tier_pair['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -2786,6 +2957,119 @@ static inline int aimee_db2_find_id_by_key_kind_reply_decode(
       return -1;
    *found = decoded_found;
    *id = decoded_id;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_request_encode(
+    const char *key, const char *tier_a, const char *tier_b, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!key || !tier_a || !tier_b || !output || !output_len)
+      return -1;
+   size_t key_len = 0u, tier_a_len = 0u, tier_b_len = 0u;
+   while (key_len <= AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX && key[key_len])
+      ++key_len;
+   while (tier_a_len <= AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX && tier_a[tier_a_len])
+      ++tier_a_len;
+   while (tier_b_len <= AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX && tier_b[tier_b_len])
+      ++tier_b_len;
+   size_t payload_len = 12u + key_len + tier_a_len + tier_b_len;
+   if (key_len == 0u || key_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX ||
+       tier_a_len == 0u || tier_a_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX ||
+       tier_b_len == 0u || tier_b_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)key_len);
+   memcpy(payload + 4u, key, key_len);
+   aimee_db2_put_u32(payload + 4u + key_len, (uint32_t)tier_a_len);
+   memcpy(payload + 8u + key_len, tier_a, tier_a_len);
+   aimee_db2_put_u32(payload + 8u + key_len + tier_a_len, (uint32_t)tier_b_len);
+   memcpy(payload + 12u + key_len + tier_a_len, tier_b, tier_b_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_request_decode(
+    const uint8_t *input, size_t input_len, char *key, size_t key_capacity, char *tier_a,
+    size_t tier_a_capacity, char *tier_b, size_t tier_b_capacity)
+{{
+   if (key && key_capacity)
+      key[0] = '\\0';
+   if (tier_a && tier_a_capacity)
+      tier_a[0] = '\\0';
+   if (tier_b && tier_b_capacity)
+      tier_b[0] = '\\0';
+   if (!key || key_capacity == 0u || !tier_a || tier_a_capacity == 0u || !tier_b ||
+       tier_b_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR || header.flags != 0u ||
+       input_len < AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN || header.payload_len < 15u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t key_len = aimee_db2_get_u32(payload);
+   if (key_len == 0u || key_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX ||
+       header.payload_len < 12u + key_len + 2u)
+      return -1;
+   uint32_t tier_a_len = aimee_db2_get_u32(payload + 4u + key_len);
+   if (tier_a_len == 0u || tier_a_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX ||
+       header.payload_len < 12u + key_len + tier_a_len + 1u)
+      return -1;
+   uint32_t tier_b_len = aimee_db2_get_u32(payload + 8u + key_len + tier_a_len);
+   if (tier_b_len == 0u || tier_b_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX ||
+       header.payload_len != 12u + key_len + tier_a_len + tier_b_len ||
+       key_capacity <= key_len || tier_a_capacity <= tier_a_len || tier_b_capacity <= tier_b_len ||
+       memchr(payload + 4u, '\\0', key_len) != NULL ||
+       memchr(payload + 8u + key_len, '\\0', tier_a_len) != NULL ||
+       memchr(payload + 12u + key_len + tier_a_len, '\\0', tier_b_len) != NULL)
+      return -1;
+   memcpy(key, payload + 4u, key_len);
+   key[key_len] = '\\0';
+   memcpy(tier_a, payload + 8u + key_len, tier_a_len);
+   tier_a[tier_a_len] = '\\0';
+   memcpy(tier_b, payload + 12u + key_len + tier_a_len, tier_b_len);
+   tier_b[tier_b_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_reply_encode(
+    uint32_t exists, uint8_t *output, size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || exists > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX ||
+       capacity < AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, exists);
+   *output_len = AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *exists)
+{{
+   if (exists)
+      *exists = 0u;
+   if (!exists)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX)
+      return -1;
+   *exists = decoded;
    return 0;
 }}
 
@@ -3677,6 +3961,11 @@ extern "C"
        const char *key, const char *kind, uint32_t *found, uint64_t *id,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_key_exists_in_tier_pair_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *key, const char *tier_a, const char *tier_b, uint32_t *exists,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -3984,6 +4273,34 @@ aimee_db2_find_id_by_key_kind_call(aimee_db2_call_fn call, void *call_context, u
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_key_exists_in_tier_pair_call(aimee_db2_call_fn call, void *call_context,
+                                       uint64_t trace_id, uint64_t deadline_ns, const char *key,
+                                       const char *tier_a, const char *tier_b, uint32_t *exists,
+                                       aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !key || !tier_a || !tier_b || !exists)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_key_exists_in_tier_pair_request_encode(key, tier_a, tier_b, request,
+                                                        sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR,
+            AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_key_exists_in_tier_pair_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -4240,6 +4557,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     session_l2_count = catalog["operations"][14]
     key_exists = catalog["operations"][15]
     find_id_by_key_kind = catalog["operations"][16]
+    key_exists_in_tier_pair = catalog["operations"][17]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -4354,6 +4672,13 @@ const FindIDByKeyKindKeyMax = {find_id_by_key_kind['request']['fields'][0]['maxi
 const FindIDByKeyKindKindMax = {find_id_by_key_kind['request']['fields'][1]['maximum_bytes']}
 const FindIDByKeyKindFoundMax uint32 = {find_id_by_key_kind['reply']['fields'][0]['maximum']}
 const FindIDByKeyKindIDMax uint64 = {find_id_by_key_kind['reply']['fields'][1]['maximum']}
+const EventKeyExistsInTierPair = EventMemory
+const StageKeyExistsInTierPair = FamilyMemory
+const OperationKeyExistsInTierPair uint32 = {key_exists_in_tier_pair['id']}
+const KeyExistsInTierPairKeyMax = {key_exists_in_tier_pair['request']['fields'][0]['maximum_bytes']}
+const KeyExistsInTierPairTierAMax = {key_exists_in_tier_pair['request']['fields'][1]['maximum_bytes']}
+const KeyExistsInTierPairTierBMax = {key_exists_in_tier_pair['request']['fields'][2]['maximum_bytes']}
+const KeyExistsInTierPairMax uint32 = {key_exists_in_tier_pair['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -4935,6 +5260,104 @@ func DecodeFindIDByKeyKindReply(reply []byte) (uint32, uint64, error) {{
 		return 0, 0, ErrMalformedEnvelope
 	}}
 	return found, id, nil
+}}
+
+// EncodeKeyExistsInTierPairRequest emits a bounded canonical key and tier pair.
+func EncodeKeyExistsInTierPairRequest(key, tierA, tierB string) ([]byte, error) {{
+	if len(key) == 0 || len(key) > KeyExistsInTierPairKeyMax ||
+		len(tierA) == 0 || len(tierA) > KeyExistsInTierPairTierAMax ||
+		len(tierB) == 0 || len(tierB) > KeyExistsInTierPairTierBMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for _, value := range []string{{key, tierA, tierB}} {{
+		for index := 0; index < len(value); index++ {{
+			if value[index] == 0 {{
+				return nil, ErrMalformedEnvelope
+			}}
+		}}
+	}}
+	payloadLen := 12 + len(key) + len(tierA) + len(tierB)
+	header, err := EncodeRequestHeader(OperationKeyExistsInTierPair, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(key)))
+	copy(payload[4:], key)
+	tierAOffset := 4 + len(key)
+	binary.LittleEndian.PutUint32(payload[tierAOffset:], uint32(len(tierA)))
+	copy(payload[tierAOffset+4:], tierA)
+	tierBOffset := tierAOffset + 4 + len(tierA)
+	binary.LittleEndian.PutUint32(payload[tierBOffset:], uint32(len(tierB)))
+	copy(payload[tierBOffset+4:], tierB)
+	return request, nil
+}}
+
+// DecodeKeyExistsInTierPairRequest validates and returns the canonical key and tier pair.
+func DecodeKeyExistsInTierPairRequest(request []byte) (string, string, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKeyExistsInTierPair || header.Flags != 0 ||
+		header.PayloadLen < 15 {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	keyLen := binary.LittleEndian.Uint32(payload[:4])
+	if keyLen == 0 || keyLen > KeyExistsInTierPairKeyMax ||
+		uint64(12)+uint64(keyLen)+2 > uint64(header.PayloadLen) {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	tierAOffset := 4 + int(keyLen)
+	tierALen := binary.LittleEndian.Uint32(payload[tierAOffset : tierAOffset+4])
+	if tierALen == 0 || tierALen > KeyExistsInTierPairTierAMax ||
+		uint64(12)+uint64(keyLen)+uint64(tierALen)+1 > uint64(header.PayloadLen) {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	tierBOffset := tierAOffset + 4 + int(tierALen)
+	tierBLen := binary.LittleEndian.Uint32(payload[tierBOffset : tierBOffset+4])
+	if tierBLen == 0 || tierBLen > KeyExistsInTierPairTierBMax ||
+		uint64(header.PayloadLen) != 12+uint64(keyLen)+uint64(tierALen)+uint64(tierBLen) {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	key := string(payload[4:tierAOffset])
+	tierA := string(payload[tierAOffset+4 : tierBOffset])
+	tierB := string(payload[tierBOffset+4:])
+	for _, value := range []string{{key, tierA, tierB}} {{
+		for index := 0; index < len(value); index++ {{
+			if value[index] == 0 {{
+				return "", "", "", ErrMalformedEnvelope
+			}}
+		}}
+	}}
+	return key, tierA, tierB, nil
+}}
+
+// EncodeKeyExistsInTierPairReply emits one boolean u32 success payload.
+func EncodeKeyExistsInTierPairReply(exists uint32) ([]byte, error) {{
+	if exists > KeyExistsInTierPairMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationKeyExistsInTierPair, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}}
+
+// DecodeKeyExistsInTierPairReply validates the operation and boolean value.
+func DecodeKeyExistsInTierPairReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationKeyExistsInTierPair ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	exists := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if exists > KeyExistsInTierPairMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return exists, nil
 }}
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

@@ -33,6 +33,8 @@ static int key_exists_value;
 static int key_exists_calls;
 static int64_t find_id_by_key_kind_value;
 static int find_id_by_key_kind_calls;
+static int key_exists_in_tier_pair_value;
+static int key_exists_in_tier_pair_calls;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -65,6 +67,7 @@ static int transport_expect_total_count;
 static int transport_expect_session_l2_count;
 static int transport_expect_key_exists;
 static int transport_expect_find_id_by_key_kind;
+static int transport_expect_key_exists_in_tier_pair;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -224,6 +227,24 @@ static int64_t find_id_by_key_kind(const char *key, const char *kind)
    return find_id_by_key_kind_value;
 }
 
+int db2_memory_key_exists_in_tier_pair(const char *key, const char *tier_a, const char *tier_b)
+{
+   assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+   assert(strcmp(tier_a, "L3") == 0);
+   assert(strcmp(tier_b, "L4") == 0);
+   key_exists_in_tier_pair_calls++;
+   return key_exists_in_tier_pair_value;
+}
+
+static int key_exists_in_tier_pair(const char *key, const char *tier_a, const char *tier_b)
+{
+   assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+   assert(strcmp(tier_a, "L3") == 0);
+   assert(strcmp(tier_b, "L4") == 0);
+   key_exists_in_tier_pair_calls++;
+   return key_exists_in_tier_pair_value;
+}
+
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
                     long *stuck, long *poisoned)
 {
@@ -377,6 +398,8 @@ static void reset(void)
    key_exists_calls = 0;
    find_id_by_key_kind_value = 42;
    find_id_by_key_kind_calls = 0;
+   key_exists_in_tier_pair_value = 1;
+   key_exists_in_tier_pair_calls = 0;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -406,6 +429,7 @@ static void reset(void)
    transport_expect_session_l2_count = 0;
    transport_expect_key_exists = 0;
    transport_expect_find_id_by_key_kind = 0;
+   transport_expect_key_exists_in_tier_pair = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -426,46 +450,60 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_find_id_by_key_kind   ? AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND
-       : transport_expect_key_exists          ? AIMEE_DB2_EVENT_KEY_EXISTS
-       : transport_expect_session_l2_count    ? AIMEE_DB2_EVENT_SESSION_L2_COUNT
-       : transport_expect_total_count         ? AIMEE_DB2_EVENT_TOTAL_COUNT
-       : transport_expect_orphaned_l0_count   ? AIMEE_DB2_EVENT_ORPHANED_L0_COUNT
-       : transport_expect_level2_count        ? AIMEE_DB2_EVENT_LEVEL2_COUNT
-       : transport_expect_level3_count        ? AIMEE_DB2_EVENT_LEVEL3_COUNT
-       : transport_expect_dimension_reset     ? AIMEE_DB2_EVENT_DIMENSION_RESET
-       : transport_expect_serving_id          ? AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID
-       : transport_expect_reembed_maintenance ? AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR
-       : transport_expect_reembed_clear       ? AIMEE_DB2_EVENT_REEMBED_CLEAR
-       : transport_expect_reembed             ? AIMEE_DB2_EVENT_REEMBED_STATUS
-       : transport_expect_postgres            ? AIMEE_DB2_EVENT_POSTGRES_STATUS
-       : transport_expect_refusals            ? AIMEE_DB2_EVENT_EMBEDDING_REFUSALS
-       : transport_expect_pool                ? AIMEE_DB2_EVENT_POOL_STATUS
-       : transport_expect_dimension           ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
-                                              : AIMEE_DB2_EVENT_HEALTH;
+       transport_expect_key_exists_in_tier_pair ? AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR
+       : transport_expect_find_id_by_key_kind   ? AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND
+       : transport_expect_key_exists            ? AIMEE_DB2_EVENT_KEY_EXISTS
+       : transport_expect_session_l2_count      ? AIMEE_DB2_EVENT_SESSION_L2_COUNT
+       : transport_expect_total_count           ? AIMEE_DB2_EVENT_TOTAL_COUNT
+       : transport_expect_orphaned_l0_count     ? AIMEE_DB2_EVENT_ORPHANED_L0_COUNT
+       : transport_expect_level2_count          ? AIMEE_DB2_EVENT_LEVEL2_COUNT
+       : transport_expect_level3_count          ? AIMEE_DB2_EVENT_LEVEL3_COUNT
+       : transport_expect_dimension_reset       ? AIMEE_DB2_EVENT_DIMENSION_RESET
+       : transport_expect_serving_id            ? AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID
+       : transport_expect_reembed_maintenance   ? AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR
+       : transport_expect_reembed_clear         ? AIMEE_DB2_EVENT_REEMBED_CLEAR
+       : transport_expect_reembed               ? AIMEE_DB2_EVENT_REEMBED_STATUS
+       : transport_expect_postgres              ? AIMEE_DB2_EVENT_POSTGRES_STATUS
+       : transport_expect_refusals              ? AIMEE_DB2_EVENT_EMBEDDING_REFUSALS
+       : transport_expect_pool                  ? AIMEE_DB2_EVENT_POOL_STATUS
+       : transport_expect_dimension             ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
+                                                : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_find_id_by_key_kind   ? AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND
-       : transport_expect_key_exists          ? AIMEE_DB2_STAGE_KEY_EXISTS
-       : transport_expect_session_l2_count    ? AIMEE_DB2_STAGE_SESSION_L2_COUNT
-       : transport_expect_total_count         ? AIMEE_DB2_STAGE_TOTAL_COUNT
-       : transport_expect_orphaned_l0_count   ? AIMEE_DB2_STAGE_ORPHANED_L0_COUNT
-       : transport_expect_level2_count        ? AIMEE_DB2_STAGE_LEVEL2_COUNT
-       : transport_expect_level3_count        ? AIMEE_DB2_STAGE_LEVEL3_COUNT
-       : transport_expect_dimension_reset     ? AIMEE_DB2_STAGE_DIMENSION_RESET
-       : transport_expect_serving_id          ? AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID
-       : transport_expect_reembed_maintenance ? AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR
-       : transport_expect_reembed_clear       ? AIMEE_DB2_STAGE_REEMBED_CLEAR
-       : transport_expect_reembed             ? AIMEE_DB2_STAGE_REEMBED_STATUS
-       : transport_expect_postgres            ? AIMEE_DB2_STAGE_POSTGRES_STATUS
-       : transport_expect_refusals            ? AIMEE_DB2_STAGE_EMBEDDING_REFUSALS
-       : transport_expect_pool                ? AIMEE_DB2_STAGE_POOL_STATUS
-       : transport_expect_dimension           ? AIMEE_DB2_STAGE_EMBEDDING_DIMENSION
-                                              : AIMEE_DB2_STAGE_HEALTH;
+       transport_expect_key_exists_in_tier_pair ? AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR
+       : transport_expect_find_id_by_key_kind   ? AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND
+       : transport_expect_key_exists            ? AIMEE_DB2_STAGE_KEY_EXISTS
+       : transport_expect_session_l2_count      ? AIMEE_DB2_STAGE_SESSION_L2_COUNT
+       : transport_expect_total_count           ? AIMEE_DB2_STAGE_TOTAL_COUNT
+       : transport_expect_orphaned_l0_count     ? AIMEE_DB2_STAGE_ORPHANED_L0_COUNT
+       : transport_expect_level2_count          ? AIMEE_DB2_STAGE_LEVEL2_COUNT
+       : transport_expect_level3_count          ? AIMEE_DB2_STAGE_LEVEL3_COUNT
+       : transport_expect_dimension_reset       ? AIMEE_DB2_STAGE_DIMENSION_RESET
+       : transport_expect_serving_id            ? AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID
+       : transport_expect_reembed_maintenance   ? AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR
+       : transport_expect_reembed_clear         ? AIMEE_DB2_STAGE_REEMBED_CLEAR
+       : transport_expect_reembed               ? AIMEE_DB2_STAGE_REEMBED_STATUS
+       : transport_expect_postgres              ? AIMEE_DB2_STAGE_POSTGRES_STATUS
+       : transport_expect_refusals              ? AIMEE_DB2_STAGE_EMBEDDING_REFUSALS
+       : transport_expect_pool                  ? AIMEE_DB2_STAGE_POOL_STATUS
+       : transport_expect_dimension             ? AIMEE_DB2_STAGE_EMBEDDING_DIMENSION
+                                                : AIMEE_DB2_STAGE_HEALTH;
    assert(event_kind == expected_event);
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_find_id_by_key_kind)
+   if (transport_expect_key_exists_in_tier_pair)
+   {
+      char key[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX + 1u];
+      char tier_a[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX + 1u];
+      char tier_b[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX + 1u];
+      assert(aimee_db2_key_exists_in_tier_pair_request_decode(request_body, request_len, key,
+                                                              sizeof(key), tier_a, sizeof(tier_a),
+                                                              tier_b, sizeof(tier_b)) == 0);
+      assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+      assert(strcmp(tier_a, "L3") == 0);
+      assert(strcmp(tier_b, "L4") == 0);
+   }
+   else if (transport_expect_find_id_by_key_kind)
    {
       char key[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX + 1u];
       char kind[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX + 1u];
@@ -937,6 +975,42 @@ static void test_find_id_by_key_kind_wire(void)
           -1);
    assert(aimee_db2_find_id_by_key_kind_reply_encode(1, 0, reply, sizeof(reply), &reply_len) == -1);
    assert(aimee_db2_find_id_by_key_kind_reply_encode(2, 42, reply, sizeof(reply), &reply_len) ==
+          -1);
+}
+
+static void test_key_exists_in_tier_pair_wire(void)
+{
+   uint8_t request[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN] = {0};
+   uint32_t request_len = 99;
+   char key[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX + 1u];
+   char tier_a[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX + 1u];
+   char tier_b[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX + 1u];
+   assert(aimee_db2_key_exists_in_tier_pair_request_encode(
+              "recovery:tool-a->tool-b", "L3", "L4", request, sizeof(request), &request_len) == 0);
+   assert(aimee_db2_key_exists_in_tier_pair_request_decode(request, request_len, key, sizeof(key),
+                                                           tier_a, sizeof(tier_a), tier_b,
+                                                           sizeof(tier_b)) == 0);
+   assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+   assert(strcmp(tier_a, "L3") == 0 && strcmp(tier_b, "L4") == 0);
+   assert(aimee_db2_key_exists_in_tier_pair_request_encode("", "L3", "L4", request, sizeof(request),
+                                                           &request_len) == -1);
+   assert(aimee_db2_key_exists_in_tier_pair_request_encode(
+              "recovery:tool-a->tool-b", "", "L4", request, sizeof(request), &request_len) == -1);
+   assert(aimee_db2_key_exists_in_tier_pair_request_encode(
+              "recovery:tool-a->tool-b", "L3", "", request, sizeof(request), &request_len) == -1);
+   assert(aimee_db2_key_exists_in_tier_pair_request_encode(
+              "recovery:tool-a->tool-b", "L3", "L4", request, sizeof(request), &request_len) == 0);
+   request[request_len - 1u] = '\0';
+   assert(aimee_db2_key_exists_in_tier_pair_request_decode(request, request_len, key, sizeof(key),
+                                                           tier_a, sizeof(tier_a), tier_b,
+                                                           sizeof(tier_b)) == -1);
+
+   uint8_t reply[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, exists = 99;
+   assert(aimee_db2_key_exists_in_tier_pair_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_key_exists_in_tier_pair_reply_decode(reply, reply_len, &exists) == 0 &&
+          exists == 1);
+   assert(aimee_db2_key_exists_in_tier_pair_reply_encode(2, reply, sizeof(reply), &reply_len) ==
           -1);
 }
 
@@ -1565,6 +1639,34 @@ static void test_find_id_by_key_kind_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
 }
 
+static void test_key_exists_in_tier_pair_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.key_exists_in_tier_pair = key_exists_in_tier_pair};
+   uint8_t request[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99, exists = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR};
+   assert(aimee_db2_key_exists_in_tier_pair_request_encode(
+              "recovery:tool-a->tool-b", "L3", "L4", request, sizeof(request), &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(key_exists_in_tier_pair_calls == 1);
+   assert(aimee_db2_key_exists_in_tier_pair_reply_decode(response, response_len, &exists) == 0 &&
+          exists == 1);
+   key_exists_in_tier_pair_value = 0;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_key_exists_in_tier_pair_reply_decode(response, response_len, &exists) == 0 &&
+          exists == 0);
+   key_exists_in_tier_pair_value = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -2011,6 +2113,26 @@ static void test_find_id_by_key_kind_typed_client(void)
    assert(found == 1 && id == 42 && transport_calls == 1);
 }
 
+static void test_key_exists_in_tier_pair_typed_client(void)
+{
+   reset();
+   transport_expect_key_exists_in_tier_pair = 1;
+   uint32_t exists = 99;
+   assert(aimee_db2_key_exists_in_tier_pair_call(NULL, NULL, 77, 88, "recovery:tool-a->tool-b",
+                                                 "L3", "L4", &exists, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(exists == 0);
+   assert(aimee_db2_key_exists_in_tier_pair_call(transport, (void *)0x1234, 77, 88,
+                                                 "recovery:tool-a->tool-b", "", "L4", &exists, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(aimee_db2_key_exists_in_tier_pair_reply_encode(
+              1, transport_response, sizeof(transport_response), &transport_response_len) == 0);
+   assert(aimee_db2_key_exists_in_tier_pair_call(transport, (void *)0x1234, 77, 88,
+                                                 "recovery:tool-a->tool-b", "L3", "L4", &exists,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(exists == 1 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -2189,6 +2311,7 @@ int main(void)
    test_session_l2_count_wire();
    test_key_exists_wire();
    test_find_id_by_key_kind_wire();
+   test_key_exists_in_tier_pair_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -2206,6 +2329,7 @@ int main(void)
    test_session_l2_count_handler();
    test_key_exists_handler();
    test_find_id_by_key_kind_handler();
+   test_key_exists_in_tier_pair_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -2223,6 +2347,7 @@ int main(void)
    test_session_l2_count_typed_client();
    test_key_exists_typed_client();
    test_find_id_by_key_kind_typed_client();
+   test_key_exists_in_tier_pair_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

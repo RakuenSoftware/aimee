@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "d329b5a1ced2c6a2f11c2283124d5feb859cb4646d2be124d7733d42b837fc0b"
+const ContractSHA256 = "d572b20bf05c7550242e883a9291cda3b65151d6babd7ae49c34fea09257bf8c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -113,6 +113,13 @@ const FindIDByKeyKindKeyMax = 511
 const FindIDByKeyKindKindMax = 15
 const FindIDByKeyKindFoundMax uint32 = 1
 const FindIDByKeyKindIDMax uint64 = 9223372036854775807
+const EventKeyExistsInTierPair = EventMemory
+const StageKeyExistsInTierPair = FamilyMemory
+const OperationKeyExistsInTierPair uint32 = 8
+const KeyExistsInTierPairKeyMax = 511
+const KeyExistsInTierPairTierAMax = 15
+const KeyExistsInTierPairTierBMax = 15
+const KeyExistsInTierPairMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -696,6 +703,104 @@ func DecodeFindIDByKeyKindReply(reply []byte) (uint32, uint64, error) {
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return found, id, nil
+}
+
+// EncodeKeyExistsInTierPairRequest emits a bounded canonical key and tier pair.
+func EncodeKeyExistsInTierPairRequest(key, tierA, tierB string) ([]byte, error) {
+	if len(key) == 0 || len(key) > KeyExistsInTierPairKeyMax ||
+		len(tierA) == 0 || len(tierA) > KeyExistsInTierPairTierAMax ||
+		len(tierB) == 0 || len(tierB) > KeyExistsInTierPairTierBMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, value := range []string{key, tierA, tierB} {
+		for index := 0; index < len(value); index++ {
+			if value[index] == 0 {
+				return nil, ErrMalformedEnvelope
+			}
+		}
+	}
+	payloadLen := 12 + len(key) + len(tierA) + len(tierB)
+	header, err := EncodeRequestHeader(OperationKeyExistsInTierPair, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(key)))
+	copy(payload[4:], key)
+	tierAOffset := 4 + len(key)
+	binary.LittleEndian.PutUint32(payload[tierAOffset:], uint32(len(tierA)))
+	copy(payload[tierAOffset+4:], tierA)
+	tierBOffset := tierAOffset + 4 + len(tierA)
+	binary.LittleEndian.PutUint32(payload[tierBOffset:], uint32(len(tierB)))
+	copy(payload[tierBOffset+4:], tierB)
+	return request, nil
+}
+
+// DecodeKeyExistsInTierPairRequest validates and returns the canonical key and tier pair.
+func DecodeKeyExistsInTierPairRequest(request []byte) (string, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKeyExistsInTierPair || header.Flags != 0 ||
+		header.PayloadLen < 15 {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	keyLen := binary.LittleEndian.Uint32(payload[:4])
+	if keyLen == 0 || keyLen > KeyExistsInTierPairKeyMax ||
+		uint64(12)+uint64(keyLen)+2 > uint64(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	tierAOffset := 4 + int(keyLen)
+	tierALen := binary.LittleEndian.Uint32(payload[tierAOffset : tierAOffset+4])
+	if tierALen == 0 || tierALen > KeyExistsInTierPairTierAMax ||
+		uint64(12)+uint64(keyLen)+uint64(tierALen)+1 > uint64(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	tierBOffset := tierAOffset + 4 + int(tierALen)
+	tierBLen := binary.LittleEndian.Uint32(payload[tierBOffset : tierBOffset+4])
+	if tierBLen == 0 || tierBLen > KeyExistsInTierPairTierBMax ||
+		uint64(header.PayloadLen) != 12+uint64(keyLen)+uint64(tierALen)+uint64(tierBLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	key := string(payload[4:tierAOffset])
+	tierA := string(payload[tierAOffset+4 : tierBOffset])
+	tierB := string(payload[tierBOffset+4:])
+	for _, value := range []string{key, tierA, tierB} {
+		for index := 0; index < len(value); index++ {
+			if value[index] == 0 {
+				return "", "", "", ErrMalformedEnvelope
+			}
+		}
+	}
+	return key, tierA, tierB, nil
+}
+
+// EncodeKeyExistsInTierPairReply emits one boolean u32 success payload.
+func EncodeKeyExistsInTierPairReply(exists uint32) ([]byte, error) {
+	if exists > KeyExistsInTierPairMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationKeyExistsInTierPair, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeKeyExistsInTierPairReply validates the operation and boolean value.
+func DecodeKeyExistsInTierPairReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationKeyExistsInTierPair ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	exists := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if exists > KeyExistsInTierPairMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return exists, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

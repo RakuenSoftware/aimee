@@ -38,6 +38,8 @@ type wireBaseline struct {
 			SourceSession string `json:"source_session"`
 			Key           string `json:"key"`
 			Kind          string `json:"kind"`
+			TierA         string `json:"tier_a"`
+			TierB         string `json:"tier_b"`
 			Negative      []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -167,7 +169,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 17 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 18 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -183,7 +185,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[13].Name != "total_count" ||
 		baseline.Operations[14].Name != "session_l2_count" ||
 		baseline.Operations[15].Name != "key_exists" ||
-		baseline.Operations[16].Name != "find_id_by_key_kind" {
+		baseline.Operations[16].Name != "find_id_by_key_kind" ||
+		baseline.Operations[17].Name != "key_exists_in_tier_pair" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -416,6 +419,44 @@ func TestFindIDByKeyKindMatchesEverySharedCVector(t *testing.T) {
 		found, id, err := DecodeFindIDByKeyKindReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || found != 0 || id != 0 {
 			t.Fatalf("negative reply %s = (%d, %d, %v)", vector.Mutation, found, id, err)
+		}
+	}
+}
+
+func TestKeyExistsInTierPairMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[17]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	request, err := EncodeKeyExistsInTierPairRequest(
+		operation.Request.Key, operation.Request.TierA, operation.Request.TierB)
+	if err != nil || string(request) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", request, err, wantRequest)
+	}
+	key, tierA, tierB, err := DecodeKeyExistsInTierPairRequest(wantRequest)
+	if err != nil || key != operation.Request.Key || tierA != operation.Request.TierA ||
+		tierB != operation.Request.TierB {
+		t.Fatalf("positive request = (%q, %q, %q, %v)", key, tierA, tierB, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		key, tierA, tierB, err := DecodeKeyExistsInTierPairRequest(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || key != "" || tierA != "" || tierB != "" {
+			t.Fatalf("negative request %s = (%q, %q, %q, %v)",
+				vector.Mutation, key, tierA, tierB, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeKeyExistsInTierPairReply(vector.Exists)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		exists, err := DecodeKeyExistsInTierPairReply(got)
+		if err != nil || exists != vector.Exists {
+			t.Fatalf("decode = (%d, %v)", exists, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		exists, err := DecodeKeyExistsInTierPairReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || exists != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, exists, err)
 		}
 	}
 }

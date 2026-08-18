@@ -37,6 +37,7 @@ typedef struct
    int (*session_l2_count)(const char *source_session);
    int (*key_exists)(const char *key);
    int64_t (*find_id_by_key_kind)(const char *key, const char *kind);
+   int (*key_exists_in_tier_pair)(const char *key, const char *tier_a, const char *tier_b);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -78,6 +79,7 @@ static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
 static int find_id_by_key_kind_calls;
+static int key_exists_in_tier_pair_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -219,6 +221,20 @@ static int64_t find_id_by_key_kind(const char *key, const char *kind)
 {
    find_id_by_key_kind_calls++;
    return strcmp(key, "task:deploy-fix") == 0 && strcmp(kind, "task") == 0 ? 42 : 0;
+}
+
+int db2_memory_key_exists_in_tier_pair(const char *key, const char *tier_a, const char *tier_b)
+{
+   key_exists_in_tier_pair_calls++;
+   return strcmp(key, "recovery:tool-a->tool-b") == 0 && strcmp(tier_a, "L3") == 0 &&
+          strcmp(tier_b, "L4") == 0;
+}
+
+static int key_exists_in_tier_pair(const char *key, const char *tier_a, const char *tier_b)
+{
+   key_exists_in_tier_pair_calls++;
+   return strcmp(key, "recovery:tool-a->tool-b") == 0 && strcmp(tier_a, "L3") == 0 &&
+          strcmp(tier_b, "L4") == 0;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -482,6 +498,7 @@ int main(void)
        .session_l2_count = session_l2_count,
        .key_exists = key_exists,
        .find_id_by_key_kind = find_id_by_key_kind,
+       .key_exists_in_tier_pair = key_exists_in_tier_pair,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -566,6 +583,12 @@ int main(void)
                                              "task", &found, &memory_id, NULL,
                                              NULL) == AIMEE_MODULE_CALL_OK);
    assert(found == 1 && memory_id == 42 && find_id_by_key_kind_calls == 1);
+
+   exists = 99;
+   assert(aimee_db2_key_exists_in_tier_pair_call(call_client, &client, 7027, 0,
+                                                 "recovery:tool-a->tool-b", "L3", "L4", &exists,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(exists == 1 && key_exists_in_tier_pair_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

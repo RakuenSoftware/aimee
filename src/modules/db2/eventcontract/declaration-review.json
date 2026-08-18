@@ -1436,6 +1436,14 @@
       "reason": "The typed memory.key_exists operation replaces the bounded exact-key probe while preserving explicit backend-error handling; canonical memory keys remain DB2 authority."
     },
     {
+      "symbol": "db2_memory_key_exists_in_tier_pair",
+      "signature_sha256": "d9032f68571caf1550933d1e1de205afa0312510cd5f2344b0bd329a02a30e3d",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
+    },
+    {
       "symbol": "db2_memory_provenance_delete",
       "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
       "disposition": "private-db2",

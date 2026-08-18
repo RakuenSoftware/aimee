@@ -260,6 +260,31 @@ class ContractTests(unittest.TestCase):
              "short", "long"],
         )
 
+    def test_key_exists_in_tier_pair_vectors_cover_three_strings_and_boolean(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][17]
+        self.assertEqual(operation["name"], "key_exists_in_tier_pair")
+        self.assertEqual(operation["request"]["key"], "recovery:tool-a->tool-b")
+        self.assertEqual(operation["request"]["tier_a"], "L3")
+        self.assertEqual(operation["request"]["tier_b"], "L4")
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "empty_key", "key_length_mismatch", "key_too_large",
+             "key_embedded_nul", "empty_tier_a", "tier_a_length_mismatch",
+             "tier_a_too_large", "tier_a_embedded_nul", "empty_tier_b",
+             "tier_b_length_mismatch", "tier_b_too_large", "tier_b_embedded_nul",
+             "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["exists"]) for row in operation["reply"]["positive"]],
+            [(0, 1)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "exists_too_large", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -448,7 +473,7 @@ class ContractTests(unittest.TestCase):
             "operation-duplicate",
         )
         self.assert_rule(
-            lambda value: value["operations"].insert(-7, {
+            lambda value: value["operations"].insert(-8, {
                 **copy.deepcopy(value["operations"][0]),
                 "id": 11,
                 "name": "health_second",
@@ -595,6 +620,25 @@ class ContractTests(unittest.TestCase):
                 "maximum", 2), "find-id-by-key-kind-reply"),
             (lambda value: value["operations"][16]["reply"]["fields"][1].__setitem__(
                 "maximum", 0xffffffffffffffff), "find-id-by-key-kind-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_key_exists_in_tier_pair_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][17].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][17].__setitem__(
+                "results", ["ok", "not_found"]), "operation-results"),
+            (lambda value: value["operations"][17]["request"]["fields"][0].__setitem__(
+                "maximum_bytes", 512), "key-exists-in-tier-pair-request"),
+            (lambda value: value["operations"][17]["request"]["fields"][1].__setitem__(
+                "maximum_bytes", 16), "key-exists-in-tier-pair-request"),
+            (lambda value: value["operations"][17]["request"]["fields"][2].__setitem__(
+                "maximum_bytes", 16), "key-exists-in-tier-pair-request"),
+            (lambda value: value["operations"][17]["reply"]["field"].__setitem__(
+                "maximum", 2), "key-exists-in-tier-pair-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):
