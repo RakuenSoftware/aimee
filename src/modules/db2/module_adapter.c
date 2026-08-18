@@ -101,6 +101,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .reembed_status = production_reembed_status,
        .reembed_clear = db2_reembed_in_progress_clear,
        .reembed_clear_maintenance = db2_reembed_clear_maintenance,
+       .embedder_serving_id = db2_embedder_serving_id,
    };
    return &backend;
 }
@@ -236,6 +237,23 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          return AIMEE_MODULE_STATUS_CANCELLED;
       if (aimee_db2_reembed_status_reply_encode(
               result, result == AIMEE_DB2_RESULT_OK ? &status : NULL, response_body,
+              response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+
+   if (aimee_db2_embedder_serving_id_request_decode(request_body, request_len) == 0)
+   {
+      if (response_capacity < AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!backend || !backend->embedder_serving_id)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      const char *serving_id = backend->embedder_serving_id();
+      uint32_t result = serving_id ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_INVALID_STATE;
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (aimee_db2_embedder_serving_id_reply_encode(
+              result, result == AIMEE_DB2_RESULT_OK ? serving_id : NULL, response_body,
               response_capacity, response_len) != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       return AIMEE_MODULE_STATUS_OK;

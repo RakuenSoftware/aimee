@@ -230,6 +230,13 @@ int main(int argc, char **argv)
    assert(domain_result == AIMEE_DB2_RESULT_OK && maintenance.was_in_progress == 0 &&
           maintenance.recorded_dimension == 384 && maintenance.running_dimension == 384);
 
+   char serving_id[AIMEE_DB2_EMBEDDER_SERVING_ID_MAX + 1] = "stale";
+   domain_result = 9;
+   assert(aimee_db2_embedder_serving_id_call(call_client, &client, 9017, 0, &domain_result,
+                                             serving_id, sizeof(serving_id), NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && serving_id[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

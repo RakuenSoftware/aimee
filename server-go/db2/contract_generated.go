@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "0cc50e3bca47848fa213031cc85844a921cacaa0e3966ea67d6595645b9013c4"
+const ContractSHA256 = "0dd4a7eafad04ab29bea122867df27d241883d0fc0d595608a6359f4863d29f4"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -72,6 +72,10 @@ const OperationReembedClear uint32 = 7
 const EventReembedClearMaintenance = EventLifecycle
 const StageReembedClearMaintenance = FamilyLifecycle
 const OperationReembedClearMaintenance uint32 = 8
+const EventEmbedderServingID = EventLifecycle
+const StageEmbedderServingID = FamilyLifecycle
+const OperationEmbedderServingID uint32 = 9
+const EmbedderServingIDMax = 159
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -684,6 +688,81 @@ func DecodeReembedClearMaintenanceReply(reply []byte) (uint32, ReembedClearMaint
 		return 0, ReembedClearMaintenance{}, ErrMalformedEnvelope
 	}
 	return header.Result, status, nil
+}
+
+func validEmbedderServingID(servingID string) bool {
+	if len(servingID) > EmbedderServingIDMax {
+		return false
+	}
+	for index := 0; index < len(servingID); index++ {
+		if servingID[index] == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func EncodeEmbedderServingIDRequest() []byte {
+	header, err := EncodeRequestHeader(OperationEmbedderServingID, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+func DecodeEmbedderServingIDRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbedderServingID || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+func EncodeEmbedderServingIDReply(result uint32, servingID string) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK {
+		if !validEmbedderServingID(servingID) {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = uint32(4 + len(servingID))
+	} else if result != ResultInvalidState || servingID != "" {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEmbedderServingID, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], uint32(len(servingID)))
+	copy(reply[EnvelopeHeaderLen+4:], servingID)
+	return reply, nil
+}
+
+func DecodeEmbedderServingIDReply(reply []byte) (uint32, string, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbedderServingID {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, "", nil
+	}
+	if header.Result != ResultOK || header.PayloadLen < 4 {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen > EmbedderServingIDMax || header.PayloadLen != 4+decodedLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	servingID := string(payload[4:])
+	if !validEmbedderServingID(servingID) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return header.Result, servingID, nil
 }
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

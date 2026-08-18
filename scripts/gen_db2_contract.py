@@ -416,14 +416,41 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != expected_fields):
                 fail("reembed-clear-maintenance-reply",
                      "ok/conflict replies must contain the canonical consistency snapshot")
+        elif key == ("lifecycle", 9) and name == "embedder_serving_id" and \
+                operation["wire_format"] == "db2-envelope-embedder-serving-id-v1":
+            if operation["c_symbols"] != ["db2_embedder_serving_id"]:
+                fail("operation-c-symbols",
+                     "embedder_serving_id C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "embedder_serving_id results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "embedder_serving_id.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok",
+                           "encoded_size_error", "field"},
+                          "embedder_serving_id.reply")
+            field = _keys(reply["field"],
+                          {"name", "type", "minimum_bytes", "maximum_bytes"},
+                          "embedder_serving_id.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("embedder-serving-id-request",
+                     "request must be an empty version-1 envelope")
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + 159 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "serving_id", "type": "opaque-string",
+                              "minimum_bytes": 0, "maximum_bytes": 159}):
+                fail("embedder-serving-id-reply",
+                     "success must contain one length-prefixed bounded opaque string")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 8 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 9 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
-            "reembed_clear_maintenance"]:
+            "reembed_clear_maintenance", "embedder_serving_id"]:
         fail("unsupported-operation",
-             "the partial generator requires the eight supported lifecycle operations exactly once")
+             "the partial generator requires the nine supported lifecycle operations exactly once")
     return catalog
 
 
@@ -544,6 +571,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     reembed_status = catalog["operations"][5]
     reembed_clear = catalog["operations"][6]
     reembed_clear_maintenance = catalog["operations"][7]
+    embedder_serving_id = catalog["operations"][8]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -653,6 +681,25 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     maintenance_invalid = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear_maintenance["id"]), 5, b"",
+    )
+    serving_id_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(embedder_serving_id["id"]), 0, b"",
+    )
+    serving_id = b"bekko-a25m/8721341054416418"
+    serving_id_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 0,
+        _put_u32(len(serving_id)) + serving_id,
+    )
+    serving_id_empty = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 0, _put_u32(0),
+    )
+    serving_id_max_value = b"x" * 159
+    serving_id_max = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 0,
+        _put_u32(len(serving_id_max_value)) + serving_id_max_value,
+    )
+    serving_id_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 5, b"",
     )
 
     value = {
@@ -1040,6 +1087,53 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (maintenance_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": embedder_serving_id["family"],
+            "id": embedder_serving_id["id"],
+            "name": embedder_serving_id["name"],
+            "request": {
+                "positive": serving_id_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(serving_id_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(serving_id_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": serving_id_request[:-1].hex()},
+                    {"mutation": "long", "hex": (serving_id_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "serving_id": serving_id.decode(),
+                     "hex": serving_id_ok.hex()},
+                    {"result": 0, "serving_id": "", "hex": serving_id_empty.hex()},
+                    {"result": 0, "serving_id": serving_id_max_value.decode(),
+                     "hex": serving_id_max.hex()},
+                    {"result": 5, "serving_id": "", "hex": serving_id_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(serving_id_ok, 8, 8).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(serving_id_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedder_serving_id["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(serving_id_ok, 12, 5).hex()},
+                    {"mutation": "length_mismatch", "hex":
+                     mutate_u32(serving_id_ok, ENVELOPE_HEADER_LEN,
+                                len(serving_id) + 1).hex()},
+                    {"mutation": "length_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedder_serving_id["id"]), 0,
+                               _put_u32(160) + (b"x" * 160)).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     (serving_id_ok[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": serving_id_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (serving_id_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -1060,6 +1154,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     reembed_status = catalog["operations"][5]
     reembed_clear = catalog["operations"][6]
     reembed_clear_maintenance = catalog["operations"][7]
+    embedder_serving_id = catalog["operations"][8]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -1159,6 +1254,19 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{reembed_clear_maintenance['reply']['encoded_size_payload']}u"),
         ("AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN",
          f"{reembed_clear_maintenance['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID", f"{embedder_serving_id['id']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN",
+         f"{embedder_serving_id['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MIN_LEN",
+         f"{embedder_serving_id['reply']['encoded_size_min_ok']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN",
+         f"{embedder_serving_id['reply']['encoded_size_max_ok']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN",
+         f"{embedder_serving_id['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_MAX",
+         f"{embedder_serving_id['reply']['field']['maximum_bytes']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -1179,6 +1287,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 {version_macros}
 
@@ -1978,6 +2087,95 @@ static inline int aimee_db2_reembed_clear_maintenance_reply_decode(
    return 0;
 }}
 
+static inline int aimee_db2_embedder_serving_id_request_encode(uint8_t *output,
+                                                               size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_embedder_serving_id_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_embedder_serving_id_reply_encode(
+    uint32_t result, const char *serving_id, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   size_t serving_id_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!serving_id)
+         return -1;
+      while (serving_id_len <= AIMEE_DB2_EMBEDDER_SERVING_ID_MAX && serving_id[serving_id_len])
+         ++serving_id_len;
+      if (serving_id_len > AIMEE_DB2_EMBEDDER_SERVING_ID_MAX ||
+          capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + serving_id_len)
+         return -1;
+      payload_len = 4u + (uint32_t)serving_id_len;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || serving_id ||
+            capacity < AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, (uint32_t)serving_id_len);
+      memcpy(payload + 4, serving_id, serving_id_len);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_embedder_serving_id_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result, char *serving_id,
+    size_t serving_id_capacity)
+{{
+   if (result)
+      *result = 0u;
+   if (serving_id && serving_id_capacity)
+      serving_id[0] = '\\0';
+   if (!result || !serving_id || serving_id_capacity == 0u)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_len = aimee_db2_get_u32(payload);
+   if (decoded_len > AIMEE_DB2_EMBEDDER_SERVING_ID_MAX ||
+       header.payload_len != 4u + decoded_len || serving_id_capacity <= decoded_len ||
+       memchr(payload + 4, '\\0', decoded_len) != NULL)
+      return -1;
+   memcpy(serving_id, payload + 4, decoded_len);
+   serving_id[decoded_len] = '\\0';
+   *result = header.result;
+   return 0;
+}}
+
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
 {{
    if (!output || capacity < AIMEE_DB2_REQUEST_LEN)
@@ -2097,6 +2295,11 @@ extern "C"
    aimee_module_call_result_t aimee_db2_reembed_clear_maintenance_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t force, uint32_t *domain_result, aimee_db2_reembed_clear_maintenance_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_embedder_serving_id_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, char *serving_id, size_t serving_id_capacity,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #ifdef __cplusplus
@@ -2344,6 +2547,36 @@ aimee_module_call_result_t aimee_db2_reembed_clear_maintenance_call(
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_embedder_serving_id_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint32_t *domain_result, char *serving_id,
+                                   size_t serving_id_capacity, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (serving_id && serving_id_capacity)
+      serving_id[0] = '\\0';
+   if (!call || !domain_result || !serving_id ||
+       serving_id_capacity < AIMEE_DB2_EMBEDDER_SERVING_ID_MAX + 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_embedder_serving_id_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID, AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_embedder_serving_id_reply_decode(response, response_len, domain_result, serving_id,
+                                                  serving_id_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
 '''
     return text.encode("utf-8")
 
@@ -2363,6 +2596,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     reembed_status = catalog["operations"][5]
     reembed_clear = catalog["operations"][6]
     reembed_clear_maintenance = catalog["operations"][7]
+    embedder_serving_id = catalog["operations"][8]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -2436,6 +2670,10 @@ const OperationReembedClear uint32 = {reembed_clear['id']}
 const EventReembedClearMaintenance = EventLifecycle
 const StageReembedClearMaintenance = FamilyLifecycle
 const OperationReembedClearMaintenance uint32 = {reembed_clear_maintenance['id']}
+const EventEmbedderServingID = EventLifecycle
+const StageEmbedderServingID = FamilyLifecycle
+const OperationEmbedderServingID uint32 = {embedder_serving_id['id']}
+const EmbedderServingIDMax = 159
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -3046,6 +3284,81 @@ func DecodeReembedClearMaintenanceReply(reply []byte) (uint32, ReembedClearMaint
 		return 0, ReembedClearMaintenance{{}}, ErrMalformedEnvelope
 	}}
 	return header.Result, status, nil
+}}
+
+func validEmbedderServingID(servingID string) bool {{
+	if len(servingID) > EmbedderServingIDMax {{
+		return false
+	}}
+	for index := 0; index < len(servingID); index++ {{
+		if servingID[index] == 0 {{
+			return false
+		}}
+	}}
+	return true
+}}
+
+func EncodeEmbedderServingIDRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEmbedderServingID, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodeEmbedderServingIDRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbedderServingID || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodeEmbedderServingIDReply(result uint32, servingID string) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if !validEmbedderServingID(servingID) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = uint32(4 + len(servingID))
+	}} else if result != ResultInvalidState || servingID != "" {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEmbedderServingID, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], uint32(len(servingID)))
+	copy(reply[EnvelopeHeaderLen+4:], servingID)
+	return reply, nil
+}}
+
+func DecodeEmbedderServingIDReply(reply []byte) (uint32, string, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbedderServingID {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, "", nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen < 4 {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen > EmbedderServingIDMax || header.PayloadLen != 4+decodedLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	servingID := string(payload[4:])
+	if !validEmbedderServingID(servingID) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return header.Result, servingID, nil
 }}
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

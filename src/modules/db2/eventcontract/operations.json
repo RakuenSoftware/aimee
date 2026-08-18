@@ -277,6 +277,31 @@
           {"name": "running_dimension", "type": "u32", "minimum": 1, "maximum": 4000}
         ]
       }
+    },
+    {
+      "family": "lifecycle",
+      "id": 9,
+      "name": "embedder_serving_id",
+      "wire_format": "db2-envelope-embedder-serving-id-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The effective vector-space identity is established during DB2 bootstrap and remains DB2 lifecycle evidence tied to the canonical corpus.",
+      "c_symbols": ["db2_embedder_serving_id"],
+      "request": {"encoded_size": 24, "payload": "none"},
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 187,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "serving_id",
+          "type": "opaque-string",
+          "minimum_bytes": 0,
+          "maximum_bytes": 159
+        }
+      }
     }
   ]
 }

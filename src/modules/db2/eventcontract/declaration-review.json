@@ -12,6 +12,14 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_embedder_serving_id",
+      "signature_sha256": "5898a1bdc571792a4b16c259f8fdabbbe26d17272c55d0670cf98d7488917972",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.embedder_serving_id operation replaces the curator replay direct caller with DB2's bounded effective vector-space identity; empty remains the legacy no-identity state."
+    },
+    {
       "symbol": "db2_embedding_dim",
       "signature_sha256": "68daa9ea74e7ddca239ff4ba399306b2cbc1c08fddf786cf009cba8c5e86307e",
       "disposition": "wire-operation",

@@ -4,8 +4,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "0cc50e3bca47848fa213031cc85844a921cacaa0e3966ea67d6595645b9013c4"
+#define AIMEE_DB2_CONTRACT_SHA256 "0dd4a7eafad04ab29bea122867df27d241883d0fc0d595608a6359f4863d29f4"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -33,66 +34,74 @@
 #define AIMEE_DB2_RESULT_RETRYABLE     4u
 #define AIMEE_DB2_RESULT_INVALID_STATE 5u
 
-#define AIMEE_DB2_EVENT_HEALTH                     AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_HEALTH                     AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_HEALTH                 1u
-#define AIMEE_DB2_REQUEST_MAGIC                    0x51483244u /* "D2HQ", little-endian */
-#define AIMEE_DB2_RESPONSE_MAGIC                   0x52483244u /* "D2HR", little-endian */
-#define AIMEE_DB2_REQUEST_LEN                      8u
-#define AIMEE_DB2_RESPONSE_LEN                     16u
-#define AIMEE_DB2_EVENT_EMBEDDING_DIMENSION        AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_EMBEDDING_DIMENSION        AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION    2u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN  24u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN 28u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN    24u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_MIN          1u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_MAX          4000u
-#define AIMEE_DB2_EVENT_POOL_STATUS                AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_POOL_STATUS                AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_POOL_STATUS            3u
-#define AIMEE_DB2_POOL_STATUS_REQUEST_LEN          24u
-#define AIMEE_DB2_POOL_STATUS_RESPONSE_LEN         68u
-#define AIMEE_DB2_POOL_STATUS_ERROR_LEN            24u
-#define AIMEE_DB2_POOL_SIZE_MAX                    256u
-#define AIMEE_DB2_EVENT_EMBEDDING_REFUSALS         AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_EMBEDDING_REFUSALS         AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS     4u
-#define AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN   24u
-#define AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN  36u
-#define AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN     24u
-#define AIMEE_DB2_EMBEDDING_OFFERED_MAX            2147483647u
-#define AIMEE_DB2_EVENT_POSTGRES_STATUS            AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_POSTGRES_STATUS            AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_POSTGRES_STATUS        5u
-#define AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN      24u
-#define AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN     48u
-#define AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN        24u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE        0x1u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_MAX           0x2u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_ROLE          0x4u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_LAG           0x8u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_ALL           0xfu
-#define AIMEE_DB2_POSTGRES_COUNT_MAX               2147483647u
-#define AIMEE_DB2_EVENT_REEMBED_STATUS             AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_REEMBED_STATUS             AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_REEMBED_STATUS         6u
-#define AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN       24u
-#define AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN      36u
-#define AIMEE_DB2_REEMBED_STATUS_ERROR_LEN         24u
-#define AIMEE_DB2_REEMBED_DIMENSION_MIN            1u
-#define AIMEE_DB2_REEMBED_DIMENSION_MAX            4000u
-#define AIMEE_DB2_EVENT_REEMBED_CLEAR              AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_REEMBED_CLEAR              AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_REEMBED_CLEAR          7u
-#define AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN        24u
-#define AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN       24u
-#define AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR        AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR        AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR    8u
-#define AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN  28u
-#define AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN 36u
-#define AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN    24u
+#define AIMEE_DB2_EVENT_HEALTH                         AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_HEALTH                         AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_HEALTH                     1u
+#define AIMEE_DB2_REQUEST_MAGIC                        0x51483244u /* "D2HQ", little-endian */
+#define AIMEE_DB2_RESPONSE_MAGIC                       0x52483244u /* "D2HR", little-endian */
+#define AIMEE_DB2_REQUEST_LEN                          8u
+#define AIMEE_DB2_RESPONSE_LEN                         16u
+#define AIMEE_DB2_EVENT_EMBEDDING_DIMENSION            AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_EMBEDDING_DIMENSION            AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION        2u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN      24u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN     28u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN        24u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_MIN              1u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_MAX              4000u
+#define AIMEE_DB2_EVENT_POOL_STATUS                    AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_POOL_STATUS                    AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_POOL_STATUS                3u
+#define AIMEE_DB2_POOL_STATUS_REQUEST_LEN              24u
+#define AIMEE_DB2_POOL_STATUS_RESPONSE_LEN             68u
+#define AIMEE_DB2_POOL_STATUS_ERROR_LEN                24u
+#define AIMEE_DB2_POOL_SIZE_MAX                        256u
+#define AIMEE_DB2_EVENT_EMBEDDING_REFUSALS             AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_EMBEDDING_REFUSALS             AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS         4u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN       24u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN      36u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN         24u
+#define AIMEE_DB2_EMBEDDING_OFFERED_MAX                2147483647u
+#define AIMEE_DB2_EVENT_POSTGRES_STATUS                AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_POSTGRES_STATUS                AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_POSTGRES_STATUS            5u
+#define AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN          24u
+#define AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN         48u
+#define AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN            24u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE            0x1u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_MAX               0x2u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ROLE              0x4u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_LAG               0x8u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ALL               0xfu
+#define AIMEE_DB2_POSTGRES_COUNT_MAX                   2147483647u
+#define AIMEE_DB2_EVENT_REEMBED_STATUS                 AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_STATUS                 AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_STATUS             6u
+#define AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN           24u
+#define AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN          36u
+#define AIMEE_DB2_REEMBED_STATUS_ERROR_LEN             24u
+#define AIMEE_DB2_REEMBED_DIMENSION_MIN                1u
+#define AIMEE_DB2_REEMBED_DIMENSION_MAX                4000u
+#define AIMEE_DB2_EVENT_REEMBED_CLEAR                  AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_CLEAR                  AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_CLEAR              7u
+#define AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN            24u
+#define AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN           24u
+#define AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR            AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR            AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR        8u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN      28u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN     36u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN        24u
+#define AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID            AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID            AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID        9u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN      24u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MIN_LEN 28u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN 187u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN        24u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_MAX              159u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -884,6 +893,95 @@ static inline int aimee_db2_reembed_clear_maintenance_reply_decode(
       return -1;
    *result = header.result;
    *status = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_embedder_serving_id_request_encode(uint8_t *output,
+                                                               size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID, 0u, 0u,
+                                           output, capacity);
+}
+
+static inline int aimee_db2_embedder_serving_id_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_embedder_serving_id_reply_encode(
+    uint32_t result, const char *serving_id, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   size_t serving_id_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {
+      if (!serving_id)
+         return -1;
+      while (serving_id_len <= AIMEE_DB2_EMBEDDER_SERVING_ID_MAX && serving_id[serving_id_len])
+         ++serving_id_len;
+      if (serving_id_len > AIMEE_DB2_EMBEDDER_SERVING_ID_MAX ||
+          capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + serving_id_len)
+         return -1;
+      payload_len = 4u + (uint32_t)serving_id_len;
+   }
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || serving_id ||
+            capacity < AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, (uint32_t)serving_id_len);
+      memcpy(payload + 4, serving_id, serving_id_len);
+   }
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_embedder_serving_id_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result, char *serving_id,
+    size_t serving_id_capacity)
+{
+   if (result)
+      *result = 0u;
+   if (serving_id && serving_id_capacity)
+      serving_id[0] = '\0';
+   if (!result || !serving_id || serving_id_capacity == 0u)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_len = aimee_db2_get_u32(payload);
+   if (decoded_len > AIMEE_DB2_EMBEDDER_SERVING_ID_MAX ||
+       header.payload_len != 4u + decoded_len || serving_id_capacity <= decoded_len ||
+       memchr(payload + 4, '\0', decoded_len) != NULL)
+      return -1;
+   memcpy(serving_id, payload + 4, decoded_len);
+   serving_id[decoded_len] = '\0';
+   *result = header.result;
    return 0;
 }
 

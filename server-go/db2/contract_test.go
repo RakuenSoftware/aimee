@@ -64,6 +64,7 @@ type wireBaseline struct {
 				WasInProgress uint32 `json:"was_in_progress"`
 				RecordedDim   uint32 `json:"recorded_dimension"`
 				RunningDim    uint32 `json:"running_dimension"`
+				ServingID     string `json:"serving_id"`
 				Hex           string `json:"hex"`
 			} `json:"positive"`
 			Negative []struct {
@@ -159,17 +160,50 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 8 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 9 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
 		baseline.Operations[4].Name != "postgres_status" ||
 		baseline.Operations[5].Name != "reembed_status" ||
 		baseline.Operations[6].Name != "reembed_clear" ||
-		baseline.Operations[7].Name != "reembed_clear_maintenance" {
+		baseline.Operations[7].Name != "reembed_clear_maintenance" ||
+		baseline.Operations[8].Name != "embedder_serving_id" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
+}
+
+func TestEmbedderServingIDMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[8]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeEmbedderServingIDRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeEmbedderServingIDRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeEmbedderServingIDRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeEmbedderServingIDReply(vector.Result, vector.ServingID)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		result, servingID, err := DecodeEmbedderServingIDReply(got)
+		if err != nil || result != vector.Result || servingID != vector.ServingID {
+			t.Fatalf("decode = (%d, %q, %v)", result, servingID, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, servingID, err := DecodeEmbedderServingIDReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || servingID != "" {
+			t.Fatalf("negative reply %s = (%d, %q, %v)", vector.Mutation, result, servingID, err)
+		}
+	}
 }
 
 func TestReembedClearMatchesEverySharedCVector(t *testing.T) {

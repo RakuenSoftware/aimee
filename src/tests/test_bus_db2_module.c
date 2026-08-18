@@ -36,6 +36,7 @@ typedef struct
    int (*reembed_status)(aimee_db2_reembed_status_t *status);
    int (*reembed_clear)(void);
    int (*reembed_clear_maintenance)(int force, int *was_in_progress, int *recorded, int *running);
+   const char *(*embedder_serving_id)(void);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -205,6 +206,17 @@ int db2_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded
    return 0;
 }
 
+const char *db2_embedder_serving_id(void)
+{
+   static char serving_id[AIMEE_DB2_EMBEDDER_SERVING_ID_MAX + 1];
+   if (serving_id[0] == '\0')
+   {
+      memset(serving_id, 'x', sizeof(serving_id) - 1);
+      serving_id[sizeof(serving_id) - 1] = '\0';
+   }
+   return serving_id;
+}
+
 static void *run_process(void *argument)
 {
    process_thread_t *thread = argument;
@@ -343,6 +355,7 @@ int main(void)
        .reembed_status = reembed_status,
        .reembed_clear = db2_reembed_in_progress_clear,
        .reembed_clear_maintenance = db2_reembed_clear_maintenance,
+       .embedder_serving_id = db2_embedder_serving_id,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -425,6 +438,16 @@ int main(void)
                                                    NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && maintenance.was_in_progress == 1 &&
           maintenance.recorded_dimension == 384 && maintenance.running_dimension == 384);
+
+   char serving_id[AIMEE_DB2_EMBEDDER_SERVING_ID_MAX + 1] = {0};
+   domain_result = 9;
+   assert(aimee_db2_embedder_serving_id_call(call_client, &client, 7017, 0, &domain_result,
+                                             serving_id, sizeof(serving_id), NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK &&
+          strlen(serving_id) == AIMEE_DB2_EMBEDDER_SERVING_ID_MAX);
+   for (size_t index = 0; index < strlen(serving_id); ++index)
+      assert(serving_id[index] == 'x');
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

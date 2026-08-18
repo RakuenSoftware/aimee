@@ -241,6 +241,22 @@ class ContractTests(unittest.TestCase):
              "error_with_payload", "short", "long"],
         )
 
+    def test_embedder_serving_id_vectors_cover_bounds(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][8]
+        self.assertEqual(operation["name"], "embedder_serving_id")
+        self.assertEqual(
+            [(row["result"], len(row["serving_id"]))
+             for row in operation["reply"]["positive"]],
+            [(0, 27), (0, 0), (0, 159), (5, 0)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "error_with_payload", "length_mismatch", "length_too_large",
+             "embedded_nul", "short", "long"],
+        )
+
     def test_root_and_version_mutations(self) -> None:
         cases = (
             (lambda value: value.__setitem__("extra", 1), "keys"),
@@ -310,7 +326,7 @@ class ContractTests(unittest.TestCase):
         self.assert_rule(
             lambda value: value["operations"].append({
                 **copy.deepcopy(value["operations"][0]),
-                "id": 9,
+                "id": 10,
                 "name": "health_second",
                 "c_symbols": ["db2_health_second"],
             }),
@@ -438,6 +454,19 @@ class ContractTests(unittest.TestCase):
                 "payload_results", ["ok"]), "reembed-clear-maintenance-reply"),
             (lambda value: value["operations"][7].__setitem__("transaction", "none"),
              "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_embedder_serving_id_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][8]["request"].__setitem__("encoded_size", 25),
+             "embedder-serving-id-request"),
+            (lambda value: value["operations"][8]["reply"].__setitem__(
+                "encoded_size_max_ok", 188), "embedder-serving-id-reply"),
+            (lambda value: value["operations"][8]["reply"]["field"].__setitem__(
+                "maximum_bytes", 160), "embedder-serving-id-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

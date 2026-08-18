@@ -6833,9 +6833,15 @@
           "line": 160
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.embedder_serving_id operation replaces the curator replay direct caller with DB2's bounded effective vector-space identity; empty remains the legacy no-identity state."
+      },
       "signature": "const char * db2_embedder_serving_id ( void )",
       "signature_sha256": "5898a1bdc571792a4b16c259f8fdabbbe26d17272c55d0670cf98d7488917972",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_embedder_serving_id"
     },
     {
@@ -24522,15 +24528,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "16739ae9b491db913794177d93174a8a3ca61e210acac94b8e8de9e19bf62d39",
+  "fingerprint": "c52bc70df73a33340a3dd6a2f981dad9c72cee1af0dccfc6dfb468e7d7ab3c21",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 875,
+    "audit_pending": 874,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 83
+    "reviewed": 84
   }
 }
