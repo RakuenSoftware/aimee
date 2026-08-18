@@ -22,6 +22,7 @@
 #include "modules/memory/gw_stage_memory.h"     /* gw_stage_memory + gw_memory_system_prompt (P3) */
 #include "gw_stage_registry.h"                  /* Slice 7: config-driven stage catalog */
 #include "gw_stage_governance.h"                /* response seam Slice 2: togglable governance */
+#include "gw_stage_completion.h"                /* bounded incomplete-repair continuation */
 #include "dogfood.h"                            /* dogfood_autolabel_next_turn_live */
 #include "modules/learning/learning_implicit.h" /* learning_implicit_detect_turn */
 #include "retrieval_outcome_bridge.h"           /* retrieval_outcome_bridge_on_autolabel */
@@ -247,6 +248,9 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
                                       parsed.prompt_tokens, parsed.completion_tokens,
                                       parsed.cache_write_tokens, parsed.cache_read_tokens,
                                       "openai-ingress", NULL);
+
+         if (gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+            LOG_INFO("completion.gate", "continued incomplete OpenAI chat repair");
 
          /* Same response-side policing the streaming path runs, so a denied
           * subagent-spawning call cannot reach an external caller. */
@@ -854,6 +858,9 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
                                       parsed.cache_write_tokens, parsed.cache_read_tokens,
                                       "openai-ingress", NULL);
 
+         if (gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+            LOG_INFO("completion.gate", "continued incomplete streaming OpenAI chat repair");
+
          if (parsed.is_tool_call && parsed.call_count > 0)
             (void)gw_response_run_governance(&parsed, openai_governance_enabled(),
                                              gateway_prevent_subagents_enabled());
@@ -1133,7 +1140,19 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
     * original array unless the policy emptied + dropped it (then omit — never
     * forward `tools: []`). */
    cJSON *gw_raw = cJSON_CreateObject();
-   cJSON_AddStringToObject(gw_raw, "instructions", system_prompt ? system_prompt : "");
+   char *tool_system = gw_request_tool_system_prompt(tools, system_prompt);
+   if (tool_system)
+      LOG_INFO("aimee.tools", "applied CLI-first policy to OpenAI ingress turn");
+   char *completion_system =
+       gw_request_completion_system_prompt(messages, tool_system ? tool_system : system_prompt);
+   cJSON_AddStringToObject(
+       gw_raw, "instructions",
+       completion_system ? completion_system
+                         : (tool_system ? tool_system : (system_prompt ? system_prompt : "")));
+   if (completion_system)
+      LOG_INFO("completion.gate", "applied continuation policy to OpenAI ingress turn");
+   free(completion_system);
+   free(tool_system);
    if (cJSON_IsArray(tools))
       cJSON_AddItemReferenceToObject(gw_raw, "tools", tools);
    gw_request_t gr = {
@@ -1432,6 +1451,9 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
                                    parsed.prompt_tokens, parsed.completion_tokens,
                                    parsed.cache_write_tokens, parsed.cache_read_tokens,
                                    "openai-ingress", NULL);
+
+      if (erc == 0 && gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+         LOG_INFO("completion.gate", "continued incomplete OpenAI Responses repair");
    }
 
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
