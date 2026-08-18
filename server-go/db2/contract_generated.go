@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "e54fde5f7ba2f47afcf05144a19983dbf840cf500e455b9dfe534fd530e4a8c5"
+const ContractSHA256 = "0034a46f7896f62a2304893be09bccf1c6b35059740b07c7cacc1fd76f0f0209"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -263,6 +263,12 @@ const OperationHasScopeType uint32 = 31
 const HasScopeTypeMemoryIDMax uint64 = 9223372036854775807
 const HasScopeTypeScopeMax = 63
 const HasScopeTypeMax uint32 = 1
+const EventReject = EventMemory
+const StageReject = FamilyMemory
+const OperationReject uint32 = 32
+const RejectMemoryIDMax uint64 = 9223372036854775807
+const RejectPenaltyBits uint64 = 4591870180066957722
+const RejectFloorBits uint64 = 0
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1076,6 +1082,54 @@ func DecodeHasScopeTypeReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return present, nil
+}
+
+// EncodeRejectRequest emits the memory to penalise. No reason travels: the
+// backend discards the one it is handed and nothing persists it.
+func EncodeRejectRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > RejectMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationReject, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeRejectRequest validates the envelope and the bounded memory.
+func DecodeRejectRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReject || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > RejectMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeRejectReply acknowledges the penalty without a payload.
+func EncodeRejectReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationReject, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeRejectReply validates the acknowledgement and refuses any payload.
+func DecodeRejectReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReject || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

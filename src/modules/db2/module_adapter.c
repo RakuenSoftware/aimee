@@ -229,6 +229,16 @@ static int production_reembed_status(aimee_db2_reembed_status_t *status)
    return 1;
 }
 
+/* The backend takes a rejection reason and discards it -- the parameter is
+ * explicitly unused and nothing above it persists one either. The wire
+ * operation therefore carries no reason, and this shim is what makes that
+ * visible instead of quietly forwarding an empty string as though a rationale
+ * had been recorded. */
+static int production_reject(int64_t memory_id)
+{
+   return db2_memory_reject(memory_id, NULL);
+}
+
 static const aimee_db2_module_backend_t *production_backend(void)
 {
    static const aimee_db2_module_backend_t backend = {
@@ -279,6 +289,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .link_delete = db2_memory_link_delete,
        .valid_at = db2_memory_valid_at,
        .has_scope_type = db2_memory_has_scope_type,
+       .reject = production_reject,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -984,6 +995,22 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_has_scope_type_reply_encode((uint32_t)present, response_body,
                                                    response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t reject_memory_id = 0u;
+      if (aimee_db2_reject_request_decode(request_body, request_len, &reject_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_REJECT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->reject)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         if (backend->reject((int64_t)reject_memory_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_reject_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_REJECT_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

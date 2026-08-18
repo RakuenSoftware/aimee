@@ -17870,9 +17870,15 @@
           "line": 713
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.reject operation replaces the confidence penalty. The backend's reason parameter is discarded and never persisted, so the wire operation deliberately does not carry it rather than implying a rejection rationale is recorded; the penalty and floor stay fixed policy."
+      },
       "signature": "int db2_memory_reject ( int64_t memory_id , const char * reason )",
       "signature_sha256": "4212a62121c6fb6a2e5f552e73565b21d2e5534bade93821ce4c4a5e09d208b9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_reject"
     },
     {
@@ -25842,15 +25848,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d2001f7522b7a2ca18c8839cfe932463e86bcbd1a7fd1ff880805c141b7a4f0f",
+  "fingerprint": "ef907347452c9f24acfa79d3ac1f1d04ce3fd3e890731879d2f362b87c550509",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 655,
+    "audit_pending": 654,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 303
+    "reviewed": 304
   }
 }

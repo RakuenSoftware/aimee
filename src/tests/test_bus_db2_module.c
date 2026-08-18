@@ -76,6 +76,7 @@ typedef struct
    int (*link_delete)(int64_t link_id);
    int (*valid_at)(int64_t memory_id, const char *as_of);
    int (*has_scope_type)(int64_t memory_id, const char *scope_type);
+   int (*reject)(int64_t memory_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -127,6 +128,8 @@ static int valid_at_calls;
 static char valid_at_last[64];
 static int scope_type_calls;
 static char scope_type_last[64];
+static int reject_calls;
+static int64_t reject_last;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -800,6 +803,20 @@ static int has_scope_type(int64_t memory_id, const char *scope_type)
    return strcmp(scope_type, "workspace") == 0 ? 1 : 0;
 }
 
+int db2_memory_reject(int64_t memory_id, const char *reason)
+{
+   (void)memory_id;
+   (void)reason;
+   return -1;
+}
+
+static int reject(int64_t memory_id)
+{
+   reject_calls++;
+   reject_last = memory_id;
+   return memory_id == 42 ? 0 : -1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1130,6 +1147,7 @@ int main(void)
        .link_delete = link_delete,
        .valid_at = valid_at,
        .has_scope_type = has_scope_type,
+       .reject = reject,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1370,6 +1388,12 @@ int main(void)
    assert(aimee_db2_has_scope_type_call(call_client, &client, 7058, 0, 42u, "project", &scoped,
                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(scoped == 0 && scope_type_calls == 2);
+
+   assert(aimee_db2_reject_call(call_client, &client, 7059, 0, 42u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(reject_calls == 1 && reject_last == 42);
+   assert(aimee_db2_reject_call(call_client, &client, 7060, 0, 43u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

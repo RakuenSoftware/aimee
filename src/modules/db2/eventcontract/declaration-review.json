@@ -1700,6 +1700,14 @@
       "reason": "The typed memory.prune_orphaned_l0 operation replaces the doctor-invoked retention delete for expired unlinked short-term rows; the tier and age window stay fixed policy behind the handler so no caller can widen the delete."
     },
     {
+      "symbol": "db2_memory_reject",
+      "signature_sha256": "4212a62121c6fb6a2e5f552e73565b21d2e5534bade93821ce4c4a5e09d208b9",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.reject operation replaces the confidence penalty. The backend's reason parameter is discarded and never persisted, so the wire operation deliberately does not carry it rather than implying a rejection rationale is recorded; the penalty and floor stay fixed policy."
+    },
+    {
       "symbol": "db2_memory_row_insert_ex",
       "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
       "disposition": "private-db2",

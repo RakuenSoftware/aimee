@@ -47,6 +47,9 @@ static int valid_at_calls;
 static char valid_at_last[64];
 static int scope_type_value;
 static int scope_type_calls;
+static int reject_value;
+static int reject_calls;
+static int64_t reject_last;
 static char scope_type_last[64];
 static int64_t link_delete_last;
 static int64_t workspace_tag_last;
@@ -395,6 +398,20 @@ static int has_scope_type(int64_t memory_id, const char *scope_type)
    scope_type_calls++;
    snprintf(scope_type_last, sizeof(scope_type_last), "%s", scope_type);
    return scope_type_value;
+}
+
+int db2_memory_reject(int64_t memory_id, const char *reason)
+{
+   (void)memory_id;
+   (void)reason;
+   return -1;
+}
+
+static int reject(int64_t memory_id)
+{
+   reject_calls++;
+   reject_last = memory_id;
+   return reject_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1065,6 +1082,9 @@ static void reset(void)
    scope_type_value = 1;
    scope_type_calls = 0;
    scope_type_last[0] = '\0';
+   reject_value = 0;
+   reject_calls = 0;
+   reject_last = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2354,6 +2374,44 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_reject_wire(void)
+{
+   /* The penalty and the floor are policy, pinned as bit patterns. Compared as
+    * bits so a constant that rounds differently on one side cannot penalise by
+    * a different amount while every envelope still matches. */
+   uint64_t penalty_bits = AIMEE_DB2_REJECT_PENALTY_BITS;
+   uint64_t floor_bits = AIMEE_DB2_REJECT_FLOOR_BITS;
+   double penalty = 0.0, floor_value = 0.0;
+   memcpy(&penalty, &penalty_bits, sizeof(penalty));
+   memcpy(&floor_value, &floor_bits, sizeof(floor_value));
+   assert(penalty == 0.1 && floor_value == 0.0);
+
+   uint8_t request[AIMEE_DB2_REJECT_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_reject_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_reject_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   /* The request is exactly a memory: there is no reason field to carry, so a
+    * payload of any other size is malformed rather than an extended request. */
+   assert(sizeof(request) == AIMEE_DB2_ENVELOPE_HEADER_LEN + 8u);
+   assert(aimee_db2_reject_request_encode(0u, request, sizeof(request)) == -1);
+   assert(aimee_db2_reject_request_encode(AIMEE_DB2_REJECT_MEMORY_ID_MAX + 1ull, request,
+                                          sizeof(request)) == -1);
+   assert(aimee_db2_reject_request_encode(42u, request, sizeof(request) - 1) == -1);
+   assert(aimee_db2_reject_request_encode(42u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_reject_request_decode(request, sizeof(request), &memory_id) == -1 &&
+          memory_id == 0);
+
+   uint8_t reply[AIMEE_DB2_REJECT_RESPONSE_LEN] = {0};
+   assert(aimee_db2_reject_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_reject_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_reject_reply_encode(reply, sizeof(reply) - 1) == -1);
+   assert(aimee_db2_reject_reply_encode(reply, sizeof(reply)) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_reject_reply_decode(reply, sizeof(reply)) == -1);
 }
 
 static void test_has_scope_type_wire(void)
@@ -3925,6 +3983,34 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_reject_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.reject = reject};
+   uint8_t request[AIMEE_DB2_REJECT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REJECT_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_REJECT};
+   assert(aimee_db2_reject_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(reject_calls == 1 && reject_last == 42);
+   assert(aimee_db2_reject_reply_decode(response, response_len) == 0);
+
+   /* A memory that is not there cannot be penalised, and the backend reports
+    * that the same way it reports a statement failure. */
+   reject_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   reject_value = 0;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_has_scope_type_handler(void)
 {
    reset();
@@ -5168,6 +5254,7 @@ int main(void)
    test_link_delete_wire();
    test_valid_at_wire();
    test_has_scope_type_wire();
+   test_reject_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5209,6 +5296,7 @@ int main(void)
    test_link_delete_handler();
    test_valid_at_handler();
    test_has_scope_type_handler();
+   test_reject_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

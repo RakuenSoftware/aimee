@@ -226,7 +226,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 41 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 42 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -266,7 +266,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[37].Name != "touch" ||
 		baseline.Operations[38].Name != "link_delete" ||
 		baseline.Operations[39].Name != "valid_at" ||
-		baseline.Operations[40].Name != "has_scope_type" {
+		baseline.Operations[40].Name != "has_scope_type" ||
+		baseline.Operations[41].Name != "reject" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -463,6 +464,52 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestRejectMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[41]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeRejectRequest(operation.Request.MemoryID)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, err := DecodeRejectRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID {
+		t.Fatalf("positive request = (%d, %v)", memoryID, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeRejectRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeRejectReply()
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		if err := DecodeRejectReply(got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeRejectReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	if _, err := EncodeRejectRequest(0); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("zero memory encoded: %v", err)
+	}
+}
+
+func TestRejectPolicyIsFixed(t *testing.T) {
+	// Compared as bits: a differently-rounded penalty on one side would move
+	// confidence by a different amount than the other while every envelope
+	// still matched.
+	if math.Float64frombits(RejectPenaltyBits) != 0.1 ||
+		math.Float64frombits(RejectFloorBits) != 0.0 {
+		t.Fatalf("policy = (%v, %v)", math.Float64frombits(RejectPenaltyBits),
+			math.Float64frombits(RejectFloorBits))
 	}
 }
 
