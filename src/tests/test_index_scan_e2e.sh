@@ -54,11 +54,17 @@ ACTIVE_SERVER_PID=""
 ACTIVE_KB_PID=""
 
 cleanup_active() {
+    # Reap both children before removing the home they write into. kill only
+    # requests exit, so without the waits a child can still be writing under
+    # $ACTIVE_TMPHOME while rm -rf walks it, and rm fails with ENOTEMPTY when a
+    # directory gains entries between unlinking its children and removing it.
     if [ -n "$ACTIVE_SERVER_PID" ]; then
         kill "$ACTIVE_SERVER_PID" 2>/dev/null || true
+        wait "$ACTIVE_SERVER_PID" 2>/dev/null || true
     fi
     if [ -n "$ACTIVE_KB_PID" ]; then
         kill "$ACTIVE_KB_PID" 2>/dev/null || true
+        wait "$ACTIVE_KB_PID" 2>/dev/null || true
     fi
     if [ -n "$ACTIVE_TMPHOME" ] && [ -d "$ACTIVE_TMPHOME" ]; then
         rm -rf "$ACTIVE_TMPHOME"

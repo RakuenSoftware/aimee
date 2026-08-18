@@ -382,6 +382,11 @@ else
     FAIL=$((FAIL + 1))
 fi
 kill "$TCP_SRV_PID" 2>/dev/null || true
+# Reap before removing its HOME. kill only requests exit, so without this the
+# server can still be writing under $TCP_HOME while rm -rf walks it, and rm
+# fails with ENOTEMPTY when a directory gains entries between unlinking its
+# children and removing it. Under 'set -e' that aborts the whole harness.
+wait "$TCP_SRV_PID" 2>/dev/null || true
 rm -rf "$TCP_HOME"
 
 # Rebuild only the thin client with a new build ID. The existing server should
