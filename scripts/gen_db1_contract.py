@@ -56,7 +56,7 @@ SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
-PAYLOADS = ("none", "state", "text", "int", "int64", "double")
+PAYLOADS = ("none", "state", "text", "int", "int64", "double", "struct")
 # A request carries a double for the same reason a reply does: a cost is a
 # number, and rounding it to an integer at the boundary would bill differently
 # on each side of it. The conversion is the one the reply already uses.
@@ -147,6 +147,16 @@ def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
     """
     grown = []
     for field in fields:
+        # A member that is itself a struct expands to its own members, spelled
+        # the way C spells them. Same trick as the array: every emitter that
+        # writes row.{name} keeps working because "outer.inner" IS that.
+        nested = field.get("fields")
+        if nested is not None and "repeat" not in field:
+            for member in nested:
+                inner = dict(member)
+                inner["name"] = f"{field['name']}.{member['name']}"
+                grown.append(inner)
+            continue
         repeat = field.get("repeat")
         if repeat is None:
             grown.append(field)
@@ -458,11 +468,23 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # A repeated value is a string unless the operation says it is a
             # row: "struct" names the type and "fields" its members, and the
             # frame then carries one group of cells per element.
-            rep = keys(request["repeated"],
-                       {"values", "count", "max_values", "struct", "fields"}
-                       if "struct" in request["repeated"]
-                       else {"values", "count", "max_values"},
-                       f"{name}.request.repeated")
+            allowed_rep = {"values", "count", "max_values"}
+            if "struct" in request["repeated"]:
+                allowed_rep |= {"struct", "fields"}
+            # "kind" says what one element is when it is not a string: a list of
+            # row ids crosses as numbers, and rendering them as text would be
+            # the same bytes with a looser contract.
+            if "kind" in request["repeated"]:
+                allowed_rep |= {"kind"}
+            rep = keys(request["repeated"], allowed_rep, f"{name}.request.repeated")
+            if "kind" in rep:
+                if str(rep["kind"]) not in ("int", "int64"):
+                    fail("request-repeated",
+                         f"{name} repeats {rep['kind']!r}; a repeated element is text unless "
+                         f"it is a number")
+                if "struct" in rep:
+                    fail("request-repeated",
+                         f"{name} repeats either a row or a bare value, not both")
             if "struct" in rep:
                 if not re.fullmatch(r"[a-z][a-z0-9_]*_t", str(rep["struct"])):
                     fail("request-repeated",
@@ -491,8 +513,11 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # A repeated STRING is a search's terms and stays small. A repeated
             # ROW is a bulk replace -- a provider's whole model list -- so it is
             # bounded by what the frame can hold rather than by that habit.
+            # A repeated STRING is a search's terms and stays small. A row or a
+            # list of ids is a bulk call, bounded by what the frame can hold
+            # rather than by that habit.
             integer(rep["max_values"], f"{name}.request.repeated.max_values",
-                    1, 1024 if "struct" in rep else 64)
+                    1, 1024 if ("struct" in rep or "kind" in rep) else 64)
 
         # A scoped operation must take its scoping key FIRST, because that key is
         # the boundary: DB1 rows belong to a conversation, session or repository,
@@ -553,7 +578,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # for a domain that returns 0/-1 instead. The ceiling is then
             # max_rows alone: there is no caller bound to clamp to.
             if "count" in reply["list"]:
-                allowed_list = (allowed_list | {"count"}) - {"bound"}
+                allowed_list = allowed_list | {"count"}
+                if "bound" not in reply["list"]:
+                    allowed_list = allowed_list - {"bound"}
             if "column" in reply["list"]:
                 allowed_list = allowed_list | {"column"}
             listed = keys(reply["list"], allowed_list, f"{name}.reply.list")
@@ -596,11 +623,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             if str(listed["out"]) not in params:
                 fail("reply-list", f"{name} list out {listed['out']!r} is not a C parameter")
             if "count" in listed:
-                if not listed.get("allocate"):
+                if not listed.get("allocate") and "bound" not in listed:
                     fail("reply-list",
-                         f"{name} reports its count through a parameter, which only a list "
-                         f"the callee allocates does: a caller-provided array is bounded by "
-                         f"the caller and the count is the return")
+                         f"{name} reports its count through a parameter and takes no bound, "
+                         f"which only a list the callee allocates can do")
                 if str(listed["count"]) not in params:
                     fail("reply-list",
                          f"{name} list count {listed['count']!r} is not a C parameter")
@@ -646,8 +672,22 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # sent, so it says how wide that buffer is. Nothing else in a reply
             # needs one: a struct member is as wide as the struct says, and a
             # column already declares its own.
+            nested_member = isinstance(declared, dict) and "fields" in declared
+            if nested_member:
+                if "struct" not in reply:
+                    fail("field-nested",
+                         f"{name} reply field {declared['name']!r} has members, which only a "
+                         f"struct member does")
+                if str(declared["type"]) != "struct":
+                    fail("field-nested",
+                         f"{name} reply field {declared['name']!r} has members, so it is "
+                         f"declared struct rather than {declared['type']!r}")
+                if not isinstance(declared["fields"], list) or not declared["fields"]:
+                    fail("field-nested",
+                         f"{name} nested member {declared['name']!r} declares no members")
             repeated_member = isinstance(declared, dict) and "repeat" in declared
-            allowed_field = ({"name", "type", "width"}
+            allowed_field = ({"name", "type", "fields"} if nested_member
+                             else {"name", "type", "width"}
                              if scalar_reply and isinstance(declared, dict) and "width" in declared
                              else {"name", "type", "repeat"} if repeated_member
                              else {"name", "type"})
@@ -682,6 +722,14 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                          f"{name} reply field {declared['name']!r} repeats, so it carries text")
                 integer(declared["repeat"], f"{name}.reply.fields[{position}].repeat", 2, 64)
             shape = keys(declared, allowed_field, f"{name}.reply.fields[{position}]")
+            if nested_member:
+                for at, member in enumerate(shape["fields"]):
+                    inner = keys(member, {"name", "type"},
+                                 f"{name}.reply.fields[{position}].fields[{at}]")
+                    if inner["type"] not in PAYLOADS or inner["type"] == "none":
+                        fail("field-nested",
+                             f"{name} nested member {inner['name']!r} type must be a payload")
+                continue
             if shape["type"] not in PAYLOADS or shape["type"] == "none":
                 fail("reply-payload",
                      f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
@@ -758,7 +806,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # declaring int64 beside it would be a second, disagreeing
             # statement about the same function.
             spelled = declared_return(root, str(operation["c_name"]))
-            wanted = ("int", "int64") if spelled == "int" else ("int64",)
+            # A cost is returned as a double, and rounding it at the boundary
+            # would bill differently on each side of it.
+            wanted = (("double",) if spelled == "double"
+                      else ("int", "int64") if spelled == "int" else ("int64",))
             if len(reply_fields) != 1 or str(reply_fields[0]["type"]) not in wanted:
                 fail("c-returns",
                      f"{name} hands back its return value, so its reply must declare "
@@ -1539,6 +1590,8 @@ static int read_result(int status, const char *value_out)
             declared_rep = dict(zip(inputs, params))
             declared_rep[str(repeated["values"])] = (
                 f"const {repeated['struct']} *{repeated['values']}" if "struct" in repeated
+                else f"const {'int' if repeated['kind'] == 'int' else 'int64_t'} "
+                     f"*{repeated['values']}" if "kind" in repeated
                 else f"const char *const *{repeated['values']}")
             declared_rep[str(repeated["count"])] = f"int {repeated['count']}"
             if listed:
@@ -1658,6 +1711,7 @@ static int read_result(int status, const char *value_out)
                 carried.append(local)
             else:
                 carried.append(source)
+        renders_numbers = False
         if repeated:
             # Fixed fields first, then the values. The stage recovers the count
             # by subtracting its own known arity from the frame's, so nothing
@@ -1676,6 +1730,7 @@ static int read_result(int status, const char *value_out)
                 # one buffer per element rather than one reused buffer.
                 numeric_members = [i for i, (_, k) in enumerate(row_members) if k in NUMERIC]
                 if numeric_members:
+                    renders_numbers = True
                     body.append(f"   char (*wire_rendered)[{NUMERIC_TEXT}] = "
                                 f"malloc((size_t){repeated['count']} * "
                                 f"{len(numeric_members)}u * sizeof *wire_rendered);")
@@ -1695,6 +1750,21 @@ static int read_result(int status, const char *value_out)
                         slot += 1
                     else:
                         body.append(f"      fields[{cell}] = {repeated['values']}[at].{member};")
+                body.append("   }")
+            elif "kind" in repeated:
+                # One rendered number per element, in storage that outlives the
+                # loop: the frame holds pointers, not copies.
+                renders_numbers = True
+                body.append(f"   char (*wire_rendered)[{NUMERIC_TEXT}] = "
+                            f"malloc((size_t){repeated['count']} * sizeof *wire_rendered);")
+                body.append("   if (!wire_rendered)")
+                body.append("      return -1;")
+                spec, cast = numeric_format(str(repeated["kind"]))
+                body.append(f"   for (int at = 0; at < {repeated['count']}; ++at)")
+                body.append("   {")
+                body.append(f"      snprintf(wire_rendered[at], {NUMERIC_TEXT}, \"{spec}\", "
+                            f"{cast}{repeated['values']}[at]);")
+                body.append(f"      fields[{base} + at] = wire_rendered[at];")
                 body.append("   }")
             else:
                 body.append(f"   for (int at = 0; at < {repeated['count']}; ++at)")
@@ -1722,7 +1792,10 @@ static int read_result(int status, const char *value_out)
                         "1, NULL);")
             body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
             body.append("      return -1;")
-            body.append(f"   return {numeric_parse('int64', 'slot0')};")
+            spelled = declared_return(root, str(operation["c_name"])).strip()
+            body.append(f"   return ({spelled})" +
+                        ("strtod(slot0, NULL);" if spelled == "double"
+                         else "strtoll(slot0, NULL, 10);"))
         elif returns_text_with_scalars:
             cap = int(reply["fields"][0].get("alloc", reply["max_bytes"]))
             body.append(f"   char *value = malloc({cap}u);")
@@ -2088,8 +2161,16 @@ static int read_result(int status, const char *value_out)
             body.append(f"   (void)call_stage({op_symbol}, fields, {arity}, "
                         f"NULL, NULL, 0, NULL);")
         else:
-            body.append(f"   return write_result(call_stage({op_symbol}, fields, {arity}, "
-                        f"NULL, NULL, 0, NULL));")
+            if renders_numbers:
+                # The frame points into wire_rendered, so it is released after
+                # the call rather than at the end of the loop that filled it.
+                body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, "
+                            f"NULL, NULL, 0, NULL);")
+                body.append("   free(wire_rendered);")
+                body.append("   return write_result(wire_status);")
+            else:
+                body.append(f"   return write_result(call_stage({op_symbol}, fields, {arity}, "
+                            f"NULL, NULL, 0, NULL));")
         body.append("}")
         out.append("\n" + "\n".join(body) + "\n")
     out.append("\n/* clang-format on */\n")
@@ -2425,10 +2506,14 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind == "double" else "parse_int64")
-                    parse.append(f"      if ({conv}(field[{position}], &row.{member}) != 0)\n"
+                    ctype = ("int" if kind == "int"
+                             else "double" if kind == "double" else "int64_t")
+                    parse.append(f"      {ctype} member_{position} = 0;\n"
+                                 f"      if ({conv}(field[{position}], &member_{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
                                  f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
-                                 f"      }}\n")
+                                 f"      }}\n"
+                                 f"      row.{member} = member_{position};\n")
                 else:
                     if member in in_struct_pointers:
                         # A const char * member is assigned, not copied into:
@@ -2462,9 +2547,18 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         returns_id = operation.get("c_returns") == "int64"
         returns_text = operation.get("c_returns") == "text"
         if returns_id:
-            tail.append("      rc = (produced >= 0) ? 0 : -1;\n")
-            tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
-                        "(long long)produced);\n")
+            returned = declared_return(root, str(operation["c_name"])).strip()
+            if returned == "double":
+                # A double has no negative failure value to test: the domain
+                # reports trouble by answering zero, which is what it always
+                # did, so the call happening is the success.
+                tail.append("      rc = 0;\n")
+                tail.append('      snprintf(row_text[0], sizeof row_text[0], "%.17g", '
+                            "(double)produced);\n")
+            else:
+                tail.append("      rc = (produced >= 0) ? 0 : -1;\n")
+                tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
+                            "(long long)produced);\n")
             tail.append("      row_slots[0] = row_text[0];\n")
             tail.append("      rows = row_slots;\n      row_count = 1u;\n")
         beside = 1 if (returns_text and scalars) else 0
@@ -2715,6 +2809,29 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 tail.append("      rows = row_slots;\n      row_count = 2u;\n")
                 tail.append("      rc = 0;\n")
         rep_span = len(repeated.get("fields", [])) if repeated else 0
+        if repeated and "kind" in repeated and not listed:
+            # A bare array of numbers: decoded into storage the stage owns and
+            # handed over as the array the domain has always taken.
+            base = len(request["fields"])
+            ctype = "int" if str(repeated["kind"]) == "int" else "int64_t"
+            conv = "parse_int" if str(repeated["kind"]) == "int" else "parse_int64"
+            parse.append(f"      int repeated_rows = (int)(count - {base}u);\n"
+                         f"      {ctype} *repeated_held = "
+                         f"calloc((size_t)repeated_rows + 1u, sizeof *repeated_held);\n"
+                         f"      if (!repeated_held)\n      {{\n         free(scratch);\n"
+                         f"         return AIMEE_MODULE_STATUS_INTERNAL;\n      }}\n"
+                         f"      domain_rows = repeated_held;\n"
+                         f"      for (int at = 0; at < repeated_rows; ++at)\n      {{\n"
+                         f"         if ({conv}(field[{base} + at], &repeated_held[at]) != 0)\n"
+                         f"         {{\n            free(scratch);\n"
+                         f"            return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+                         f"         }}\n      }}\n")
+            ordered = dict(zip([p for p in operation["c_params"]
+                                if p not in {str(repeated["values"]), str(repeated["count"])}],
+                               args))
+            ordered[str(repeated["values"])] = "repeated_held"
+            ordered[str(repeated["count"])] = "repeated_rows"
+            args = [ordered[p] for p in operation["c_params"]]
         if repeated and rep_span and not listed:
             # Rebuild the rows the client flattened, hand the domain the array
             # it has always taken, and give it back afterwards.
@@ -2756,7 +2873,8 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         # changed.
         # The ceiling counts CELLS, and a repeated row is several cells each.
         ceiling = int(repeated["max_values"]) * (rep_span or 1) if repeated else 0
-        check = (f"      if (count < {arity}u || count > {arity}u + {ceiling}u)\n"
+        check = ((f"      if (count > {ceiling}u)\n" if not arity
+                  else f"      if (count < {arity}u || count > {arity}u + {ceiling}u)\n")
                  if repeated else f"      if (count != {arity}u)\n")
         if rep_span:
             # A frame that is not a whole number of rows is not this
@@ -2772,7 +2890,8 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 + "".join(parse)
                 + (f"      char *produced = {operation['c_name']}({', '.join(args)});\n"
                    "      rc = produced ? 1 : 0;\n" if returns_text
-                   else f"      int64_t produced = {operation['c_name']}({', '.join(args)});\n"
+                   else f"      {declared_return(root, str(operation['c_name'])).strip()} "
+                        f"produced = {operation['c_name']}({', '.join(args)});\n"
                    if returns_id
                    # A void domain has no rc to take. It reports failure the
                    # only way it ever did -- by not having happened -- so the

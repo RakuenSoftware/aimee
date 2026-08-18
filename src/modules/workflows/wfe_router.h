@@ -3,7 +3,7 @@
  * The PURE decision core: a deterministic prefilter + a routing table over an
  * injected catalog. The catalog enumeration (globbing $AIMEE_HOME/workflows),
  * the sampled + hard-bounded LLM classifier call, the advisory logging
- * (ie_record), and the chat-ingress hook are integration layers built ON TOP of
+ * (db1_interaction_event_record), and the chat-ingress hook are integration layers built ON TOP of
  * this core -- kept out of here so the decision logic is unit-testable and has
  * no I/O, no LLM, no filesystem.
  *

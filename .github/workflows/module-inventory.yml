@@ -131,8 +131,18 @@ jobs:
       # and fails until the baseline is refrozen, and THAT diff is the useful
       # artifact: one review of everything a release changes on the public
       # surface, instead of nineteen refreezes read by nobody.
+      # Integration bases, not just `testing`: agent/<topic> and aimee/feat/<id>
+      # are stacked onto the same way (see ci.yml's pull_request branch list), so
+      # a sub-PR based on one hit this release gate while its eventual base does
+      # not. Both escapes were wrong -- re-freeze, which the refusal below then
+      # blocks on the way to `testing`, or leave the PR red.
       - name: Enforce refactor surface baselines
-        if: github.base_ref != 'testing' && github.ref != 'refs/heads/testing'
+        if: >-
+          !startsWith(github.base_ref, 'agent/')
+          && !startsWith(github.base_ref, 'aimee/feat/')
+          && github.base_ref != 'testing'
+          && github.ref != 'refs/heads/testing'
+          && !startsWith(github.ref, 'refs/heads/agent/')
         run: python3 -I -S scripts/refactor_baselines.py
       # The surface baseline is a RELEASE gate, enforced on `main` by the step
       # above and deliberately not here. That makes re-freezing it on a `testing`
@@ -149,7 +159,10 @@ jobs:
       #
       # Adding a public header therefore does not require touching this file.
       - name: Refuse a baseline re-freeze on the integration branch
-        if: github.base_ref == 'testing'
+        if: >-
+          github.base_ref == 'testing'
+          || startsWith(github.base_ref, 'agent/')
+          || startsWith(github.base_ref, 'aimee/feat/')
         run: |
           set -eu
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
@@ -158,7 +171,8 @@ jobs:
             exit 0
           fi
           cat >&2 <<'MSG'
-          ::error::This PR changes tests/baselines/refactor/index.json, and it targets `testing`.
+          ::error::This PR changes tests/baselines/refactor/index.json, and it targets the
+          integration branch `${{ github.base_ref }}`.
 
           The public-surface baseline is a release question. It gates `main`, not this
           branch, so re-freezing it here achieves nothing and collides with every other
@@ -166,10 +180,10 @@ jobs:
 
           Revert the file and push again:
 
-              git checkout origin/testing -- tests/baselines/refactor/index.json
+              git checkout "origin/${{ github.base_ref }}" -- tests/baselines/refactor/index.json
 
           You do NOT need to re-freeze after adding or changing a public header. The
-          baseline is expected to be stale on `testing`; the promotion PR into `main`
+          baseline is expected to be stale on an integration branch; the promotion PR into `main`
           re-freezes it once, and that single diff is the review of what the release
           changed on the public surface.
           MSG

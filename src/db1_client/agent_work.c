@@ -308,7 +308,7 @@ long long db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_INSERT, fields, 11, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (long long)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_log_list_recent(db1_agent_log_display_t *out, int max)
@@ -1085,7 +1085,7 @@ int db1_coord_job_create(int plan_id, int max_concurrent)
    int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_CREATE, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role, const char *prompt, const char *cwd, const char *persona)
@@ -1101,7 +1101,7 @@ int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, cons
    int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_ADD, fields, 7, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_task_t *out)
@@ -1651,7 +1651,7 @@ int db1_cron_job_record_run(const char *job_id, const char *status, int silent, 
    int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_RECORD_RUN, fields, 7, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 char *db1_cron_jobs_list_json()

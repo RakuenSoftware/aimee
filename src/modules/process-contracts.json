@@ -684,6 +684,11 @@
           "id": 7,
           "name": "db1-runtime",
           "event_kind": 11783
+        },
+        {
+          "id": 8,
+          "name": "db1-telemetry",
+          "event_kind": 11784
         }
       ]
     }
