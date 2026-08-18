@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "6b013d14a79d9b095794933c4275e757921467c2ab4bea3c5965fa5b077f277a"
+const ContractSHA256 = "1bbb26a27542420f16c8d43274509b7faf4aec1a6699c65cbe9e3eaea7252fea"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -158,6 +158,12 @@ const StageHealthRecord = FamilyMemory
 const OperationHealthRecord uint32 = 14
 const HealthRecordConflictWindowDays uint32 = 1
 const HealthRecordCounterMax uint32 = 2147483647
+const EventHealthRetention = EventMemory
+const StageHealthRetention = FamilyMemory
+const OperationHealthRetention uint32 = 15
+const HealthRetentionSnapshotDays uint32 = 90
+const HealthRetentionContradictionDays uint32 = 90
+const HealthRetentionMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -995,6 +1001,57 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// EncodeHealthRetentionRequest emits the empty request for the complete fixed policy.
+func EncodeHealthRetentionRequest() []byte {
+	header, err := EncodeRequestHeader(OperationHealthRetention, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeHealthRetentionRequest validates the exact empty operation envelope.
+func DecodeHealthRetentionRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthRetention || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeHealthRetentionReply emits both bounded deletion counts.
+func EncodeHealthRetentionReply(snapshotsDeleted, contradictionsDeleted uint32) ([]byte, error) {
+	if snapshotsDeleted > HealthRetentionMax || contradictionsDeleted > HealthRetentionMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationHealthRetention, ResultOK, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, snapshotsDeleted)
+	binary.LittleEndian.PutUint32(payload[4:], contradictionsDeleted)
+	return reply, nil
+}
+
+// DecodeHealthRetentionReply validates the operation and both bounded counts.
+func DecodeHealthRetentionReply(reply []byte) (uint32, uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthRetention || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	snapshots := binary.LittleEndian.Uint32(payload)
+	contradictions := binary.LittleEndian.Uint32(payload[4:])
+	if snapshots > HealthRetentionMax || contradictions > HealthRetentionMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return snapshots, contradictions, nil
 }
 
 // EncodeHealthRecordRequest emits the three bounded health-cycle counters.

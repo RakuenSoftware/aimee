@@ -420,6 +420,28 @@ class ContractTests(unittest.TestCase):
             ["wrong_operation", "unsupported_result", "unexpected_payload", "short", "long"],
         )
 
+    def test_health_retention_vectors_cover_both_halves(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][24]
+        self.assertEqual(operation["name"], "health_retention")
+        self.assertEqual(operation["request"]["snapshot_retention_days"], 90)
+        self.assertEqual(operation["request"]["contradiction_retention_days"], 90)
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["snapshots_deleted"], row["contradictions_deleted"])
+             for row in operation["reply"]["positive"]],
+            [(0, 11, 3)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "snapshots_deleted_too_large", "contradictions_deleted_too_large",
+             "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -898,6 +920,28 @@ class ContractTests(unittest.TestCase):
             # ...and no other operation may claim that exemption.
             (lambda value: value["operations"][22].__setitem__("idempotency", "unsafe"),
              "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_health_retention_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][24].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][24].__setitem__("results", ["ok", "not_found"]),
+             "operation-results"),
+            (lambda value: value["operations"][24]["request"]["policy"].__setitem__(
+                "snapshot_retention_days", 30), "health-retention-request"),
+            (lambda value: value["operations"][24]["request"]["policy"].__setitem__(
+                "contradiction_retention_days", 30), "health-retention-request"),
+            (lambda value: value["operations"][24]["reply"]["fields"][1].__setitem__(
+                "maximum", 0xffffffff), "health-retention-reply"),
+            # Dropping a half would let one prune report as the whole action.
+            (lambda value: value["operations"][24]["reply"]["fields"].pop(),
+             "health-retention-reply"),
+            (lambda value: value["operations"][24]["c_symbols"].pop(),
+             "operation-c-symbols"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

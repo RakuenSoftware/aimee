@@ -264,6 +264,12 @@ int main(int argc, char **argv)
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
+   uint32_t snapshots_deleted = 99, contradictions_deleted = 99;
+   assert(aimee_db2_health_retention_call(call_client, &client, 9036, 0, &snapshots_deleted,
+                                          &contradictions_deleted, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   assert(snapshots_deleted == 0 && contradictions_deleted == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

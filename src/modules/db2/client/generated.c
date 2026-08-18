@@ -445,6 +445,36 @@ aimee_module_call_result_t aimee_db2_health_record_call(aimee_db2_call_fn call, 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_health_retention_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, uint32_t *snapshots_deleted,
+                                uint32_t *contradictions_deleted,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (snapshots_deleted)
+      *snapshots_deleted = 0u;
+   if (contradictions_deleted)
+      *contradictions_deleted = 0u;
+   if (!call || !snapshots_deleted || !contradictions_deleted)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_retention_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_RETENTION, AIMEE_DB2_STAGE_HEALTH_RETENTION,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_retention_reply_decode(response, response_len, snapshots_deleted,
+                                               contradictions_deleted) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,

@@ -49,6 +49,8 @@ typedef struct
    int (*count_recent_conflicts)(int days);
    void (*health_record)(int total_memories, int contradictions_detected, int promotions,
                          int demotions, int expirations);
+   int (*prune_health)(int days);
+   int (*prune_contradictions)(int days);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -101,6 +103,8 @@ static int health_record_calls;
 static int health_record_total;
 static int health_record_contradictions;
 static int health_record_promotions;
+static int prune_health_calls;
+static int prune_contradictions_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -410,6 +414,38 @@ static void health_record(int total_memories, int contradictions_detected, int p
    health_record_impl(total_memories, contradictions_detected, promotions, demotions, expirations);
 }
 
+static int prune_health_impl(int days)
+{
+   prune_health_calls++;
+   return days == AIMEE_DB2_HEALTH_RETENTION_SNAPSHOT_DAYS ? 11 : -1;
+}
+
+int db2_memory_health_prune_old(int days)
+{
+   return prune_health_impl(days);
+}
+
+static int prune_health(int days)
+{
+   return prune_health_impl(days);
+}
+
+static int prune_contradictions_impl(int days)
+{
+   prune_contradictions_calls++;
+   return days == AIMEE_DB2_HEALTH_RETENTION_CONTRADICTION_DAYS ? 3 : -1;
+}
+
+int db2_memory_health_prune_old_contradictions(int days)
+{
+   return prune_contradictions_impl(days);
+}
+
+static int prune_contradictions(int days)
+{
+   return prune_contradictions_impl(days);
+}
+
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
                     long *stuck, long *poisoned)
 {
@@ -681,6 +717,8 @@ int main(void)
        .count_memories = count_memories,
        .count_recent_conflicts = count_recent_conflicts,
        .health_record = health_record,
+       .prune_health = prune_health,
+       .prune_contradictions = prune_contradictions,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -805,6 +843,13 @@ int main(void)
           AIMEE_MODULE_CALL_OK);
    assert(health_record_calls == 1 && health_record_total == 512 &&
           health_record_contradictions == 6 && health_record_promotions == 4);
+
+   uint32_t snapshots_deleted = 99, contradictions_deleted = 99;
+   assert(aimee_db2_health_retention_call(call_client, &client, 7034, 0, &snapshots_deleted,
+                                          &contradictions_deleted, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   assert(snapshots_deleted == 11 && contradictions_deleted == 3 && prune_health_calls == 1 &&
+          prune_contradictions_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -35,23 +35,25 @@ type wireBaseline struct {
 	Operations []struct {
 		Name    string `json:"name"`
 		Request struct {
-			Positive           string `json:"positive"`
-			SourceSession      string `json:"source_session"`
-			Key                string `json:"key"`
-			Kind               string `json:"kind"`
-			TierA              string `json:"tier_a"`
-			TierB              string `json:"tier_b"`
-			MemoryID           uint64 `json:"memory_id"`
-			HasValue           uint32 `json:"has_value"`
-			ValueBits          uint64 `json:"value_bits"`
-			ThresholdBits      uint64 `json:"threshold_bits"`
-			LowThresholdBits   uint64 `json:"low_threshold_bits"`
-			MaximumIDs         uint32 `json:"maximum_ids"`
-			Promotions         uint32 `json:"promotions"`
-			Demotions          uint32 `json:"demotions"`
-			Expirations        uint32 `json:"expirations"`
-			ConflictWindowDays uint32 `json:"conflict_window_days"`
-			Negative           []struct {
+			Positive                   string `json:"positive"`
+			SourceSession              string `json:"source_session"`
+			Key                        string `json:"key"`
+			Kind                       string `json:"kind"`
+			TierA                      string `json:"tier_a"`
+			TierB                      string `json:"tier_b"`
+			MemoryID                   uint64 `json:"memory_id"`
+			HasValue                   uint32 `json:"has_value"`
+			ValueBits                  uint64 `json:"value_bits"`
+			ThresholdBits              uint64 `json:"threshold_bits"`
+			LowThresholdBits           uint64 `json:"low_threshold_bits"`
+			MaximumIDs                 uint32 `json:"maximum_ids"`
+			Promotions                 uint32 `json:"promotions"`
+			Demotions                  uint32 `json:"demotions"`
+			Expirations                uint32 `json:"expirations"`
+			ConflictWindowDays         uint32 `json:"conflict_window_days"`
+			SnapshotRetentionDays      uint32 `json:"snapshot_retention_days"`
+			ContradictionRetentionDays uint32 `json:"contradiction_retention_days"`
+			Negative                   []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
 			} `json:"negative"`
@@ -68,6 +70,8 @@ type wireBaseline struct {
 				LowEffectivenessCount uint32   `json:"low_effectiveness_count"`
 				HighImpactCount       uint32   `json:"high_impact_count"`
 				MemoryIDs             []uint64 `json:"memory_ids"`
+				SnapshotsDeleted      uint32   `json:"snapshots_deleted"`
+				ContradictionsDeleted uint32   `json:"contradictions_deleted"`
 				Exists                uint32   `json:"exists"`
 				Found                 uint32   `json:"found"`
 				ID                    uint64   `json:"id"`
@@ -186,7 +190,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 24 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 25 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -209,7 +213,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[20].Name != "effectiveness_demote" ||
 		baseline.Operations[21].Name != "effectiveness_stats" ||
 		baseline.Operations[22].Name != "l2_memory_ids" ||
-		baseline.Operations[23].Name != "health_record" {
+		baseline.Operations[23].Name != "health_record" ||
+		baseline.Operations[24].Name != "health_retention" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -732,6 +737,52 @@ func TestHealthRecordMatchesEverySharedCVector(t *testing.T) {
 		if _, err := EncodeHealthRecordRequest(counters[0], counters[1], counters[2]); !errors.Is(err, ErrMalformedEnvelope) {
 			t.Fatalf("counter %d past its bound encoded: %v", index, err)
 		}
+	}
+}
+
+func TestHealthRetentionMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[24]
+	if operation.Request.SnapshotRetentionDays != HealthRetentionSnapshotDays ||
+		operation.Request.ContradictionRetentionDays != HealthRetentionContradictionDays {
+		t.Fatalf("retention policy = (%d, %d), generated = (%d, %d)",
+			operation.Request.SnapshotRetentionDays, operation.Request.ContradictionRetentionDays,
+			HealthRetentionSnapshotDays, HealthRetentionContradictionDays)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeHealthRetentionRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeHealthRetentionRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeHealthRetentionRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeHealthRetentionReply(vector.SnapshotsDeleted, vector.ContradictionsDeleted)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		snapshots, contradictions, err := DecodeHealthRetentionReply(got)
+		if err != nil || snapshots != vector.SnapshotsDeleted ||
+			contradictions != vector.ContradictionsDeleted {
+			t.Fatalf("decode = (%d, %d, %v)", snapshots, contradictions, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		snapshots, contradictions, err := DecodeHealthRetentionReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || snapshots != 0 || contradictions != 0 {
+			t.Fatalf("negative reply %s = (%d, %d, %v)", vector.Mutation, snapshots, contradictions, err)
+		}
+	}
+	// Each half is bounded independently.
+	if _, err := EncodeHealthRetentionReply(HealthRetentionMax+1, 0); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("snapshot count past its bound encoded: %v", err)
+	}
+	if _, err := EncodeHealthRetentionReply(0, HealthRetentionMax+1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("contradiction count past its bound encoded: %v", err)
 	}
 }
 

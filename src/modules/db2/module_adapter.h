@@ -31,6 +31,9 @@ typedef struct
    int (*count_recent_conflicts)(int days);
    void (*health_record)(int total_memories, int contradictions_detected, int promotions,
                          int demotions, int expirations);
+   /* health_retention runs both halves; neither is reachable on its own. */
+   int (*prune_health)(int days);
+   int (*prune_contradictions)(int days);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

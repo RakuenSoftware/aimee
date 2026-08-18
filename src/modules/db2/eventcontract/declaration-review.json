@@ -1486,18 +1486,18 @@
     {
       "symbol": "db2_memory_health_prune_old",
       "signature_sha256": "72dc451b17a01e95eb74f03a61f51af72057b38fdbe34f82a9db392a02b4a760",
-      "disposition": "private-db2",
+      "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "Pruning old health snapshots is one private half of the complete memory health-retention action and must not expose a partially pruned state across the bus."
+      "reason": "The typed memory.health_retention operation applies the complete fixed snapshot and contradiction retention policy in one action, so neither half is reachable alone and no partially pruned state is exposed across the bus."
     },
     {
       "symbol": "db2_memory_health_prune_old_contradictions",
       "signature_sha256": "ae9eda0fb8546c7a1c10b2665718519f24d19cde1cb250f615b2cf48c8c0d2a5",
-      "disposition": "private-db2",
+      "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "Pruning old contradiction rows is one private half of the complete memory health-retention action and must run with health-snapshot pruning inside DB2."
+      "reason": "The typed memory.health_retention operation runs contradiction pruning together with health-snapshot pruning under one fixed policy, so this half is never invoked on its own."
     },
     {
       "symbol": "db2_memory_health_record",

@@ -688,6 +688,32 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 15,
+      "name": "health_retention",
+      "wire_format": "db2-envelope-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Health snapshot and contradiction retention deletes canonical relational DB2 bookkeeping rows and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_health_prune_old", "db2_memory_health_prune_old_contradictions"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"snapshot_retention_days": 90, "contradiction_retention_days": 90}
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "snapshots_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "contradictions_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        ]
+      }
     }
   ]
 }

@@ -915,9 +915,41 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
                     reply["fields"] != []):
                 fail("health-record-reply", "reply must acknowledge the cycle without a payload")
+        elif key == ("memory", 15) and name == "health_retention" and \
+                operation["wire_format"] == "db2-envelope-u32-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_health_prune_old",
+                                          "db2_memory_health_prune_old_contradictions"]:
+                fail("operation-c-symbols",
+                     "health_retention C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health_retention results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "health_retention.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"snapshot_retention_days": 90,
+                                          "contradiction_retention_days": 90}):
+                fail("health-retention-request",
+                     "request must carry no payload and use the complete fixed retention policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "health_retention.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("health-retention-reply", "reply must report both halves of the action")
+            counts = [_keys(field, {"name", "type", "minimum", "maximum"},
+                            f"health_retention.reply.fields[{index}]")
+                      for index, field in enumerate(reply_fields)]
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    counts != [{"name": name_, "type": "u32", "minimum": 0,
+                                "maximum": 0x7fffffff}
+                               for name_ in ("snapshots_deleted", "contradictions_deleted")]):
+                fail("health-retention-reply",
+                     "reply must contain the two bounded deletion counts")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 24 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 25 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -925,9 +957,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "session_l2_count", "key_exists", "find_id_by_key_kind",
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
-            "health_record"]:
+            "health_record", "health_retention"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-four supported operations exactly once")
+             "the partial generator requires the twenty-five supported operations exactly once")
     return catalog
 
 
@@ -1075,6 +1107,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_stats = catalog["operations"][21]
     l2_memory_ids = catalog["operations"][22]
     health_record = catalog["operations"][23]
+    health_retention = catalog["operations"][24]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1332,6 +1365,13 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     health_record_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(health_record["id"]), 0, b"",
+    )
+    health_retention_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(health_retention["id"]), 0, b"",
+    )
+    health_retention_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(health_retention["id"]), 0,
+        _put_u32(11) + _put_u32(3),
     )
 
     value = {
@@ -2456,6 +2496,46 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (health_record_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": health_retention["family"],
+            "id": health_retention["id"],
+            "name": health_retention["name"],
+            "request": {
+                "positive": health_retention_request.hex(),
+                "snapshot_retention_days":
+                    health_retention["request"]["policy"]["snapshot_retention_days"],
+                "contradiction_retention_days":
+                    health_retention["request"]["policy"]["contradiction_retention_days"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(health_retention_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(health_retention_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": health_retention_request[:-1].hex()},
+                    {"mutation": "long", "hex": (health_retention_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "snapshots_deleted": 11, "contradictions_deleted": 3,
+                     "hex": health_retention_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(health_retention_ok, 8, 14).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(health_retention_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(health_retention["id"]), 0, b"").hex()},
+                    {"mutation": "snapshots_deleted_too_large", "hex":
+                     mutate_u32(health_retention_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "contradictions_deleted_too_large", "hex":
+                     mutate_u32(health_retention_ok, ENVELOPE_HEADER_LEN + 4, 0x80000000).hex()},
+                    {"mutation": "short", "hex": health_retention_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (health_retention_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2492,6 +2572,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_stats = catalog["operations"][21]
     l2_memory_ids = catalog["operations"][22]
     health_record = catalog["operations"][23]
+    health_retention = catalog["operations"][24]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -2817,6 +2898,21 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{health_record['request']['policy']['conflict_window_days']}"),
         ("AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX",
          f"{health_record['request']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_HEALTH_RETENTION", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HEALTH_RETENTION", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HEALTH_RETENTION", f"{health_retention['id']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN",
+         f"{health_retention['request']['encoded_size']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN",
+         f"{health_retention['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_ERROR_LEN",
+         f"{health_retention['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_SNAPSHOT_DAYS",
+         f"{health_retention['request']['policy']['snapshot_retention_days']}"),
+        ("AIMEE_DB2_HEALTH_RETENTION_CONTRADICTION_DAYS",
+         f"{health_retention['request']['policy']['contradiction_retention_days']}"),
+        ("AIMEE_DB2_HEALTH_RETENTION_MAX",
+         f"{health_retention['reply']['fields'][0]['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -4108,6 +4204,70 @@ static inline int aimee_db2_health_record_reply_decode(const uint8_t *input, siz
               : -1;
 }}
 
+static inline int aimee_db2_health_retention_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_RETENTION, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_health_retention_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_RETENTION &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_health_retention_reply_encode(uint32_t snapshots_deleted,
+                                                          uint32_t contradictions_deleted,
+                                                          uint8_t *output, size_t capacity,
+                                                          uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || snapshots_deleted > AIMEE_DB2_HEALTH_RETENTION_MAX ||
+       contradictions_deleted > AIMEE_DB2_HEALTH_RETENTION_MAX ||
+       capacity < AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_RETENTION, AIMEE_DB2_RESULT_OK, 8u,
+                                     output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, snapshots_deleted);
+   aimee_db2_put_u32(payload + 4u, contradictions_deleted);
+   *output_len = AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_health_retention_reply_decode(const uint8_t *input, size_t input_len,
+                                                          uint32_t *snapshots_deleted,
+                                                          uint32_t *contradictions_deleted)
+{{
+   if (snapshots_deleted)
+      *snapshots_deleted = 0u;
+   if (contradictions_deleted)
+      *contradictions_deleted = 0u;
+   if (!snapshots_deleted || !contradictions_deleted)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_RETENTION ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t snapshots = aimee_db2_get_u32(payload);
+   uint32_t contradictions = aimee_db2_get_u32(payload + 4u);
+   if (snapshots > AIMEE_DB2_HEALTH_RETENTION_MAX ||
+       contradictions > AIMEE_DB2_HEALTH_RETENTION_MAX)
+      return -1;
+   *snapshots_deleted = snapshots;
+   *contradictions_deleted = contradictions;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -5029,6 +5189,11 @@ extern "C"
        uint32_t promotions, uint32_t demotions, uint32_t expirations,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_health_retention_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *snapshots_deleted, uint32_t *contradictions_deleted,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -5526,6 +5691,36 @@ aimee_module_call_result_t aimee_db2_health_record_call(aimee_db2_call_fn call, 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_health_retention_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, uint32_t *snapshots_deleted,
+                                uint32_t *contradictions_deleted,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (snapshots_deleted)
+      *snapshots_deleted = 0u;
+   if (contradictions_deleted)
+      *contradictions_deleted = 0u;
+   if (!call || !snapshots_deleted || !contradictions_deleted)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_retention_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_RETENTION, AIMEE_DB2_STAGE_HEALTH_RETENTION,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_retention_reply_decode(response, response_len, snapshots_deleted,
+                                               contradictions_deleted) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -5789,6 +5984,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_stats = catalog["operations"][21]
     l2_memory_ids = catalog["operations"][22]
     health_record = catalog["operations"][23]
+    health_retention = catalog["operations"][24]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -5948,6 +6144,12 @@ const StageHealthRecord = FamilyMemory
 const OperationHealthRecord uint32 = {health_record['id']}
 const HealthRecordConflictWindowDays uint32 = {health_record['request']['policy']['conflict_window_days']}
 const HealthRecordCounterMax uint32 = {health_record['request']['fields'][0]['maximum']}
+const EventHealthRetention = EventMemory
+const StageHealthRetention = FamilyMemory
+const OperationHealthRetention uint32 = {health_retention['id']}
+const HealthRetentionSnapshotDays uint32 = {health_retention['request']['policy']['snapshot_retention_days']}
+const HealthRetentionContradictionDays uint32 = {health_retention['request']['policy']['contradiction_retention_days']}
+const HealthRetentionMax uint32 = {health_retention['reply']['fields'][0]['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -6783,6 +6985,57 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// EncodeHealthRetentionRequest emits the empty request for the complete fixed policy.
+func EncodeHealthRetentionRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationHealthRetention, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeHealthRetentionRequest validates the exact empty operation envelope.
+func DecodeHealthRetentionRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthRetention || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeHealthRetentionReply emits both bounded deletion counts.
+func EncodeHealthRetentionReply(snapshotsDeleted, contradictionsDeleted uint32) ([]byte, error) {{
+	if snapshotsDeleted > HealthRetentionMax || contradictionsDeleted > HealthRetentionMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationHealthRetention, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, snapshotsDeleted)
+	binary.LittleEndian.PutUint32(payload[4:], contradictionsDeleted)
+	return reply, nil
+}}
+
+// DecodeHealthRetentionReply validates the operation and both bounded counts.
+func DecodeHealthRetentionReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthRetention || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	snapshots := binary.LittleEndian.Uint32(payload)
+	contradictions := binary.LittleEndian.Uint32(payload[4:])
+	if snapshots > HealthRetentionMax || contradictions > HealthRetentionMax {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return snapshots, contradictions, nil
 }}
 
 // EncodeHealthRecordRequest emits the three bounded health-cycle counters.

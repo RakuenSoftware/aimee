@@ -132,6 +132,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .count_memories = db2_memory_health_count_memories,
        .count_recent_conflicts = db2_memory_health_count_recent_conflicts,
        .health_record = db2_memory_health_record,
+       .prune_health = db2_memory_health_prune_old,
+       .prune_contradictions = db2_memory_health_prune_old_contradictions,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -443,6 +445,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_health_record_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_health_retention_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->prune_health || !backend->prune_contradictions)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int snapshots = backend->prune_health(AIMEE_DB2_HEALTH_RETENTION_SNAPSHOT_DAYS);
+         int contradictions =
+             backend->prune_contradictions(AIMEE_DB2_HEALTH_RETENTION_CONTRADICTION_DAYS);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (snapshots < 0 || snapshots > (int)AIMEE_DB2_HEALTH_RETENTION_MAX ||
+             contradictions < 0 || contradictions > (int)AIMEE_DB2_HEALTH_RETENTION_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_health_retention_reply_encode((uint32_t)snapshots, (uint32_t)contradictions,
+                                                     response_body, response_capacity,
+                                                     response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
