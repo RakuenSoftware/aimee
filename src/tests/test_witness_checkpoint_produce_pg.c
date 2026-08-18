@@ -23,6 +23,7 @@
 #include "modules/vault/vault_witness_checkpoint.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+#include "vault_witness_provider_fixture.h"
 
 static void append_record(void *conn, const char *sid)
 {
@@ -44,6 +45,31 @@ typedef struct
    int schema_ok;
    int tables_ok;
 } health_probe_result_t;
+
+static int invalid_digest(const vault_witness_checkpoint_t *checkpoint, uint8_t digest[32])
+{
+   (void)checkpoint;
+   memset(digest, 0xa5, 32);
+   return -1;
+}
+
+static int invalid_encode(const vault_witness_checkpoint_t *checkpoint, uint8_t *out, size_t cap,
+                          size_t *out_len)
+{
+   (void)checkpoint;
+   memset(out, 0xa5, cap);
+   *out_len = cap + 1;
+   return 0;
+}
+
+static int invalid_verify(const vault_witness_checkpoint_t *checkpoint,
+                          const vault_witness_anchor_t *anchors, size_t anchor_count)
+{
+   (void)checkpoint;
+   (void)anchors;
+   (void)anchor_count;
+   return 99;
+}
 
 static void *run_health_probe(void *arg)
 {
@@ -83,6 +109,35 @@ static void assert_health_probe_uses_caller_connection(void *owner_conn)
 
 int main(void)
 {
+   aimee_db2_register_vault_witness_provider(NULL);
+   uint8_t missing_digest[32];
+   memset(missing_digest, 0xa5, sizeof missing_digest);
+   assert(db2_vault_witness_checkpoint_digest(NULL, missing_digest) == -1);
+   for (size_t i = 0; i < sizeof missing_digest; ++i)
+      assert(missing_digest[i] == 0);
+
+   db2_vault_witness_provider_t invalid = {
+       .checkpoint_digest = invalid_digest,
+       .checkpoint_encode = invalid_encode,
+       .checkpoint_verify = invalid_verify,
+   };
+   aimee_db2_register_vault_witness_provider(&invalid);
+   vault_witness_checkpoint_t invalid_checkpoint = {0};
+   memset(missing_digest, 0xa5, sizeof missing_digest);
+   assert(db2_vault_witness_checkpoint_digest(&invalid_checkpoint, missing_digest) == -1);
+   for (size_t i = 0; i < sizeof missing_digest; ++i)
+      assert(missing_digest[i] == 0);
+   uint8_t invalid_wire[16];
+   size_t invalid_wire_len = 0;
+   assert(db2_vault_witness_checkpoint_encode(&invalid_checkpoint, invalid_wire,
+                                              sizeof invalid_wire, &invalid_wire_len) == -1);
+   assert(invalid_wire_len == 0);
+   for (size_t i = 0; i < sizeof invalid_wire; ++i)
+      assert(invalid_wire[i] == 0);
+   assert(db2_vault_witness_checkpoint_verify(&invalid_checkpoint, NULL, 0) ==
+          VAULT_WITNESS_CP_MALFORMED);
+   test_register_vault_witness_provider();
+
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {

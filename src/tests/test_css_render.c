@@ -4,6 +4,7 @@
 #include "aimee.h"
 #include "config.h"
 #include "css_analyze.h"
+#include "css_render_oracle.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -44,8 +45,67 @@ static const char *SNAP_A =
 static const char *SNAP_B =
     "{\"nodes\":[{\"ref\":\".btn\",\"computed\":{\"color\":\"rgb(255, 0, 0)\"}}]}";
 
+static int compare_result;
+static int compare_invalid;
+
+static int compare_provider(const char *before_json, const char *after_json, int *before_valid,
+                            int *after_valid, int *available, int *equivalent, int *diff_count)
+{
+   if (compare_result != 0)
+      return compare_result;
+   css_render_snapshot_t *before = before_json ? css_render_snapshot_parse(before_json) : NULL;
+   css_render_snapshot_t *after = after_json ? css_render_snapshot_parse(after_json) : NULL;
+   css_render_result_t *result = css_render_oracle_compare(before, after);
+   assert(result);
+   *before_valid = compare_invalid == 1 ? 2 : before != NULL;
+   *after_valid = after != NULL;
+   *available = result->available;
+   *equivalent = result->equivalent;
+   *diff_count = result->diff_count;
+   if (compare_invalid == 2)
+      *diff_count = 1;
+   else if (compare_invalid == 3)
+      *diff_count = -1;
+   css_render_result_free(result);
+   css_render_snapshot_free(before);
+   css_render_snapshot_free(after);
+   return 0;
+}
+
+static void test_injected_compare_provider(void)
+{
+   int before_valid = 7, after_valid = 7, available = 7, equivalent = 7, diff_count = 7;
+   aimee_db2_register_css_render_compare_provider(NULL);
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   assert(before_valid == 0 && after_valid == 0 && available == 0 && equivalent == 0 &&
+          diff_count == 0);
+
+   aimee_db2_register_css_render_compare_provider(compare_provider);
+   compare_result = 1;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_result = 0;
+   compare_invalid = 1;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_invalid = 2;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_invalid = 3;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_invalid = 0;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == 0);
+   assert(before_valid == 1 && after_valid == 1 && available == 1 && equivalent == 1 &&
+          diff_count == 0);
+}
+
 int main(void)
 {
+   test_injected_compare_provider();
+
    db2_test_shim_open();
    set_config(1);
 

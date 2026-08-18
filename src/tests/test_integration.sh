@@ -501,6 +501,10 @@ fi
 # point, on every CI run of this harness. That line was in the log from the
 # first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
+# Reap before removing its HOME. kill only requests exit, so without this the
+# server can still be writing under $TCP_HOME while rm -rf walks it, and rm
+# fails with ENOTEMPTY when a directory gains entries between unlinking its
+# children and removing it. Under 'set -e' that aborts the whole harness.
 wait "$TCP_SRV_PID" 2>/dev/null || true
 # `|| true` regardless: teardown of a temporary directory must never decide
 # whether the suite continues. Even with the wait, anything else holding a file
