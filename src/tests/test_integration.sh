@@ -277,6 +277,11 @@ start_server() {
 # like a job which built for four minutes, ran the harness, and printed nothing
 # at all — no FAIL line, no count, nothing to read. Say so instead.
 REACHED_SUMMARY=0
+ABORT_LINE=""
+ABORT_CMD=""
+# Record WHERE, not just that. "ABORTED after 21 checks" is a number to go
+# hunting with; bash already knows the line and the command, so ask it.
+trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
 cleanup() {
     local rc=$?
@@ -285,6 +290,9 @@ cleanup() {
         echo "integration: ABORTED after $((PASS + FAIL)) checks (exit $rc)."
         echo "  The harness exited before its summary — under 'set -e' an unguarded"
         echo "  command failed, so the checks below this point never ran."
+        if [ -n "$ABORT_LINE" ]; then
+            echo "  It failed at line $ABORT_LINE: $ABORT_CMD"
+        fi
     fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null
@@ -359,7 +367,7 @@ check_output "server.health uptime" '"uptime"' echo "$RESP"
 # well-formed dispatch response over its first-class /v1 route.
 if [ -S "$HTTP_SOCK" ]; then
     PASS=$((PASS + 1)) # /v1 HTTP socket bound
-    HTTP_PROV=$(http_rpc '{"method":"provider.list"}')
+    HTTP_PROV=$(http_rpc '{"method":"provider.list"}') || true
     if [ -n "$HTTP_PROV" ] && python3 -c "import json,sys; json.loads(sys.argv[1])" "$HTTP_PROV" \
         2>/dev/null; then
         PASS=$((PASS + 1)) # provider.list over /v1/provider/list returned valid JSON
@@ -492,7 +500,7 @@ RESP=$(srv_req '{"method":"memory.list","limit":1}') || true
 if echo "$RESP" | grep -qF '"status":"ok"'; then
     KB_AVAILABLE=1
     PASS=$((PASS + 1))
-    RESP=$(srv_req '{"method":"rules.list"}')
+    RESP=$(srv_req '{"method":"rules.list"}') || true
     check_output "local /v1: rules.list ok" '"status":"ok"' echo "$RESP"
 else
     KB_AVAILABLE=0
@@ -582,14 +590,14 @@ fi  # DB1_SESSIONS_AVAILABLE
 # ============================================================
 
 if [ "$KB_AVAILABLE" -eq 1 ]; then
-    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}')
+    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"
-    MEM_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null)
+    MEM_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
 
-    RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}')
+    RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}') || true
     check_output "memory.list has stored entry" "integ-test" echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
     check_output "memory.get by ID" "integration test value" echo "$RESP"
 
     # `memory get --as-of` crosses client -> aimee-server -> aimee-kb, and it was
@@ -599,11 +607,11 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     # it passed, because each end was checked against a hand-written payload that
     # already contained the field. Only the real wire shows the gap, so assert it
     # here: the verdict must come back, and must NOT appear when nobody asked.
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}") || true
     check_output "memory.get --as-of echoes the timestamp" '"as_of"' echo "$RESP"
     check_output "memory.get --as-of returns an event-time verdict" '"valid_at"' echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
     if echo "$RESP" | grep -q '"valid_at"'; then
         check_output "memory.get without --as-of emits no verdict" "no valid_at" echo "found valid_at"
     else
@@ -631,7 +639,7 @@ if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
     )
     start_server || true
     set +e
-    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
+    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
     HOOK_RC=$?
     set -e
 fi
