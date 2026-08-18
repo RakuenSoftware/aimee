@@ -17703,9 +17703,15 @@
           "line": 83
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
+      },
       "signature": "int db2_memory_promotion_record_l4_approval ( int64_t memory_id , const char * approver , const char * note )",
       "signature_sha256": "17003e46e85876231f57f99d229d9f06770970e58b39958f063ddf3927578f72",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_record_l4_approval"
     },
     {
@@ -25782,15 +25788,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7a25f8ec444a4061fad60691c6a3fd3477bed28ac2e8fe5cf24a107244ee06d5",
+  "fingerprint": "5256b02c44a95cb50c4343a47f5daaf2120874ae2cb31758d6b0a38b0b4c5e73",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 665,
+    "audit_pending": 664,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 293
+    "reviewed": 294
   }
 }

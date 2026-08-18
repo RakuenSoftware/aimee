@@ -894,6 +894,35 @@
         "field": {"name": "reclassified_count", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "memory",
+      "id": 22,
+      "name": "record_l4_approval",
+      "wire_format": "db2-envelope-u64-string-pair-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Promotion approvals are canonical relational DB2 rows that gate a later tier change and do not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_promotion_record_l4_approval"],
+      "request": {
+        "encoded_size_min": 41,
+        "encoded_size_max": 614,
+        "policy": {"target_tier": "L4"},
+        "fields": [
+          {"name": "memory_id", "type": "u64", "minimum": 1,
+           "maximum": 9223372036854775807},
+          {"name": "approver", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 63},
+          {"name": "note", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
     }
   ]
 }

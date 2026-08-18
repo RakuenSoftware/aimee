@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +60,9 @@ type wireBaseline struct {
 			GatedKind                  string   `json:"gated_kind"`
 			RequireApproval            uint32   `json:"require_approval"`
 			OpenPositive               string   `json:"open_positive"`
+			Approver                   string   `json:"approver"`
+			Note                       string   `json:"note"`
+			BarePositive               string   `json:"bare_positive"`
 			Promotions                 uint32   `json:"promotions"`
 			Demotions                  uint32   `json:"demotions"`
 			Expirations                uint32   `json:"expirations"`
@@ -214,7 +218,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 31 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 32 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -244,7 +248,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[27].Name != "expire" ||
 		baseline.Operations[28].Name != "demote" ||
 		baseline.Operations[29].Name != "promote_stable" ||
-		baseline.Operations[30].Name != "reclassify_directives" {
+		baseline.Operations[30].Name != "reclassify_directives" ||
+		baseline.Operations[31].Name != "record_l4_approval" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -1124,6 +1129,70 @@ func TestReclassifyDirectivesMatchesEverySharedCVector(t *testing.T) {
 	}
 	if _, err := EncodeReclassifyDirectivesReply(ReclassifyDirectivesMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
 		t.Fatalf("reclassified count past its bound encoded: %v", err)
+	}
+}
+
+func TestRecordL4ApprovalMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[31]
+	request := operation.Request
+	if request.TargetTier != RecordL4ApprovalTier {
+		t.Fatalf("approved tier = %q, generated = %q", request.TargetTier, RecordL4ApprovalTier)
+	}
+	wantRequest := decodeHex(t, request.Positive)
+	got, err := EncodeRecordL4ApprovalRequest(request.MemoryID, request.Approver, request.Note)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, approver, note, err := DecodeRecordL4ApprovalRequest(wantRequest)
+	if err != nil || memoryID != request.MemoryID || approver != request.Approver ||
+		note != request.Note {
+		t.Fatalf("decode = (%d, %q, %q, %v)", memoryID, approver, note, err)
+	}
+	// An empty note is legal and round-trips.
+	wantBare := decodeHex(t, request.BarePositive)
+	bare, err := EncodeRecordL4ApprovalRequest(request.MemoryID, request.Approver, "")
+	if err != nil || string(bare) != string(wantBare) {
+		t.Fatalf("bare request = (%x, %v), want %x", bare, err, wantBare)
+	}
+	if _, _, note, err := DecodeRecordL4ApprovalRequest(wantBare); err != nil || note != "" {
+		t.Fatalf("bare decode note = (%q, %v)", note, err)
+	}
+	for _, vector := range request.Negative {
+		if _, _, _, err := DecodeRecordL4ApprovalRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for range operation.Reply.Positive {
+		reply, err := EncodeRecordL4ApprovalReply()
+		if err != nil || string(reply) != string(decodeHex(t, operation.Reply.Positive[0].Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", reply, err)
+		}
+		if err := DecodeRecordL4ApprovalReply(reply); err != nil {
+			t.Fatalf("decode reply: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeRecordL4ApprovalReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	// The approver is required, both bounds hold, and NULs are refused.
+	for _, probe := range []struct {
+		name     string
+		id       uint64
+		approver string
+		note     string
+	}{
+		{"zero id", 0, "operator", ""},
+		{"empty approver", 42, "", ""},
+		{"approver too long", 42, strings.Repeat("a", RecordL4ApprovalApproverMax+1), ""},
+		{"note too long", 42, "operator", strings.Repeat("n", RecordL4ApprovalNoteMax+1)},
+		{"approver NUL", 42, "oper\x00tor", ""},
+		{"note NUL", 42, "operator", "re\x00viewed"},
+	} {
+		if _, err := EncodeRecordL4ApprovalRequest(probe.id, probe.approver, probe.note); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("%s encoded: %v", probe.name, err)
+		}
 	}
 }
 

@@ -267,6 +267,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .demote_cascade = db2_memory_promotion_demote_cascade,
        .promote_stable = db2_memory_promotion_promote_stable_l2_to_l3,
        .reclassify_directives = db2_memory_promotion_reclassify_directives,
+       .record_l4_approval = db2_memory_promotion_record_l4_approval,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -775,6 +776,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_reclassify_directives_reply_encode((uint32_t)reclassified, response_body,
                                                           response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t approval_memory_id = 0u;
+      char approver[AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX + 1];
+      char note[AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX + 1];
+      if (aimee_db2_record_l4_approval_request_decode(request_body, request_len,
+                                                      &approval_memory_id, approver,
+                                                      sizeof(approver), note, sizeof(note)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->record_l4_approval)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         if (backend->record_l4_approval((int64_t)approval_memory_id, approver, note) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_record_l4_approval_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

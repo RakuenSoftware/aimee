@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "3dd161daf451c4f71eee4d5cc7a588fa3e5a8b81d1001f4d773871222f56e636"
+const ContractSHA256 = "74b2de6d877c8eec38aa852c721a537f6cddec10f1bcd17b201be501fc5fd48d"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -206,6 +206,13 @@ const ReclassifyDirectivesTargetTier = "L4"
 const ReclassifyDirectivesGatedKind = "policy"
 const ReclassifyDirectivesGateMax uint32 = 1
 const ReclassifyDirectivesMax uint32 = 2147483647
+const EventRecordL4Approval = EventMemory
+const StageRecordL4Approval = FamilyMemory
+const OperationRecordL4Approval uint32 = 22
+const RecordL4ApprovalTier = "L4"
+const RecordL4ApprovalMemoryIDMax uint64 = 9223372036854775807
+const RecordL4ApprovalApproverMax = 63
+const RecordL4ApprovalNoteMax = 511
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1043,6 +1050,88 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// hasNUL reports whether a wire string carries an embedded NUL. The C backend
+// binds these as C strings, so a NUL would silently truncate the stored value.
+func hasNUL(value string) bool {
+	for index := 0; index < len(value); index++ {
+		if value[index] == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// EncodeRecordL4ApprovalRequest emits the memory, the approver, and the note.
+func EncodeRecordL4ApprovalRequest(memoryID uint64, approver, note string) ([]byte, error) {
+	if memoryID == 0 || memoryID > RecordL4ApprovalMemoryIDMax ||
+		len(approver) == 0 || len(approver) > RecordL4ApprovalApproverMax ||
+		len(note) > RecordL4ApprovalNoteMax ||
+		hasNUL(approver) || hasNUL(note) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 16 + len(approver) + len(note)
+	header, err := EncodeRequestHeader(OperationRecordL4Approval, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(approver)))
+	copy(payload[12:], approver)
+	binary.LittleEndian.PutUint32(payload[12+len(approver):], uint32(len(note)))
+	copy(payload[16+len(approver):], note)
+	return request, nil
+}
+
+// DecodeRecordL4ApprovalRequest validates the operation and every bounded field.
+func DecodeRecordL4ApprovalRequest(request []byte) (uint64, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRecordL4Approval || header.Flags != 0 ||
+		header.PayloadLen < 16 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	approverLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > RecordL4ApprovalMemoryIDMax || approverLen == 0 ||
+		approverLen > uint32(RecordL4ApprovalApproverMax) ||
+		header.PayloadLen < 16+approverLen {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	noteLen := binary.LittleEndian.Uint32(payload[12+approverLen:])
+	if noteLen > uint32(RecordL4ApprovalNoteMax) ||
+		header.PayloadLen != 16+approverLen+noteLen {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	approver := string(payload[12 : 12+approverLen])
+	note := string(payload[16+approverLen : 16+approverLen+noteLen])
+	if hasNUL(approver) || hasNUL(note) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return memoryID, approver, note, nil
+}
+
+// EncodeRecordL4ApprovalReply emits the payload-free acknowledgement.
+func EncodeRecordL4ApprovalReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationRecordL4Approval, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeRecordL4ApprovalReply validates the payload-free acknowledgement.
+func DecodeRecordL4ApprovalReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRecordL4Approval || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 // EncodeReclassifyDirectivesRequest emits the approval gate, the operation's only input.

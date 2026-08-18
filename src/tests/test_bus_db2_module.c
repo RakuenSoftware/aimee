@@ -66,6 +66,7 @@ typedef struct
    int (*demote_cascade)(const char *ts);
    int (*promote_stable)(const char *ts);
    int (*reclassify_directives)(int require_approval);
+   int (*record_l4_approval)(int64_t memory_id, const char *approver, const char *note);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -128,6 +129,8 @@ static int demote_cascade_calls;
 static char demote_kind_stamp[32];
 static int promote_stable_calls;
 static int reclassify_last_gate;
+static int approval_calls;
+static char approval_last_approver[64];
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -638,6 +641,22 @@ static int reclassify_directives(int require_approval)
    return require_approval ? 3 : 7;
 }
 
+int db2_memory_promotion_record_l4_approval(int64_t memory_id, const char *approver,
+                                            const char *note)
+{
+   (void)memory_id;
+   (void)approver;
+   (void)note;
+   return -1;
+}
+
+static int record_l4_approval(int64_t memory_id, const char *approver, const char *note)
+{
+   approval_calls++;
+   snprintf(approval_last_approver, sizeof(approval_last_approver), "%s", approver);
+   return (memory_id == 42 && note && note[0]) ? 0 : -1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -958,6 +977,7 @@ int main(void)
        .demote_cascade = demote_cascade,
        .promote_stable = promote_stable,
        .reclassify_directives = reclassify_directives,
+       .record_l4_approval = record_l4_approval,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1129,6 +1149,10 @@ int main(void)
    assert(aimee_db2_reclassify_directives_call(call_client, &client, 7041, 0, 0u, &reclassified,
                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(reclassified == 7 && reclassify_last_gate == 0);
+
+   assert(aimee_db2_record_l4_approval_call(call_client, &client, 7042, 0, 42u, "operator",
+                                            "reviewed", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(approval_calls == 1 && strcmp(approval_last_approver, "operator") == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

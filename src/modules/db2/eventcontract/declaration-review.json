@@ -1620,6 +1620,14 @@
       "reason": "The typed memory.reclassify_directives operation fixes the tiers and directive kinds and carries only the approval gate, which is a genuine caller choice: the batch path runs ungated while the operator approval path requires a recorded approval for policies."
     },
     {
+      "symbol": "db2_memory_promotion_record_l4_approval",
+      "signature_sha256": "17003e46e85876231f57f99d229d9f06770970e58b39958f063ddf3927578f72",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
+    },
+    {
       "symbol": "db2_memory_provenance_delete",
       "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
       "disposition": "private-db2",

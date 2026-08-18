@@ -300,6 +300,10 @@ int main(int argc, char **argv)
                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(reclassified == 0);
 
+   /* The packaged process has no rows, so its backend refuses the approval. */
+   assert(aimee_db2_record_l4_approval_call(call_client, &client, 9043, 0, 42u, "operator",
+                                            "reviewed", NULL, NULL) == AIMEE_MODULE_CALL_INTERNAL);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

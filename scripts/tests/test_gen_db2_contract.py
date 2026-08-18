@@ -591,6 +591,29 @@ class ContractTests(unittest.TestCase):
              "reclassified_count_too_large", "short", "long"],
         )
 
+    def test_record_l4_approval_vectors_cover_the_bounded_fields(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][31]
+        self.assertEqual(operation["name"], "record_l4_approval")
+        request = operation["request"]
+        self.assertEqual(
+            (request["target_tier"], request["memory_id"], request["approver"],
+             request["note"]),
+            ("L4", 42, "operator", "reviewed with the platform team"),
+        )
+        # An empty note is a canonical request; an empty approver is a mutation.
+        self.assertNotEqual(request["bare_positive"], request["positive"])
+        self.assertEqual(
+            [row["mutation"] for row in request["negative"]],
+            ["bad_flags", "memory_id_zero", "approver_empty", "approver_too_long",
+             "approver_length_overruns_payload", "approver_embedded_nul", "short", "long"],
+        )
+        self.assertEqual([row["result"] for row in operation["reply"]["positive"]], [0])
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "unexpected_payload", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -1240,6 +1263,38 @@ class ContractTests(unittest.TestCase):
             value["operations"][30]["request"]["policy"]["gated_kind"] = "fact"
             value["operations"][30]["request"]["policy"]["kinds"] = ["policy", "workflow"]
         self.assert_rule(mutate, "reclassify-directives-request")
+
+    def test_record_l4_approval_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][31].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][31].__setitem__("results", ["ok", "denied"]),
+             "operation-results"),
+            (lambda value: value["operations"][31]["request"]["policy"].__setitem__(
+                "target_tier", "L3"), "record-l4-approval-request"),
+            # An optional approver would leave approvals with nobody accountable.
+            (lambda value: value["operations"][31]["request"]["fields"][1].__setitem__(
+                "minimum_bytes", 0), "record-l4-approval-request"),
+            (lambda value: value["operations"][31]["request"]["fields"][0].__setitem__(
+                "minimum", 0), "record-l4-approval-request"),
+            # Encoded sizes must follow from the bounds, not be asserted freely.
+            (lambda value: value["operations"][31]["request"].__setitem__(
+                "encoded_size_max", 615), "record-l4-approval-request"),
+            (lambda value: value["operations"][31]["reply"].__setitem__("encoded_size_ok", 28),
+             "record-l4-approval-reply"),
+            (lambda value: value["operations"][31].__setitem__("transaction", "none"),
+             "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_record_l4_approval_sizes_track_the_declared_bounds(self) -> None:
+        # Widening a bound without restating the sizes must fail rather than
+        # silently leaving the envelope limits behind.
+        def mutate(value):
+            value["operations"][31]["request"]["fields"][2]["maximum_bytes"] = 1023
+        self.assert_rule(mutate, "record-l4-approval-request")
 
     def test_pool_status_shape_mutations(self) -> None:
         cases = (

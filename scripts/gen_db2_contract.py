@@ -222,7 +222,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "effectiveness_demote",
                                                                 "health_record",
                                                                 "promote_stable",
-                                                                "reclassify_directives") else
+                                                                "reclassify_directives",
+                                                                "record_l4_approval") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1167,9 +1168,57 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "maximum": 0x7fffffff}):
                 fail("reclassify-directives-reply",
                      "reply must contain one bounded reclassification count")
+        elif key == ("memory", 22) and name == "record_l4_approval" and \
+                operation["wire_format"] == "db2-envelope-u64-string-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_record_l4_approval"]:
+                fail("operation-c-symbols",
+                     "record_l4_approval C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "record_l4_approval results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "policy", "fields"},
+                            "record_l4_approval.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("record-l4-approval-request",
+                     "request must carry the memory, the approver, and the note")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "record_l4_approval.request.fields[0]")
+            approver = _keys(request_fields[1],
+                             {"name", "type", "minimum_bytes", "maximum_bytes"},
+                             "record_l4_approval.request.fields[1]")
+            note = _keys(request_fields[2], {"name", "type", "minimum_bytes", "maximum_bytes"},
+                         "record_l4_approval.request.fields[2]")
+            # The approver is who is accountable for the promotion, so it is
+            # required; the note is optional colour.
+            if (request["policy"] != {"target_tier": "L4"} or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    approver != {"name": "approver", "type": "utf8", "minimum_bytes": 1,
+                                 "maximum_bytes": 63} or
+                    note != {"name": "note", "type": "utf8", "minimum_bytes": 0,
+                             "maximum_bytes": 511}):
+                fail("record-l4-approval-request",
+                     "request must fix the approved tier and bound the approver and note")
+            if (request["encoded_size_min"] !=
+                    ENVELOPE_HEADER_LEN + 8 + 4 + approver["minimum_bytes"] + 4 +
+                    note["minimum_bytes"] or
+                    request["encoded_size_max"] !=
+                    ENVELOPE_HEADER_LEN + 8 + 4 + approver["maximum_bytes"] + 4 +
+                    note["maximum_bytes"]):
+                fail("record-l4-approval-request",
+                     "encoded sizes must follow from the declared field bounds")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "record_l4_approval.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("record-l4-approval-reply",
+                     "reply must acknowledge the approval without a payload")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 31 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 32 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1178,9 +1227,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
             "health_record", "health_retention", "health_counters", "stats_counts",
-            "expire", "demote", "promote_stable", "reclassify_directives"]:
+            "expire", "demote", "promote_stable", "reclassify_directives",
+            "record_l4_approval"]:
         fail("unsupported-operation",
-             "the partial generator requires the thirty-one supported operations exactly once")
+             "the partial generator requires the thirty-two supported operations exactly once")
     return catalog
 
 
@@ -1335,6 +1385,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     demote = catalog["operations"][28]
     promote_stable = catalog["operations"][29]
     reclassify_directives = catalog["operations"][30]
+    record_l4_approval = catalog["operations"][31]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1650,6 +1701,21 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     reclassify_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(reclassify_directives["id"]), 0, _put_u32(3),
+    )
+    approval_approver = b"operator"
+    approval_note = b"reviewed with the platform team"
+    approval_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+        _put_u64(42) + _put_u32(len(approval_approver)) + approval_approver +
+        _put_u32(len(approval_note)) + approval_note,
+    )
+    # An empty note is legal; an empty approver is not.
+    approval_bare_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+        _put_u64(42) + _put_u32(len(approval_approver)) + approval_approver + _put_u32(0),
+    )
+    approval_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(record_l4_approval["id"]), 0, b"",
     )
 
     value = {
@@ -3064,6 +3130,55 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (reclassify_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": record_l4_approval["family"],
+            "id": record_l4_approval["id"],
+            "name": record_l4_approval["name"],
+            "request": {
+                "positive": approval_request.hex(),
+                "memory_id": 42,
+                "approver": approval_approver.decode("ascii"),
+                "note": approval_note.decode("ascii"),
+                "bare_positive": approval_bare_request.hex(),
+                "target_tier": record_l4_approval["request"]["policy"]["target_tier"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(approval_request, 12, 1).hex()},
+                    {"mutation": "memory_id_zero", "hex":
+                     (approval_request[:ENVELOPE_HEADER_LEN] + _put_u64(0) +
+                      approval_request[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "approver_empty", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u64(42) + _put_u32(0) + _put_u32(0)).hex()},
+                    {"mutation": "approver_too_long", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u64(42) + _put_u32(64) + b"a" * 64 + _put_u32(0)).hex()},
+                    {"mutation": "approver_length_overruns_payload", "hex":
+                     mutate_u32(approval_request, ENVELOPE_HEADER_LEN + 8, 60).hex()},
+                    {"mutation": "approver_embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u64(42) + _put_u32(8) + b"opera\0tor" [:8] +
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": approval_request[:-1].hex()},
+                    {"mutation": "long", "hex": (approval_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": approval_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(approval_ok, 8, 21).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(approval_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": approval_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (approval_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -3107,6 +3222,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     demote = catalog["operations"][28]
     promote_stable = catalog["operations"][29]
     reclassify_directives = catalog["operations"][30]
+    record_l4_approval = catalog["operations"][31]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -3536,6 +3652,25 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{reclassify_directives['request']['field']['maximum']}u"),
         ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX",
          f"{reclassify_directives['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_RECORD_L4_APPROVAL", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_RECORD_L4_APPROVAL", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL", f"{record_l4_approval['id']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MIN_LEN",
+         f"{record_l4_approval['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN",
+         f"{record_l4_approval['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN",
+         f"{record_l4_approval['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_ERROR_LEN",
+         f"{record_l4_approval['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_TIER",
+         f"\"{record_l4_approval['request']['policy']['target_tier']}\""),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX",
+         f"{record_l4_approval['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX",
+         f"{record_l4_approval['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX",
+         f"{record_l4_approval['request']['fields'][2]['maximum_bytes']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -5329,6 +5464,101 @@ static inline int aimee_db2_reclassify_directives_reply_decode(const uint8_t *in
    return 0;
 }}
 
+static inline int aimee_db2_record_l4_approval_request_encode(uint64_t memory_id,
+                                                              const char *approver,
+                                                              const char *note, uint8_t *output,
+                                                              size_t capacity,
+                                                              uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!approver || !note || !output || !output_len)
+      return -1;
+   size_t approver_len = 0u, note_len = 0u;
+   while (approver_len <= AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX && approver[approver_len])
+      ++approver_len;
+   while (note_len <= AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX && note[note_len])
+      ++note_len;
+   size_t payload_len = 16u + approver_len + note_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX ||
+       approver_len == 0u || approver_len > AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX ||
+       note_len > AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)approver_len);
+   memcpy(payload + 12u, approver, approver_len);
+   aimee_db2_put_u32(payload + 12u + approver_len, (uint32_t)note_len);
+   memcpy(payload + 16u + approver_len, note, note_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_record_l4_approval_request_decode(
+    const uint8_t *input, size_t input_len, uint64_t *memory_id, char *approver,
+    size_t approver_capacity, char *note, size_t note_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (approver && approver_capacity)
+      approver[0] = '\\0';
+   if (note && note_capacity)
+      note[0] = '\\0';
+   if (!memory_id || !approver || approver_capacity == 0u || !note || note_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL || header.flags != 0u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len ||
+       header.payload_len < 16u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_id = aimee_db2_get_u64(payload);
+   uint32_t approver_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_id == 0u || decoded_id > AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX ||
+       approver_len == 0u || approver_len > AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX ||
+       header.payload_len < 16u + approver_len)
+      return -1;
+   uint32_t note_len = aimee_db2_get_u32(payload + 12u + approver_len);
+   if (note_len > AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX ||
+       header.payload_len != 16u + approver_len + note_len ||
+       approver_capacity < (size_t)approver_len + 1u || note_capacity < (size_t)note_len + 1u)
+      return -1;
+   /* Reject embedded NULs: the backend binds these as C strings. */
+   if (memchr(payload + 12u, 0, approver_len) ||
+       (note_len && memchr(payload + 16u + approver_len, 0, note_len)))
+      return -1;
+   memcpy(approver, payload + 12u, approver_len);
+   approver[approver_len] = '\\0';
+   memcpy(note, payload + 16u + approver_len, note_len);
+   note[note_len] = '\\0';
+   *memory_id = decoded_id;
+   return 0;
+}}
+
+static inline int aimee_db2_record_l4_approval_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_record_l4_approval_reply_decode(const uint8_t *input,
+                                                            size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -6283,6 +6513,11 @@ extern "C"
        uint32_t require_approval, uint32_t *reclassified_count,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_record_l4_approval_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *approver, const char *note,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -6977,6 +7212,32 @@ aimee_db2_reclassify_directives_call(aimee_db2_call_fn call, void *call_context,
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_record_l4_approval_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t memory_id, const char *approver,
+                                  const char *note, aimee_module_cancelled_fn cancelled,
+                                  void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_record_l4_approval_request_encode(memory_id, approver, note, request,
+                                                   sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RECORD_L4_APPROVAL, AIMEE_DB2_STAGE_RECORD_L4_APPROVAL,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_record_l4_approval_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -7247,6 +7508,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     demote = catalog["operations"][28]
     promote_stable = catalog["operations"][29]
     reclassify_directives = catalog["operations"][30]
+    record_l4_approval = catalog["operations"][31]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -7454,6 +7716,13 @@ const ReclassifyDirectivesTargetTier = "{reclassify_directives['request']['polic
 const ReclassifyDirectivesGatedKind = "{reclassify_directives['request']['policy']['gated_kind']}"
 const ReclassifyDirectivesGateMax uint32 = {reclassify_directives['request']['field']['maximum']}
 const ReclassifyDirectivesMax uint32 = {reclassify_directives['reply']['field']['maximum']}
+const EventRecordL4Approval = EventMemory
+const StageRecordL4Approval = FamilyMemory
+const OperationRecordL4Approval uint32 = {record_l4_approval['id']}
+const RecordL4ApprovalTier = "{record_l4_approval['request']['policy']['target_tier']}"
+const RecordL4ApprovalMemoryIDMax uint64 = {record_l4_approval['request']['fields'][0]['maximum']}
+const RecordL4ApprovalApproverMax = {record_l4_approval['request']['fields'][1]['maximum_bytes']}
+const RecordL4ApprovalNoteMax = {record_l4_approval['request']['fields'][2]['maximum_bytes']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -8289,6 +8558,88 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// hasNUL reports whether a wire string carries an embedded NUL. The C backend
+// binds these as C strings, so a NUL would silently truncate the stored value.
+func hasNUL(value string) bool {{
+	for index := 0; index < len(value); index++ {{
+		if value[index] == 0 {{
+			return true
+		}}
+	}}
+	return false
+}}
+
+// EncodeRecordL4ApprovalRequest emits the memory, the approver, and the note.
+func EncodeRecordL4ApprovalRequest(memoryID uint64, approver, note string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > RecordL4ApprovalMemoryIDMax ||
+		len(approver) == 0 || len(approver) > RecordL4ApprovalApproverMax ||
+		len(note) > RecordL4ApprovalNoteMax ||
+		hasNUL(approver) || hasNUL(note) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 16 + len(approver) + len(note)
+	header, err := EncodeRequestHeader(OperationRecordL4Approval, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(approver)))
+	copy(payload[12:], approver)
+	binary.LittleEndian.PutUint32(payload[12+len(approver):], uint32(len(note)))
+	copy(payload[16+len(approver):], note)
+	return request, nil
+}}
+
+// DecodeRecordL4ApprovalRequest validates the operation and every bounded field.
+func DecodeRecordL4ApprovalRequest(request []byte) (uint64, string, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRecordL4Approval || header.Flags != 0 ||
+		header.PayloadLen < 16 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	approverLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > RecordL4ApprovalMemoryIDMax || approverLen == 0 ||
+		approverLen > uint32(RecordL4ApprovalApproverMax) ||
+		header.PayloadLen < 16+approverLen {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	noteLen := binary.LittleEndian.Uint32(payload[12+approverLen:])
+	if noteLen > uint32(RecordL4ApprovalNoteMax) ||
+		header.PayloadLen != 16+approverLen+noteLen {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	approver := string(payload[12 : 12+approverLen])
+	note := string(payload[16+approverLen : 16+approverLen+noteLen])
+	if hasNUL(approver) || hasNUL(note) {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	return memoryID, approver, note, nil
+}}
+
+// EncodeRecordL4ApprovalReply emits the payload-free acknowledgement.
+func EncodeRecordL4ApprovalReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationRecordL4Approval, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeRecordL4ApprovalReply validates the payload-free acknowledgement.
+func DecodeRecordL4ApprovalReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRecordL4Approval || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
 }}
 
 // EncodeReclassifyDirectivesRequest emits the approval gate, the operation's only input.

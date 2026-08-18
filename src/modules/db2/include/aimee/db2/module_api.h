@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "3dd161daf451c4f71eee4d5cc7a588fa3e5a8b81d1001f4d773871222f56e636"
+#define AIMEE_DB2_CONTRACT_SHA256 "74b2de6d877c8eec38aa852c721a537f6cddec10f1bcd17b201be501fc5fd48d"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -302,6 +302,17 @@
 #define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATED_KIND        "policy"
 #define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX          1u
 #define AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX               2147483647u
+#define AIMEE_DB2_EVENT_RECORD_L4_APPROVAL                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RECORD_L4_APPROVAL                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL            22u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MIN_LEN      41u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN      614u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN         24u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_ERROR_LEN            24u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_TIER                 "L4"
+#define AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX        9223372036854775807ull
+#define AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX         63u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX             511u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2067,6 +2078,101 @@ static inline int aimee_db2_reclassify_directives_reply_decode(const uint8_t *in
       return -1;
    *reclassified_count = decoded;
    return 0;
+}
+
+static inline int aimee_db2_record_l4_approval_request_encode(uint64_t memory_id,
+                                                              const char *approver,
+                                                              const char *note, uint8_t *output,
+                                                              size_t capacity,
+                                                              uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!approver || !note || !output || !output_len)
+      return -1;
+   size_t approver_len = 0u, note_len = 0u;
+   while (approver_len <= AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX && approver[approver_len])
+      ++approver_len;
+   while (note_len <= AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX && note[note_len])
+      ++note_len;
+   size_t payload_len = 16u + approver_len + note_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX ||
+       approver_len == 0u || approver_len > AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX ||
+       note_len > AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)approver_len);
+   memcpy(payload + 12u, approver, approver_len);
+   aimee_db2_put_u32(payload + 12u + approver_len, (uint32_t)note_len);
+   memcpy(payload + 16u + approver_len, note, note_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_record_l4_approval_request_decode(
+    const uint8_t *input, size_t input_len, uint64_t *memory_id, char *approver,
+    size_t approver_capacity, char *note, size_t note_capacity)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (approver && approver_capacity)
+      approver[0] = '\0';
+   if (note && note_capacity)
+      note[0] = '\0';
+   if (!memory_id || !approver || approver_capacity == 0u || !note || note_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL || header.flags != 0u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len ||
+       header.payload_len < 16u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_id = aimee_db2_get_u64(payload);
+   uint32_t approver_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_id == 0u || decoded_id > AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX ||
+       approver_len == 0u || approver_len > AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX ||
+       header.payload_len < 16u + approver_len)
+      return -1;
+   uint32_t note_len = aimee_db2_get_u32(payload + 12u + approver_len);
+   if (note_len > AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX ||
+       header.payload_len != 16u + approver_len + note_len ||
+       approver_capacity < (size_t)approver_len + 1u || note_capacity < (size_t)note_len + 1u)
+      return -1;
+   /* Reject embedded NULs: the backend binds these as C strings. */
+   if (memchr(payload + 12u, 0, approver_len) ||
+       (note_len && memchr(payload + 16u + approver_len, 0, note_len)))
+      return -1;
+   memcpy(approver, payload + 12u, approver_len);
+   approver[approver_len] = '\0';
+   memcpy(note, payload + 16u + approver_len, note_len);
+   note[note_len] = '\0';
+   *memory_id = decoded_id;
+   return 0;
+}
+
+static inline int aimee_db2_record_l4_approval_reply_encode(uint8_t *output, size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}
+
+static inline int aimee_db2_record_l4_approval_reply_decode(const uint8_t *input,
+                                                            size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }
 
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)

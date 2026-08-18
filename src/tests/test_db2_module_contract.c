@@ -96,6 +96,11 @@ static char promote_stable_stamp[32];
 static int reclassify_value;
 static int reclassify_calls;
 static int reclassify_last_gate;
+static int approval_result;
+static int approval_calls;
+static int64_t approval_last_id;
+static char approval_last_approver[64];
+static char approval_last_note[512];
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -144,6 +149,7 @@ static int transport_expect_expire;
 static int transport_expect_demote;
 static int transport_expect_promote_stable;
 static int transport_expect_reclassify;
+static int transport_expect_approval;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -677,6 +683,24 @@ int db2_memory_promotion_reclassify_directives(int require_approval)
    return 0;
 }
 
+int db2_memory_promotion_record_l4_approval(int64_t memory_id, const char *approver,
+                                            const char *note)
+{
+   (void)memory_id;
+   (void)approver;
+   (void)note;
+   return -1;
+}
+
+static int record_l4_approval(int64_t memory_id, const char *approver, const char *note)
+{
+   approval_calls++;
+   approval_last_id = memory_id;
+   snprintf(approval_last_approver, sizeof(approval_last_approver), "%s", approver);
+   snprintf(approval_last_note, sizeof(approval_last_note), "%s", note);
+   return approval_result;
+}
+
 static int reclassify_directives(int require_approval)
 {
    reclassify_calls++;
@@ -943,6 +967,11 @@ static void reset(void)
    reclassify_value = 3;
    reclassify_calls = 0;
    reclassify_last_gate = -1;
+   approval_result = 0;
+   approval_calls = 0;
+   approval_last_id = 0;
+   approval_last_approver[0] = '\0';
+   approval_last_note[0] = '\0';
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -986,6 +1015,7 @@ static void reset(void)
    transport_expect_demote = 0;
    transport_expect_promote_stable = 0;
    transport_expect_reclassify = 0;
+   transport_expect_approval = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -1006,7 +1036,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_reclassify                ? AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES
+       transport_expect_approval                  ? AIMEE_DB2_EVENT_RECORD_L4_APPROVAL
+       : transport_expect_reclassify              ? AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES
        : transport_expect_promote_stable          ? AIMEE_DB2_EVENT_PROMOTE_STABLE
        : transport_expect_demote                  ? AIMEE_DB2_EVENT_DEMOTE
        : transport_expect_expire                  ? AIMEE_DB2_EVENT_EXPIRE
@@ -1038,7 +1069,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_reclassify                ? AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES
+       transport_expect_approval                  ? AIMEE_DB2_STAGE_RECORD_L4_APPROVAL
+       : transport_expect_reclassify              ? AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES
        : transport_expect_promote_stable          ? AIMEE_DB2_STAGE_PROMOTE_STABLE
        : transport_expect_demote                  ? AIMEE_DB2_STAGE_DEMOTE
        : transport_expect_expire                  ? AIMEE_DB2_STAGE_EXPIRE
@@ -1073,7 +1105,15 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_reclassify)
+   if (transport_expect_approval)
+   {
+      uint64_t id = 0;
+      char who[64] = "", what[512] = "";
+      assert(aimee_db2_record_l4_approval_request_decode(request_body, request_len, &id, who,
+                                                         sizeof(who), what, sizeof(what)) == 0);
+      assert(id == 42u && strcmp(who, "operator") == 0 && strcmp(what, "reviewed") == 0);
+   }
+   else if (transport_expect_reclassify)
    {
       uint32_t gate = 99;
       assert(aimee_db2_reclassify_directives_request_decode(request_body, request_len, &gate) == 0);
@@ -2118,6 +2158,65 @@ static void test_reclassify_directives_wire(void)
    assert(aimee_db2_reclassify_directives_reply_encode(AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX + 1u,
                                                        reply, sizeof(reply), &reply_len) == -1);
    assert(reply_len == 0);
+}
+
+static void test_record_l4_approval_wire(void)
+{
+   assert(strcmp(AIMEE_DB2_RECORD_L4_APPROVAL_TIER, "L4") == 0);
+
+   static uint8_t request[AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN];
+   uint32_t request_len = 99;
+   uint64_t memory_id = 99;
+   char approver[AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX + 1] = "";
+   char note[AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX + 1] = "";
+   assert(aimee_db2_record_l4_approval_request_encode(42u, "operator", "reviewed", request,
+                                                      sizeof(request), &request_len) == 0);
+   assert(aimee_db2_record_l4_approval_request_decode(request, request_len, &memory_id, approver,
+                                                      sizeof(approver), note, sizeof(note)) == 0);
+   assert(memory_id == 42u && strcmp(approver, "operator") == 0 && strcmp(note, "reviewed") == 0);
+
+   /* An empty note is legal and produces the shortest request. */
+   assert(aimee_db2_record_l4_approval_request_encode(42u, "o", "", request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(request_len == AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MIN_LEN);
+   assert(aimee_db2_record_l4_approval_request_decode(request, request_len, &memory_id, approver,
+                                                      sizeof(approver), note, sizeof(note)) == 0);
+   assert(note[0] == '\0');
+
+   /* An empty approver is not: someone must be accountable. */
+   assert(aimee_db2_record_l4_approval_request_encode(42u, "", "reviewed", request, sizeof(request),
+                                                      &request_len) == -1);
+   assert(request_len == 0);
+
+   /* Both string bounds and the identifier bound hold. */
+   char long_approver[AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX + 2];
+   memset(long_approver, 'a', sizeof(long_approver) - 1);
+   long_approver[sizeof(long_approver) - 1] = '\0';
+   assert(aimee_db2_record_l4_approval_request_encode(42u, long_approver, "", request,
+                                                      sizeof(request), &request_len) == -1);
+   assert(aimee_db2_record_l4_approval_request_encode(0u, "operator", "", request, sizeof(request),
+                                                      &request_len) == -1);
+
+   /* The longest legal request fits the declared maximum exactly. */
+   char max_approver[AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX + 1];
+   memset(max_approver, 'a', sizeof(max_approver) - 1);
+   max_approver[sizeof(max_approver) - 1] = '\0';
+   static char max_note[AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX + 1];
+   memset(max_note, 'n', sizeof(max_note) - 1);
+   max_note[sizeof(max_note) - 1] = '\0';
+   assert(aimee_db2_record_l4_approval_request_encode(42u, max_approver, max_note, request,
+                                                      sizeof(request), &request_len) == 0);
+   assert(request_len == AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN);
+
+   /* A caller buffer too small for the decoded strings is refused. */
+   char tiny[4] = "";
+   assert(aimee_db2_record_l4_approval_request_decode(request, request_len, &memory_id, tiny,
+                                                      sizeof(tiny), note, sizeof(note)) == -1);
+
+   uint8_t reply[AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN] = {0};
+   assert(aimee_db2_record_l4_approval_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_record_l4_approval_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_record_l4_approval_reply_encode(reply, sizeof(reply) - 1) == -1);
 }
 
 static void test_pool_status_wire(void)
@@ -3330,6 +3429,35 @@ static void test_reclassify_directives_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_record_l4_approval_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.record_l4_approval = record_l4_approval};
+   static uint8_t request[AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_RECORD_L4_APPROVAL};
+   assert(aimee_db2_record_l4_approval_request_encode(42u, "operator", "reviewed", request,
+                                                      sizeof(request), &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(approval_calls == 1 && approval_last_id == 42 &&
+          strcmp(approval_last_approver, "operator") == 0 &&
+          strcmp(approval_last_note, "reviewed") == 0);
+   assert(aimee_db2_record_l4_approval_reply_decode(response, response_len) == 0);
+
+   approval_result = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   approval_result = 0;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -4034,6 +4162,27 @@ static void test_reclassify_directives_typed_client(void)
    assert(reclassified == 3 && transport_calls == 1);
 }
 
+static void test_record_l4_approval_typed_client(void)
+{
+   reset();
+   transport_expect_approval = 1;
+   assert(aimee_db2_record_l4_approval_call(NULL, NULL, 77, 88, 42u, "operator", "reviewed", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   /* An out-of-range field never reaches the transport. */
+   assert(aimee_db2_record_l4_approval_call(transport, (void *)0x1234, 77, 88, 0u, "operator",
+                                            "reviewed", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(aimee_db2_record_l4_approval_call(transport, (void *)0x1234, 77, 88, 42u, "", "reviewed",
+                                            NULL, NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(transport_calls == 0);
+   assert(aimee_db2_record_l4_approval_reply_encode(transport_response,
+                                                    sizeof(transport_response)) == 0);
+   transport_response_len = AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN;
+   assert(aimee_db2_record_l4_approval_call(transport, (void *)0x1234, 77, 88, 42u, "operator",
+                                            "reviewed", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -4226,6 +4375,7 @@ int main(void)
    test_demote_wire();
    test_promote_stable_wire();
    test_reclassify_directives_wire();
+   test_record_l4_approval_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4257,6 +4407,7 @@ int main(void)
    test_demote_handler();
    test_promote_stable_handler();
    test_reclassify_directives_handler();
+   test_record_l4_approval_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -4288,6 +4439,7 @@ int main(void)
    test_demote_typed_client();
    test_promote_stable_typed_client();
    test_reclassify_directives_typed_client();
+   test_record_l4_approval_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();
