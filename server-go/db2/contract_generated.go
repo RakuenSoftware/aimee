@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "c94cee99636b82d8724df363d156291a353ac543579d375a5f9267bf219f3a7f"
+const ContractSHA256 = "6d79ba454b8de9de63c152ffa0c8281014a11f70d8a5909a9596e9339fb59f49"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -226,6 +226,13 @@ const LifecycleSweepExpiredSourceState = "pending"
 const LifecycleSweepExpiredTargetState = "archived"
 const LifecycleSweepExpiredReason = "pending_ttl_expired"
 const LifecycleSweepExpiredCountMax uint32 = 2147483647
+const EventDemoteID = EventMemory
+const StageDemoteID = FamilyMemory
+const OperationDemoteID uint32 = 25
+const DemoteIDMemoryIDMax uint64 = 9223372036854775807
+const DemoteIDCountMax uint32 = 1
+const DemoteIDMultiplierBits uint64 = 4606281698874543309
+const DemoteIDMinimumConfidenceBits uint64 = 4599075939470750515
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -623,6 +630,63 @@ func DecodeLifecycleSweepExpiredReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return archivedCount, nil
+}
+
+// EncodeDemoteIDRequest emits the single memory the caller wants decayed. The
+// multiplier and floor are policy and never travel.
+func EncodeDemoteIDRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > DemoteIDMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDemoteID, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeDemoteIDRequest validates the envelope and the bounded memory.
+func DecodeDemoteIDRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemoteID || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > DemoteIDMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeDemoteIDReply emits the single-row demotion count.
+func EncodeDemoteIDReply(demotedCount uint32) ([]byte, error) {
+	if demotedCount > DemoteIDCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDemoteID, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], demotedCount)
+	return reply, nil
+}
+
+// DecodeDemoteIDReply validates the operation and the single-row bound.
+func DecodeDemoteIDReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDemoteID || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	demotedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if demotedCount > DemoteIDCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return demotedCount, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

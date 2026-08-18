@@ -271,6 +271,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .record_l4_approval = db2_memory_promotion_record_l4_approval,
        .prune_orphaned_l0 = db2_memory_prune_orphaned_l0,
        .lifecycle_sweep_expired = db2_memory_lifecycle_sweep_expired,
+       .demote_id = db2_memory_promotion_demote_id,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -839,6 +840,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_lifecycle_sweep_expired_reply_encode((uint32_t)archived, response_body,
                                                             response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t decay_memory_id = 0u;
+      if (aimee_db2_demote_id_request_decode(request_body, request_len, &decay_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DEMOTE_ID_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->demote_id)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The predicate is an equality on the primary key, so a count above
+          * one means the statement no longer matches the reviewed operation
+          * and the reply would misreport how much of the tier moved. */
+         int demoted = backend->demote_id((int64_t)decay_memory_id);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (demoted < 0 || (uint32_t)demoted > AIMEE_DB2_DEMOTE_ID_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_demote_id_reply_encode((uint32_t)demoted, response_body, response_capacity,
+                                              response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

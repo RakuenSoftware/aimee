@@ -1596,6 +1596,14 @@
       "reason": "The typed memory.demote operation cascades reduced confidence to dependants of the rows it just demoted, matched by the stamp it issued; exposing the cascade alone would let a caller match rows a different action had stamped."
     },
     {
+      "symbol": "db2_memory_promotion_demote_id",
+      "signature_sha256": "41338c6555357a70173d9a2228d92792c6e9f22b1e50bca963eb7aee7e097b93",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.demote_id operation replaces the single-row confidence decay; the multiplier and the floor below which a row stops decaying stay fixed policy behind the handler so a caller can only name which row decays, never how far."
+    },
+    {
       "symbol": "db2_memory_promotion_demote_kind",
       "signature_sha256": "1a8dc69de29ad0e38b3465d730a1963cb251cabd32cdefa2e0243ea4c93c5f7f",
       "disposition": "wire-operation",

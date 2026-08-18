@@ -341,6 +341,21 @@ int main(int argc, char **argv)
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(archived == 0);
 
+   /* Memory 42 does not exist on a fresh schema, so the primary-key predicate
+    * matches nothing and no row decays. Not replayed the way the sweeps above
+    * are: this operation is declared unsafe precisely because a second call
+    * would decay a real row again, so proving neutrality here would prove
+    * nothing and asserting it would contradict the catalog. */
+   uint32_t decayed = 99;
+   assert(aimee_db2_demote_id_call(call_client, &client, 9048, 0, 42u, &decayed, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(decayed == 0);
+
+   /* Zero is refused before anything is published, so the process never sees
+    * a request that names no row. */
+   assert(aimee_db2_demote_id_call(call_client, &client, 9049, 0, 0u, &decayed, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

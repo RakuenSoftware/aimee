@@ -69,6 +69,7 @@ typedef struct
    int (*record_l4_approval)(int64_t memory_id, const char *approver, const char *note);
    int (*prune_orphaned_l0)(void);
    int (*lifecycle_sweep_expired)(void);
+   int (*demote_id)(int64_t memory_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -108,6 +109,8 @@ static int level2_count_calls;
 static int orphaned_l0_count_calls;
 static int prune_orphaned_l0_calls;
 static int lifecycle_sweep_calls;
+static int demote_id_calls;
+static int64_t demote_id_last;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -685,6 +688,19 @@ static int lifecycle_sweep_expired(void)
    return 4;
 }
 
+int db2_memory_promotion_demote_id(int64_t memory_id)
+{
+   (void)memory_id;
+   return 0;
+}
+
+static int demote_id(int64_t memory_id)
+{
+   demote_id_calls++;
+   demote_id_last = memory_id;
+   return 1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1008,6 +1024,7 @@ int main(void)
        .record_l4_approval = record_l4_approval,
        .prune_orphaned_l0 = prune_orphaned_l0,
        .lifecycle_sweep_expired = lifecycle_sweep_expired,
+       .demote_id = demote_id,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1193,6 +1210,11 @@ int main(void)
    assert(aimee_db2_lifecycle_sweep_expired_call(call_client, &client, 7044, 0, &archived, NULL,
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(archived == 4 && lifecycle_sweep_calls == 1);
+
+   uint32_t decayed = 99u;
+   assert(aimee_db2_demote_id_call(call_client, &client, 7045, 0, 42u, &decayed, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(decayed == 1 && demote_id_calls == 1 && demote_id_last == 42);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

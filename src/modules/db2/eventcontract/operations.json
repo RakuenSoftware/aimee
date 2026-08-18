@@ -972,6 +972,33 @@
         "field": {"name": "archived_count", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "memory",
+      "id": 25,
+      "name": "demote_id",
+      "wire_format": "db2-envelope-u64-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Decaying the confidence of one canonical relational memory row is DB2 lifecycle authority and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_promotion_demote_id"],
+      "request": {
+        "encoded_size": 32,
+        "policy": {
+          "confidence_multiplier_binary64_bits": 4606281698874543309,
+          "minimum_confidence_binary64_bits": 4599075939470750515
+        },
+        "field": {"name": "memory_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "demoted_count", "type": "u32", "minimum": 0, "maximum": 1}
+      }
     }
   ]
 }

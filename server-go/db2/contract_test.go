@@ -219,7 +219,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 34 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 35 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -252,7 +252,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[30].Name != "reclassify_directives" ||
 		baseline.Operations[31].Name != "record_l4_approval" ||
 		baseline.Operations[32].Name != "prune_orphaned_l0" ||
-		baseline.Operations[33].Name != "lifecycle_sweep_expired" {
+		baseline.Operations[33].Name != "lifecycle_sweep_expired" ||
+		baseline.Operations[34].Name != "demote_id" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -415,6 +416,57 @@ func TestLifecycleSweepExpiredMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || archived != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, archived, err)
 		}
+	}
+}
+
+func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[34]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeDemoteIDRequest(operation.Request.MemoryID)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, err := DecodeDemoteIDRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID {
+		t.Fatalf("positive request = (%d, %v)", memoryID, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeDemoteIDRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeDemoteIDReply(vector.DemotedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		demoted, err := DecodeDemoteIDReply(got)
+		if err != nil || demoted != vector.DemotedCount {
+			t.Fatalf("decode = (%d, %v)", demoted, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestDemoteIDPolicyIsFixed(t *testing.T) {
+	// Compared as bits, not as floats: a constant that rounds differently on
+	// one side would decay rows by a different factor than the other.
+	if math.Float64frombits(DemoteIDMultiplierBits) != 0.9 ||
+		math.Float64frombits(DemoteIDMinimumConfidenceBits) != 0.3 {
+		t.Fatalf("policy = (%v, %v)", math.Float64frombits(DemoteIDMultiplierBits),
+			math.Float64frombits(DemoteIDMinimumConfidenceBits))
+	}
+	// A primary-key equality can touch at most one row.
+	if _, err := EncodeDemoteIDReply(DemoteIDCountMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("count past the single-row bound encoded: %v", err)
+	}
+	if _, err := EncodeDemoteIDRequest(0); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("zero memory encoded: %v", err)
 	}
 }
 

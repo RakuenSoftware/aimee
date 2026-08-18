@@ -17535,9 +17535,15 @@
           "line": 64
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.demote_id operation replaces the single-row confidence decay; the multiplier and the floor below which a row stops decaying stay fixed policy behind the handler so a caller can only name which row decays, never how far."
+      },
       "signature": "int db2_memory_promotion_demote_id ( int64_t memory_id )",
       "signature_sha256": "41338c6555357a70173d9a2228d92792c6e9f22b1e50bca963eb7aee7e097b93",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_demote_id"
     },
     {
@@ -25800,15 +25806,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "2bd4cadac6a7ba1eb146e2a01456f176d143f81428d00fd6c95b6d201b6ca503",
+  "fingerprint": "428543829157e86a2c3f1a5c3a5bf23501e70d9298f9bfe3f552c4a050162ed7",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 662,
+    "audit_pending": 661,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 296
+    "reviewed": 297
   }
 }

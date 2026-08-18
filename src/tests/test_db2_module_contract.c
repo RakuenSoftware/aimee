@@ -29,6 +29,9 @@ static int prune_orphaned_l0_value;
 static int prune_orphaned_l0_calls;
 static int lifecycle_sweep_value;
 static int lifecycle_sweep_calls;
+static int demote_id_value;
+static int demote_id_calls;
+static int64_t demote_id_last;
 static int64_t total_count_value;
 static int total_count_calls;
 static int session_l2_count_value;
@@ -279,6 +282,19 @@ static int lifecycle_sweep_expired(void)
 {
    lifecycle_sweep_calls++;
    return lifecycle_sweep_value;
+}
+
+int db2_memory_promotion_demote_id(int64_t memory_id)
+{
+   (void)memory_id;
+   return 0;
+}
+
+static int demote_id(int64_t memory_id)
+{
+   demote_id_calls++;
+   demote_id_last = memory_id;
+   return demote_id_value;
 }
 
 int64_t db2_memory_count(void)
@@ -928,6 +944,9 @@ static void reset(void)
    prune_orphaned_l0_calls = 0;
    lifecycle_sweep_value = 4;
    lifecycle_sweep_calls = 0;
+   demote_id_value = 1;
+   demote_id_calls = 0;
+   demote_id_last = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2217,6 +2236,45 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_demote_id_wire(void)
+{
+   /* The decay multiplier and the floor are policy, pinned as binary64 bit
+    * patterns because the catalog refuses float literals. They are compared as
+    * bits so a rounding-different constant on either side is a failure. */
+   uint64_t multiplier_bits = AIMEE_DB2_DEMOTE_ID_MULTIPLIER_BITS;
+   uint64_t floor_bits = AIMEE_DB2_DEMOTE_ID_MINIMUM_CONFIDENCE_BITS;
+   double multiplier = 0.0, floor_value = 0.0;
+   memcpy(&multiplier, &multiplier_bits, sizeof(multiplier));
+   memcpy(&floor_value, &floor_bits, sizeof(floor_value));
+   assert(multiplier == 0.9 && floor_value == 0.3);
+
+   uint8_t request[AIMEE_DB2_DEMOTE_ID_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_demote_id_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_demote_id_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   /* Zero is not a memory: it must not survive either direction. */
+   assert(aimee_db2_demote_id_request_encode(0u, request, sizeof(request)) == -1);
+   assert(aimee_db2_demote_id_request_encode(AIMEE_DB2_DEMOTE_ID_MEMORY_ID_MAX + 1ull, request,
+                                             sizeof(request)) == -1);
+   assert(aimee_db2_demote_id_request_encode(42u, request, sizeof(request) - 1) == -1);
+   assert(aimee_db2_demote_id_request_encode(42u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_demote_id_request_decode(request, sizeof(request), &memory_id) == -1 &&
+          memory_id == 0);
+
+   uint8_t reply[AIMEE_DB2_DEMOTE_ID_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, demoted = 99;
+   assert(aimee_db2_demote_id_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_demote_id_reply_decode(reply, reply_len, &demoted) == 0 && demoted == 1);
+   /* A primary-key equality can touch at most one row. */
+   assert(aimee_db2_demote_id_reply_encode(2, reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_demote_id_reply_encode(1, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_demote_id_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_demote_id_reply_decode(reply, reply_len, &demoted) == -1 && demoted == 0);
 }
 
 static void test_lifecycle_sweep_expired_wire(void)
@@ -3558,6 +3616,45 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_demote_id_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.demote_id = demote_id};
+   uint8_t request[AIMEE_DB2_DEMOTE_ID_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DEMOTE_ID_RESPONSE_LEN];
+   uint32_t response_len = 99, demoted = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_DEMOTE_ID};
+   assert(aimee_db2_demote_id_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(demote_id_calls == 1 && demote_id_last == 42);
+   assert(aimee_db2_demote_id_reply_decode(response, response_len, &demoted) == 0 && demoted == 1);
+
+   /* A row already at or below the floor matches nothing and decays no
+    * further. That is a success reporting zero, not a missing row. */
+   demote_id_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_demote_id_reply_decode(response, response_len, &demoted) == 0 && demoted == 0);
+
+   /* More than one row for a primary-key equality means the statement drifted
+    * from the reviewed operation, so it must not be encodable as a reply. */
+   demote_id_value = 2;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   demote_id_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   demote_id_value = 1;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_lifecycle_sweep_expired_handler(void)
 {
    reset();
@@ -4544,6 +4641,7 @@ int main(void)
    test_record_l4_approval_wire();
    test_prune_orphaned_l0_wire();
    test_lifecycle_sweep_expired_wire();
+   test_demote_id_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4578,6 +4676,7 @@ int main(void)
    test_record_l4_approval_handler();
    test_prune_orphaned_l0_handler();
    test_lifecycle_sweep_expired_handler();
+   test_demote_id_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
