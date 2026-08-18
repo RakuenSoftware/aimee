@@ -1708,6 +1708,11 @@ static size_t method_size_limit(const char *method)
    return LIMIT_DEFAULT;
 }
 
+/* An RPC slower than this is worth an access line on its own. Below it the
+ * line is DEBUG: the ordinary trace stays available without every healthy
+ * call competing with the one that stalled. */
+#define SERVER_RPC_SLOW_MS 1000
+
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {
    /* Quick method extraction for size limit check (scan for "method":"..." in raw JSON) */
@@ -1793,6 +1798,7 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    }
 
    rc = -1;
+   const long long dispatch_started_ms = util_now_ms();
    for (int i = 0; server_dispatch_table[i].method; i++)
    {
       if (strcmp(m, server_dispatch_table[i].method) == 0)
@@ -1801,6 +1807,22 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
          break;
       }
    }
+   /* The NDJSON surface logged nothing, while every HTTP request has an access
+    * line. A call that stalls here is therefore invisible twice over: the
+    * client reports only that it gave up, and the server log shows a healthy,
+    * idle process because it never recorded being asked. That reads as "the
+    * server is down" and sends the reader to the wrong subsystem.
+    *
+    * Duration is the point -- a call that took 30s and one that took 3ms are
+    * the same line without it. Chatty by default would trade a blindness
+    * problem for a noise one, so the ordinary case stays at DEBUG and only a
+    * slow or failed call is promoted, which is the same bargain the HTTP
+    * access line makes for its own poll route. */
+   const long long dispatch_ms = util_now_ms() - dispatch_started_ms;
+   if (rc < 0 || dispatch_ms >= SERVER_RPC_SLOW_MS)
+      LOG_INFO("server.rpc", "%s -> rc=%d %lldms", m, rc, dispatch_ms);
+   else
+      LOG_DEBUG("server.rpc", "%s -> rc=%d %lldms", m, rc, dispatch_ms);
    if (rc == -1)
    {
       cJSON *resp = cJSON_CreateObject();
