@@ -141,6 +141,19 @@ int main(void)
    snprintf(endpoint, sizeof(endpoint), "http://127.0.0.1:%d", port);
    setenv("AIMEE_API_ENDPOINT", endpoint, 1);
 
+   /* Install the route map directly instead of letting the client fetch it.
+    *
+    * The client now asks the server which methods it routes (GET
+    * /v1/cli/manifest) before routing anything. This stub answers the FIRST
+    * request with a run handle and counts every later connection as a poll, so a
+    * fetch would take the run handle and the polls being measured would never
+    * happen. Injecting keeps the request sequence exactly what this test is
+    * about: submit, then poll until the deadline. */
+   cli_v1_manifest_set_for_test(
+       cJSON_Parse("{\"manifest_version\":1,\"routes\":["
+                   "{\"op\":\"dev.sweep\",\"verb\":\"POST\",\"path\":\"/v1/dev/sweep\","
+                   "\"async\":true}]}"));
+
    /* dev.sweep is an async route, so this goes through cli_v1_run_and_poll. */
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "dev.sweep");

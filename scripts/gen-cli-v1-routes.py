@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""Generate the thin client's method -> first-class /v1 route map from the /v1
-route descriptor, so the client calls dedicated REST endpoints instead of
-tunnelling through the retired generic dispatch endpoint.
+"""Extract the method -> first-class /v1 route map from the /v1 route descriptor.
+
+NOTE: this no longer generates a table into the thin client. The client fetches
+the map from the server at runtime (GET /v1/cli/manifest), so there is no second
+copy to keep in step and nothing here writes into src/cli_v1_routes*.c any more.
+What survives is the extraction: scripts/check-cli-v1-routes.py calls this with
+--stdout to learn which methods the server routes, so it can still catch a
+command that is dispatchable but unroutable. Kept as an extractor, not a
+generator.
 
 Source of truth: docs/gen/v1-route-descriptor.json — the canonical extract of the
 server's g_v1_routes[] table (produced by scripts/gen-v1-route-descriptor.py,

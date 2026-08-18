@@ -94,6 +94,9 @@
 #define AIMEE_DB1_OP_WINDOW_DELETE_ALL_FILES    30u
 #define AIMEE_DB1_OP_WINDOW_PRUNE_FILES         31u
 #define AIMEE_DB1_OP_WINDOWS_DELETE_AFTER_TURN  32u
+#define AIMEE_DB1_OP_USER_MEMORY_LIST_RECALL    33u
+#define AIMEE_DB1_OP_USER_MEMORY_ANY            34u
+#define AIMEE_DB1_OP_USER_MEMORY_UPSERT         35u
 
 /* Family 4: queued agent work: logs, coordination jobs and the cron that
  * drives them. */

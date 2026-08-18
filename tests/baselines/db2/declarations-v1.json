@@ -1237,6 +1237,36 @@
     },
     {
       "consumers": [
+        "src/tests/test_kb.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/kb_payload.h",
+          "line": 31
+        }
+      ],
+      "signature": "void aimee_db2_register_embed_provider ( db2_embed_fn provider )",
+      "signature_sha256": "e9a01b47b5f663d3142a8d4006da6eaead8fce289f6c768e7f845be525558dc7",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_embed_provider"
+    },
+    {
+      "consumers": [
+        "src/tests/test_fact_ingest.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/fact_ingest.h",
+          "line": 39
+        }
+      ],
+      "signature": "void aimee_db2_register_fact_extract_provider ( db2_fact_extract_fn provider )",
+      "signature_sha256": "13d592fd1c7dc0e9416cd39e7911f080042abd2aa9c46537b64280161e84dd91",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_fact_extract_provider"
+    },
+    {
+      "consumers": [
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fact_recall.c",
@@ -1253,6 +1283,21 @@
       "signature_sha256": "8f2225aa4902b730d36b0d307d6312d7ad44dc383db012512b86283e2c93ef94",
       "status": "private-test-only",
       "symbol": "aimee_db2_register_fact_gate_provider"
+    },
+    {
+      "consumers": [
+        "src/tests/test_fact_ingest.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/fact_ingest.h",
+          "line": 40
+        }
+      ],
+      "signature": "void aimee_db2_register_fact_scan_provider ( db2_fact_scan_fn provider )",
+      "signature_sha256": "778769db9a9b8ed08848a401aaac428b3a2886f97b72b9d2ab1671285aba7401",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_fact_scan_provider"
     },
     {
       "consumers": [
@@ -5747,7 +5792,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 100
+          "line": 115
         }
       ],
       "signature": "int db2_curator_invalidate_doc ( const char * project , const char * file_path )",
@@ -5760,7 +5805,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 112
+          "line": 127
         }
       ],
       "signature": "void db2_curator_invalidation_record ( const char * source_kind , const char * source_id , int artifacts_stale )",
@@ -5777,7 +5822,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 115
+          "line": 130
         }
       ],
       "signature": "int db2_curator_invalidations_since ( int64_t since_id , db2_curator_invalidation_t * out , int max )",
@@ -5807,7 +5852,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 96
+          "line": 111
         }
       ],
       "signature": "int db2_curator_reenqueue_extract_all ( void )",
@@ -8066,7 +8111,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 31
+          "line": 54
         }
       ],
       "signature": "int db2_fact_ingest_text ( const char * text , fact_authority_t authority , int enabled )",
@@ -8123,7 +8168,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fact_recall.c"
       ],
@@ -8619,7 +8663,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 240
+          "line": 255
         }
       ],
       "signature": "int db2_kb_async_count_kind ( const char * kind )",
@@ -8635,7 +8679,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 246
+          "line": 261
         }
       ],
       "signature": "int db2_kb_async_count_kind_pending ( const char * kind )",
@@ -8654,7 +8698,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 93
+          "line": 108
         }
       ],
       "signature": "int db2_kb_async_enqueue ( const char * kind , int64_t document_id , const char * project )",
@@ -8761,7 +8805,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 332
+          "line": 347
         }
       ],
       "signature": "int db2_kb_blob_ref_referenced ( const char * blob_ref )",
@@ -8776,7 +8820,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 22
+          "line": 37
         }
       ],
       "signature": "char * db2_kb_build_document_payload ( int64_t doc_id )",
@@ -8792,7 +8836,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 307
+          "line": 322
         }
       ],
       "signature": "int db2_kb_doc_asset_insert ( const char * project , const char * document_key , int page_no , double x0 , double y0 , double x1 , double y1 , const char * kind , const char * caption , const char * content_type , const char * blob_ref , const char * sensitivity_class )",
@@ -8808,7 +8852,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 317
+          "line": 332
         }
       ],
       "signature": "int db2_kb_doc_asset_open ( const char * project , int64_t asset_id , char * blob_ref_out , size_t ref_cap , char * content_type_out , size_t ct_cap )",
@@ -8823,7 +8867,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 328
+          "line": 343
         }
       ],
       "signature": "int db2_kb_doc_assets_delete_for_doc ( const char * project , const char * document_key )",
@@ -8839,7 +8883,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 323
+          "line": 338
         }
       ],
       "signature": "int db2_kb_doc_assets_list ( const char * project , const char * document_key , db2_kb_doc_asset_t * out , int max )",
@@ -8915,7 +8959,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 222
+          "line": 237
         }
       ],
       "signature": "int db2_kb_doc_regions_for_chunk ( int64_t chunk_id , db2_kb_pdf_region_t * out , int max )",
@@ -8930,7 +8974,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 159
+          "line": 174
         }
       ],
       "signature": "int64_t db2_kb_doc_regions_insert ( int64_t chunk_id , const char * document_key , int page_no , double x0 , double y0 , double x1 , double y1 , const char * quote , int line_index , const char * content_type , const char * sensitivity_class )",
@@ -8980,7 +9024,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 42
+          "line": 57
         }
       ],
       "signature": "int db2_kb_document_fetch ( int64_t id , const char * project , db2_kb_document_row_t * out )",
@@ -8997,7 +9041,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 129
+          "line": 144
         }
       ],
       "signature": "void db2_kb_documents_delete_for_file ( const char * project , const char * file_path )",
@@ -9010,7 +9054,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 84
+          "line": 99
         }
       ],
       "signature": "int db2_kb_documents_fts_search ( const char * project , const char * query , int64_t * ids , double * scores , int max )",
@@ -9025,7 +9069,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 86
+          "line": 101
         }
       ],
       "signature": "int db2_kb_documents_fts_search_scoped ( const char * project , const char * exclude_project , const char * query , int64_t * ids , double * scores , int max )",
@@ -9041,7 +9085,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 65
+          "line": 80
         }
       ],
       "signature": "int db2_kb_documents_get_stored_hash ( const char * project , const char * file_path , char * out , size_t out_len )",
@@ -9056,7 +9100,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 71
+          "line": 86
         }
       ],
       "signature": "int db2_kb_documents_hash_exists ( const char * project , const char * file_hash , char * sample_path , size_t sample_path_len )",
@@ -9071,7 +9115,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 77
+          "line": 92
         }
       ],
       "signature": "int db2_kb_documents_hll_sources_for_hash ( const char * project , const char * file_hash , sketch_hll_t * out )",
@@ -9090,7 +9134,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 135
+          "line": 150
         }
       ],
       "signature": "int64_t db2_kb_documents_insert_chunk ( const char * project , const char * file_path , const char * file_hash , int chunk_index , const char * heading_path , int line_start , int line_end , const char * content , int token_count )",
@@ -9105,7 +9149,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 148
+          "line": 163
         }
       ],
       "signature": "int64_t db2_kb_documents_insert_chunk_pdf ( const char * project , const char * file_path , const char * file_hash , int chunk_index , const char * heading_path , int line_start , int line_end , const char * content , int token_count , const char * chunk_strategy , int page_start , int page_end , const char * sensitivity_class , const char * quarantine_state )",
@@ -9123,7 +9167,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 143
+          "line": 158
         }
       ],
       "signature": "void db2_kb_documents_link_neighbours ( int64_t doc_id , int64_t prev_id )",
@@ -9140,7 +9184,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 122
+          "line": 137
         }
       ],
       "signature": "int db2_kb_documents_list_chunk_ids_for_file ( const char * project , const char * file_path , int64_t * out , int max )",
@@ -9156,7 +9200,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 59
+          "line": 74
         }
       ],
       "signature": "int db2_kb_documents_list_convention_candidates ( db2_kb_convention_row_t * out , int max )",
@@ -9172,13 +9216,28 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 284
+          "line": 299
         }
       ],
       "signature": "void db2_kb_documents_set_tsr_state ( const char * project , const char * file_path , const char * state )",
       "signature_sha256": "2ad93a6533c85679625b1dc98af047b8cb09933f17e7918c15301707f7f53fcb",
       "status": "audit-pending",
       "symbol": "db2_kb_documents_set_tsr_state"
+    },
+    {
+      "consumers": [
+        "src/tests/test_kb.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/kb_payload.h",
+          "line": 32
+        }
+      ],
+      "signature": "int db2_kb_embed_text ( const char * text , const char * command , int input_type , float * out , int max_dim )",
+      "signature_sha256": "40ff154dda4ae0d9fa654eb042d3136a0504796dba4d5087a681fdcf5644648b",
+      "status": "private-test-only",
+      "symbol": "db2_kb_embed_text"
     },
     {
       "consumers": [
@@ -9414,7 +9473,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 356
+          "line": 371
         }
       ],
       "signature": "int db2_kb_pdf_inspect_structure ( const char * project , const char * document_key , db2_kb_pdf_outline_t * out , int max )",
@@ -9429,7 +9488,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 344
+          "line": 359
         }
       ],
       "signature": "int db2_kb_pdf_open_neighbors ( const char * project , int64_t chunk_id , db2_kb_pdf_chunk_t * out , int max )",
@@ -9444,7 +9503,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 339
+          "line": 354
         }
       ],
       "signature": "int db2_kb_pdf_open_page ( const char * project , const char * document_key , int page_no , db2_kb_pdf_region_t * out , int max )",
@@ -9460,7 +9519,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 229
+          "line": 244
         }
       ],
       "signature": "int db2_kb_pdf_quarantine_confirm ( const char * project , const char * document_key )",
@@ -9475,7 +9534,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 230
+          "line": 245
         }
       ],
       "signature": "int db2_kb_pdf_quarantine_reject ( const char * project , const char * document_key )",
@@ -9490,7 +9549,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 236
+          "line": 251
         }
       ],
       "signature": "int db2_kb_pdf_reembed_project ( const char * project )",
@@ -9506,7 +9565,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 207
+          "line": 222
         }
       ],
       "signature": "int db2_kb_pdf_search_chunks ( const char * project , const char * query , int max , db2_kb_pdf_chunk_t * out , db2_kb_answerability_t * ans_out )",
@@ -9522,7 +9581,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 286
+          "line": 301
         }
       ],
       "signature": "int db2_kb_pdf_tsr_state ( const char * project , const char * document_key , char * out , size_t out_len )",
@@ -12362,7 +12421,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 268
+          "line": 283
         }
       ],
       "signature": "int db2_kb_table_cell_insert ( int64_t region_id , const char * document_key , int page_no , int cell_row , int cell_col , const char * cell_text , const char * subject , const char * relation , const char * object , int tsr_confidence , const char * sensitivity_class )",
@@ -12378,7 +12437,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 277
+          "line": 292
         }
       ],
       "signature": "int db2_kb_table_cells_lookup ( const char * project , const char * document_key , int page_no , db2_kb_table_cell_t * out , int max )",
@@ -12396,7 +12455,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 166
+          "line": 181
         }
       ],
       "signature": "int db2_kb_txn_begin ( void )",
@@ -12414,7 +12473,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 167
+          "line": 182
         }
       ],
       "signature": "int db2_kb_txn_commit ( void )",
@@ -12433,7 +12492,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_payload.h",
-          "line": 168
+          "line": 183
         }
       ],
       "signature": "void db2_kb_txn_rollback ( void )",
@@ -20474,12 +20533,13 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c"
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
+        "src/tests/test_fact_ingest.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 39
+          "line": 62
         }
       ],
       "signature": "int db2_typed_fact_ingress ( const char * query , char * facts_out , size_t facts_cap )",
@@ -23754,15 +23814,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4355164d3f5671d14a4cfaaf2388965d5979ec9e7039c698c9c657be2bd2d5bc",
+  "fingerprint": "6f7af39565097397a554afd4793960204fb554564972c8fd089826bc42683834",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1353,
+    "declarations": 1357,
     "headers": 136,
     "internal_unconsumed": 141,
-    "private_test_only": 255,
+    "private_test_only": 259,
     "reviewed": 62
   }
 }

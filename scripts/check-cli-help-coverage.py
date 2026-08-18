@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Guard that every command the thin client can route has a help entry.
 
-`aimee help <cmd>` is served from client_help[] (src/cli_help_data.h), which is a
+`aimee help <cmd>` is served from the command catalogue
+(src/server/cli_command_defs_data.h), which the server sends to the client. It is a
 SEPARATE table from both the /v1 route map (src/cli_v1_routes.c) and the embedded
 command table (src/cmd_table.c). Nothing tied them together, so a command could
 route and execute perfectly while `aimee help <cmd>` answered "Unknown command:
@@ -22,7 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ROUTES = ROOT / "src" / "cli_v1_routes.c"
-HELP = ROOT / "src" / "cli_help_data.h"
+HELP = ROOT / "src" / "server" / "cli_command_defs_data.h"
 
 # Routed commands that still lack a client_help[] entry. Shrink this, never grow it.
 KNOWN_GAPS: set[str] = set()
@@ -42,7 +43,7 @@ def main() -> int:
               "`aimee help <cmd>` answers \"Unknown command\":")
         for name in sorted(missing):
             print(f"  {name}")
-        print("Add an entry to src/cli_help_data.h (see the `aux` entry for the shape).")
+        print("Add an entry to src/server/cli_command_defs_data.h (see `aux` for the shape).")
         return 1
 
     # A fixed gap must leave the list, or the list rots into a lie.

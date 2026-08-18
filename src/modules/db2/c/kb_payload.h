@@ -17,6 +17,21 @@ extern "C"
 {
 #endif
 
+   enum
+   {
+      DB2_EMBED_DOCUMENT = 0,
+      DB2_EMBED_QUERY = 1,
+   };
+
+   typedef int (*db2_embed_fn)(const char *text, const char *command, int input_type, float *out,
+                               int max_dim);
+
+   /* Internal declarations of the embedding host contract exported publicly
+    * through <aimee/db2/host_contracts.h>. */
+   void aimee_db2_register_embed_provider(db2_embed_fn provider);
+   int db2_kb_embed_text(const char *text, const char *command, int input_type, float *out,
+                         int max_dim);
+
    /* Heap-allocated payload JSON for the kb_documents row, or NULL on
     * missing / SQL error.  Caller frees. */
    char *db2_kb_build_document_payload(int64_t doc_id);

@@ -56,7 +56,7 @@ TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
 PAYLOADS = ("none", "state", "text", "int", "int64", "double")
-FIELD_TYPES = ("text", "int", "int64")
+FIELD_TYPES = ("text", "int", "int64", "double")
 # Members that travel as decimal text and convert back on arrival.
 NUMERIC = ("int", "int64", "double")
 
@@ -1120,6 +1120,31 @@ def domain_headers(root: Path, operations: list[dict[str, object]]) -> list[str]
     return sorted(found)
 
 
+def declared_parameters(root: Path, symbol: str) -> dict[str, str]:
+    """Parameter name -> the type the header spells for it.
+
+    The generator used to derive a C type from the catalog's FIELD type: text
+    became const char *, int became int. That holds until the domain spells it
+    differently -- an enum passed by value is an int on the wire and
+    db1_user_recall_section_t in the signature -- and "int section" declares a
+    different function. Same lesson as the return type: read the header.
+    """
+    pattern = re.compile(r"\b" + re.escape(symbol) + r"\s*\(([^;{]*)\)\s*;", re.S)
+    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+        found = pattern.search(re.sub(r"/\*.*?\*/", "", header.read_text(errors="ignore"),
+                                      flags=re.S))
+        if not found:
+            continue
+        spelled: dict[str, str] = {}
+        for piece in found.group(1).split(","):
+            piece = " ".join(piece.split())
+            named = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[\s*\])?$", piece)
+            if named:
+                spelled[named.group(1)] = piece
+        return spelled
+    return {}
+
+
 def declared_return(root: Path, symbol: str) -> str:
     """The return type the header actually spells for `symbol`.
 
@@ -1267,9 +1292,11 @@ static int read_result(int status, const char *value_out)
             # int64 is its own C type here. It only ever appeared as a struct
             # member before, where the struct's own declaration carried the
             # width; as a direct parameter, "int" is a different function.
-            params = [(f"int {p}" if t == "int"
-                       else f"int64_t {p}" if t == "int64"
-                       else f"const char *{p}")
+            spelled = declared_parameters(root, str(operation.get("c_name", "")))
+            params = [spelled.get(p) or (f"int {p}" if t == "int"
+                                         else f"int64_t {p}" if t == "int64"
+                                         else f"double {p}" if t == "double"
+                                         else f"const char *{p}")
                       for p, t in zip(inputs, types)]
             # An int cannot be null and has no empty case, so only text is
             # guarded -- and only where the operation says it must be there.
@@ -1459,12 +1486,12 @@ static int read_result(int status, const char *value_out)
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             width = len(members)
             numeric = [i for i, (_, k) in enumerate(members) if k in NUMERIC]
-            body.append(f"   char **values = malloc((size_t){bound} * {width}u * sizeof *values);")
-            body.append(f"   size_t *caps = malloc((size_t){bound} * {width}u * sizeof *caps);")
+            body.append(f"   char **wire_values = malloc((size_t){bound} * {width}u * sizeof *wire_values);")
+            body.append(f"   size_t *wire_caps = malloc((size_t){bound} * {width}u * sizeof *wire_caps);")
             if numeric:
-                body.append(f"   char (*scratch)[{NUMERIC_TEXT}] = malloc((size_t){bound} * {len(numeric)}u * "
-                            "sizeof *scratch);")
-            owned = "values, caps" + (", scratch" if numeric else "")
+                body.append(f"   char (*wire_scratch)[{NUMERIC_TEXT}] = malloc((size_t){bound} * {len(numeric)}u * "
+                            "sizeof *wire_scratch);")
+            owned = "wire_values, wire_caps" + (", wire_scratch" if numeric else "")
             checks = " || ".join(f"!{o}" for o in owned.split(", "))
             body.append(f"   if ({checks})")
             body.append("   {")
@@ -1473,49 +1500,49 @@ static int read_result(int status, const char *value_out)
             body.append("      return -1;")
             body.append("   }")
             body.append(f"   memset({row_out}, 0, (size_t){bound} * sizeof *{row_out});")
-            body.append(f"   for (int row = 0; row < {bound}; ++row)")
+            body.append(f"   for (int wire_row = 0; wire_row < {bound}; ++wire_row)")
             body.append("   {")
             slot = 0
             for index, (member, kind) in enumerate(members):
-                at = f"row * {width}u + {index}u"
+                at = f"wire_row * {width}u + {index}u"
                 if kind in NUMERIC:
-                    cell = f"scratch[row * {len(numeric)}u + {slot}u]"
-                    body.append(f"      values[{at}] = {cell};")
-                    body.append(f"      caps[{at}] = sizeof {cell};")
+                    cell = f"wire_scratch[wire_row * {len(numeric)}u + {slot}u]"
+                    body.append(f"      wire_values[{at}] = {cell};")
+                    body.append(f"      wire_caps[{at}] = sizeof {cell};")
                     slot += 1
                 else:
-                    cell = (f"{row_out}[row]" if column
-                            else f"{row_out}[row].{member}")
-                    body.append(f"      values[{at}] = {cell};")
-                    body.append(f"      caps[{at}] = sizeof {cell};")
+                    cell = (f"{row_out}[wire_row]" if column
+                            else f"{row_out}[wire_row].{member}")
+                    body.append(f"      wire_values[{at}] = {cell};")
+                    body.append(f"      wire_caps[{at}] = sizeof {cell};")
             body.append("   }")
-            body.append("   uint32_t filled = 0;")
-            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps,")
-            body.append(f"                           (uint32_t)({bound} * {width}), &filled);")
-            body.append("   free(values);")
-            body.append("   free(caps);")
-            fail_free = "".join(f"\n      free({o});" for o in (["scratch"] if numeric else []))
+            body.append("   uint32_t wire_filled = 0;")
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, wire_values, wire_caps,")
+            body.append(f"                           (uint32_t)({bound} * {width}), &wire_filled);")
+            body.append("   free(wire_values);")
+            body.append("   free(wire_caps);")
+            fail_free = "".join(f"\n      free({o});" for o in (["wire_scratch"] if numeric else []))
             # A reply that is not a whole number of rows is not this operation's
-            # reply, whatever its status says.
-            body.append(f"   if (status != (int)AIMEE_DB1_STATUS_OK || filled % {width}u != 0u)")
+            # reply, whatever its wire_status says.
+            body.append(f"   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % {width}u != 0u)")
             body.append("   {" + fail_free)
             body.append("      return -1;")
             body.append("   }")
-            body.append(f"   int rows = (int)(filled / {width}u);")
+            body.append(f"   int wire_rows = (int)(wire_filled / {width}u);")
             if numeric:
-                body.append("   for (int row = 0; row < rows; ++row)")
+                body.append("   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)")
                 body.append("   {")
                 slot = 0
                 for member, kind in members:
                     if kind in NUMERIC:
-                        cell = f"scratch[row * {len(numeric)}u + {slot}u]"
-                        target = (f"{row_out}[row]" if column
-                                  else f"{row_out}[row].{member}")
+                        cell = f"wire_scratch[wire_row * {len(numeric)}u + {slot}u]"
+                        target = (f"{row_out}[wire_row]" if column
+                                  else f"{row_out}[wire_row].{member}")
                         body.append(f"      {target} = {numeric_parse(kind, cell)};")
                         slot += 1
                 body.append("   }")
-                body.append("   free(scratch);")
-            body.append("   return rows;")
+                body.append("   free(wire_scratch);")
+            body.append("   return wire_rows;")
         elif out_struct:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             target = outputs[0]

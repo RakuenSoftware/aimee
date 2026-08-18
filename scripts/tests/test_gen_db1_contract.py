@@ -739,8 +739,8 @@ class CatalogTests(unittest.TestCase):
         # The width is never sent: an operation knows how wide its rows are, so
         # the reply's own value count is what carries the length.
         client = (REPO_ROOT / contract.CLIENT_DIR / "conversation.c").read_text(encoding="utf-8")
-        self.assertIn("int rows = (int)(filled / 8u);", client)
-        self.assertIn("filled % 8u != 0u", client)
+        self.assertIn("int wire_rows = (int)(wire_filled / 8u);", client)
+        self.assertIn("wire_filled % 8u != 0u", client)
 
     def test_the_generated_list_stage_bounds_what_it_allocates(self) -> None:
         stage = (REPO_ROOT / contract.SOURCE_DIR / "conversation_stage.c").read_text(

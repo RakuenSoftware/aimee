@@ -317,70 +317,70 @@ int db1_agent_log_list_recent(db1_agent_log_display_t *out, int max)
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", max);
    const char *fields[] = {arg0};
-   char **values = malloc((size_t)max * 13u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 13u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 8u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 13u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 13u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 8u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 13u + 0u] = scratch[row * 8u + 0u];
-      caps[row * 13u + 0u] = sizeof scratch[row * 8u + 0u];
-      values[row * 13u + 1u] = out[row].agent_name;
-      caps[row * 13u + 1u] = sizeof out[row].agent_name;
-      values[row * 13u + 2u] = out[row].role;
-      caps[row * 13u + 2u] = sizeof out[row].role;
-      values[row * 13u + 3u] = scratch[row * 8u + 1u];
-      caps[row * 13u + 3u] = sizeof scratch[row * 8u + 1u];
-      values[row * 13u + 4u] = scratch[row * 8u + 2u];
-      caps[row * 13u + 4u] = sizeof scratch[row * 8u + 2u];
-      values[row * 13u + 5u] = scratch[row * 8u + 3u];
-      caps[row * 13u + 5u] = sizeof scratch[row * 8u + 3u];
-      values[row * 13u + 6u] = scratch[row * 8u + 4u];
-      caps[row * 13u + 6u] = sizeof scratch[row * 8u + 4u];
-      values[row * 13u + 7u] = scratch[row * 8u + 5u];
-      caps[row * 13u + 7u] = sizeof scratch[row * 8u + 5u];
-      values[row * 13u + 8u] = scratch[row * 8u + 6u];
-      caps[row * 13u + 8u] = sizeof scratch[row * 8u + 6u];
-      values[row * 13u + 9u] = scratch[row * 8u + 7u];
-      caps[row * 13u + 9u] = sizeof scratch[row * 8u + 7u];
-      values[row * 13u + 10u] = out[row].session_id;
-      caps[row * 13u + 10u] = sizeof out[row].session_id;
-      values[row * 13u + 11u] = out[row].created_at;
-      caps[row * 13u + 11u] = sizeof out[row].created_at;
-      values[row * 13u + 12u] = out[row].error;
-      caps[row * 13u + 12u] = sizeof out[row].error;
+      wire_values[wire_row * 13u + 0u] = wire_scratch[wire_row * 8u + 0u];
+      wire_caps[wire_row * 13u + 0u] = sizeof wire_scratch[wire_row * 8u + 0u];
+      wire_values[wire_row * 13u + 1u] = out[wire_row].agent_name;
+      wire_caps[wire_row * 13u + 1u] = sizeof out[wire_row].agent_name;
+      wire_values[wire_row * 13u + 2u] = out[wire_row].role;
+      wire_caps[wire_row * 13u + 2u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 13u + 3u] = wire_scratch[wire_row * 8u + 1u];
+      wire_caps[wire_row * 13u + 3u] = sizeof wire_scratch[wire_row * 8u + 1u];
+      wire_values[wire_row * 13u + 4u] = wire_scratch[wire_row * 8u + 2u];
+      wire_caps[wire_row * 13u + 4u] = sizeof wire_scratch[wire_row * 8u + 2u];
+      wire_values[wire_row * 13u + 5u] = wire_scratch[wire_row * 8u + 3u];
+      wire_caps[wire_row * 13u + 5u] = sizeof wire_scratch[wire_row * 8u + 3u];
+      wire_values[wire_row * 13u + 6u] = wire_scratch[wire_row * 8u + 4u];
+      wire_caps[wire_row * 13u + 6u] = sizeof wire_scratch[wire_row * 8u + 4u];
+      wire_values[wire_row * 13u + 7u] = wire_scratch[wire_row * 8u + 5u];
+      wire_caps[wire_row * 13u + 7u] = sizeof wire_scratch[wire_row * 8u + 5u];
+      wire_values[wire_row * 13u + 8u] = wire_scratch[wire_row * 8u + 6u];
+      wire_caps[wire_row * 13u + 8u] = sizeof wire_scratch[wire_row * 8u + 6u];
+      wire_values[wire_row * 13u + 9u] = wire_scratch[wire_row * 8u + 7u];
+      wire_caps[wire_row * 13u + 9u] = sizeof wire_scratch[wire_row * 8u + 7u];
+      wire_values[wire_row * 13u + 10u] = out[wire_row].session_id;
+      wire_caps[wire_row * 13u + 10u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 13u + 11u] = out[wire_row].created_at;
+      wire_caps[wire_row * 13u + 11u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 13u + 12u] = out[wire_row].error;
+      wire_caps[wire_row * 13u + 12u] = sizeof out[wire_row].error;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT, fields, 1, values, caps,
-                           (uint32_t)(max * 13), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 13u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 13), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 13u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 13u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 13u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int64_t)strtoll(scratch[row * 8u + 0u], NULL, 10);
-      out[row].prompt_tokens = (int)strtol(scratch[row * 8u + 1u], NULL, 10);
-      out[row].completion_tokens = (int)strtol(scratch[row * 8u + 2u], NULL, 10);
-      out[row].latency_ms = (int)strtol(scratch[row * 8u + 3u], NULL, 10);
-      out[row].success = (int)strtol(scratch[row * 8u + 4u], NULL, 10);
-      out[row].turns = (int)strtol(scratch[row * 8u + 5u], NULL, 10);
-      out[row].tool_calls = (int)strtol(scratch[row * 8u + 6u], NULL, 10);
-      out[row].confidence = (int)strtol(scratch[row * 8u + 7u], NULL, 10);
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 8u + 0u], NULL, 10);
+      out[wire_row].prompt_tokens = (int)strtol(wire_scratch[wire_row * 8u + 1u], NULL, 10);
+      out[wire_row].completion_tokens = (int)strtol(wire_scratch[wire_row * 8u + 2u], NULL, 10);
+      out[wire_row].latency_ms = (int)strtol(wire_scratch[wire_row * 8u + 3u], NULL, 10);
+      out[wire_row].success = (int)strtol(wire_scratch[wire_row * 8u + 4u], NULL, 10);
+      out[wire_row].turns = (int)strtol(wire_scratch[wire_row * 8u + 5u], NULL, 10);
+      out[wire_row].tool_calls = (int)strtol(wire_scratch[wire_row * 8u + 6u], NULL, 10);
+      out[wire_row].confidence = (int)strtol(wire_scratch[wire_row * 8u + 7u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_list_by_session(const char *session_id, db1_agent_log_display_t *out, int max)
@@ -392,70 +392,70 @@ int db1_agent_log_list_by_session(const char *session_id, db1_agent_log_display_
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {session_id, arg1};
-   char **values = malloc((size_t)max * 13u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 13u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 8u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 13u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 13u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 8u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 13u + 0u] = scratch[row * 8u + 0u];
-      caps[row * 13u + 0u] = sizeof scratch[row * 8u + 0u];
-      values[row * 13u + 1u] = out[row].agent_name;
-      caps[row * 13u + 1u] = sizeof out[row].agent_name;
-      values[row * 13u + 2u] = out[row].role;
-      caps[row * 13u + 2u] = sizeof out[row].role;
-      values[row * 13u + 3u] = scratch[row * 8u + 1u];
-      caps[row * 13u + 3u] = sizeof scratch[row * 8u + 1u];
-      values[row * 13u + 4u] = scratch[row * 8u + 2u];
-      caps[row * 13u + 4u] = sizeof scratch[row * 8u + 2u];
-      values[row * 13u + 5u] = scratch[row * 8u + 3u];
-      caps[row * 13u + 5u] = sizeof scratch[row * 8u + 3u];
-      values[row * 13u + 6u] = scratch[row * 8u + 4u];
-      caps[row * 13u + 6u] = sizeof scratch[row * 8u + 4u];
-      values[row * 13u + 7u] = scratch[row * 8u + 5u];
-      caps[row * 13u + 7u] = sizeof scratch[row * 8u + 5u];
-      values[row * 13u + 8u] = scratch[row * 8u + 6u];
-      caps[row * 13u + 8u] = sizeof scratch[row * 8u + 6u];
-      values[row * 13u + 9u] = scratch[row * 8u + 7u];
-      caps[row * 13u + 9u] = sizeof scratch[row * 8u + 7u];
-      values[row * 13u + 10u] = out[row].session_id;
-      caps[row * 13u + 10u] = sizeof out[row].session_id;
-      values[row * 13u + 11u] = out[row].created_at;
-      caps[row * 13u + 11u] = sizeof out[row].created_at;
-      values[row * 13u + 12u] = out[row].error;
-      caps[row * 13u + 12u] = sizeof out[row].error;
+      wire_values[wire_row * 13u + 0u] = wire_scratch[wire_row * 8u + 0u];
+      wire_caps[wire_row * 13u + 0u] = sizeof wire_scratch[wire_row * 8u + 0u];
+      wire_values[wire_row * 13u + 1u] = out[wire_row].agent_name;
+      wire_caps[wire_row * 13u + 1u] = sizeof out[wire_row].agent_name;
+      wire_values[wire_row * 13u + 2u] = out[wire_row].role;
+      wire_caps[wire_row * 13u + 2u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 13u + 3u] = wire_scratch[wire_row * 8u + 1u];
+      wire_caps[wire_row * 13u + 3u] = sizeof wire_scratch[wire_row * 8u + 1u];
+      wire_values[wire_row * 13u + 4u] = wire_scratch[wire_row * 8u + 2u];
+      wire_caps[wire_row * 13u + 4u] = sizeof wire_scratch[wire_row * 8u + 2u];
+      wire_values[wire_row * 13u + 5u] = wire_scratch[wire_row * 8u + 3u];
+      wire_caps[wire_row * 13u + 5u] = sizeof wire_scratch[wire_row * 8u + 3u];
+      wire_values[wire_row * 13u + 6u] = wire_scratch[wire_row * 8u + 4u];
+      wire_caps[wire_row * 13u + 6u] = sizeof wire_scratch[wire_row * 8u + 4u];
+      wire_values[wire_row * 13u + 7u] = wire_scratch[wire_row * 8u + 5u];
+      wire_caps[wire_row * 13u + 7u] = sizeof wire_scratch[wire_row * 8u + 5u];
+      wire_values[wire_row * 13u + 8u] = wire_scratch[wire_row * 8u + 6u];
+      wire_caps[wire_row * 13u + 8u] = sizeof wire_scratch[wire_row * 8u + 6u];
+      wire_values[wire_row * 13u + 9u] = wire_scratch[wire_row * 8u + 7u];
+      wire_caps[wire_row * 13u + 9u] = sizeof wire_scratch[wire_row * 8u + 7u];
+      wire_values[wire_row * 13u + 10u] = out[wire_row].session_id;
+      wire_caps[wire_row * 13u + 10u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 13u + 11u] = out[wire_row].created_at;
+      wire_caps[wire_row * 13u + 11u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 13u + 12u] = out[wire_row].error;
+      wire_caps[wire_row * 13u + 12u] = sizeof out[wire_row].error;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_BY_SESSION, fields, 2, values, caps,
-                           (uint32_t)(max * 13), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 13u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_BY_SESSION, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 13), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 13u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 13u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 13u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int64_t)strtoll(scratch[row * 8u + 0u], NULL, 10);
-      out[row].prompt_tokens = (int)strtol(scratch[row * 8u + 1u], NULL, 10);
-      out[row].completion_tokens = (int)strtol(scratch[row * 8u + 2u], NULL, 10);
-      out[row].latency_ms = (int)strtol(scratch[row * 8u + 3u], NULL, 10);
-      out[row].success = (int)strtol(scratch[row * 8u + 4u], NULL, 10);
-      out[row].turns = (int)strtol(scratch[row * 8u + 5u], NULL, 10);
-      out[row].tool_calls = (int)strtol(scratch[row * 8u + 6u], NULL, 10);
-      out[row].confidence = (int)strtol(scratch[row * 8u + 7u], NULL, 10);
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 8u + 0u], NULL, 10);
+      out[wire_row].prompt_tokens = (int)strtol(wire_scratch[wire_row * 8u + 1u], NULL, 10);
+      out[wire_row].completion_tokens = (int)strtol(wire_scratch[wire_row * 8u + 2u], NULL, 10);
+      out[wire_row].latency_ms = (int)strtol(wire_scratch[wire_row * 8u + 3u], NULL, 10);
+      out[wire_row].success = (int)strtol(wire_scratch[wire_row * 8u + 4u], NULL, 10);
+      out[wire_row].turns = (int)strtol(wire_scratch[wire_row * 8u + 5u], NULL, 10);
+      out[wire_row].tool_calls = (int)strtol(wire_scratch[wire_row * 8u + 6u], NULL, 10);
+      out[wire_row].confidence = (int)strtol(wire_scratch[wire_row * 8u + 7u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_search_session_ids_by_role(const char *pattern, char (*out_ids)[DB1_AL_SESSION_LEN], int max)
@@ -467,31 +467,31 @@ int db1_agent_log_search_session_ids_by_role(const char *pattern, char (*out_ids
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {pattern, arg1};
-   char **values = malloc((size_t)max * 1u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
-   if (!values || !caps)
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
    {
-      free(values);
-      free(caps);
+      free(wire_values);
+      free(wire_caps);
       return -1;
    }
    memset(out_ids, 0, (size_t)max * sizeof *out_ids);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 1u + 0u] = out_ids[row];
-      caps[row * 1u + 0u] = sizeof out_ids[row];
+      wire_values[wire_row * 1u + 0u] = out_ids[wire_row];
+      wire_caps[wire_row * 1u + 0u] = sizeof out_ids[wire_row];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_SEARCH_SESSIONS_BY_ROLE, fields, 2, values, caps,
-                           (uint32_t)(max * 1), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_SEARCH_SESSIONS_BY_ROLE, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
    {
       return -1;
    }
-   int rows = (int)(filled / 1u);
-   return rows;
+   int wire_rows = (int)(wire_filled / 1u);
+   return wire_rows;
 }
 
 int db1_agent_log_count_per_role(const char *since_or_null, db1_agent_log_role_count_t *out, int max)
@@ -503,41 +503,41 @@ int db1_agent_log_count_per_role(const char *since_or_null, db1_agent_log_role_c
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {since_or_null ? since_or_null : "", arg1};
-   char **values = malloc((size_t)max * 2u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 2u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 2u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 2u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 2u + 0u] = out[row].role;
-      caps[row * 2u + 0u] = sizeof out[row].role;
-      values[row * 2u + 1u] = scratch[row * 1u + 0u];
-      caps[row * 2u + 1u] = sizeof scratch[row * 1u + 0u];
+      wire_values[wire_row * 2u + 0u] = out[wire_row].role;
+      wire_caps[wire_row * 2u + 0u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 2u + 1u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 2u + 1u] = sizeof wire_scratch[wire_row * 1u + 0u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_COUNT_PER_ROLE, fields, 2, values, caps,
-                           (uint32_t)(max * 2), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 2u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_COUNT_PER_ROLE, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 2), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 2u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 2u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 2u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].count = (int)strtol(scratch[row * 1u + 0u], NULL, 10);
+      out[wire_row].count = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_failures_since_seconds(int max_rows, int since_secs, db1_agent_log_failure_t *out)
@@ -551,35 +551,35 @@ int db1_agent_log_failures_since_seconds(int max_rows, int since_secs, db1_agent
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", since_secs);
    const char *fields[] = {arg0, arg1};
-   char **values = malloc((size_t)max_rows * 3u * sizeof *values);
-   size_t *caps = malloc((size_t)max_rows * 3u * sizeof *caps);
-   if (!values || !caps)
+   char **wire_values = malloc((size_t)max_rows * 3u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max_rows * 3u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
    {
-      free(values);
-      free(caps);
+      free(wire_values);
+      free(wire_caps);
       return -1;
    }
    memset(out, 0, (size_t)max_rows * sizeof *out);
-   for (int row = 0; row < max_rows; ++row)
+   for (int wire_row = 0; wire_row < max_rows; ++wire_row)
    {
-      values[row * 3u + 0u] = out[row].role;
-      caps[row * 3u + 0u] = sizeof out[row].role;
-      values[row * 3u + 1u] = out[row].error;
-      caps[row * 3u + 1u] = sizeof out[row].error;
-      values[row * 3u + 2u] = out[row].created_at;
-      caps[row * 3u + 2u] = sizeof out[row].created_at;
+      wire_values[wire_row * 3u + 0u] = out[wire_row].role;
+      wire_caps[wire_row * 3u + 0u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 3u + 1u] = out[wire_row].error;
+      wire_caps[wire_row * 3u + 1u] = sizeof out[wire_row].error;
+      wire_values[wire_row * 3u + 2u] = out[wire_row].created_at;
+      wire_caps[wire_row * 3u + 2u] = sizeof out[wire_row].created_at;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_FAILURES_SINCE, fields, 2, values, caps,
-                           (uint32_t)(max_rows * 3), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 3u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_FAILURES_SINCE, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max_rows * 3), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 3u != 0u)
    {
       return -1;
    }
-   int rows = (int)(filled / 3u);
-   return rows;
+   int wire_rows = (int)(wire_filled / 3u);
+   return wire_rows;
 }
 
 int db1_agent_log_list_recent_errors(int since_days, db1_agent_log_recent_error_t *out, int max)
@@ -593,31 +593,31 @@ int db1_agent_log_list_recent_errors(int since_days, db1_agent_log_recent_error_
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {arg0, arg1};
-   char **values = malloc((size_t)max * 1u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
-   if (!values || !caps)
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
    {
-      free(values);
-      free(caps);
+      free(wire_values);
+      free(wire_caps);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 1u + 0u] = out[row].error;
-      caps[row * 1u + 0u] = sizeof out[row].error;
+      wire_values[wire_row * 1u + 0u] = out[wire_row].error;
+      wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row].error;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT_ERRORS, fields, 2, values, caps,
-                           (uint32_t)(max * 1), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT_ERRORS, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
    {
       return -1;
    }
-   int rows = (int)(filled / 1u);
-   return rows;
+   int wire_rows = (int)(wire_filled / 1u);
+   return wire_rows;
 }
 
 int db1_agent_log_list_delegation_patterns(int since_days, int min_total, db1_agent_log_delegation_pattern_t *out, int max)
@@ -633,57 +633,57 @@ int db1_agent_log_list_delegation_patterns(int since_days, int min_total, db1_ag
    char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", max);
    const char *fields[] = {arg0, arg1, arg2};
-   char **values = malloc((size_t)max * 8u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 5u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 8u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 8u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 5u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 8u + 0u] = out[row].role;
-      caps[row * 8u + 0u] = sizeof out[row].role;
-      values[row * 8u + 1u] = out[row].agent_name;
-      caps[row * 8u + 1u] = sizeof out[row].agent_name;
-      values[row * 8u + 2u] = scratch[row * 5u + 0u];
-      caps[row * 8u + 2u] = sizeof scratch[row * 5u + 0u];
-      values[row * 8u + 3u] = scratch[row * 5u + 1u];
-      caps[row * 8u + 3u] = sizeof scratch[row * 5u + 1u];
-      values[row * 8u + 4u] = scratch[row * 5u + 2u];
-      caps[row * 8u + 4u] = sizeof scratch[row * 5u + 2u];
-      values[row * 8u + 5u] = scratch[row * 5u + 3u];
-      caps[row * 8u + 5u] = sizeof scratch[row * 5u + 3u];
-      values[row * 8u + 6u] = scratch[row * 5u + 4u];
-      caps[row * 8u + 6u] = sizeof scratch[row * 5u + 4u];
-      values[row * 8u + 7u] = out[row].recent_error;
-      caps[row * 8u + 7u] = sizeof out[row].recent_error;
+      wire_values[wire_row * 8u + 0u] = out[wire_row].role;
+      wire_caps[wire_row * 8u + 0u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 8u + 1u] = out[wire_row].agent_name;
+      wire_caps[wire_row * 8u + 1u] = sizeof out[wire_row].agent_name;
+      wire_values[wire_row * 8u + 2u] = wire_scratch[wire_row * 5u + 0u];
+      wire_caps[wire_row * 8u + 2u] = sizeof wire_scratch[wire_row * 5u + 0u];
+      wire_values[wire_row * 8u + 3u] = wire_scratch[wire_row * 5u + 1u];
+      wire_caps[wire_row * 8u + 3u] = sizeof wire_scratch[wire_row * 5u + 1u];
+      wire_values[wire_row * 8u + 4u] = wire_scratch[wire_row * 5u + 2u];
+      wire_caps[wire_row * 8u + 4u] = sizeof wire_scratch[wire_row * 5u + 2u];
+      wire_values[wire_row * 8u + 5u] = wire_scratch[wire_row * 5u + 3u];
+      wire_caps[wire_row * 8u + 5u] = sizeof wire_scratch[wire_row * 5u + 3u];
+      wire_values[wire_row * 8u + 6u] = wire_scratch[wire_row * 5u + 4u];
+      wire_caps[wire_row * 8u + 6u] = sizeof wire_scratch[wire_row * 5u + 4u];
+      wire_values[wire_row * 8u + 7u] = out[wire_row].recent_error;
+      wire_caps[wire_row * 8u + 7u] = sizeof out[wire_row].recent_error;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_DELEGATION_PATTERNS, fields, 3, values, caps,
-                           (uint32_t)(max * 8), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_DELEGATION_PATTERNS, fields, 3, wire_values, wire_caps,
+                           (uint32_t)(max * 8), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 8u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 8u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 8u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].wins = (int)strtol(scratch[row * 5u + 0u], NULL, 10);
-      out[row].fails = (int)strtol(scratch[row * 5u + 1u], NULL, 10);
-      out[row].total = (int)strtol(scratch[row * 5u + 2u], NULL, 10);
-      out[row].avg_turns = (int)strtol(scratch[row * 5u + 3u], NULL, 10);
-      out[row].avg_tools = (int)strtol(scratch[row * 5u + 4u], NULL, 10);
+      out[wire_row].wins = (int)strtol(wire_scratch[wire_row * 5u + 0u], NULL, 10);
+      out[wire_row].fails = (int)strtol(wire_scratch[wire_row * 5u + 1u], NULL, 10);
+      out[wire_row].total = (int)strtol(wire_scratch[wire_row * 5u + 2u], NULL, 10);
+      out[wire_row].avg_turns = (int)strtol(wire_scratch[wire_row * 5u + 3u], NULL, 10);
+      out[wire_row].avg_tools = (int)strtol(wire_scratch[wire_row * 5u + 4u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_list_failure_episode_seeds(int since_days, int min_fails, db1_agent_log_failure_episode_seed_t *out, int max)
@@ -699,45 +699,45 @@ int db1_agent_log_list_failure_episode_seeds(int since_days, int min_fails, db1_
    char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", max);
    const char *fields[] = {arg0, arg1, arg2};
-   char **values = malloc((size_t)max * 4u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 4u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 4u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 4u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 4u + 0u] = out[row].role;
-      caps[row * 4u + 0u] = sizeof out[row].role;
-      values[row * 4u + 1u] = out[row].agent_name;
-      caps[row * 4u + 1u] = sizeof out[row].agent_name;
-      values[row * 4u + 2u] = scratch[row * 1u + 0u];
-      caps[row * 4u + 2u] = sizeof scratch[row * 1u + 0u];
-      values[row * 4u + 3u] = out[row].errors;
-      caps[row * 4u + 3u] = sizeof out[row].errors;
+      wire_values[wire_row * 4u + 0u] = out[wire_row].role;
+      wire_caps[wire_row * 4u + 0u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 4u + 1u] = out[wire_row].agent_name;
+      wire_caps[wire_row * 4u + 1u] = sizeof out[wire_row].agent_name;
+      wire_values[wire_row * 4u + 2u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 4u + 2u] = sizeof wire_scratch[wire_row * 1u + 0u];
+      wire_values[wire_row * 4u + 3u] = out[wire_row].errors;
+      wire_caps[wire_row * 4u + 3u] = sizeof out[wire_row].errors;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_FAILURE_SEEDS, fields, 3, values, caps,
-                           (uint32_t)(max * 4), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 4u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_FAILURE_SEEDS, fields, 3, wire_values, wire_caps,
+                           (uint32_t)(max * 4), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 4u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 4u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 4u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].fails = (int)strtol(scratch[row * 1u + 0u], NULL, 10);
+      out[wire_row].fails = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_metrics_by_role(db1_agent_log_metric_t *out, int max)
@@ -749,59 +749,59 @@ int db1_agent_log_metrics_by_role(db1_agent_log_metric_t *out, int max)
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", max);
    const char *fields[] = {arg0};
-   char **values = malloc((size_t)max * 8u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 7u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 8u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 8u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 7u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 8u + 0u] = out[row].role;
-      caps[row * 8u + 0u] = sizeof out[row].role;
-      values[row * 8u + 1u] = scratch[row * 7u + 0u];
-      caps[row * 8u + 1u] = sizeof scratch[row * 7u + 0u];
-      values[row * 8u + 2u] = scratch[row * 7u + 1u];
-      caps[row * 8u + 2u] = sizeof scratch[row * 7u + 1u];
-      values[row * 8u + 3u] = scratch[row * 7u + 2u];
-      caps[row * 8u + 3u] = sizeof scratch[row * 7u + 2u];
-      values[row * 8u + 4u] = scratch[row * 7u + 3u];
-      caps[row * 8u + 4u] = sizeof scratch[row * 7u + 3u];
-      values[row * 8u + 5u] = scratch[row * 7u + 4u];
-      caps[row * 8u + 5u] = sizeof scratch[row * 7u + 4u];
-      values[row * 8u + 6u] = scratch[row * 7u + 5u];
-      caps[row * 8u + 6u] = sizeof scratch[row * 7u + 5u];
-      values[row * 8u + 7u] = scratch[row * 7u + 6u];
-      caps[row * 8u + 7u] = sizeof scratch[row * 7u + 6u];
+      wire_values[wire_row * 8u + 0u] = out[wire_row].role;
+      wire_caps[wire_row * 8u + 0u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 8u + 1u] = wire_scratch[wire_row * 7u + 0u];
+      wire_caps[wire_row * 8u + 1u] = sizeof wire_scratch[wire_row * 7u + 0u];
+      wire_values[wire_row * 8u + 2u] = wire_scratch[wire_row * 7u + 1u];
+      wire_caps[wire_row * 8u + 2u] = sizeof wire_scratch[wire_row * 7u + 1u];
+      wire_values[wire_row * 8u + 3u] = wire_scratch[wire_row * 7u + 2u];
+      wire_caps[wire_row * 8u + 3u] = sizeof wire_scratch[wire_row * 7u + 2u];
+      wire_values[wire_row * 8u + 4u] = wire_scratch[wire_row * 7u + 3u];
+      wire_caps[wire_row * 8u + 4u] = sizeof wire_scratch[wire_row * 7u + 3u];
+      wire_values[wire_row * 8u + 5u] = wire_scratch[wire_row * 7u + 4u];
+      wire_caps[wire_row * 8u + 5u] = sizeof wire_scratch[wire_row * 7u + 4u];
+      wire_values[wire_row * 8u + 6u] = wire_scratch[wire_row * 7u + 5u];
+      wire_caps[wire_row * 8u + 6u] = sizeof wire_scratch[wire_row * 7u + 5u];
+      wire_values[wire_row * 8u + 7u] = wire_scratch[wire_row * 7u + 6u];
+      wire_caps[wire_row * 8u + 7u] = sizeof wire_scratch[wire_row * 7u + 6u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_METRICS_BY_ROLE, fields, 1, values, caps,
-                           (uint32_t)(max * 8), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_METRICS_BY_ROLE, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 8), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 8u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 8u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 8u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].total = (int)strtol(scratch[row * 7u + 0u], NULL, 10);
-      out[row].successes = (int)strtol(scratch[row * 7u + 1u], NULL, 10);
-      out[row].avg_latency_ms = (int)strtol(scratch[row * 7u + 2u], NULL, 10);
-      out[row].tokens = (int64_t)strtoll(scratch[row * 7u + 3u], NULL, 10);
-      out[row].cache_write_tokens = (int64_t)strtoll(scratch[row * 7u + 4u], NULL, 10);
-      out[row].cache_read_tokens = (int64_t)strtoll(scratch[row * 7u + 5u], NULL, 10);
-      out[row].estimated_cost_usd = strtod(scratch[row * 7u + 6u], NULL);
+      out[wire_row].total = (int)strtol(wire_scratch[wire_row * 7u + 0u], NULL, 10);
+      out[wire_row].successes = (int)strtol(wire_scratch[wire_row * 7u + 1u], NULL, 10);
+      out[wire_row].avg_latency_ms = (int)strtol(wire_scratch[wire_row * 7u + 2u], NULL, 10);
+      out[wire_row].tokens = (int64_t)strtoll(wire_scratch[wire_row * 7u + 3u], NULL, 10);
+      out[wire_row].cache_write_tokens = (int64_t)strtoll(wire_scratch[wire_row * 7u + 4u], NULL, 10);
+      out[wire_row].cache_read_tokens = (int64_t)strtoll(wire_scratch[wire_row * 7u + 5u], NULL, 10);
+      out[wire_row].estimated_cost_usd = strtod(wire_scratch[wire_row * 7u + 6u], NULL);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_agent_stats(const char *agent_name_or_null, db1_agent_log_agent_stats_t *out, int max)
@@ -813,62 +813,62 @@ int db1_agent_log_agent_stats(const char *agent_name_or_null, db1_agent_log_agen
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {agent_name_or_null ? agent_name_or_null : "", arg1};
-   char **values = malloc((size_t)max * 9u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 9u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 8u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 9u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 9u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 8u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 9u + 0u] = out[row].agent_name;
-      caps[row * 9u + 0u] = sizeof out[row].agent_name;
-      values[row * 9u + 1u] = scratch[row * 8u + 0u];
-      caps[row * 9u + 1u] = sizeof scratch[row * 8u + 0u];
-      values[row * 9u + 2u] = scratch[row * 8u + 1u];
-      caps[row * 9u + 2u] = sizeof scratch[row * 8u + 1u];
-      values[row * 9u + 3u] = scratch[row * 8u + 2u];
-      caps[row * 9u + 3u] = sizeof scratch[row * 8u + 2u];
-      values[row * 9u + 4u] = scratch[row * 8u + 3u];
-      caps[row * 9u + 4u] = sizeof scratch[row * 8u + 3u];
-      values[row * 9u + 5u] = scratch[row * 8u + 4u];
-      caps[row * 9u + 5u] = sizeof scratch[row * 8u + 4u];
-      values[row * 9u + 6u] = scratch[row * 8u + 5u];
-      caps[row * 9u + 6u] = sizeof scratch[row * 8u + 5u];
-      values[row * 9u + 7u] = scratch[row * 8u + 6u];
-      caps[row * 9u + 7u] = sizeof scratch[row * 8u + 6u];
-      values[row * 9u + 8u] = scratch[row * 8u + 7u];
-      caps[row * 9u + 8u] = sizeof scratch[row * 8u + 7u];
+      wire_values[wire_row * 9u + 0u] = out[wire_row].agent_name;
+      wire_caps[wire_row * 9u + 0u] = sizeof out[wire_row].agent_name;
+      wire_values[wire_row * 9u + 1u] = wire_scratch[wire_row * 8u + 0u];
+      wire_caps[wire_row * 9u + 1u] = sizeof wire_scratch[wire_row * 8u + 0u];
+      wire_values[wire_row * 9u + 2u] = wire_scratch[wire_row * 8u + 1u];
+      wire_caps[wire_row * 9u + 2u] = sizeof wire_scratch[wire_row * 8u + 1u];
+      wire_values[wire_row * 9u + 3u] = wire_scratch[wire_row * 8u + 2u];
+      wire_caps[wire_row * 9u + 3u] = sizeof wire_scratch[wire_row * 8u + 2u];
+      wire_values[wire_row * 9u + 4u] = wire_scratch[wire_row * 8u + 3u];
+      wire_caps[wire_row * 9u + 4u] = sizeof wire_scratch[wire_row * 8u + 3u];
+      wire_values[wire_row * 9u + 5u] = wire_scratch[wire_row * 8u + 4u];
+      wire_caps[wire_row * 9u + 5u] = sizeof wire_scratch[wire_row * 8u + 4u];
+      wire_values[wire_row * 9u + 6u] = wire_scratch[wire_row * 8u + 5u];
+      wire_caps[wire_row * 9u + 6u] = sizeof wire_scratch[wire_row * 8u + 5u];
+      wire_values[wire_row * 9u + 7u] = wire_scratch[wire_row * 8u + 6u];
+      wire_caps[wire_row * 9u + 7u] = sizeof wire_scratch[wire_row * 8u + 6u];
+      wire_values[wire_row * 9u + 8u] = wire_scratch[wire_row * 8u + 7u];
+      wire_caps[wire_row * 9u + 8u] = sizeof wire_scratch[wire_row * 8u + 7u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_AGENT_STATS, fields, 2, values, caps,
-                           (uint32_t)(max * 9), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 9u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_AGENT_STATS, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 9), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 9u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 9u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 9u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].total_calls = (int)strtol(scratch[row * 8u + 0u], NULL, 10);
-      out[row].total_prompt_tokens = (int)strtol(scratch[row * 8u + 1u], NULL, 10);
-      out[row].total_completion_tokens = (int)strtol(scratch[row * 8u + 2u], NULL, 10);
-      out[row].avg_latency_ms = (int)strtol(scratch[row * 8u + 3u], NULL, 10);
-      out[row].success_rate = strtod(scratch[row * 8u + 4u], NULL);
-      out[row].total_cache_write_tokens = (int64_t)strtoll(scratch[row * 8u + 5u], NULL, 10);
-      out[row].total_cache_read_tokens = (int64_t)strtoll(scratch[row * 8u + 6u], NULL, 10);
-      out[row].total_estimated_cost_usd = strtod(scratch[row * 8u + 7u], NULL);
+      out[wire_row].total_calls = (int)strtol(wire_scratch[wire_row * 8u + 0u], NULL, 10);
+      out[wire_row].total_prompt_tokens = (int)strtol(wire_scratch[wire_row * 8u + 1u], NULL, 10);
+      out[wire_row].total_completion_tokens = (int)strtol(wire_scratch[wire_row * 8u + 2u], NULL, 10);
+      out[wire_row].avg_latency_ms = (int)strtol(wire_scratch[wire_row * 8u + 3u], NULL, 10);
+      out[wire_row].success_rate = strtod(wire_scratch[wire_row * 8u + 4u], NULL);
+      out[wire_row].total_cache_write_tokens = (int64_t)strtoll(wire_scratch[wire_row * 8u + 5u], NULL, 10);
+      out[wire_row].total_cache_read_tokens = (int64_t)strtoll(wire_scratch[wire_row * 8u + 6u], NULL, 10);
+      out[wire_row].total_estimated_cost_usd = strtod(wire_scratch[wire_row * 8u + 7u], NULL);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_hud_summary(db1_agent_log_hud_t *out, int recent_secs)
@@ -933,58 +933,58 @@ int db1_agent_log_prometheus(db1_agent_log_prometheus_t *out, int max)
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", max);
    const char *fields[] = {arg0};
-   char **values = malloc((size_t)max * 8u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 6u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 8u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 8u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 6u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 8u + 0u] = out[row].agent_name;
-      caps[row * 8u + 0u] = sizeof out[row].agent_name;
-      values[row * 8u + 1u] = out[row].role;
-      caps[row * 8u + 1u] = sizeof out[row].role;
-      values[row * 8u + 2u] = scratch[row * 6u + 0u];
-      caps[row * 8u + 2u] = sizeof scratch[row * 6u + 0u];
-      values[row * 8u + 3u] = scratch[row * 6u + 1u];
-      caps[row * 8u + 3u] = sizeof scratch[row * 6u + 1u];
-      values[row * 8u + 4u] = scratch[row * 6u + 2u];
-      caps[row * 8u + 4u] = sizeof scratch[row * 6u + 2u];
-      values[row * 8u + 5u] = scratch[row * 6u + 3u];
-      caps[row * 8u + 5u] = sizeof scratch[row * 6u + 3u];
-      values[row * 8u + 6u] = scratch[row * 6u + 4u];
-      caps[row * 8u + 6u] = sizeof scratch[row * 6u + 4u];
-      values[row * 8u + 7u] = scratch[row * 6u + 5u];
-      caps[row * 8u + 7u] = sizeof scratch[row * 6u + 5u];
+      wire_values[wire_row * 8u + 0u] = out[wire_row].agent_name;
+      wire_caps[wire_row * 8u + 0u] = sizeof out[wire_row].agent_name;
+      wire_values[wire_row * 8u + 1u] = out[wire_row].role;
+      wire_caps[wire_row * 8u + 1u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 8u + 2u] = wire_scratch[wire_row * 6u + 0u];
+      wire_caps[wire_row * 8u + 2u] = sizeof wire_scratch[wire_row * 6u + 0u];
+      wire_values[wire_row * 8u + 3u] = wire_scratch[wire_row * 6u + 1u];
+      wire_caps[wire_row * 8u + 3u] = sizeof wire_scratch[wire_row * 6u + 1u];
+      wire_values[wire_row * 8u + 4u] = wire_scratch[wire_row * 6u + 2u];
+      wire_caps[wire_row * 8u + 4u] = sizeof wire_scratch[wire_row * 6u + 2u];
+      wire_values[wire_row * 8u + 5u] = wire_scratch[wire_row * 6u + 3u];
+      wire_caps[wire_row * 8u + 5u] = sizeof wire_scratch[wire_row * 6u + 3u];
+      wire_values[wire_row * 8u + 6u] = wire_scratch[wire_row * 6u + 4u];
+      wire_caps[wire_row * 8u + 6u] = sizeof wire_scratch[wire_row * 6u + 4u];
+      wire_values[wire_row * 8u + 7u] = wire_scratch[wire_row * 6u + 5u];
+      wire_caps[wire_row * 8u + 7u] = sizeof wire_scratch[wire_row * 6u + 5u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_PROMETHEUS, fields, 1, values, caps,
-                           (uint32_t)(max * 8), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_PROMETHEUS, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 8), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 8u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 8u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 8u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].total = (int)strtol(scratch[row * 6u + 0u], NULL, 10);
-      out[row].successes = (int)strtol(scratch[row * 6u + 1u], NULL, 10);
-      out[row].prompt_tokens = (int)strtol(scratch[row * 6u + 2u], NULL, 10);
-      out[row].completion_tokens = (int)strtol(scratch[row * 6u + 3u], NULL, 10);
-      out[row].avg_latency_ms = (int)strtol(scratch[row * 6u + 4u], NULL, 10);
-      out[row].tool_calls = (int)strtol(scratch[row * 6u + 5u], NULL, 10);
+      out[wire_row].total = (int)strtol(wire_scratch[wire_row * 6u + 0u], NULL, 10);
+      out[wire_row].successes = (int)strtol(wire_scratch[wire_row * 6u + 1u], NULL, 10);
+      out[wire_row].prompt_tokens = (int)strtol(wire_scratch[wire_row * 6u + 2u], NULL, 10);
+      out[wire_row].completion_tokens = (int)strtol(wire_scratch[wire_row * 6u + 3u], NULL, 10);
+      out[wire_row].avg_latency_ms = (int)strtol(wire_scratch[wire_row * 6u + 4u], NULL, 10);
+      out[wire_row].tool_calls = (int)strtol(wire_scratch[wire_row * 6u + 5u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_agent_log_stats(const char *since_or_null, db1_agent_log_stats_t *out)
@@ -1243,62 +1243,62 @@ int db1_coord_job_list_tasks(int job_id, db1_coord_task_t *out, int max)
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {arg0, arg1};
-   char **values = malloc((size_t)max * 11u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 11u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 4u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 11u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 11u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 4u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 11u + 0u] = scratch[row * 4u + 0u];
-      caps[row * 11u + 0u] = sizeof scratch[row * 4u + 0u];
-      values[row * 11u + 1u] = scratch[row * 4u + 1u];
-      caps[row * 11u + 1u] = sizeof scratch[row * 4u + 1u];
-      values[row * 11u + 2u] = scratch[row * 4u + 2u];
-      caps[row * 11u + 2u] = sizeof scratch[row * 4u + 2u];
-      values[row * 11u + 3u] = out[row].status;
-      caps[row * 11u + 3u] = sizeof out[row].status;
-      values[row * 11u + 4u] = out[row].claimed_by;
-      caps[row * 11u + 4u] = sizeof out[row].claimed_by;
-      values[row * 11u + 5u] = out[row].claimed_at;
-      caps[row * 11u + 5u] = sizeof out[row].claimed_at;
-      values[row * 11u + 6u] = out[row].files;
-      caps[row * 11u + 6u] = sizeof out[row].files;
-      values[row * 11u + 7u] = out[row].result;
-      caps[row * 11u + 7u] = sizeof out[row].result;
-      values[row * 11u + 8u] = out[row].error;
-      caps[row * 11u + 8u] = sizeof out[row].error;
-      values[row * 11u + 9u] = scratch[row * 4u + 3u];
-      caps[row * 11u + 9u] = sizeof scratch[row * 4u + 3u];
-      values[row * 11u + 10u] = out[row].created_at;
-      caps[row * 11u + 10u] = sizeof out[row].created_at;
+      wire_values[wire_row * 11u + 0u] = wire_scratch[wire_row * 4u + 0u];
+      wire_caps[wire_row * 11u + 0u] = sizeof wire_scratch[wire_row * 4u + 0u];
+      wire_values[wire_row * 11u + 1u] = wire_scratch[wire_row * 4u + 1u];
+      wire_caps[wire_row * 11u + 1u] = sizeof wire_scratch[wire_row * 4u + 1u];
+      wire_values[wire_row * 11u + 2u] = wire_scratch[wire_row * 4u + 2u];
+      wire_caps[wire_row * 11u + 2u] = sizeof wire_scratch[wire_row * 4u + 2u];
+      wire_values[wire_row * 11u + 3u] = out[wire_row].status;
+      wire_caps[wire_row * 11u + 3u] = sizeof out[wire_row].status;
+      wire_values[wire_row * 11u + 4u] = out[wire_row].claimed_by;
+      wire_caps[wire_row * 11u + 4u] = sizeof out[wire_row].claimed_by;
+      wire_values[wire_row * 11u + 5u] = out[wire_row].claimed_at;
+      wire_caps[wire_row * 11u + 5u] = sizeof out[wire_row].claimed_at;
+      wire_values[wire_row * 11u + 6u] = out[wire_row].files;
+      wire_caps[wire_row * 11u + 6u] = sizeof out[wire_row].files;
+      wire_values[wire_row * 11u + 7u] = out[wire_row].result;
+      wire_caps[wire_row * 11u + 7u] = sizeof out[wire_row].result;
+      wire_values[wire_row * 11u + 8u] = out[wire_row].error;
+      wire_caps[wire_row * 11u + 8u] = sizeof out[wire_row].error;
+      wire_values[wire_row * 11u + 9u] = wire_scratch[wire_row * 4u + 3u];
+      wire_caps[wire_row * 11u + 9u] = sizeof wire_scratch[wire_row * 4u + 3u];
+      wire_values[wire_row * 11u + 10u] = out[wire_row].created_at;
+      wire_caps[wire_row * 11u + 10u] = sizeof out[wire_row].created_at;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_COORD_TASK_LIST, fields, 2, values, caps,
-                           (uint32_t)(max * 11), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 11u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_LIST, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 11), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 11u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 11u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 11u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int)strtol(scratch[row * 4u + 0u], NULL, 10);
-      out[row].job_id = (int)strtol(scratch[row * 4u + 1u], NULL, 10);
-      out[row].step_id = (int)strtol(scratch[row * 4u + 2u], NULL, 10);
-      out[row].preempt_requeues = (int)strtol(scratch[row * 4u + 3u], NULL, 10);
+      out[wire_row].id = (int)strtol(wire_scratch[wire_row * 4u + 0u], NULL, 10);
+      out[wire_row].job_id = (int)strtol(wire_scratch[wire_row * 4u + 1u], NULL, 10);
+      out[wire_row].step_id = (int)strtol(wire_scratch[wire_row * 4u + 2u], NULL, 10);
+      out[wire_row].preempt_requeues = (int)strtol(wire_scratch[wire_row * 4u + 3u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_coord_job_cancel(int job_id)
@@ -1337,63 +1337,63 @@ int db1_coord_job_list_recent(db1_coord_job_t *out, int max)
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", max);
    const char *fields[] = {arg0};
-   char **values = malloc((size_t)max * 10u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 10u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 7u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 10u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 10u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 7u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 10u + 0u] = scratch[row * 7u + 0u];
-      caps[row * 10u + 0u] = sizeof scratch[row * 7u + 0u];
-      values[row * 10u + 1u] = scratch[row * 7u + 1u];
-      caps[row * 10u + 1u] = sizeof scratch[row * 7u + 1u];
-      values[row * 10u + 2u] = out[row].status;
-      caps[row * 10u + 2u] = sizeof out[row].status;
-      values[row * 10u + 3u] = scratch[row * 7u + 2u];
-      caps[row * 10u + 3u] = sizeof scratch[row * 7u + 2u];
-      values[row * 10u + 4u] = out[row].created_at;
-      caps[row * 10u + 4u] = sizeof out[row].created_at;
-      values[row * 10u + 5u] = out[row].updated_at;
-      caps[row * 10u + 5u] = sizeof out[row].updated_at;
-      values[row * 10u + 6u] = scratch[row * 7u + 3u];
-      caps[row * 10u + 6u] = sizeof scratch[row * 7u + 3u];
-      values[row * 10u + 7u] = scratch[row * 7u + 4u];
-      caps[row * 10u + 7u] = sizeof scratch[row * 7u + 4u];
-      values[row * 10u + 8u] = scratch[row * 7u + 5u];
-      caps[row * 10u + 8u] = sizeof scratch[row * 7u + 5u];
-      values[row * 10u + 9u] = scratch[row * 7u + 6u];
-      caps[row * 10u + 9u] = sizeof scratch[row * 7u + 6u];
+      wire_values[wire_row * 10u + 0u] = wire_scratch[wire_row * 7u + 0u];
+      wire_caps[wire_row * 10u + 0u] = sizeof wire_scratch[wire_row * 7u + 0u];
+      wire_values[wire_row * 10u + 1u] = wire_scratch[wire_row * 7u + 1u];
+      wire_caps[wire_row * 10u + 1u] = sizeof wire_scratch[wire_row * 7u + 1u];
+      wire_values[wire_row * 10u + 2u] = out[wire_row].status;
+      wire_caps[wire_row * 10u + 2u] = sizeof out[wire_row].status;
+      wire_values[wire_row * 10u + 3u] = wire_scratch[wire_row * 7u + 2u];
+      wire_caps[wire_row * 10u + 3u] = sizeof wire_scratch[wire_row * 7u + 2u];
+      wire_values[wire_row * 10u + 4u] = out[wire_row].created_at;
+      wire_caps[wire_row * 10u + 4u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 10u + 5u] = out[wire_row].updated_at;
+      wire_caps[wire_row * 10u + 5u] = sizeof out[wire_row].updated_at;
+      wire_values[wire_row * 10u + 6u] = wire_scratch[wire_row * 7u + 3u];
+      wire_caps[wire_row * 10u + 6u] = sizeof wire_scratch[wire_row * 7u + 3u];
+      wire_values[wire_row * 10u + 7u] = wire_scratch[wire_row * 7u + 4u];
+      wire_caps[wire_row * 10u + 7u] = sizeof wire_scratch[wire_row * 7u + 4u];
+      wire_values[wire_row * 10u + 8u] = wire_scratch[wire_row * 7u + 5u];
+      wire_caps[wire_row * 10u + 8u] = sizeof wire_scratch[wire_row * 7u + 5u];
+      wire_values[wire_row * 10u + 9u] = wire_scratch[wire_row * 7u + 6u];
+      wire_caps[wire_row * 10u + 9u] = sizeof wire_scratch[wire_row * 7u + 6u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_RECENT, fields, 1, values, caps,
-                           (uint32_t)(max * 10), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 10u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_RECENT, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 10), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 10u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 10u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 10u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int)strtol(scratch[row * 7u + 0u], NULL, 10);
-      out[row].plan_id = (int)strtol(scratch[row * 7u + 1u], NULL, 10);
-      out[row].max_concurrent = (int)strtol(scratch[row * 7u + 2u], NULL, 10);
-      out[row].total_tasks = (int)strtol(scratch[row * 7u + 3u], NULL, 10);
-      out[row].done_tasks = (int)strtol(scratch[row * 7u + 4u], NULL, 10);
-      out[row].failed_tasks = (int)strtol(scratch[row * 7u + 5u], NULL, 10);
-      out[row].running_tasks = (int)strtol(scratch[row * 7u + 6u], NULL, 10);
+      out[wire_row].id = (int)strtol(wire_scratch[wire_row * 7u + 0u], NULL, 10);
+      out[wire_row].plan_id = (int)strtol(wire_scratch[wire_row * 7u + 1u], NULL, 10);
+      out[wire_row].max_concurrent = (int)strtol(wire_scratch[wire_row * 7u + 2u], NULL, 10);
+      out[wire_row].total_tasks = (int)strtol(wire_scratch[wire_row * 7u + 3u], NULL, 10);
+      out[wire_row].done_tasks = (int)strtol(wire_scratch[wire_row * 7u + 4u], NULL, 10);
+      out[wire_row].failed_tasks = (int)strtol(wire_scratch[wire_row * 7u + 5u], NULL, 10);
+      out[wire_row].running_tasks = (int)strtol(wire_scratch[wire_row * 7u + 6u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_coord_job_list_active_ids(int *out_ids, int max)
@@ -1405,39 +1405,39 @@ int db1_coord_job_list_active_ids(int *out_ids, int max)
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", max);
    const char *fields[] = {arg0};
-   char **values = malloc((size_t)max * 1u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out_ids, 0, (size_t)max * sizeof *out_ids);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 1u + 0u] = scratch[row * 1u + 0u];
-      caps[row * 1u + 0u] = sizeof scratch[row * 1u + 0u];
+      wire_values[wire_row * 1u + 0u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_ACTIVE_IDS, fields, 1, values, caps,
-                           (uint32_t)(max * 1), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_ACTIVE_IDS, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 1u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 1u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out_ids[row] = (int)strtol(scratch[row * 1u + 0u], NULL, 10);
+      out_ids[wire_row] = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out, size_t prompt_cap, char *files_out, size_t files_cap, char *cwd_out, size_t cwd_cap, char *persona_out, size_t persona_cap)

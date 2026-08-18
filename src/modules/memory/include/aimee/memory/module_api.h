@@ -1,5 +1,5 @@
 /* Wire contract for the memory process's reranking confidence, typed-fact
- * write-gate, pattern-extraction and PII recall-gate stages. */
+ * write-gate, pattern-extraction, PII recall-gate and embedding stages. */
 #ifndef AIMEE_MEMORY_MODULE_API_H
 #define AIMEE_MEMORY_MODULE_API_H 1
 
@@ -22,6 +22,12 @@
 #define AIMEE_MEMORY_WIRE_VERSION       1u
 #define AIMEE_MEMORY_REQUEST_LEN        16u
 #define AIMEE_MEMORY_RESPONSE_LEN       8u
+
+/* EMBED uses the module's bounded JSON envelope because its vector is variable
+ * width. Request fields are base_url:string, input_type:"document"|"query",
+ * text:string and max_dim:positive integer. A successful response carries
+ * vector:number[] and dim; optional truncated, unavailable and unauthorized
+ * booleans and error:string keep distinct failure facts distinct. */
 
 /* Typed-fact write gate (stage WRITE). Separate magics from the rerank stage so
  * a request routed to the wrong stage is rejected rather than misparsed. */
