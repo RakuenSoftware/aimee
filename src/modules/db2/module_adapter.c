@@ -119,6 +119,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .orphaned_l0_count = db2_memory_count_orphaned_l0,
        .total_count = db2_memory_count,
        .session_l2_count = db2_memory_count_l2_for_session,
+       .key_exists = db2_memory_key_exists,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -230,6 +231,23 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_session_l2_count_reply_encode((uint32_t)raw_count, response_body,
                                                      response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      char key[AIMEE_DB2_KEY_EXISTS_KEY_MAX + 1u];
+      if (aimee_db2_key_exists_request_decode(request_body, request_len, key, sizeof(key)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->key_exists)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int raw_exists = backend->key_exists(key);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (raw_exists < 0 || (uint32_t)raw_exists > AIMEE_DB2_KEY_EXISTS_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_key_exists_reply_encode((uint32_t)raw_exists, response_body,
+                                               response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

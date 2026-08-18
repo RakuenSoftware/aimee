@@ -211,6 +211,11 @@ int main(int argc, char **argv)
                                           &session_l2_total, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(session_l2_total == 0);
 
+   uint32_t key_exists = 99;
+   assert(aimee_db2_key_exists_call(call_client, &client, 9026, 0, "fresh-key-with-no-row",
+                                    &key_exists, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(key_exists == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

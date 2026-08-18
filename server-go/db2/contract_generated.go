@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "c5b9b77dde4c5a0501abb210ceb1351eb0021cf15bf98db0c7559b5219c20c69"
+const ContractSHA256 = "b17d393eccb1ca8ae46c28b4c9d60a16f3620dbffc66b27ee14d9c3262a39633"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -101,6 +101,11 @@ const StageSessionL2Count = FamilyMemory
 const OperationSessionL2Count uint32 = 5
 const SessionL2CountSessionMax = 127
 const SessionL2CountMax uint32 = 2147483647
+const EventKeyExists = EventMemory
+const StageKeyExists = FamilyMemory
+const OperationKeyExists uint32 = 6
+const KeyExistsKeyMax = 511
+const KeyExistsMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -519,6 +524,75 @@ func DecodeSessionL2CountReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return count, nil
+}
+
+// EncodeKeyExistsRequest emits one non-empty bounded canonical memory key.
+func EncodeKeyExistsRequest(key string) ([]byte, error) {
+	if len(key) == 0 || len(key) > KeyExistsKeyMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for index := 0; index < len(key); index++ {
+		if key[index] == 0 {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	header, err := EncodeRequestHeader(OperationKeyExists, 0, uint32(4+len(key)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4+len(key))...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(key)))
+	copy(request[EnvelopeHeaderLen+4:], key)
+	return request, nil
+}
+
+// DecodeKeyExistsRequest validates and returns the bounded canonical memory key.
+func DecodeKeyExistsRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKeyExists || header.Flags != 0 ||
+		header.PayloadLen < 5 {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen == 0 || decodedLen > KeyExistsKeyMax || header.PayloadLen != 4+decodedLen {
+		return "", ErrMalformedEnvelope
+	}
+	key := string(payload[4:])
+	for index := 0; index < len(key); index++ {
+		if key[index] == 0 {
+			return "", ErrMalformedEnvelope
+		}
+	}
+	return key, nil
+}
+
+// EncodeKeyExistsReply emits one boolean u32 success payload.
+func EncodeKeyExistsReply(exists uint32) ([]byte, error) {
+	if exists > KeyExistsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationKeyExists, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeKeyExistsReply validates the operation and boolean value.
+func DecodeKeyExistsReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationKeyExists || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	exists := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if exists > KeyExistsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return exists, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

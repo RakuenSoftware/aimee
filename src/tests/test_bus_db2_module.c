@@ -35,6 +35,7 @@ typedef struct
    int (*orphaned_l0_count)(void);
    int64_t (*total_count)(void);
    int (*session_l2_count)(const char *source_session);
+   int (*key_exists)(const char *key);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -74,6 +75,7 @@ static int level2_count_calls;
 static int orphaned_l0_count_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
+static int key_exists_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -191,6 +193,18 @@ static int session_l2_count(const char *source_session)
 {
    session_l2_count_calls++;
    return strcmp(source_session, "session-123") == 0 ? 3 : 0;
+}
+
+int db2_memory_key_exists(const char *key)
+{
+   key_exists_calls++;
+   return strcmp(key, "recovery:tool-a->tool-b") == 0 ? 1 : 0;
+}
+
+static int key_exists(const char *key)
+{
+   key_exists_calls++;
+   return strcmp(key, "recovery:tool-a->tool-b") == 0 ? 1 : 0;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -452,6 +466,7 @@ int main(void)
        .orphaned_l0_count = orphaned_l0_count,
        .total_count = total_count,
        .session_l2_count = session_l2_count,
+       .key_exists = key_exists,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -524,6 +539,11 @@ int main(void)
    assert(aimee_db2_session_l2_count_call(call_client, &client, 7024, 0, "session-123",
                                           &session_l2_total, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(session_l2_total == 3 && session_l2_count_calls == 1);
+
+   uint32_t exists = 99;
+   assert(aimee_db2_key_exists_call(call_client, &client, 7025, 0, "recovery:tool-a->tool-b",
+                                    &exists, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(exists == 1 && key_exists_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

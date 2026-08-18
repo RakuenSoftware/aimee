@@ -16525,9 +16525,15 @@
           "line": 37
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.key_exists operation replaces the bounded exact-key probe while preserving explicit backend-error handling; canonical memory keys remain DB2 authority."
+      },
       "signature": "int db2_memory_key_exists ( const char * key )",
       "signature_sha256": "209f3694a02607a189dccf2e451c0d13190cf52ff4a48270996ef0718bdd5828",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_key_exists"
     },
     {
@@ -25626,15 +25632,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "81517343159f8fe833b343e3300e1838201eada01404a42c6720daca39e3f05f",
+  "fingerprint": "510c8e69485e695660de9fa45f3eadf618fd3bbf045a92ff78625a0730b7617e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 691,
+    "audit_pending": 690,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 267
+    "reviewed": 268
   }
 }

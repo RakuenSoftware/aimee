@@ -452,6 +452,29 @@
         "encoded_size_error": 24,
         "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
       }
+    },
+    {
+      "family": "memory",
+      "id": 6,
+      "name": "key_exists",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Exact canonical memory-key existence is relational DB2 authority and does not depend on portable ANN state.",
+      "c_symbols": ["db2_memory_key_exists"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 539,
+        "field": {"name": "key", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+      }
     }
   ]
 }

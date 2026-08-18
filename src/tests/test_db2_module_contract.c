@@ -29,6 +29,8 @@ static int64_t total_count_value;
 static int total_count_calls;
 static int session_l2_count_value;
 static int session_l2_count_calls;
+static int key_exists_value;
+static int key_exists_calls;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -59,6 +61,7 @@ static int transport_expect_level2_count;
 static int transport_expect_orphaned_l0_count;
 static int transport_expect_total_count;
 static int transport_expect_session_l2_count;
+static int transport_expect_key_exists;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -186,6 +189,20 @@ static int session_l2_count(const char *source_session)
    assert(strcmp(source_session, "session-123") == 0);
    session_l2_count_calls++;
    return session_l2_count_value;
+}
+
+int db2_memory_key_exists(const char *key)
+{
+   assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+   key_exists_calls++;
+   return key_exists_value;
+}
+
+static int key_exists(const char *key)
+{
+   assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+   key_exists_calls++;
+   return key_exists_value;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -337,6 +354,8 @@ static void reset(void)
    total_count_calls = 0;
    session_l2_count_value = 3;
    session_l2_count_calls = 0;
+   key_exists_value = 1;
+   key_exists_calls = 0;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -364,6 +383,7 @@ static void reset(void)
    transport_expect_orphaned_l0_count = 0;
    transport_expect_total_count = 0;
    transport_expect_session_l2_count = 0;
+   transport_expect_key_exists = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -384,7 +404,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_session_l2_count      ? AIMEE_DB2_EVENT_SESSION_L2_COUNT
+       transport_expect_key_exists            ? AIMEE_DB2_EVENT_KEY_EXISTS
+       : transport_expect_session_l2_count    ? AIMEE_DB2_EVENT_SESSION_L2_COUNT
        : transport_expect_total_count         ? AIMEE_DB2_EVENT_TOTAL_COUNT
        : transport_expect_orphaned_l0_count   ? AIMEE_DB2_EVENT_ORPHANED_L0_COUNT
        : transport_expect_level2_count        ? AIMEE_DB2_EVENT_LEVEL2_COUNT
@@ -400,7 +421,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension           ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                               : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_session_l2_count      ? AIMEE_DB2_STAGE_SESSION_L2_COUNT
+       transport_expect_key_exists            ? AIMEE_DB2_STAGE_KEY_EXISTS
+       : transport_expect_session_l2_count    ? AIMEE_DB2_STAGE_SESSION_L2_COUNT
        : transport_expect_total_count         ? AIMEE_DB2_STAGE_TOTAL_COUNT
        : transport_expect_orphaned_l0_count   ? AIMEE_DB2_STAGE_ORPHANED_L0_COUNT
        : transport_expect_level2_count        ? AIMEE_DB2_STAGE_LEVEL2_COUNT
@@ -419,7 +441,13 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_session_l2_count)
+   if (transport_expect_key_exists)
+   {
+      char key[AIMEE_DB2_KEY_EXISTS_KEY_MAX + 1u];
+      assert(aimee_db2_key_exists_request_decode(request_body, request_len, key, sizeof(key)) == 0);
+      assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+   }
+   else if (transport_expect_session_l2_count)
    {
       char source_session[AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX + 1u];
       assert(aimee_db2_session_l2_count_request_decode(request_body, request_len, source_session,
@@ -795,6 +823,34 @@ static void test_session_l2_count_wire(void)
    assert(aimee_db2_session_l2_count_reply_decode(reply, reply_len, &count) == 0 && count == 3);
    assert(aimee_db2_session_l2_count_reply_encode(AIMEE_DB2_SESSION_L2_COUNT_MAX + 1u, reply,
                                                   sizeof(reply), &reply_len) == -1);
+}
+
+static void test_key_exists_wire(void)
+{
+   uint8_t request[AIMEE_DB2_KEY_EXISTS_REQUEST_MAX_LEN] = {0};
+   uint32_t request_len = 99;
+   char key[AIMEE_DB2_KEY_EXISTS_KEY_MAX + 1u];
+   assert(aimee_db2_key_exists_request_encode("recovery:tool-a->tool-b", request, sizeof(request),
+                                              &request_len) == 0);
+   assert(aimee_db2_key_exists_request_decode(request, request_len, key, sizeof(key)) == 0);
+   assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
+   assert(aimee_db2_key_exists_request_encode("", request, sizeof(request), &request_len) == -1);
+   char oversized[AIMEE_DB2_KEY_EXISTS_KEY_MAX + 2u];
+   memset(oversized, 'x', sizeof(oversized) - 1u);
+   oversized[sizeof(oversized) - 1u] = '\0';
+   assert(aimee_db2_key_exists_request_encode(oversized, request, sizeof(request), &request_len) ==
+          -1);
+   assert(aimee_db2_key_exists_request_encode("recovery:tool-a->tool-b", request, sizeof(request),
+                                              &request_len) == 0);
+   request[AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u] = '\0';
+   assert(aimee_db2_key_exists_request_decode(request, request_len, key, sizeof(key)) == -1);
+
+   uint8_t reply[AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, exists = 99;
+   assert(aimee_db2_key_exists_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_key_exists_reply_decode(reply, reply_len, &exists) == 0 && exists == 1);
+   assert(aimee_db2_key_exists_reply_encode(AIMEE_DB2_KEY_EXISTS_MAX + 1u, reply, sizeof(reply),
+                                            &reply_len) == -1);
 }
 
 static void test_pool_status_wire(void)
@@ -1371,6 +1427,28 @@ static void test_session_l2_count_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
 }
 
+static void test_key_exists_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.key_exists = key_exists};
+   uint8_t request[AIMEE_DB2_KEY_EXISTS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99, exists = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_KEY_EXISTS};
+   assert(aimee_db2_key_exists_request_encode("recovery:tool-a->tool-b", request, sizeof(request),
+                                              &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(key_exists_calls == 1);
+   assert(aimee_db2_key_exists_reply_decode(response, response_len, &exists) == 0 && exists == 1);
+   key_exists_value = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -1779,6 +1857,23 @@ static void test_session_l2_count_typed_client(void)
    assert(count == 3 && transport_calls == 1);
 }
 
+static void test_key_exists_typed_client(void)
+{
+   reset();
+   transport_expect_key_exists = 1;
+   uint32_t exists = 99;
+   assert(aimee_db2_key_exists_call(NULL, NULL, 77, 88, "recovery:tool-a->tool-b", &exists, NULL,
+                                    NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(exists == 0);
+   assert(aimee_db2_key_exists_call(transport, (void *)0x1234, 77, 88, "", &exists, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(aimee_db2_key_exists_reply_encode(1, transport_response, sizeof(transport_response),
+                                            &transport_response_len) == 0);
+   assert(aimee_db2_key_exists_call(transport, (void *)0x1234, 77, 88, "recovery:tool-a->tool-b",
+                                    &exists, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(exists == 1 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -1955,6 +2050,7 @@ int main(void)
    test_orphaned_l0_count_wire();
    test_total_count_wire();
    test_session_l2_count_wire();
+   test_key_exists_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -1970,6 +2066,7 @@ int main(void)
    test_orphaned_l0_count_handler();
    test_total_count_handler();
    test_session_l2_count_handler();
+   test_key_exists_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -1985,6 +2082,7 @@ int main(void)
    test_orphaned_l0_count_typed_client();
    test_total_count_typed_client();
    test_session_l2_count_typed_client();
+   test_key_exists_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

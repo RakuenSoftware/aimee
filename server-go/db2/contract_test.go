@@ -36,6 +36,7 @@ type wireBaseline struct {
 		Request struct {
 			Positive      string `json:"positive"`
 			SourceSession string `json:"source_session"`
+			Key           string `json:"key"`
 			Negative      []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -47,6 +48,7 @@ type wireBaseline struct {
 				Result        uint32 `json:"result"`
 				Dimension     uint32 `json:"dimension"`
 				Count         uint64 `json:"count"`
+				Exists        uint32 `json:"exists"`
 				Size          uint32 `json:"size"`
 				InUse         uint32 `json:"in_use"`
 				Waiters       uint32 `json:"waiters"`
@@ -162,7 +164,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 15 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 16 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -176,7 +178,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[11].Name != "level2_count" ||
 		baseline.Operations[12].Name != "orphaned_l0_count" ||
 		baseline.Operations[13].Name != "total_count" ||
-		baseline.Operations[14].Name != "session_l2_count" {
+		baseline.Operations[14].Name != "session_l2_count" ||
+		baseline.Operations[15].Name != "key_exists" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -340,6 +343,40 @@ func TestSessionL2CountMatchesEverySharedCVector(t *testing.T) {
 		count, err := DecodeSessionL2CountReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || count != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, count, err)
+		}
+	}
+}
+
+func TestKeyExistsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[15]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	request, err := EncodeKeyExistsRequest(operation.Request.Key)
+	if err != nil || string(request) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", request, err, wantRequest)
+	}
+	if key, err := DecodeKeyExistsRequest(wantRequest); err != nil || key != operation.Request.Key {
+		t.Fatalf("positive request = (%q, %v)", key, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		key, err := DecodeKeyExistsRequest(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || key != "" {
+			t.Fatalf("negative request %s = (%q, %v)", vector.Mutation, key, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeKeyExistsReply(vector.Exists)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		exists, err := DecodeKeyExistsReply(got)
+		if err != nil || exists != vector.Exists {
+			t.Fatalf("decode = (%d, %v)", exists, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		exists, err := DecodeKeyExistsReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || exists != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, exists, err)
 		}
 	}
 }
