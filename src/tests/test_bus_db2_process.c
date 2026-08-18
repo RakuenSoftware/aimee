@@ -270,10 +270,19 @@ int main(int argc, char **argv)
                                           NULL) == AIMEE_MODULE_CALL_OK);
    assert(snapshots_deleted == 0 && contradictions_deleted == 0);
 
+   /* health_record above wrote one cycle row through the packaged process, and
+    * retention did not prune it (it is not 90 days old), so these counters read
+    * back exactly what that write recorded. This is the round trip the packaged
+    * replay exists to prove: a write and a later read, both across the bus,
+    * against a real database. */
    aimee_db2_health_counters_t counters = {.cycles = 99};
    assert(aimee_db2_health_counters_call(call_client, &client, 9037, 0, &counters, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
-   assert(counters.cycles == 0 && counters.l2_stale_30_days == 0);
+   assert(counters.cycles == 1 && counters.total_promotions == 4 && counters.total_demotions == 2 &&
+          counters.total_expirations == 9);
+   /* The corpus itself is untouched, so the derived counters stay empty. */
+   assert(counters.total_contradictions == 0 && counters.new_memories == 0 &&
+          counters.l2_total == 0 && counters.l2_stale_30_days == 0);
 
    aimee_db2_memory_stats_t corpus = {.total = 99};
    assert(aimee_db2_stats_counts_call(call_client, &client, 9038, 0, &corpus, NULL, NULL) ==
@@ -300,7 +309,9 @@ int main(int argc, char **argv)
                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(reclassified == 0);
 
-   /* The packaged process has no rows, so its backend refuses the approval. */
+   /* Memory 42 does not exist, so the approval row's foreign key onto memories
+    * refuses the insert. The point is that a backend failure crosses the
+    * packaged boundary as INTERNAL rather than being reported as success. */
    assert(aimee_db2_record_l4_approval_call(call_client, &client, 9043, 0, 42u, "operator",
                                             "reviewed", NULL, NULL) == AIMEE_MODULE_CALL_INTERNAL);
 
