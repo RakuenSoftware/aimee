@@ -61,7 +61,7 @@ class BoundaryTests(unittest.TestCase):
 
     def test_production_tree_matches_baseline(self) -> None:
         result = checker.check(REPO_ROOT)
-        self.assertEqual(result["source_files"], 281)
+        self.assertEqual(result["source_files"], 282)
         self.assertEqual(result["consumer_files"], 305)
         self.assertEqual(result["include_directives"], 994)
 
