@@ -266,6 +266,9 @@ try:
     p.wait(timeout=2)
 except subprocess.TimeoutExpired:
     p.kill()
+err = p.stderr.read().decode("utf-8", "replace").strip()
+if err:
+    sys.stderr.write("mcp-serve stderr:\n" + err + "\n")
 PY
 }
 
@@ -315,6 +318,9 @@ try:
     p.wait(timeout=2)
 except subprocess.TimeoutExpired:
     p.kill()
+err = p.stderr.read().decode("utf-8", "replace").strip()
+if err:
+    sys.stderr.write("mcp-serve stderr:\n" + err + "\n")
 PY
 }
 
