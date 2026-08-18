@@ -67,6 +67,7 @@ typedef struct
    int (*promote_stable)(const char *ts);
    int (*reclassify_directives)(int require_approval);
    int (*record_l4_approval)(int64_t memory_id, const char *approver, const char *note);
+   int (*prune_orphaned_l0)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -104,6 +105,7 @@ static int embedding_dimension_calls;
 static int level3_count_calls;
 static int level2_count_calls;
 static int orphaned_l0_count_calls;
+static int prune_orphaned_l0_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -657,6 +659,18 @@ static int record_l4_approval(int64_t memory_id, const char *approver, const cha
    return (memory_id == 42 && note && note[0]) ? 0 : -1;
 }
 
+int db2_memory_prune_orphaned_l0(void)
+{
+   prune_orphaned_l0_calls++;
+   return 3;
+}
+
+static int prune_orphaned_l0(void)
+{
+   prune_orphaned_l0_calls++;
+   return 3;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -978,6 +992,7 @@ int main(void)
        .promote_stable = promote_stable,
        .reclassify_directives = reclassify_directives,
        .record_l4_approval = record_l4_approval,
+       .prune_orphaned_l0 = prune_orphaned_l0,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1153,6 +1168,11 @@ int main(void)
    assert(aimee_db2_record_l4_approval_call(call_client, &client, 7042, 0, 42u, "operator",
                                             "reviewed", NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(approval_calls == 1 && strcmp(approval_last_approver, "operator") == 0);
+
+   uint32_t pruned = 99u;
+   assert(aimee_db2_prune_orphaned_l0_call(call_client, &client, 7043, 0, &pruned, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(pruned == 3 && prune_orphaned_l0_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

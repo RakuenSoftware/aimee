@@ -1644,6 +1644,14 @@
       "reason": "Provenance append is private bookkeeping inside complete insert, merge, consolidate, and supersede operations; no generic caller-controlled provenance mutation crosses the bus."
     },
     {
+      "symbol": "db2_memory_prune_orphaned_l0",
+      "signature_sha256": "6e10c9e9cae3ed58ded0b8eb1bd7be915e6ca0f96173c50ff0ba75437927cf12",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.prune_orphaned_l0 operation replaces the doctor-invoked retention delete for expired unlinked short-term rows; the tier and age window stay fixed policy behind the handler so no caller can widen the delete."
+    },
+    {
       "symbol": "db2_memory_row_insert_ex",
       "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
       "disposition": "private-db2",

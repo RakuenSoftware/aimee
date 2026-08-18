@@ -17798,9 +17798,15 @@
           "line": 582
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prune_orphaned_l0 operation replaces the doctor-invoked retention delete for expired unlinked short-term rows; the tier and age window stay fixed policy behind the handler so no caller can widen the delete."
+      },
       "signature": "int db2_memory_prune_orphaned_l0 ( void )",
       "signature_sha256": "6e10c9e9cae3ed58ded0b8eb1bd7be915e6ca0f96173c50ff0ba75437927cf12",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_prune_orphaned_l0"
     },
     {
@@ -25788,15 +25794,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3266102e61926a846a1dd3da3ea7858d59d4f31f5a1ddf17192fe345f6cb62d9",
+  "fingerprint": "f0a2f1a2690d642acc139ebb7c905b4b3a10e8b02428f554ec9de29270715394",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 664,
+    "audit_pending": 663,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 294
+    "reviewed": 295
   }
 }

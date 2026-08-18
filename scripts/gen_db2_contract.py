@@ -223,7 +223,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "health_record",
                                                                 "promote_stable",
                                                                 "reclassify_directives",
-                                                                "record_l4_approval") else
+                                                                "record_l4_approval",
+                                                                "prune_orphaned_l0") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1216,9 +1217,37 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != []):
                 fail("record-l4-approval-reply",
                      "reply must acknowledge the approval without a payload")
+        elif key == ("memory", 23) and name == "prune_orphaned_l0" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # The retention window and tier are fixed policy, so the request
+            # carries no payload: an operator cannot widen the delete over the
+            # bus. The reply is the affected-row count of the single DELETE.
+            if operation["c_symbols"] != ["db2_memory_prune_orphaned_l0"]:
+                fail("operation-c-symbols",
+                     "prune_orphaned_l0 C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "prune_orphaned_l0 results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "prune_orphaned_l0.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"tier": "L0", "maximum_age": "-7 days"}):
+                fail("prune-orphaned-l0-request",
+                     "request must carry no payload and use the fixed tier and age bound")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "prune_orphaned_l0.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "prune_orphaned_l0.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "deleted_count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("prune-orphaned-l0-reply",
+                     "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 32 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 33 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1228,9 +1257,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
             "health_record", "health_retention", "health_counters", "stats_counts",
             "expire", "demote", "promote_stable", "reclassify_directives",
-            "record_l4_approval"]:
+            "record_l4_approval", "prune_orphaned_l0"]:
         fail("unsupported-operation",
-             "the partial generator requires the thirty-two supported operations exactly once")
+             "the partial generator requires the thirty-three supported operations exactly once")
     return catalog
 
 
@@ -1386,6 +1415,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     promote_stable = catalog["operations"][29]
     reclassify_directives = catalog["operations"][30]
     record_l4_approval = catalog["operations"][31]
+    prune_orphaned_l0 = catalog["operations"][32]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1550,6 +1580,12 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     orphaned_l0_count_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(orphaned_l0_count["id"]), 0, _put_u32(5),
+    )
+    prune_orphaned_l0_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(prune_orphaned_l0["id"]), 0, b"",
+    )
+    prune_orphaned_l0_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(prune_orphaned_l0["id"]), 0, _put_u32(3),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -3179,6 +3215,39 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (approval_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": prune_orphaned_l0["family"],
+            "id": prune_orphaned_l0["id"],
+            "name": prune_orphaned_l0["name"],
+            "request": {
+                "positive": prune_orphaned_l0_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(prune_orphaned_l0_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(prune_orphaned_l0_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": prune_orphaned_l0_request[:-1].hex()},
+                    {"mutation": "long", "hex": (prune_orphaned_l0_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "deleted_count": 3, "hex": prune_orphaned_l0_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(prune_orphaned_l0_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(prune_orphaned_l0_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(prune_orphaned_l0["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (prune_orphaned_l0_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": prune_orphaned_l0_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (prune_orphaned_l0_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -3223,6 +3292,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     promote_stable = catalog["operations"][29]
     reclassify_directives = catalog["operations"][30]
     record_l4_approval = catalog["operations"][31]
+    prune_orphaned_l0 = catalog["operations"][32]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -3671,6 +3741,21 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{record_l4_approval['request']['fields'][1]['maximum_bytes']}u"),
         ("AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX",
          f"{record_l4_approval['request']['fields'][2]['maximum_bytes']}u"),
+        ("AIMEE_DB2_EVENT_PRUNE_ORPHANED_L0", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_PRUNE_ORPHANED_L0", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0", f"{prune_orphaned_l0['id']}u"),
+        ("AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN",
+         f"{prune_orphaned_l0['request']['encoded_size']}u"),
+        ("AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN",
+         f"{prune_orphaned_l0['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_PRUNE_ORPHANED_L0_ERROR_LEN",
+         f"{prune_orphaned_l0['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_PRUNE_ORPHANED_L0_TIER",
+         '"' + prune_orphaned_l0['request']['policy']['tier'] + '"'),
+        ("AIMEE_DB2_PRUNE_ORPHANED_L0_MAX_AGE",
+         '"' + prune_orphaned_l0['request']['policy']['maximum_age'] + '"'),
+        ("AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX",
+         f"{prune_orphaned_l0['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -5559,6 +5644,60 @@ static inline int aimee_db2_record_l4_approval_reply_decode(const uint8_t *input
               : -1;
 }}
 
+static inline int aimee_db2_prune_orphaned_l0_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_prune_orphaned_l0_request_decode(const uint8_t *input,
+                                                             size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0 &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_prune_orphaned_l0_reply_encode(uint32_t deleted_count,
+                                                           uint8_t *output, size_t capacity,
+                                                           uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_count > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX ||
+       capacity < AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_count);
+   *output_len = AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
+                                                           size_t input_len,
+                                                           uint32_t *deleted_count)
+{{
+   if (deleted_count)
+      *deleted_count = 0u;
+   if (!deleted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0 ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
+      return -1;
+   *deleted_count = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -6518,6 +6657,10 @@ extern "C"
        uint64_t memory_id, const char *approver, const char *note,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_prune_orphaned_l0_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *deleted_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -7238,6 +7381,31 @@ aimee_db2_record_l4_approval_call(aimee_db2_call_fn call, void *call_context, ui
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_prune_orphaned_l0_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                 uint64_t deadline_ns, uint32_t *deleted_count,
+                                 aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !deleted_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *deleted_count = 0u;
+   uint8_t request[AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_prune_orphaned_l0_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PRUNE_ORPHANED_L0, AIMEE_DB2_STAGE_PRUNE_ORPHANED_L0,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_prune_orphaned_l0_reply_decode(response, response_len, deleted_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -7509,6 +7677,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     promote_stable = catalog["operations"][29]
     reclassify_directives = catalog["operations"][30]
     record_l4_approval = catalog["operations"][31]
+    prune_orphaned_l0 = catalog["operations"][32]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -7723,6 +7892,12 @@ const RecordL4ApprovalTier = "{record_l4_approval['request']['policy']['target_t
 const RecordL4ApprovalMemoryIDMax uint64 = {record_l4_approval['request']['fields'][0]['maximum']}
 const RecordL4ApprovalApproverMax = {record_l4_approval['request']['fields'][1]['maximum_bytes']}
 const RecordL4ApprovalNoteMax = {record_l4_approval['request']['fields'][2]['maximum_bytes']}
+const EventPruneOrphanedL0 = EventMemory
+const StagePruneOrphanedL0 = FamilyMemory
+const OperationPruneOrphanedL0 uint32 = {prune_orphaned_l0['id']}
+const PruneOrphanedL0Tier = "{prune_orphaned_l0['request']['policy']['tier']}"
+const PruneOrphanedL0MaxAge = "{prune_orphaned_l0['request']['policy']['maximum_age']}"
+const PruneOrphanedL0CountMax uint32 = {prune_orphaned_l0['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -8022,6 +8197,54 @@ func DecodeOrphanedL0CountReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return count, nil
+}}
+
+// EncodePruneOrphanedL0Request emits the empty request envelope; the tier and
+// age window are fixed policy and never travel on the wire.
+func EncodePruneOrphanedL0Request() []byte {{
+	header, err := EncodeRequestHeader(OperationPruneOrphanedL0, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodePruneOrphanedL0Request validates the exact memory-family operation envelope.
+func DecodePruneOrphanedL0Request(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPruneOrphanedL0 ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodePruneOrphanedL0Reply emits one bounded u32 deletion count.
+func EncodePruneOrphanedL0Reply(deletedCount uint32) ([]byte, error) {{
+	if deletedCount > PruneOrphanedL0CountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationPruneOrphanedL0, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedCount)
+	return reply, nil
+}}
+
+// DecodePruneOrphanedL0Reply validates the operation and bounded deletion count.
+func DecodePruneOrphanedL0Reply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPruneOrphanedL0 || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	deletedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedCount > PruneOrphanedL0CountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return deletedCount, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

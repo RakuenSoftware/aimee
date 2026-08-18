@@ -268,6 +268,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .promote_stable = db2_memory_promotion_promote_stable_l2_to_l3,
        .reclassify_directives = db2_memory_promotion_reclassify_directives,
        .record_l4_approval = db2_memory_promotion_record_l4_approval,
+       .prune_orphaned_l0 = db2_memory_prune_orphaned_l0,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -796,6 +797,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_record_l4_approval_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_prune_orphaned_l0_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->prune_orphaned_l0)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The backend returns -1 on connection or statement failure and the
+          * affected-row count otherwise, so a negative value is a fault rather
+          * than an empty sweep. */
+         int deleted = backend->prune_orphaned_l0();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (deleted < 0 || (uint32_t)deleted > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_prune_orphaned_l0_reply_encode((uint32_t)deleted, response_body,
+                                                      response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

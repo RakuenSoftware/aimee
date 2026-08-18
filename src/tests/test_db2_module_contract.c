@@ -25,6 +25,8 @@ static int level2_count_value;
 static int level2_count_calls;
 static int orphaned_l0_count_value;
 static int orphaned_l0_count_calls;
+static int prune_orphaned_l0_value;
+static int prune_orphaned_l0_calls;
 static int64_t total_count_value;
 static int total_count_calls;
 static int session_l2_count_value;
@@ -251,6 +253,18 @@ static int orphaned_l0_count(void)
 {
    orphaned_l0_count_calls++;
    return orphaned_l0_count_value;
+}
+
+int db2_memory_prune_orphaned_l0(void)
+{
+   prune_orphaned_l0_calls++;
+   return prune_orphaned_l0_value;
+}
+
+static int prune_orphaned_l0(void)
+{
+   prune_orphaned_l0_calls++;
+   return prune_orphaned_l0_value;
 }
 
 int64_t db2_memory_count(void)
@@ -896,6 +910,8 @@ static void reset(void)
    level2_count_calls = 0;
    orphaned_l0_count_value = 5;
    orphaned_l0_count_calls = 0;
+   prune_orphaned_l0_value = 3;
+   prune_orphaned_l0_calls = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2158,6 +2174,33 @@ static void test_reclassify_directives_wire(void)
    assert(aimee_db2_reclassify_directives_reply_encode(AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX + 1u,
                                                        reply, sizeof(reply), &reply_len) == -1);
    assert(reply_len == 0);
+}
+
+static void test_prune_orphaned_l0_wire(void)
+{
+   /* The retention window and tier are compiled-in policy, so they must be
+    * exactly what the reviewed catalog declares and must never be encoded. */
+   assert(strcmp(AIMEE_DB2_PRUNE_ORPHANED_L0_TIER, "L0") == 0);
+   assert(strcmp(AIMEE_DB2_PRUNE_ORPHANED_L0_MAX_AGE, "-7 days") == 0);
+
+   uint8_t request[AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN] = {0};
+   assert(aimee_db2_prune_orphaned_l0_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_prune_orphaned_l0_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_prune_orphaned_l0_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, deleted = 99;
+   assert(aimee_db2_prune_orphaned_l0_reply_encode(3, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == 0 &&
+          deleted == 3);
+   assert(aimee_db2_prune_orphaned_l0_reply_encode(AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX + 1u,
+                                                   reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_prune_orphaned_l0_reply_encode(3, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_prune_orphaned_l0_reply_encode(3, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
+          deleted == 0);
 }
 
 static void test_record_l4_approval_wire(void)
@@ -3429,6 +3472,46 @@ static void test_reclassify_directives_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_prune_orphaned_l0_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.prune_orphaned_l0 = prune_orphaned_l0};
+   uint8_t request[AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN];
+   uint32_t response_len = 99, deleted = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_PRUNE_ORPHANED_L0};
+   assert(aimee_db2_prune_orphaned_l0_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(prune_orphaned_l0_calls == 1);
+   assert(aimee_db2_prune_orphaned_l0_reply_decode(response, response_len, &deleted) == 0 &&
+          deleted == 3);
+
+   /* An empty sweep is a success reporting zero, not a fault. */
+   prune_orphaned_l0_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_prune_orphaned_l0_reply_decode(response, response_len, &deleted) == 0 &&
+          deleted == 0);
+
+   /* The backend signals a connection or statement failure with -1. */
+   prune_orphaned_l0_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   /* A count past the declared bound is a fault, not a truncated reply. */
+   prune_orphaned_l0_value = (int)AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   prune_orphaned_l0_value = 3;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_record_l4_approval_handler(void)
 {
    reset();
@@ -4376,6 +4459,7 @@ int main(void)
    test_promote_stable_wire();
    test_reclassify_directives_wire();
    test_record_l4_approval_wire();
+   test_prune_orphaned_l0_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4408,6 +4492,7 @@ int main(void)
    test_promote_stable_handler();
    test_reclassify_directives_handler();
    test_record_l4_approval_handler();
+   test_prune_orphaned_l0_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

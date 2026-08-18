@@ -218,7 +218,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 32 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 33 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -249,7 +249,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[28].Name != "demote" ||
 		baseline.Operations[29].Name != "promote_stable" ||
 		baseline.Operations[30].Name != "reclassify_directives" ||
-		baseline.Operations[31].Name != "record_l4_approval" {
+		baseline.Operations[31].Name != "record_l4_approval" ||
+		baseline.Operations[32].Name != "prune_orphaned_l0" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -348,6 +349,49 @@ func TestOrphanedL0CountMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || count != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, count, err)
 		}
+	}
+}
+
+func TestPruneOrphanedL0MatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[32]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodePruneOrphanedL0Request(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodePruneOrphanedL0Request(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodePruneOrphanedL0Request(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodePruneOrphanedL0Reply(vector.DeletedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		deleted, err := DecodePruneOrphanedL0Reply(got)
+		if err != nil || deleted != vector.DeletedCount {
+			t.Fatalf("decode = (%d, %v)", deleted, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		deleted, err := DecodePruneOrphanedL0Reply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || deleted != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, deleted, err)
+		}
+	}
+}
+
+func TestPruneOrphanedL0PolicyIsFixed(t *testing.T) {
+	// The tier and window are compiled-in policy shared with the C header; a
+	// drift here would let one side sweep a different set of rows.
+	if PruneOrphanedL0Tier != "L0" || PruneOrphanedL0MaxAge != "-7 days" {
+		t.Fatalf("policy = (%q, %q)", PruneOrphanedL0Tier, PruneOrphanedL0MaxAge)
+	}
+	if _, err := EncodePruneOrphanedL0Reply(PruneOrphanedL0CountMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("count past the bound encoded: %v", err)
 	}
 }
 

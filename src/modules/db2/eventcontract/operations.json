@@ -923,6 +923,30 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 23,
+      "name": "prune_orphaned_l0",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Deleting expired orphaned L0 rows is canonical relational DB2 retention authority and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_prune_orphaned_l0"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"tier": "L0", "maximum_age": "-7 days"}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "deleted_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }

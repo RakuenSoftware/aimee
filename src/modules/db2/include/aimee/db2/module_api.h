@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "74b2de6d877c8eec38aa852c721a537f6cddec10f1bcd17b201be501fc5fd48d"
+#define AIMEE_DB2_CONTRACT_SHA256 "e46a7a1e85c69d57f61e640989b25d2123d5f1f97296d813759d97605b4df661"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -313,6 +313,15 @@
 #define AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX        9223372036854775807ull
 #define AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX         63u
 #define AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX             511u
+#define AIMEE_DB2_EVENT_PRUNE_ORPHANED_L0                 AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_PRUNE_ORPHANED_L0                 AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0             23u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN           24u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN          28u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_ERROR_LEN             24u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_TIER                  "L0"
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_MAX_AGE               "-7 days"
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX             2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2173,6 +2182,60 @@ static inline int aimee_db2_record_l4_approval_reply_decode(const uint8_t *input
                   header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
               ? 0
               : -1;
+}
+
+static inline int aimee_db2_prune_orphaned_l0_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0, 0u, 0u,
+                                           output, capacity);
+}
+
+static inline int aimee_db2_prune_orphaned_l0_request_decode(const uint8_t *input,
+                                                             size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0 &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_prune_orphaned_l0_reply_encode(uint32_t deleted_count,
+                                                           uint8_t *output, size_t capacity,
+                                                           uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_count > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX ||
+       capacity < AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_count);
+   *output_len = AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
+                                                           size_t input_len,
+                                                           uint32_t *deleted_count)
+{
+   if (deleted_count)
+      *deleted_count = 0u;
+   if (!deleted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0 ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
+      return -1;
+   *deleted_count = decoded;
+   return 0;
 }
 
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)

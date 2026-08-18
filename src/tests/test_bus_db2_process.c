@@ -315,6 +315,19 @@ int main(int argc, char **argv)
    assert(aimee_db2_record_l4_approval_call(call_client, &client, 9043, 0, 42u, "operator",
                                             "reviewed", NULL, NULL) == AIMEE_MODULE_CALL_INTERNAL);
 
+   /* The schema is fresh, so no L0 row is old enough to fall outside the fixed
+    * seven-day window and the sweep deletes nothing. Replaying it must return
+    * the same zero: that is what the catalog's `safe` idempotency claims, and a
+    * second call is the only thing that actually demonstrates it. */
+   uint32_t pruned = 99;
+   assert(aimee_db2_prune_orphaned_l0_call(call_client, &client, 9044, 0, &pruned, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(pruned == 0);
+   pruned = 99;
+   assert(aimee_db2_prune_orphaned_l0_call(call_client, &client, 9045, 0, &pruned, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(pruned == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

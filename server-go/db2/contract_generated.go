@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "74b2de6d877c8eec38aa852c721a537f6cddec10f1bcd17b201be501fc5fd48d"
+const ContractSHA256 = "e46a7a1e85c69d57f61e640989b25d2123d5f1f97296d813759d97605b4df661"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -213,6 +213,12 @@ const RecordL4ApprovalTier = "L4"
 const RecordL4ApprovalMemoryIDMax uint64 = 9223372036854775807
 const RecordL4ApprovalApproverMax = 63
 const RecordL4ApprovalNoteMax = 511
+const EventPruneOrphanedL0 = EventMemory
+const StagePruneOrphanedL0 = FamilyMemory
+const OperationPruneOrphanedL0 uint32 = 23
+const PruneOrphanedL0Tier = "L0"
+const PruneOrphanedL0MaxAge = "-7 days"
+const PruneOrphanedL0CountMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -514,6 +520,54 @@ func DecodeOrphanedL0CountReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return count, nil
+}
+
+// EncodePruneOrphanedL0Request emits the empty request envelope; the tier and
+// age window are fixed policy and never travel on the wire.
+func EncodePruneOrphanedL0Request() []byte {
+	header, err := EncodeRequestHeader(OperationPruneOrphanedL0, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodePruneOrphanedL0Request validates the exact memory-family operation envelope.
+func DecodePruneOrphanedL0Request(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPruneOrphanedL0 ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodePruneOrphanedL0Reply emits one bounded u32 deletion count.
+func EncodePruneOrphanedL0Reply(deletedCount uint32) ([]byte, error) {
+	if deletedCount > PruneOrphanedL0CountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationPruneOrphanedL0, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedCount)
+	return reply, nil
+}
+
+// DecodePruneOrphanedL0Reply validates the operation and bounded deletion count.
+func DecodePruneOrphanedL0Reply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPruneOrphanedL0 || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	deletedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedCount > PruneOrphanedL0CountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return deletedCount, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.
