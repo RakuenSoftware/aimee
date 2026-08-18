@@ -172,6 +172,54 @@
       "reason": "A caller-controlled rollback is process-local transaction cleanup; failed or cancelled maintenance operations roll back inside DB2 before returning transport status."
     },
     {
+      "symbol": "db2_memory_scope_context_clear",
+      "signature_sha256": "5d6ec5c28d8a03daa5e5943336638a584b47a7cd8e2c566b97945cf896cc2461",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Clearing thread-local memory query context has no wire representation; each bounded memory request carries its scope and DB2 discards that request-local state before replying."
+    },
+    {
+      "symbol": "db2_memory_scope_context_get",
+      "signature_sha256": "55d1008e106a1147103b87726e4c0833c1a94acbe8962c4d65b71b3e4ba658a9",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Reading process thread-local scope is private memory-operation plumbing; explicit bounded scope fields replace implicit caller-owned state across the bus."
+    },
+    {
+      "symbol": "db2_memory_scope_context_rank",
+      "signature_sha256": "284878b4cdc500db2a5e7288465e3522ff5481857669ffec3f8ddaf7c0de5845",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Per-candidate rank probes would expose chatty implicit state; DB2 applies scope ranking inside the complete bounded memory search and returns only the ranked result set."
+    },
+    {
+      "symbol": "db2_memory_scope_context_set",
+      "signature_sha256": "3219f9f3e18ec28009676eb767569485cdcf9b6afe51a138e3c5a155840c8674",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "A setter for thread-local workspace and project scope cannot cross a process boundary; typed memory requests carry the bounded scope with the operation that consumes it."
+    },
+    {
+      "symbol": "db2_memory_scope_matches",
+      "signature_sha256": "be1d8067178fc0a27dc4174b1f972632a318b6cdb1fa64c38769be0408f196d6",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
+    },
+    {
+      "symbol": "db2_memory_workspace_matches",
+      "signature_sha256": "20497944db190512bcd0cfe009a9d24fb48a73d301cb1d4ad2c9bee4dbb21732",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The legacy-workspace membership probe remains an internal compatibility predicate folded into scoped memory operations, not a separately callable bus capability."
+    },
+    {
       "symbol": "db2_pg_stat_summary",
       "signature_sha256": "cbef9ff5eee86a096a36a66c4153f2aa76a45f7a4bcf026994ee3f6f53ac42f8",
       "disposition": "wire-operation",

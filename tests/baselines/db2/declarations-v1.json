@@ -16964,9 +16964,15 @@
           "line": 47
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Clearing thread-local memory query context has no wire representation; each bounded memory request carries its scope and DB2 discards that request-local state before replying."
+      },
       "signature": "void db2_memory_scope_context_clear ( void )",
       "signature_sha256": "5d6ec5c28d8a03daa5e5943336638a584b47a7cd8e2c566b97945cf896cc2461",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scope_context_clear"
     },
     {
@@ -16983,9 +16989,15 @@
           "line": 48
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Reading process thread-local scope is private memory-operation plumbing; explicit bounded scope fields replace implicit caller-owned state across the bus."
+      },
       "signature": "void db2_memory_scope_context_get ( db2_memory_scope_context_t * out )",
       "signature_sha256": "55d1008e106a1147103b87726e4c0833c1a94acbe8962c4d65b71b3e4ba658a9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scope_context_get"
     },
     {
@@ -17000,9 +17012,15 @@
           "line": 49
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Per-candidate rank probes would expose chatty implicit state; DB2 applies scope ranking inside the complete bounded memory search and returns only the ranked result set."
+      },
       "signature": "int db2_memory_scope_context_rank ( int64_t memory_id )",
       "signature_sha256": "284878b4cdc500db2a5e7288465e3522ff5481857669ffec3f8ddaf7c0de5845",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scope_context_rank"
     },
     {
@@ -17017,9 +17035,15 @@
           "line": 46
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "A setter for thread-local workspace and project scope cannot cross a process boundary; typed memory requests carry the bounded scope with the operation that consumes it."
+      },
       "signature": "void db2_memory_scope_context_set ( const char * workspace , const char * project , int include_all )",
       "signature_sha256": "3219f9f3e18ec28009676eb767569485cdcf9b6afe51a138e3c5a155840c8674",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scope_context_set"
     },
     {
@@ -17032,9 +17056,15 @@
           "line": 117
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
+      },
       "signature": "int db2_memory_scope_matches ( int64_t memory_id , const char * scope_type , const char * scope_value )",
       "signature_sha256": "be1d8067178fc0a27dc4174b1f972632a318b6cdb1fa64c38769be0408f196d6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scope_matches"
     },
     {
@@ -17610,9 +17640,15 @@
           "line": 121
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The legacy-workspace membership probe remains an internal compatibility predicate folded into scoped memory operations, not a separately callable bus capability."
+      },
       "signature": "int db2_memory_workspace_matches ( int64_t memory_id , const char * workspace )",
       "signature_sha256": "20497944db190512bcd0cfe009a9d24fb48a73d301cb1d4ad2c9bee4dbb21732",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_workspace_matches"
     },
     {
@@ -24612,15 +24648,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "894212420318f380034f7b8995515e87139eb849be296ff60d99a34fda82cf4b",
+  "fingerprint": "d82b7c3dcfcbe851c17751dfa85ca578ae62e928ce8bf3f8b8631bb82a605f55",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 860,
+    "audit_pending": 854,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 98
+    "reviewed": 104
   }
 }
