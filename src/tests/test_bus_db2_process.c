@@ -86,6 +86,15 @@ call_client(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trac
                                    response_len, cancelled, cancel_context);
 }
 
+static int cancel_after_request(void *context)
+{
+   int *checks = context;
+   *checks += 1;
+   /* module_client checks once before locking and once before publishing.
+    * The third check happens only after the request entered the bus. */
+   return *checks >= 3;
+}
+
 int main(int argc, char **argv)
 {
    assert(argc == 2);
@@ -172,6 +181,26 @@ int main(int argc, char **argv)
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(schema_ok == 1 && have_pg_trgm == 1 && kb_tables_ok == 1);
 
+   schema_ok = have_pg_trgm = kb_tables_ok = 9;
+   assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(schema_ok == 0 && have_pg_trgm == 0 && kb_tables_ok == 0);
+
+   int cancel_checks = 0;
+   schema_ok = have_pg_trgm = kb_tables_ok = 9;
+   assert(aimee_db2_health_call(call_client, &client, 9004, 0, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, cancel_after_request,
+                                &cancel_checks) == AIMEE_MODULE_CALL_CANCELLED);
+   assert(cancel_checks >= 3);
+   assert(schema_ok == 0 && have_pg_trgm == 0 && kb_tables_ok == 0);
+
+   /* A cancellation can race the packaged handler's terminal reply. Prove the
+    * next live PostgreSQL request drains it and remains byte-canonical. */
+   schema_ok = have_pg_trgm = kb_tables_ok = 0;
+   assert(aimee_db2_health_call(call_client, &client, 9005, 0, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(schema_ok == 1 && have_pg_trgm == 1 && kb_tables_ok == 1);
+
    aimee_module_client_destroy(&client);
    assert(kill(child, SIGTERM) == 0);
    int child_status = 0;
@@ -184,6 +213,6 @@ int main(int argc, char **argv)
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
    assert(rmdir(directory) == 0);
-   puts("test_bus_db2_process: real Postgres schema and health bytes replayed over the bus");
+   puts("test_bus_db2_process: Postgres health, deadline, and cancellation replayed over the bus");
    return 0;
 }

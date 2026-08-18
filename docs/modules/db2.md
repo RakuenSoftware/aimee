@@ -482,9 +482,11 @@ PostgreSQL database and an executable-bound bus grant. It compares the returned 
 the generated reference codec, repeats the request through the typed client, verifies all schema,
 `pg_trgm`, and KB-table evidence bits, terminates the process cleanly, and leaves the recorded
 embedding dimension and representative schema tables for a separate database-effect assertion.
-The required CI job runs this target and is part of the stable `unit-tests` aggregate. This is the
-first live S3 replay group; the remaining operation families and fault fixtures still gate S3
-completion and activation.
+The replay also rejects an expired deadline, deterministically cancels a request only after it has
+entered the bus, and proves a later live health call drains any stale terminal reply. The required
+CI job runs this target and is part of the stable `unit-tests` aggregate. These are the first live
+S3 replay groups; the remaining operation families and fault fixtures still gate S3 completion and
+activation.
 
 ## Tests and failure behavior
 

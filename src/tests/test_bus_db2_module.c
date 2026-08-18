@@ -51,10 +51,20 @@ typedef struct
 
 static int health_calls;
 static int kb_health_calls;
+static atomic_int block_health;
+static atomic_int health_entered;
+static atomic_int health_release;
 
 static int health_probe(int *schema_ok, int *have_pg_trgm)
 {
    health_calls++;
+   if (atomic_load_explicit(&block_health, memory_order_acquire))
+   {
+      const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
+      atomic_store_explicit(&health_entered, 1, memory_order_release);
+      while (!atomic_load_explicit(&health_release, memory_order_acquire))
+         nanosleep(&pause, NULL);
+   }
    *schema_ok = 1;
    *have_pg_trgm = 0;
    return 0;
@@ -100,6 +110,37 @@ static void *run_pump(void *argument)
       pump(state->host, state->lock);
       nanosleep(&pause, NULL);
    }
+   return NULL;
+}
+
+typedef struct
+{
+   atomic_int *cancel;
+   int entered;
+} cancel_inflight_t;
+
+static int cancellation_flag(void *context)
+{
+   return atomic_load_explicit((atomic_int *)context, memory_order_acquire);
+}
+
+static void *cancel_inflight(void *argument)
+{
+   cancel_inflight_t *state = argument;
+   const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
+   for (int attempt = 0; attempt < 5000; ++attempt)
+   {
+      if (atomic_load_explicit(&health_entered, memory_order_acquire))
+      {
+         state->entered = 1;
+         break;
+      }
+      nanosleep(&pause, NULL);
+   }
+   atomic_store_explicit(state->cancel, 1, memory_order_release);
+   for (int attempt = 0; attempt < 10; ++attempt)
+      nanosleep(&pause, NULL);
+   atomic_store_explicit(&health_release, 1, memory_order_release);
    return NULL;
 }
 
@@ -210,6 +251,35 @@ int main(void)
    assert(schema_ok == 1 && have_pg_trgm == 0 && kb_tables_ok == 1);
    assert(health_calls == 1 && kb_health_calls == 1);
 
+   schema_ok = have_pg_trgm = kb_tables_ok = 9;
+   assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(schema_ok == 0 && have_pg_trgm == 0 && kb_tables_ok == 0);
+
+   atomic_store_explicit(&block_health, 1, memory_order_release);
+   atomic_store_explicit(&health_entered, 0, memory_order_release);
+   atomic_store_explicit(&health_release, 0, memory_order_release);
+   atomic_int cancel;
+   atomic_init(&cancel, 0);
+   cancel_inflight_t cancel_state = {.cancel = &cancel};
+   pthread_t cancel_thread;
+   assert(pthread_create(&cancel_thread, NULL, cancel_inflight, &cancel_state) == 0);
+   schema_ok = have_pg_trgm = kb_tables_ok = 9;
+   assert(aimee_db2_health_call(call_client, &client, 7003, 0, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, cancellation_flag,
+                                &cancel) == AIMEE_MODULE_CALL_CANCELLED);
+   assert(schema_ok == 0 && have_pg_trgm == 0 && kb_tables_ok == 0);
+   assert(pthread_join(cancel_thread, NULL) == 0 && cancel_state.entered == 1);
+   atomic_store_explicit(&block_health, 0, memory_order_release);
+
+   /* The cancelled handler finishes after its caller. The typed client must
+    * drain that stale terminal reply and keep the next correlation healthy. */
+   schema_ok = have_pg_trgm = kb_tables_ok = 0;
+   assert(aimee_db2_health_call(call_client, &client, 7004, 0, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(schema_ok == 1 && have_pg_trgm == 0 && kb_tables_ok == 1);
+   assert(health_calls == 3 && kb_health_calls == 3);
+
    aimee_module_client_destroy(&client);
    aimee_module_process_stop();
    assert(pthread_join(module_thread, NULL) == 0 && process.result == 0);
@@ -220,6 +290,6 @@ int main(void)
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
    assert(rmdir(directory) == 0);
-   puts("test_bus_db2_module: typed client/dispatch crossed the real event bus");
+   puts("test_bus_db2_module: typed client, deadline, and cancellation crossed the real event bus");
    return 0;
 }

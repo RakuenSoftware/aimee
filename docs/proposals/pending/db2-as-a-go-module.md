@@ -642,8 +642,10 @@ against fresh pgvector PostgreSQL, compares raw response bytes to the generated 
 repeats the call through the typed client, checks schema/extension/KB-table evidence, and terminates
 the process cleanly. CI separately verifies `kb_meta.schema_embedding_dim` and representative
 tables, and the stable `unit-tests` aggregate now requires this job. This proves the current health
-operation and schema bootstrap through the real process boundary; it does not claim the remaining
-catalog handlers, tenant, concurrency, cancellation, ambiguity, or durability replay groups.
+operation and schema bootstrap through the real process boundary. The next replay slice proves an
+expired deadline, deterministic cancellation after request publication, stale-terminal-reply
+draining, and post-cancellation process health; it does not claim the remaining catalog handlers,
+tenant, concurrency, ambiguity, or durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
 standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is
