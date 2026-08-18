@@ -49,6 +49,7 @@
 #include "cost_fold.h"
 #include "diagnose.h"
 #include "interaction_events.h"
+#include "clarify.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -659,6 +660,46 @@ static void test_costs_ids_and_a_nested_row(void)
    printf("  PASS: costs, ids and a nested row\n");
 }
 
+static void test_a_row_that_carries_rows(void)
+{
+   clarify_session_t started;
+   memset(&started, 0, sizeof started);
+   must(db1_clarify_start("make the exporter idempotent", &started) > 0,
+        "start a clarify session, which answers with its new id");
+   must(started.id > 0, "it has an id");
+   must(started.qa_count > 0, "and the questions it opened with");
+
+   /* clarify_session_t holds clarify_qa_t qa[8]: eight rows inside a row, and
+      the frame carries every member of every one of them. */
+   clarify_session_t back;
+   memset(&back, 0, sizeof back);
+   must(db1_clarify_get(started.id, &back) == 0, "read the session back");
+   must(back.id == started.id, "it is the session just started");
+   must(back.qa_count == started.qa_count, "with the same number of pairs");
+   must(strcmp(back.qa[0].question, started.qa[0].question) == 0,
+        "the first nested row survived the crossing");
+   must(strcmp(back.qa[0].dimension, started.qa[0].dimension) == 0, "including its dimension");
+
+   must(db1_clarify_answer(started.id, "it must be safe to run twice", &back) == 0,
+        "answer the first question");
+
+   /* A pure computation over a struct the caller holds: it crosses as the row
+      it is, and comes back as the number the domain computed. */
+   float scored = db1_clarify_score(&back);
+   must(scored > 0.0f, "scoring the row answers the same way");
+
+   char dim[CLARIFY_DIM_NAME_LEN] = "";
+   db1_clarify_weakest_dim(&back, dim, sizeof dim);
+   must(dim[0] != '\0', "the weakest dimension came back through a void call");
+
+   char *spec = db1_clarify_crystallize(&back);
+   must(spec != NULL, "crystallize answers with a document");
+   must(strstr(spec, "make the exporter idempotent") != NULL, "built from the row it was given");
+   free(spec);
+
+   printf("  PASS: a row that carries rows\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -702,6 +743,7 @@ int main(int argc, char **argv)
    test_the_callee_allocates_what_the_caller_frees();
    test_a_bulk_replace_and_what_it_reads_back();
    test_costs_ids_and_a_nested_row();
+   test_a_row_that_carries_rows();
 
    stop_module();
    obs_bus_stop();

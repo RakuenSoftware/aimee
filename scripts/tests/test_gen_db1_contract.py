@@ -511,7 +511,10 @@ class CatalogTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             catalog = self.catalog(root)
-            catalog["operations"][0]["request"]["fields"][0]["type"] = "float"
+            # "blob" rather than "float": float joined the set when clarify's
+            # score needed it, and a test that pins the set has to name
+            # something still outside it or it stops testing anything.
+            catalog["operations"][0]["request"]["fields"][0]["type"] = "blob"
             self.write(root, catalog)
             self.assertRule(root, "field-type")
         finally:
@@ -813,10 +816,15 @@ class CatalogTests(unittest.TestCase):
             root = Path(tmp.name)
             self.double_catalog(root)
             contract.run(root, write=True)
+            # A DECLARATION of width 24, not the characters "[24]": a family
+            # with two dozen fields indexes field[24] in the ordinary course of
+            # things, and matching that says nothing about slot widths.
+            declared = re.compile(r"char\s+\(?\*?\w+\)?\s*\[\s*24\s*\]")
             for path in list((root / contract.SOURCE_DIR).glob("*_stage.c")) + \
                     list((root / contract.CLIENT_DIR).glob("*.c")):
-                self.assertNotIn("[24]", path.read_text(),
-                                 f"{path.name} still sizes a numeric slot at 24")
+                found = declared.search(path.read_text())
+                self.assertIsNone(found,
+                                  f"{path.name} still sizes a numeric slot at 24")
         finally:
             tmp.cleanup()
 
@@ -1054,6 +1062,42 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("caps, 2, NULL)", body)
         self.assertIn("strtol(slot_rc, NULL, 10)", body)
         self.assertNotIn("read_result(", body)
+
+    def test_a_row_crosses_whole_or_not_at_all(self) -> None:
+        # A member the catalog leaves out is not refused, it is never written:
+        # the client leaves it as memset left it, and the caller cannot tell an
+        # omitted field from one that really is empty. Regeneration makes that
+        # permanent without a word, which is what this refuses.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            dropped = None
+            for operation in catalog["operations"]:
+                reply = operation["reply"]
+                if "struct" in reply and len(reply["fields"]) > 2:
+                    dropped = reply["fields"].pop(1)
+                    break
+            self.assertIsNotNone(dropped, "no struct-shaped reply to test with")
+            self.write(root, catalog)
+            with self.assertRaises(contract.ContractError) as caught:
+                contract.run(root, write=False)
+            self.assertIn("struct-members", str(caught.exception))
+            self.assertIn(str(dropped["name"]), str(caught.exception))
+        finally:
+            tmp.cleanup()
+
+    def test_a_struct_is_read_by_its_braces_not_by_a_regex(self) -> None:
+        # Two structs in one header: ".*?" from the first "typedef struct {" to
+        # the named closing brace swallows the first one whole, and its members
+        # come back as members of the second.
+        text = """
+        typedef struct { char first[8]; int second; } earlier_t;
+        typedef struct { char only[8]; } later_t;
+        """
+        self.assertEqual(contract.struct_body(text, "later_t").strip(), "char only[8];")
+        self.assertIn("first", contract.struct_body(text, "earlier_t"))
+        self.assertIsNone(contract.struct_body(text, "absent_t"))
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ typedef enum
    VAULT_WITNESS_SIG_ED25519 = 1
 } vault_witness_sig_alg_t;
 
-typedef struct
+typedef struct vault_witness_checkpoint
 {
    uint16_t version;
    uint64_t seq;
@@ -58,7 +58,7 @@ typedef struct
 /* One trusted verification key. `revoked` != 0 means a checkpoint signed by this
  * key is rejected even when the signature is mathematically valid — a key
  * compromised before rotation must not keep validating forged checkpoints. */
-typedef struct
+typedef struct vault_witness_anchor
 {
    uint8_t key_id[VAULT_WITNESS_SIGNER_KEY_ID_LEN];
    uint8_t ed25519_pub[VAULT_WITNESS_ED25519_PUB_LEN];

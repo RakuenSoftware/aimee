@@ -8,7 +8,7 @@
 #define VAULT_RESEAL_OPERATION_ID_LEN  16
 #define VAULT_RESEAL_OPERATION_HEX_LEN 32
 
-typedef struct
+typedef struct vault_tpm2_reseal_receipt
 {
    uint8_t operation_id[VAULT_RESEAL_OPERATION_ID_LEN];
    uint64_t old_generation;

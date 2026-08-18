@@ -97,6 +97,8 @@ static void describe_token(const char *jwt)
 
 int main(int argc, char **argv)
 {
+   aimee_db2_register_token_record_validators(kb_mgmt_token_authority_record_valid,
+                                              kb_identity_token_authority_record_valid);
    if (argc != 4)
    {
       fprintf(stderr, "usage: identity-mint-live <dsn> <correlation_id> <jti>\n");

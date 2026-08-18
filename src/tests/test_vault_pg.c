@@ -16,6 +16,7 @@
  * scripts/p10_vault_rls_test.sql. */
 #include "vault_store.h"
 #include "vault_crypto.h"
+#include "vault_kek_check.h"
 #include "vault_internal.h"             /* vault_store_set_backend */
 #include "modules/db2/c/vault_pg.h"     /* vault_pg_backend */
 #include "modules/db2/c/db2.h"          /* db2_init / db2_shutdown */
@@ -32,6 +33,78 @@ static void make_kek(uint8_t kek[VAULT_KEK_LEN], unsigned seed)
 {
    for (int i = 0; i < VAULT_KEK_LEN; i++)
       kek[i] = (uint8_t)(seed * 31 + i * 7 + 1);
+}
+
+static int invalid_random(uint8_t *out, size_t len)
+{
+   memset(out, 0xa5, len);
+   return 1;
+}
+
+static void register_crypto_provider(void)
+{
+   const db2_vault_crypto_provider_t provider = {
+       .aad_build_v2 = vault_aad_build_v2,
+       .aad_build_v1_safe = vault_aad_build_v1_safe,
+       .random = vault_crypto_random,
+       .dek_wrap = vault_dek_wrap,
+       .dek_unwrap = vault_dek_unwrap,
+       .secret_encrypt = vault_secret_encrypt,
+       .secret_decrypt = vault_secret_decrypt,
+       .kek_check_wrap = vault_kek_check_wrap,
+       .kek_check_verify = vault_kek_check_verify,
+   };
+   aimee_db2_register_vault_crypto_provider(&provider);
+}
+
+static void test_crypto_contract(void)
+{
+   uint8_t random_bytes[VAULT_SALT_LEN];
+   memset(random_bytes, 0xa5, sizeof(random_bytes));
+   aimee_db2_register_vault_crypto_provider(NULL);
+   assert(db2_vault_crypto_random(random_bytes, sizeof(random_bytes)) == -1);
+   for (size_t i = 0; i < sizeof(random_bytes); ++i)
+      assert(random_bytes[i] == 0);
+
+   db2_vault_crypto_provider_t invalid = {.random = invalid_random};
+   aimee_db2_register_vault_crypto_provider(&invalid);
+   memset(random_bytes, 0xa5, sizeof(random_bytes));
+   assert(db2_vault_crypto_random(random_bytes, sizeof(random_bytes)) == -1);
+   for (size_t i = 0; i < sizeof(random_bytes); ++i)
+      assert(random_bytes[i] == 0);
+
+   register_crypto_provider();
+   assert(db2_vault_crypto_random(random_bytes, sizeof(random_bytes)) == 0);
+
+   uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
+   size_t aad_len = 0;
+   assert(db2_vault_aad_build_v2("owner", "agent", "credential", 1, aad, sizeof(aad), &aad_len) ==
+          0);
+   assert(aad_len > 0);
+   assert(db2_vault_aad_build_v1_safe("owner", "agent", "credential", 1, aad, sizeof(aad),
+                                      &aad_len) == 0);
+
+   uint8_t kek[VAULT_KEK_LEN], wrong[VAULT_KEK_LEN], dek[VAULT_DEK_LEN], unwrapped[VAULT_DEK_LEN];
+   make_kek(kek, 1);
+   make_kek(wrong, 2);
+   memset(dek, 0x42, sizeof(dek));
+   uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
+   assert(db2_vault_dek_wrap(kek, dek, wrapped) == 0);
+   assert(db2_vault_dek_unwrap(kek, wrapped, unwrapped) == 0);
+   assert(memcmp(dek, unwrapped, sizeof(dek)) == 0);
+
+   const uint8_t plaintext[] = "contract-secret";
+   uint8_t nonce[VAULT_GCM_NONCE_LEN], ciphertext[sizeof(plaintext)];
+   uint8_t tag[VAULT_GCM_TAG_LEN], decrypted[sizeof(plaintext)];
+   assert(db2_vault_secret_encrypt(dek, aad, aad_len, plaintext, sizeof(plaintext), nonce,
+                                   ciphertext, tag) == 0);
+   assert(db2_vault_secret_decrypt(dek, aad, aad_len, nonce, ciphertext, sizeof(ciphertext), tag,
+                                   decrypted) == 0);
+   assert(memcmp(plaintext, decrypted, sizeof(plaintext)) == 0);
+
+   assert(db2_vault_kek_check_wrap(kek, wrapped) == 0);
+   assert(db2_vault_kek_check_verify(kek, wrapped) == 0);
+   assert(db2_vault_kek_check_verify(wrong, wrapped) == -1);
 }
 
 /* Read the current version of a slot straight from org_vault_has, so we can assert the
@@ -133,6 +206,8 @@ static void run(void)
 
 int main(void)
 {
+   test_crypto_contract();
+
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {

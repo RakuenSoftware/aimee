@@ -443,12 +443,59 @@ jobs:
             unit-tests
           ccache --show-stats
 
+  db2-process-replay:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    env:
+      AIMEE_DB2_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_db2_process_ci
+      EMBEDDER_DIMS: "384"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-db2-process-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee \
+            -e POSTGRES_DB=aimee_db2_process_ci -p 5432:5432 "$img"
+      - name: Install DB2 replay dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0
+          until sudo apt-get update -q; do
+            i=$((i+1))
+            [ "$i" -ge 5 ] && break
+            echo "apt-get update retry $i (transient repo failure)"
+            sleep $((i*4))
+          done
+          sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-db2-process-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"
+          docker logs aimee-db2-process-pg || true
+          exit 1
+      - name: Replay packaged DB2 operations through the event bus
+        run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay
+      - name: Verify durable schema effect
+        run: |
+          test "$(psql -XAt "$AIMEE_DB2_URL" -c "select value from kb_meta where key='schema_embedding_dim'")" = "384"
+          test "$(psql -XAt "$AIMEE_DB2_URL" -c "select count(*) from information_schema.tables where table_schema=current_schema() and table_name in ('memories','kb_documents','kb_async_jobs')")" = "3"
+
   # Stable protected context for the sharded suite. It remains named
   # `unit-tests`, so branch protection needs no transition window, and it also
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, p1-rls-gate]
+    needs: [change-scope, unit-test-shards, db2-process-replay, p1-rls-gate]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -457,6 +504,7 @@ jobs:
           CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
           DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
           SHARDS_RESULT: ${{ needs.unit-test-shards.result }}
+          DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
         run: |
           if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
@@ -471,7 +519,11 @@ jobs:
             echo "P1 RLS gate result: $P1_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards and the P1 RLS gate passed."
+          [ "$DB2_REPLAY_RESULT" = success ] || {
+            echo "DB2 process replay result: $DB2_REPLAY_RESULT" >&2
+            exit 1
+          }
+          echo "All unit-test shards, DB2 process replay, and the P1 RLS gate passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
