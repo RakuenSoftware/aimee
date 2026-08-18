@@ -63,12 +63,13 @@ func loadHealthBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
-	if len(baseline.Operations) != 6 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 7 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
 		baseline.Operations[4].Name != "postgres_status" ||
-		baseline.Operations[5].Name != "reembed_status" {
+		baseline.Operations[5].Name != "reembed_status" ||
+		baseline.Operations[6].Name != "reembed_clear" {
 		t.Fatalf("unexpected operation baseline: %+v", baseline.Operations)
 	}
 	return baseline

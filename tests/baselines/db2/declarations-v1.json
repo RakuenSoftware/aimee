@@ -18782,9 +18782,15 @@
           "line": 141
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.reembed_clear operation replaces the curator drain's direct maintenance-marker delete with an idempotent DB2 mutation."
+      },
       "signature": "int db2_reembed_in_progress_clear ( void )",
       "signature_sha256": "25bd647860f1e1ae2ab397d52563d4eca74d4ee5252b78f5258e92153a6f16b4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_reembed_in_progress_clear"
     },
     {
@@ -24438,15 +24444,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e5369aa9e8da25d01dc4506ed0ab237afaba8dc87a0a97b4c57f654109ceca1b",
+  "fingerprint": "796efc3aa8a5960a62bec99ef5438455573f3cb44577312791ff846f9f3fbc72",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 889,
+    "audit_pending": 888,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 69
+    "reviewed": 70
   }
 }

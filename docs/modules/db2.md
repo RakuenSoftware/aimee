@@ -44,6 +44,8 @@ for a known replica. A dead probe connection returns `invalid_state`.
 `reembed_status` reads the canonical DB2 maintenance marker that blocks vector search during a
 schema-width rebuild. It returns a bounded target dimension and positive start epoch, `not_found`
 when maintenance is inactive, or `invalid_state` for an unreadable or malformed marker.
+`reembed_clear` is its idempotent, zero-payload companion mutation: DB2 deletes that marker after
+reconciliation, returning `invalid_state` if the single statement fails.
 
 ## Dependencies and consumers
 
@@ -86,7 +88,7 @@ gone, and the declaration ledger proves that `db2_health_probe` has no productio
 
 The current surface is the lifecycle event on the KB-local Unix-domain module bus. It serves the
 frozen health operation plus the envelope-backed embedding-dimension, pool-status, and
-embedding-refusal, PostgreSQL-status, and re-embedding-status operations. There
+embedding-refusal, PostgreSQL-status, re-embedding-status, and re-embedding-clear operations. There
 is no HTTP listener, network service, generic query operation, raw SQL payload, or provider-secret
 field. The catalog reserves the eight family identities and event kinds `11521` through `11528`, but
 only lifecycle is active and granted. Later operations must be typed, bounded catalog entries.
@@ -104,8 +106,8 @@ also fails if a wire review has no catalog operation. At this checkpoint 153 dec
 unconsumed implementation details, 286 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
 explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
-the embedding-dimension, pool-status, embedding-refusal, PostgreSQL-status, and re-embedding-status
-backends are reviewed wire operations, and 889
+the embedding-dimension, pool-status, embedding-refusal, PostgreSQL-status, re-embedding-status, and
+re-embedding-clear backends are reviewed wire operations, and 888
 production-consumed declarations remain
 without a reviewed disposition.
 

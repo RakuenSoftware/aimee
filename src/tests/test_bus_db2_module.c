@@ -33,6 +33,7 @@ typedef struct
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
    int (*reembed_status)(aimee_db2_reembed_status_t *status);
+   int (*reembed_clear)(void);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -173,6 +174,11 @@ static int reembed_status(aimee_db2_reembed_status_t *status)
    return 1;
 }
 
+int db2_reembed_in_progress_clear(void)
+{
+   return 0;
+}
+
 static void *run_process(void *argument)
 {
    process_thread_t *thread = argument;
@@ -308,6 +314,7 @@ int main(void)
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
        .reembed_status = reembed_status,
+       .reembed_clear = db2_reembed_in_progress_clear,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -377,6 +384,11 @@ int main(void)
                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && reembed.target_dimension == 384 &&
           reembed.started_epoch == 1700000000);
+
+   domain_result = 9;
+   assert(aimee_db2_reembed_clear_call(call_client, &client, 7015, 0, &domain_result, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

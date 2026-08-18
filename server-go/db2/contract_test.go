@@ -156,15 +156,45 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 6 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 7 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
 		baseline.Operations[4].Name != "postgres_status" ||
-		baseline.Operations[5].Name != "reembed_status" {
+		baseline.Operations[5].Name != "reembed_status" ||
+		baseline.Operations[6].Name != "reembed_clear" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
+}
+
+func TestReembedClearMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[6]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeReembedClearRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeReembedClearRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeReembedClearReply(vector.Result)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		result, err := DecodeReembedClearReply(got)
+		if err != nil || result != vector.Result {
+			t.Fatalf("decode = (%d, %v)", result, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, err := DecodeReembedClearReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, result, err)
+		}
+	}
 }
 
 func TestReembedStatusMatchesEverySharedCVector(t *testing.T) {

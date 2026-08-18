@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "96b5f2e19c00c02bacf73244163dbd26e18e8fb44f50387fb79afbcdef3464eb"
+#define AIMEE_DB2_CONTRACT_SHA256 "837c4db936e2a4cb670d26f7f2f733d14bce16b0f785a15ae2d3f4230d4864d7"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -82,6 +82,11 @@
 #define AIMEE_DB2_REEMBED_STATUS_ERROR_LEN         24u
 #define AIMEE_DB2_REEMBED_DIMENSION_MIN            1u
 #define AIMEE_DB2_REEMBED_DIMENSION_MAX            4000u
+#define AIMEE_DB2_EVENT_REEMBED_CLEAR              AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_CLEAR              AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_CLEAR          7u
+#define AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN        24u
+#define AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN       24u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -706,6 +711,54 @@ static inline int aimee_db2_reembed_status_reply_decode(
       return -1;
    *result = header.result;
    *status = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_reembed_clear_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REEMBED_CLEAR, 0u, 0u, output,
+                                           capacity);
+}
+
+static inline int aimee_db2_reembed_clear_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REEMBED_CLEAR && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_reembed_clear_reply_encode(uint32_t result, uint8_t *output,
+                                                       size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len || capacity < AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN ||
+       (result != AIMEE_DB2_RESULT_OK && result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REEMBED_CLEAR, result, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_reembed_clear_reply_decode(const uint8_t *input, size_t input_len,
+                                                       uint32_t *result)
+{
+   if (result)
+      *result = 0u;
+   if (!result)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_CLEAR || header.payload_len != 0u ||
+       (header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   *result = header.result;
    return 0;
 }
 

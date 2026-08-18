@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "96b5f2e19c00c02bacf73244163dbd26e18e8fb44f50387fb79afbcdef3464eb"
+const ContractSHA256 = "837c4db936e2a4cb670d26f7f2f733d14bce16b0f785a15ae2d3f4230d4864d7"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -66,6 +66,9 @@ const StageReembedStatus = FamilyLifecycle
 const OperationReembedStatus uint32 = 6
 const ReembedDimensionMin uint32 = 1
 const ReembedDimensionMax uint32 = 4000
+const EventReembedClear = EventLifecycle
+const StageReembedClear = FamilyLifecycle
+const OperationReembedClear uint32 = 7
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -552,6 +555,43 @@ func DecodeReembedStatusReply(reply []byte) (uint32, ReembedStatus, error) {
 		return 0, ReembedStatus{}, ErrMalformedEnvelope
 	}
 	return header.Result, status, nil
+}
+
+func EncodeReembedClearRequest() []byte {
+	header, err := EncodeRequestHeader(OperationReembedClear, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+func DecodeReembedClearRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedClear || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+func EncodeReembedClearReply(result uint32) ([]byte, error) {
+	if result != ResultOK && result != ResultInvalidState {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationReembedClear, result, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+func DecodeReembedClearReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedClear || header.PayloadLen != 0 ||
+		(header.Result != ResultOK && header.Result != ResultInvalidState) {
+		return 0, ErrMalformedEnvelope
+	}
+	return header.Result, nil
 }
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

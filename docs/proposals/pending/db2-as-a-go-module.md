@@ -662,8 +662,9 @@ lifecycle health, returning only the valid zero/zero or positive/positive states
 carries best-effort active/max connection, recovery-role, and replica-lag evidence.
 It uses explicit availability bits, canonicalizes unavailable values to zero, and keeps PostgreSQL
 operational evidence in DB2. `reembed_status` preserves the canonical maintenance marker as a
-bounded target dimension and start epoch, with explicit absent and malformed results. These
-operations do not claim the remaining catalog handlers, tenant, concurrency, ambiguity, or
+bounded target dimension and start epoch, with explicit absent and malformed results. Its
+`reembed_clear` companion performs the idempotent single-statement marker delete after reconciliation.
+These operations do not claim the remaining catalog handlers, tenant, concurrency, ambiguity, or
 durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:

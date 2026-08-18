@@ -98,6 +98,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
        .reembed_status = production_reembed_status,
+       .reembed_clear = db2_reembed_in_progress_clear,
    };
    return &backend;
 }
@@ -217,20 +218,37 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       return AIMEE_MODULE_STATUS_OK;
    }
 
-   if (aimee_db2_reembed_status_request_decode(request_body, request_len) != 0 ||
-       response_capacity < AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN)
+   if (aimee_db2_reembed_status_request_decode(request_body, request_len) == 0)
+   {
+      if (response_capacity < AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!backend || !backend->reembed_status)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      aimee_db2_reembed_status_t status = {0};
+      int backend_result = backend->reembed_status(&status);
+      uint32_t result = backend_result == 1   ? AIMEE_DB2_RESULT_OK
+                        : backend_result == 0 ? AIMEE_DB2_RESULT_NOT_FOUND
+                                              : AIMEE_DB2_RESULT_INVALID_STATE;
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (aimee_db2_reembed_status_reply_encode(
+              result, result == AIMEE_DB2_RESULT_OK ? &status : NULL, response_body,
+              response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+
+   if (aimee_db2_reembed_clear_request_decode(request_body, request_len) != 0 ||
+       response_capacity < AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN)
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (!backend || !backend->reembed_status)
+   if (!backend || !backend->reembed_clear)
       return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-   aimee_db2_reembed_status_t status = {0};
-   int backend_result = backend->reembed_status(&status);
-   uint32_t result = backend_result == 1   ? AIMEE_DB2_RESULT_OK
-                     : backend_result == 0 ? AIMEE_DB2_RESULT_NOT_FOUND
-                                           : AIMEE_DB2_RESULT_INVALID_STATE;
+   uint32_t result =
+       backend->reembed_clear() == 0 ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_INVALID_STATE;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
-   if (aimee_db2_reembed_status_reply_encode(result, result == AIMEE_DB2_RESULT_OK ? &status : NULL,
-                                             response_body, response_capacity, response_len) != 0)
+   if (aimee_db2_reembed_clear_reply_encode(result, response_body, response_capacity,
+                                            response_len) != 0)
       return AIMEE_MODULE_STATUS_INTERNAL;
    return AIMEE_MODULE_STATUS_OK;
 }
