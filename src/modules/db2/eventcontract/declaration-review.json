@@ -604,6 +604,134 @@
       "reason": "The entity-profile cJSON tree stays local presentation; a typed memory operation returns bounded profile statistics and relation records."
     },
     {
+      "symbol": "db2_kb_service_memory_episode_card_generate_json",
+      "signature_sha256": "24295ef8a045390f4a6bab2eb84dfc6c43f1cf98af925956e39ced5980259bc4",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The episode-card cJSON response is presentation-only; a complete typed memory operation owns generation and returns bounded card fields."
+    },
+    {
+      "symbol": "db2_kb_service_memory_explain_match_json",
+      "signature_sha256": "6dcce6804d5a516ea5841a2830eaf583e30619c8d5d77c7bd76b46fa9564a7a1",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The match-explanation cJSON document is caller rendering; typed bounded scoring evidence forms the stable memory reply."
+    },
+    {
+      "symbol": "db2_kb_service_memory_export_jsonl_json",
+      "signature_sha256": "6b34336bc9b69bfef2e49e7ec128b512e072fd94130e9a68b8cb6372ee634e8e",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON export-status wrapper stays local presentation; a typed export operation owns destination validation and returns its bounded row count."
+    },
+    {
+      "symbol": "db2_kb_service_memory_fact_history_json",
+      "signature_sha256": "100cb4aed0e5c22ce460251fc5f5ca5fcc1bd9e678dc0a3cff88147d4582766d",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The fact-history cJSON array is caller serialization; a typed operation returns bounded version records and explicit truncation state."
+    },
+    {
+      "symbol": "db2_kb_service_memory_facts_json",
+      "signature_sha256": "f53ea5067a8a2713878057ac5b889ef937a03a61afcc78ba880b80f254e7bc31",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON facts response is a compatibility view; a bounded typed memory query returns canonical fact records."
+    },
+    {
+      "symbol": "db2_kb_service_memory_find_facts_json",
+      "signature_sha256": "da7b66ffc25d1c4e1e7ca54f65dfffb2968441f2d56186bf7d7d3fef2a3a3df2",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON fact-search response does not cross the typed ABI; a bounded query returns structured matches and truncation evidence."
+    },
+    {
+      "symbol": "db2_kb_service_memory_find_facts_scoped_json",
+      "signature_sha256": "0a3229393f7228731092b83e4d6150e134f4d12d12b2fa5abe648d8b1ff9ed59",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The scoped fact-search cJSON wrapper remains presentation; explicit bounded scope fields and typed matches define the memory operation."
+    },
+    {
+      "symbol": "db2_kb_service_memory_find_facts_visible_json",
+      "signature_sha256": "d5f8c42dd37676170cb4edca0568379bd940d0cda0e361de6a87bdbd87f89a4b",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The visibility-filtered cJSON result is local rendering; a typed query enforces scope and returns only bounded visible matches."
+    },
+    {
+      "symbol": "db2_kb_service_memory_find_id_by_key_kind_json",
+      "signature_sha256": "f5fcc29350f0ad76cbe66a040d345f07a4e55b4c7af266dbface6b85f0980f07",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The identifier-lookup cJSON envelope is presentation-only; a typed bounded key/kind request returns explicit found state and identifier."
+    },
+    {
+      "symbol": "db2_kb_service_memory_fold_session_json",
+      "signature_sha256": "68f5de45d2cab8368b0b61cbdb90b0b1c619bf86ac3bdc47b8e1cb742d0ac07a",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON session-fold wrapper cannot define or split the transaction; a typed memory.session_fold operation owns checkpoint creation and L0 cleanup before replying."
+    },
+    {
+      "symbol": "db2_kb_service_memory_get_episode_json",
+      "signature_sha256": "12a34b457fceded4f6be5995ecddeec6c7d4c55a3f516a5e532df1d192931805",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The episode cJSON response remains caller serialization; a typed bounded lookup returns the episode record and explicit found state."
+    },
+    {
+      "symbol": "db2_kb_service_memory_get_json",
+      "signature_sha256": "4b3162d73b2fa727cadf53aed611965a3bff2a9179880e7bc63dfd619857dc2a",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The memory-record cJSON builder is a compatibility facade; typed bounded fields and explicit not-found status define the retrieval contract."
+    },
+    {
+      "symbol": "db2_kb_service_memory_get_provenance_json",
+      "signature_sha256": "0ade9c6db181e7fc24e75f2c8ff67f849dc755402447e41db4f5b032ff7c3523",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The provenance cJSON object stays local presentation; a typed lookup returns bounded provenance fields and explicit missing state."
+    },
+    {
+      "symbol": "db2_kb_service_memory_insert_ex_json",
+      "signature_sha256": "3e639110365710819aa0845d3737615c088a39e2f6c271ed84bb831aea6f5791",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The extended-insert cJSON facade is not the mutation boundary; one typed memory.insert operation validates all bounded fields and owns the complete transactional insert."
+    },
+    {
+      "symbol": "db2_kb_service_memory_insert_json",
+      "signature_sha256": "6447c87043a81c766cdf9b095223b8c2c24160b43f5a89668765512edb629856",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The legacy insert cJSON wrapper remains caller presentation; the typed memory.insert operation owns validation, provenance, and its structured result."
+    },
+    {
+      "symbol": "db2_kb_service_memory_key_exists_json",
+      "signature_sha256": "c73d0293ab3ff0bacf00c4d0d1bee40c7a4f1a723589c19a846063ee9f1289be",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The key-existence cJSON envelope is local compatibility output; a typed bounded key request returns a boolean domain value."
+    },
+    {
       "symbol": "db2_kb_service_note_create_json",
       "signature_sha256": "b38f3d397de14bdd287340a701dad79c0a8d60ef73e6b0d66c505fa0a2c96b50",
       "disposition": "private-db2",
