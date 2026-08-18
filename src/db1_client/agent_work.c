@@ -22,6 +22,8 @@
 /* clang-format off */
 #include "agent_log.h"
 #include "cognify_jobs.h"
+#include "coord_jobs.h"
+#include "db1_cron_jobs.h"
 #include "db1_trigger.h"
 
 #include "db1_module_api.h"
@@ -231,12 +233,14 @@ int db1_cognify_job_status(db1_cognify_job_stats_t *out)
    char slot2[32];
    char slot3[32];
    char slot4[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, slot4};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4};
-   memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_COGNIFY_STATUS, fields, 0, values, caps, 5, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_COGNIFY_STATUS, fields, 0, values, caps, 5, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->pending = (int)strtol(slot0, NULL, 10);
    out->running = (int)strtol(slot1, NULL, 10);
    out->done = (int)strtol(slot2, NULL, 10);
@@ -254,14 +258,14 @@ int db1_cognify_job_claim_next(db1_cognify_job_t *out)
    char slot1[32];
    char slot2[32];
    char slot3[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, out->kind, out->status, out->claimed_by, out->claimed_at, out->last_error};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof out->kind, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->last_error};
-   memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT, fields, 0, values, caps, 9, NULL);
-   if (status == (int)AIMEE_DB1_STATUS_MISSING)
-      return 0;
-   if (status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
+   int wire_status = call_stage(AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT, fields, 0, values, caps, 9, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
+   }
    out->id = (int64_t)strtoll(slot0, NULL, 10);
    out->memory_id = (int64_t)strtoll(slot1, NULL, 10);
    out->attempts = (int)strtol(slot2, NULL, 10);
@@ -301,8 +305,8 @@ long long db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_INSERT, fields, 11, values, caps, 1, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_INSERT, fields, 11, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int64_t)strtoll(slot0, NULL, 10);
 }
@@ -887,12 +891,14 @@ int db1_agent_log_hud_summary(db1_agent_log_hud_t *out, int recent_secs)
    char slot7[32];
    char slot8[32];
    char slot9[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, slot4, slot5, slot6, slot7, slot8, slot9};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9};
-   memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_HUD_SUMMARY, fields, 1, values, caps, 10, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_HUD_SUMMARY, fields, 1, values, caps, 10, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->total_calls = (int)strtol(slot0, NULL, 10);
    out->successful_calls = (int)strtol(slot1, NULL, 10);
    out->failed_calls = (int)strtol(slot2, NULL, 10);
@@ -915,8 +921,8 @@ int db1_agent_log_session_outcome(const char *session_id, int *successes_out, in
    char slot1[32];
    char *const values[] = {slot0, slot1};
    const size_t caps[] = {sizeof slot0, sizeof slot1};
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_SESSION_OUTCOME, fields, 1, values, caps, 2, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_SESSION_OUTCOME, fields, 1, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    *successes_out = (int)strtol(slot0, NULL, 10);
    *total_out = (int)strtol(slot1, NULL, 10);
@@ -997,12 +1003,14 @@ int db1_agent_log_stats(const char *since_or_null, db1_agent_log_stats_t *out)
    char slot3[32];
    char slot4[32];
    char slot5[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, slot4, slot5};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5};
-   memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_STATS, fields, 1, values, caps, 6, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_STATS, fields, 1, values, caps, 6, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->total = (int)strtol(slot0, NULL, 10);
    out->turns = (int64_t)strtoll(slot1, NULL, 10);
    out->tool_calls = (int64_t)strtoll(slot2, NULL, 10);
@@ -1033,12 +1041,14 @@ int db1_trigger_get(const char *id, db1_trigger_run_t *out)
    if (!id || !id[0] || !out)
       return -1;
    const char *fields[] = {id};
+   memset(out, 0, sizeof *out);
    char *const values[] = {out->id, out->source, out->event, out->task, out->workspace, out->metadata, out->pipeline_id, out->status, out->queued_at, out->started_at, out->finished_at, out->error};
    const size_t caps[] = {sizeof out->id, sizeof out->source, sizeof out->event, sizeof out->task, sizeof out->workspace, sizeof out->metadata, sizeof out->pipeline_id, sizeof out->status, sizeof out->queued_at, sizeof out->started_at, sizeof out->finished_at, sizeof out->error};
-   memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_TRIGGER_GET, fields, 1, values, caps, 12, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK)
+   int wire_status = call_stage(AIMEE_DB1_OP_TRIGGER_GET, fields, 1, values, caps, 12, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    return 0;
 }
 
@@ -1050,8 +1060,666 @@ char *db1_trigger_list_json(const char *status_filter)
       return NULL;
    char *const values[] = {value};
    const size_t caps[] = {524288u};
-   int status = call_stage(AIMEE_DB1_OP_TRIGGER_LIST_JSON, fields, 1, values, caps, 1, NULL);
-   if (status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   int wire_status = call_stage(AIMEE_DB1_OP_TRIGGER_LIST_JSON, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   {
+      free(value);
+      return NULL;
+   }
+   char *shrunk = realloc(value, strlen(value) + 1u);
+   return shrunk ? shrunk : value;
+}
+
+int db1_coord_job_create(int plan_id, int max_concurrent)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", plan_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max_concurrent);
+   const char *fields[] = {arg0, arg1};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_CREATE, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role, const char *prompt, const char *cwd, const char *persona)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", step_id);
+   const char *fields[] = {arg0, arg1, files_json ? files_json : "", role ? role : "", prompt ? prompt : "", cwd ? cwd : "", persona ? persona : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_ADD, fields, 7, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_task_t *out)
+{
+   if (!delegate_name || !delegate_name[0] || !out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0, delegate_name};
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   char slot9[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, slot1, slot2, out->status, out->claimed_by, out->claimed_at, out->files, out->result, out->error, slot9, out->created_at};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->files, sizeof out->result, sizeof out->error, sizeof slot9, sizeof out->created_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_CLAIM_NEXT, fields, 2, values, caps, 11, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->job_id = (int)strtol(slot1, NULL, 10);
+   out->step_id = (int)strtol(slot2, NULL, 10);
+   out->preempt_requeues = (int)strtol(slot9, NULL, 10);
+   return out->id;
+}
+
+int db1_coord_job_complete_task(int task_id, const char *result)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, result ? result : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_COMPLETE, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_fail_task(int task_id, const char *error)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, error ? error : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_FAIL, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_complete_task_owned(int task_id, const char *claimed_by, const char *result)
+{
+   if (!claimed_by || !claimed_by[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, claimed_by, result ? result : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_COMPLETE_OWNED, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_fail_task_owned(int task_id, const char *claimed_by, const char *error)
+{
+   if (!claimed_by || !claimed_by[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, claimed_by, error ? error : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_FAIL_OWNED, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_release_task(int task_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_RELEASE, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_release_task_bounded(int task_id, int max_requeues)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max_requeues);
+   const char *fields[] = {arg0, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_RELEASE_BOUNDED, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_release_task_bounded_owned(int task_id, const char *claimed_by, int max_requeues)
+{
+   if (!claimed_by || !claimed_by[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", max_requeues);
+   const char *fields[] = {arg0, claimed_by, arg2};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_RELEASE_BOUNDED_OWNED, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_recover_owner(const char *claimed_by, int max_requeues, int *requeued_out, int *failed_out)
+{
+   if (!claimed_by || !claimed_by[0] || !requeued_out || !failed_out)
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max_requeues);
+   const char *fields[] = {claimed_by, arg1};
+   char slot0[32];
+   char slot1[32];
+   char *const values[] = {slot0, slot1};
+   const size_t caps[] = {sizeof slot0, sizeof slot1};
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_OWNER_RECOVER, fields, 2, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   *requeued_out = (int)strtol(slot0, NULL, 10);
+   *failed_out = (int)strtol(slot1, NULL, 10);
+   return 0;
+}
+
+int db1_coord_job_get(int job_id, db1_coord_job_t *out)
+{
+   if (!out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0};
+   char slot0[32];
+   char slot1[32];
+   char slot3[32];
+   char slot6[32];
+   char slot7[32];
+   char slot8[32];
+   char slot9[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, slot1, out->status, slot3, out->created_at, out->updated_at, slot6, slot7, slot8, slot9};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof out->status, sizeof slot3, sizeof out->created_at, sizeof out->updated_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9};
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_GET, fields, 1, values, caps, 10, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->plan_id = (int)strtol(slot1, NULL, 10);
+   out->max_concurrent = (int)strtol(slot3, NULL, 10);
+   out->total_tasks = (int)strtol(slot6, NULL, 10);
+   out->done_tasks = (int)strtol(slot7, NULL, 10);
+   out->failed_tasks = (int)strtol(slot8, NULL, 10);
+   out->running_tasks = (int)strtol(slot9, NULL, 10);
+   return 0;
+}
+
+int db1_coord_job_list_tasks(int job_id, db1_coord_task_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {arg0, arg1};
+   char **wire_values = malloc((size_t)max * 11u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 11u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 4u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 11u + 0u] = wire_scratch[wire_row * 4u + 0u];
+      wire_caps[wire_row * 11u + 0u] = sizeof wire_scratch[wire_row * 4u + 0u];
+      wire_values[wire_row * 11u + 1u] = wire_scratch[wire_row * 4u + 1u];
+      wire_caps[wire_row * 11u + 1u] = sizeof wire_scratch[wire_row * 4u + 1u];
+      wire_values[wire_row * 11u + 2u] = wire_scratch[wire_row * 4u + 2u];
+      wire_caps[wire_row * 11u + 2u] = sizeof wire_scratch[wire_row * 4u + 2u];
+      wire_values[wire_row * 11u + 3u] = out[wire_row].status;
+      wire_caps[wire_row * 11u + 3u] = sizeof out[wire_row].status;
+      wire_values[wire_row * 11u + 4u] = out[wire_row].claimed_by;
+      wire_caps[wire_row * 11u + 4u] = sizeof out[wire_row].claimed_by;
+      wire_values[wire_row * 11u + 5u] = out[wire_row].claimed_at;
+      wire_caps[wire_row * 11u + 5u] = sizeof out[wire_row].claimed_at;
+      wire_values[wire_row * 11u + 6u] = out[wire_row].files;
+      wire_caps[wire_row * 11u + 6u] = sizeof out[wire_row].files;
+      wire_values[wire_row * 11u + 7u] = out[wire_row].result;
+      wire_caps[wire_row * 11u + 7u] = sizeof out[wire_row].result;
+      wire_values[wire_row * 11u + 8u] = out[wire_row].error;
+      wire_caps[wire_row * 11u + 8u] = sizeof out[wire_row].error;
+      wire_values[wire_row * 11u + 9u] = wire_scratch[wire_row * 4u + 3u];
+      wire_caps[wire_row * 11u + 9u] = sizeof wire_scratch[wire_row * 4u + 3u];
+      wire_values[wire_row * 11u + 10u] = out[wire_row].created_at;
+      wire_caps[wire_row * 11u + 10u] = sizeof out[wire_row].created_at;
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_LIST, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 11), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 11u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 11u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].id = (int)strtol(wire_scratch[wire_row * 4u + 0u], NULL, 10);
+      out[wire_row].job_id = (int)strtol(wire_scratch[wire_row * 4u + 1u], NULL, 10);
+      out[wire_row].step_id = (int)strtol(wire_scratch[wire_row * 4u + 2u], NULL, 10);
+      out[wire_row].preempt_requeues = (int)strtol(wire_scratch[wire_row * 4u + 3u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_coord_job_cancel(int job_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_JOB_CANCEL, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_refresh_status(int job_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_JOB_REFRESH_STATUS, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_has_file_conflict(int job_id, const char *files_json)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0, files_json ? files_json : ""};
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_FILE_CONFLICT, fields, 2, NULL, NULL, 0, NULL);
+   if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return wire_status == (int)AIMEE_DB1_STATUS_OK ? 1 : -1;
+}
+
+int db1_coord_job_list_recent(db1_coord_job_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **wire_values = malloc((size_t)max * 10u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 10u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 7u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 10u + 0u] = wire_scratch[wire_row * 7u + 0u];
+      wire_caps[wire_row * 10u + 0u] = sizeof wire_scratch[wire_row * 7u + 0u];
+      wire_values[wire_row * 10u + 1u] = wire_scratch[wire_row * 7u + 1u];
+      wire_caps[wire_row * 10u + 1u] = sizeof wire_scratch[wire_row * 7u + 1u];
+      wire_values[wire_row * 10u + 2u] = out[wire_row].status;
+      wire_caps[wire_row * 10u + 2u] = sizeof out[wire_row].status;
+      wire_values[wire_row * 10u + 3u] = wire_scratch[wire_row * 7u + 2u];
+      wire_caps[wire_row * 10u + 3u] = sizeof wire_scratch[wire_row * 7u + 2u];
+      wire_values[wire_row * 10u + 4u] = out[wire_row].created_at;
+      wire_caps[wire_row * 10u + 4u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 10u + 5u] = out[wire_row].updated_at;
+      wire_caps[wire_row * 10u + 5u] = sizeof out[wire_row].updated_at;
+      wire_values[wire_row * 10u + 6u] = wire_scratch[wire_row * 7u + 3u];
+      wire_caps[wire_row * 10u + 6u] = sizeof wire_scratch[wire_row * 7u + 3u];
+      wire_values[wire_row * 10u + 7u] = wire_scratch[wire_row * 7u + 4u];
+      wire_caps[wire_row * 10u + 7u] = sizeof wire_scratch[wire_row * 7u + 4u];
+      wire_values[wire_row * 10u + 8u] = wire_scratch[wire_row * 7u + 5u];
+      wire_caps[wire_row * 10u + 8u] = sizeof wire_scratch[wire_row * 7u + 5u];
+      wire_values[wire_row * 10u + 9u] = wire_scratch[wire_row * 7u + 6u];
+      wire_caps[wire_row * 10u + 9u] = sizeof wire_scratch[wire_row * 7u + 6u];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_RECENT, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 10), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 10u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 10u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].id = (int)strtol(wire_scratch[wire_row * 7u + 0u], NULL, 10);
+      out[wire_row].plan_id = (int)strtol(wire_scratch[wire_row * 7u + 1u], NULL, 10);
+      out[wire_row].max_concurrent = (int)strtol(wire_scratch[wire_row * 7u + 2u], NULL, 10);
+      out[wire_row].total_tasks = (int)strtol(wire_scratch[wire_row * 7u + 3u], NULL, 10);
+      out[wire_row].done_tasks = (int)strtol(wire_scratch[wire_row * 7u + 4u], NULL, 10);
+      out[wire_row].failed_tasks = (int)strtol(wire_scratch[wire_row * 7u + 5u], NULL, 10);
+      out[wire_row].running_tasks = (int)strtol(wire_scratch[wire_row * 7u + 6u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_coord_job_list_active_ids(int *out_ids, int max)
+{
+   if (!out_ids || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 1u + 0u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_ACTIVE_IDS, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 1u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out_ids[wire_row] = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out, size_t prompt_cap, char *files_out, size_t files_cap, char *cwd_out, size_t cwd_cap, char *persona_out, size_t persona_cap)
+{
+   if (!role_out || role_cap == 0 || !prompt_out || prompt_cap == 0 || !files_out || files_cap == 0 || !cwd_out || cwd_cap == 0 || !persona_out || persona_cap == 0)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0};
+   char *const values[] = {role_out, prompt_out, files_out, cwd_out, persona_out};
+   const size_t caps[] = {role_cap, prompt_cap, files_cap, cwd_cap, persona_cap};
+   int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH, fields, 1, values, caps, 5, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return 0;
+}
+
+int db1_cron_job_upsert(const cron_job_t *job)
+{
+   if (!job)
+      return -1;
+   char arg16[32];
+   snprintf(arg16, sizeof arg16, "%d", job->skill_count);
+   char arg18[32];
+   snprintf(arg18, sizeof arg18, "%d", job->deliver_only_if_changed);
+   char arg19[32];
+   snprintf(arg19, sizeof arg19, "%d", job->deliver_first_run_silent);
+   char arg20[32];
+   snprintf(arg20, sizeof arg20, "%d", job->pre_wake_gate);
+   char arg21[32];
+   snprintf(arg21, sizeof arg21, "%d", job->enabled);
+   const char *fields[] = {job->id, job->schedule, job->mode, job->script, job->prompt, job->workdir, job->context_from, job->when_context_contains, job->skills[0], job->skills[1], job->skills[2], job->skills[3], job->skills[4], job->skills[5], job->skills[6], job->skills[7], arg16, job->deliver_target, arg18, arg19, arg20, arg21};
+   return write_result(call_stage(AIMEE_DB1_OP_CRON_JOB_UPSERT, fields, 22, NULL, NULL, 0, NULL));
+}
+
+int db1_cron_job_get(const char *job_id, cron_job_t *out)
+{
+   if (!job_id || !job_id[0] || !out)
+      return -1;
+   const char *fields[] = {job_id};
+   char slot16[32];
+   char slot18[32];
+   char slot19[32];
+   char slot20[32];
+   char slot21[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {out->id, out->schedule, out->mode, out->script, out->prompt, out->workdir, out->context_from, out->when_context_contains, out->skills[0], out->skills[1], out->skills[2], out->skills[3], out->skills[4], out->skills[5], out->skills[6], out->skills[7], slot16, out->deliver_target, slot18, slot19, slot20, slot21};
+   const size_t caps[] = {sizeof out->id, sizeof out->schedule, sizeof out->mode, sizeof out->script, sizeof out->prompt, sizeof out->workdir, sizeof out->context_from, sizeof out->when_context_contains, sizeof out->skills[0], sizeof out->skills[1], sizeof out->skills[2], sizeof out->skills[3], sizeof out->skills[4], sizeof out->skills[5], sizeof out->skills[6], sizeof out->skills[7], sizeof slot16, sizeof out->deliver_target, sizeof slot18, sizeof slot19, sizeof slot20, sizeof slot21};
+   int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_GET, fields, 1, values, caps, 22, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->skill_count = (int)strtol(slot16, NULL, 10);
+   out->deliver_only_if_changed = (int)strtol(slot18, NULL, 10);
+   out->deliver_first_run_silent = (int)strtol(slot19, NULL, 10);
+   out->pre_wake_gate = (int)strtol(slot20, NULL, 10);
+   out->enabled = (int)strtol(slot21, NULL, 10);
+   return 0;
+}
+
+int db1_cron_jobs_load(cron_job_t *out, int max, int enabled_only)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 32)
+      max = 32;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", enabled_only);
+   const char *fields[] = {arg0, arg1};
+   char **wire_values = malloc((size_t)max * 22u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 22u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 5u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 22u + 0u] = out[wire_row].id;
+      wire_caps[wire_row * 22u + 0u] = sizeof out[wire_row].id;
+      wire_values[wire_row * 22u + 1u] = out[wire_row].schedule;
+      wire_caps[wire_row * 22u + 1u] = sizeof out[wire_row].schedule;
+      wire_values[wire_row * 22u + 2u] = out[wire_row].mode;
+      wire_caps[wire_row * 22u + 2u] = sizeof out[wire_row].mode;
+      wire_values[wire_row * 22u + 3u] = out[wire_row].script;
+      wire_caps[wire_row * 22u + 3u] = sizeof out[wire_row].script;
+      wire_values[wire_row * 22u + 4u] = out[wire_row].prompt;
+      wire_caps[wire_row * 22u + 4u] = sizeof out[wire_row].prompt;
+      wire_values[wire_row * 22u + 5u] = out[wire_row].workdir;
+      wire_caps[wire_row * 22u + 5u] = sizeof out[wire_row].workdir;
+      wire_values[wire_row * 22u + 6u] = out[wire_row].context_from;
+      wire_caps[wire_row * 22u + 6u] = sizeof out[wire_row].context_from;
+      wire_values[wire_row * 22u + 7u] = out[wire_row].when_context_contains;
+      wire_caps[wire_row * 22u + 7u] = sizeof out[wire_row].when_context_contains;
+      wire_values[wire_row * 22u + 8u] = out[wire_row].skills[0];
+      wire_caps[wire_row * 22u + 8u] = sizeof out[wire_row].skills[0];
+      wire_values[wire_row * 22u + 9u] = out[wire_row].skills[1];
+      wire_caps[wire_row * 22u + 9u] = sizeof out[wire_row].skills[1];
+      wire_values[wire_row * 22u + 10u] = out[wire_row].skills[2];
+      wire_caps[wire_row * 22u + 10u] = sizeof out[wire_row].skills[2];
+      wire_values[wire_row * 22u + 11u] = out[wire_row].skills[3];
+      wire_caps[wire_row * 22u + 11u] = sizeof out[wire_row].skills[3];
+      wire_values[wire_row * 22u + 12u] = out[wire_row].skills[4];
+      wire_caps[wire_row * 22u + 12u] = sizeof out[wire_row].skills[4];
+      wire_values[wire_row * 22u + 13u] = out[wire_row].skills[5];
+      wire_caps[wire_row * 22u + 13u] = sizeof out[wire_row].skills[5];
+      wire_values[wire_row * 22u + 14u] = out[wire_row].skills[6];
+      wire_caps[wire_row * 22u + 14u] = sizeof out[wire_row].skills[6];
+      wire_values[wire_row * 22u + 15u] = out[wire_row].skills[7];
+      wire_caps[wire_row * 22u + 15u] = sizeof out[wire_row].skills[7];
+      wire_values[wire_row * 22u + 16u] = wire_scratch[wire_row * 5u + 0u];
+      wire_caps[wire_row * 22u + 16u] = sizeof wire_scratch[wire_row * 5u + 0u];
+      wire_values[wire_row * 22u + 17u] = out[wire_row].deliver_target;
+      wire_caps[wire_row * 22u + 17u] = sizeof out[wire_row].deliver_target;
+      wire_values[wire_row * 22u + 18u] = wire_scratch[wire_row * 5u + 1u];
+      wire_caps[wire_row * 22u + 18u] = sizeof wire_scratch[wire_row * 5u + 1u];
+      wire_values[wire_row * 22u + 19u] = wire_scratch[wire_row * 5u + 2u];
+      wire_caps[wire_row * 22u + 19u] = sizeof wire_scratch[wire_row * 5u + 2u];
+      wire_values[wire_row * 22u + 20u] = wire_scratch[wire_row * 5u + 3u];
+      wire_caps[wire_row * 22u + 20u] = sizeof wire_scratch[wire_row * 5u + 3u];
+      wire_values[wire_row * 22u + 21u] = wire_scratch[wire_row * 5u + 4u];
+      wire_caps[wire_row * 22u + 21u] = sizeof wire_scratch[wire_row * 5u + 4u];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_LOAD, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 22), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 22u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 22u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].skill_count = (int)strtol(wire_scratch[wire_row * 5u + 0u], NULL, 10);
+      out[wire_row].deliver_only_if_changed = (int)strtol(wire_scratch[wire_row * 5u + 1u], NULL, 10);
+      out[wire_row].deliver_first_run_silent = (int)strtol(wire_scratch[wire_row * 5u + 2u], NULL, 10);
+      out[wire_row].pre_wake_gate = (int)strtol(wire_scratch[wire_row * 5u + 3u], NULL, 10);
+      out[wire_row].enabled = (int)strtol(wire_scratch[wire_row * 5u + 4u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_cron_job_set_enabled(const char *job_id, int enabled)
+{
+   if (!job_id || !job_id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", enabled);
+   const char *fields[] = {job_id, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_CRON_JOB_SET_ENABLED, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_cron_jobs_set_enabled_all(int enabled)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", enabled);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_CRON_JOB_SET_ENABLED_ALL, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_cron_job_delete(const char *job_id)
+{
+   if (!job_id || !job_id[0])
+      return -1;
+   const char *fields[] = {job_id};
+   return write_result(call_stage(AIMEE_DB1_OP_CRON_JOB_DELETE, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_cron_job_record_run(const char *job_id, const char *status, int silent, int delivered, const char *output, const char *error, const char *output_hash)
+{
+   if (!job_id || !job_id[0] || !status || !status[0])
+      return -1;
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", silent);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%d", delivered);
+   const char *fields[] = {job_id, status, arg2, arg3, output ? output : "", error ? error : "", output_hash ? output_hash : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_RECORD_RUN, fields, 7, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+char *db1_cron_jobs_list_json()
+{
+   const char *const *fields = NULL;
+   char *value = malloc(524288u);
+   if (!value)
+      return NULL;
+   char *const values[] = {value};
+   const size_t caps[] = {524288u};
+   int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_LIST_JSON, fields, 0, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   {
+      free(value);
+      return NULL;
+   }
+   char *shrunk = realloc(value, strlen(value) + 1u);
+   return shrunk ? shrunk : value;
+}
+
+char *db1_cron_job_history_json(const char *job_id, int limit)
+{
+   if (!job_id || !job_id[0])
+      return NULL;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", limit);
+   const char *fields[] = {job_id, arg1};
+   char *value = malloc(524288u);
+   if (!value)
+      return NULL;
+   char *const values[] = {value};
+   const size_t caps[] = {524288u};
+   int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_HISTORY_JSON, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   {
+      free(value);
+      return NULL;
+   }
+   char *shrunk = realloc(value, strlen(value) + 1u);
+   return shrunk ? shrunk : value;
+}
+
+char *db1_cron_job_latest_output(const char *job_id)
+{
+   if (!job_id || !job_id[0])
+      return NULL;
+   const char *fields[] = {job_id};
+   char *value = malloc(262144u);
+   if (!value)
+      return NULL;
+   char *const values[] = {value};
+   const size_t caps[] = {262144u};
+   int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   {
+      free(value);
+      return NULL;
+   }
+   char *shrunk = realloc(value, strlen(value) + 1u);
+   return shrunk ? shrunk : value;
+}
+
+char *db1_cron_job_last_output_hash(const char *job_id)
+{
+   if (!job_id || !job_id[0])
+      return NULL;
+   const char *fields[] = {job_id};
+   char *value = malloc(128u);
+   if (!value)
+      return NULL;
+   char *const values[] = {value};
+   const size_t caps[] = {128u};
+   int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_LAST_OUTPUT_HASH, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
    {
       free(value);
       return NULL;

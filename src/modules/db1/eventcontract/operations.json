@@ -94,6 +94,8 @@
    "retired_sources": [
     "agent_log.c",
     "cognify_jobs.c",
+    "coord_jobs.c",
+    "db1_cron_jobs.c",
     "db1_trigger.c"
    ]
   },
@@ -101,7 +103,7 @@
    "id": 5,
    "name": "delegation",
    "event_kind": 11781,
-   "active": false,
+   "active": true,
    "doc": "delegation spawns, reservations, checkpoints and the agent_jobs ledger they reserve against. These move as ONE unit: a reservation resolves to a job id, and server_compute.c records that the ledger and the launch were deliberately co-located because a ledger across a boundary from the launch left paid-for jobs that nothing could replay. Splitting them across families would restore exactly that topology one migration at a time.",
    "client_doc": "",
    "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint, agent_jobs",
@@ -112,7 +114,13 @@
     "delegation_checkpoint",
     "delegations"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "agent_jobs.c",
+    "delegate_learning.c",
+    "delegate_reservation.c",
+    "delegation_checkpoint.c",
+    "delegations.c"
+   ]
   },
   {
    "id": 6,
@@ -3978,6 +3986,3729 @@
      }
     ],
     "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 24,
+   "name": "coord_job_create",
+   "c_name": "db1_coord_job_create",
+   "c_params": [
+    "plan_id",
+    "max_concurrent"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "plan_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 25,
+   "name": "coord_task_add",
+   "c_name": "db1_coord_job_add_task",
+   "c_params": [
+    "job_id",
+    "step_id",
+    "files_json",
+    "role",
+    "prompt",
+    "cwd",
+    "persona"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "step_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "files_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cwd",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "persona",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 26,
+   "name": "coord_task_claim_next",
+   "c_name": "db1_coord_job_claim_next",
+   "c_params": [
+    "job_id",
+    "delegate_name",
+    "out"
+   ],
+   "c_returns": "member",
+   "c_member": "id",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "delegate_name",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_task_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "step_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "files",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "preempt_requeues",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 27,
+   "name": "coord_task_complete",
+   "c_name": "db1_coord_job_complete_task",
+   "c_params": [
+    "task_id",
+    "result"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 28,
+   "name": "coord_task_fail",
+   "c_name": "db1_coord_job_fail_task",
+   "c_params": [
+    "task_id",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 29,
+   "name": "coord_task_complete_owned",
+   "c_name": "db1_coord_job_complete_task_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "result"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 30,
+   "name": "coord_task_fail_owned",
+   "c_name": "db1_coord_job_fail_task_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 31,
+   "name": "coord_task_release",
+   "c_name": "db1_coord_job_release_task",
+   "c_params": [
+    "task_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 32,
+   "name": "coord_task_release_bounded",
+   "c_name": "db1_coord_job_release_task_bounded",
+   "c_params": [
+    "task_id",
+    "max_requeues"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 33,
+   "name": "coord_task_release_bounded_owned",
+   "c_name": "db1_coord_job_release_task_bounded_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "max_requeues"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 34,
+   "name": "coord_owner_recover",
+   "c_name": "db1_coord_job_recover_owner",
+   "c_params": [
+    "claimed_by",
+    "max_requeues",
+    "requeued_out",
+    "failed_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "requeued",
+      "type": "int"
+     },
+     {
+      "name": "failed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 35,
+   "name": "coord_job_get",
+   "c_name": "db1_coord_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "total_tasks",
+      "type": "int"
+     },
+     {
+      "name": "done_tasks",
+      "type": "int"
+     },
+     {
+      "name": "failed_tasks",
+      "type": "int"
+     },
+     {
+      "name": "running_tasks",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 36,
+   "name": "coord_task_list",
+   "c_name": "db1_coord_job_list_tasks",
+   "c_params": [
+    "job_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_task_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "step_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "files",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "preempt_requeues",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 37,
+   "name": "coord_job_cancel",
+   "c_name": "db1_coord_job_cancel",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 38,
+   "name": "coord_job_refresh_status",
+   "c_name": "db1_coord_job_refresh_status",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 39,
+   "name": "coord_job_file_conflict",
+   "c_name": "db1_coord_job_has_file_conflict",
+   "c_params": [
+    "job_id",
+    "files_json"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "files_json",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 40,
+   "name": "coord_job_list_recent",
+   "c_name": "db1_coord_job_list_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "total_tasks",
+      "type": "int"
+     },
+     {
+      "name": "done_tasks",
+      "type": "int"
+     },
+     {
+      "name": "failed_tasks",
+      "type": "int"
+     },
+     {
+      "name": "running_tasks",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 41,
+   "name": "coord_job_list_active_ids",
+   "c_name": "db1_coord_job_list_active_ids",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 64,
+     "column": {
+      "kind": "int"
+     }
+    },
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 42,
+   "name": "coord_task_get_dispatch",
+   "c_name": "db1_coord_task_get_dispatch",
+   "c_params": [
+    "task_id",
+    "role_out",
+    "role_cap",
+    "prompt_out",
+    "prompt_cap",
+    "files_out",
+    "files_cap",
+    "cwd_out",
+    "cwd_cap",
+    "persona_out",
+    "persona_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "width": "DB1_COORD_ROLE_LEN"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "width": "DB1_COORD_PROMPT_LEN"
+     },
+     {
+      "name": "files",
+      "type": "text",
+      "width": "DB1_COORD_FILES_LEN"
+     },
+     {
+      "name": "cwd",
+      "type": "text",
+      "width": "DB1_COORD_CWD_LEN"
+     },
+     {
+      "name": "persona",
+      "type": "text",
+      "width": "DB1_COORD_ROLE_LEN"
+     }
+    ],
+    "max_bytes": 32768
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 43,
+   "name": "cron_job_upsert",
+   "c_name": "db1_cron_job_upsert",
+   "c_params": [
+    "job"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "cron_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "schedule",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "script",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "workdir",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "context_from",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "required": false,
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_target",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 44,
+   "name": "cron_job_get",
+   "c_name": "db1_cron_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 45,
+   "name": "cron_job_load",
+   "c_name": "db1_cron_jobs_load",
+   "c_params": [
+    "out",
+    "max",
+    "enabled_only"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "enabled_only",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 32
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 46,
+   "name": "cron_job_set_enabled",
+   "c_name": "db1_cron_job_set_enabled",
+   "c_params": [
+    "job_id",
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 47,
+   "name": "cron_job_set_enabled_all",
+   "c_name": "db1_cron_jobs_set_enabled_all",
+   "c_params": [
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 48,
+   "name": "cron_job_delete",
+   "c_name": "db1_cron_job_delete",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 49,
+   "name": "cron_job_record_run",
+   "c_name": "db1_cron_job_record_run",
+   "c_params": [
+    "job_id",
+    "status",
+    "silent",
+    "delivered",
+    "output",
+    "error",
+    "output_hash"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "silent",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "delivered",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "output_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "run_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 50,
+   "name": "cron_job_list_json",
+   "c_name": "db1_cron_jobs_list_json",
+   "c_params": [],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "jobs",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 51,
+   "name": "cron_job_history_json",
+   "c_name": "db1_cron_job_history_json",
+   "c_params": [
+    "job_id",
+    "limit"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "limit",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "history",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 52,
+   "name": "cron_job_latest_output",
+   "c_name": "db1_cron_job_latest_output",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 53,
+   "name": "cron_job_last_output_hash",
+   "c_name": "db1_cron_job_last_output_hash",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output_hash",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 1,
+   "name": "delegation_message_record",
+   "c_name": "db1_delegation_message_record",
+   "c_params": [
+    "delegation_id",
+    "direction",
+    "content"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "direction",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "content",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 2,
+   "name": "delegation_spawn_record",
+   "c_name": "db1_delegation_spawn_record",
+   "c_params": [
+    "delegation_id",
+    "parent_delegation_id",
+    "session_id",
+    "depth",
+    "role"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "parent_delegation_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "depth",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 3,
+   "name": "delegation_spawn_complete",
+   "c_name": "db1_delegation_spawn_complete",
+   "c_params": [
+    "delegation_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 4,
+   "name": "delegation_spawn_preempt",
+   "c_name": "db1_delegation_spawn_preempt",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 5,
+   "name": "delegation_spawn_status",
+   "c_name": "db1_delegation_spawn_status",
+   "c_params": [
+    "delegation_id",
+    "out",
+    "out_sz"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "status",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 6,
+   "name": "delegation_spawn_stop_reason",
+   "c_name": "db1_delegation_spawn_stop_reason",
+   "c_params": [
+    "delegation_id",
+    "out",
+    "out_sz"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "stop_reason",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 7,
+   "name": "delegation_spawn_is_stopped",
+   "c_name": "db1_delegation_spawn_is_stopped",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "stopped",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 8,
+   "name": "delegation_spawn_is_cancelled",
+   "c_name": "db1_delegation_spawn_is_cancelled",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "cancelled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 9,
+   "name": "delegation_spawn_is_active",
+   "c_name": "db1_delegation_spawn_is_active",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "active",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 10,
+   "name": "delegation_spawn_count_total",
+   "c_name": "db1_delegation_spawn_count_total",
+   "c_params": [
+    "session_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "total",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 11,
+   "name": "delegation_spawn_find_root",
+   "c_name": "db1_delegation_spawn_find_root",
+   "c_params": [
+    "delegation_id",
+    "out",
+    "out_sz"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "root_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 12,
+   "name": "delegation_spawn_count_descendants",
+   "c_name": "db1_delegation_spawn_count_descendants",
+   "c_params": [
+    "root_delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "root_delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "descendants",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 13,
+   "name": "delegation_spawn_list_active",
+   "c_name": "db1_delegation_spawn_list_active",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 256,
+     "column": {
+      "kind": "int"
+     }
+    },
+    "fields": [
+     {
+      "name": "spawn_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 14,
+   "name": "delegation_spawn_cancel_by_id",
+   "c_name": "db1_delegation_spawn_cancel_by_id",
+   "c_params": [
+    "spawn_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "spawn_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 15,
+   "name": "delegation_spawn_cancel_recursive",
+   "c_name": "db1_delegation_spawn_cancel_recursive",
+   "c_params": [
+    "spawn_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "spawn_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 16,
+   "name": "delegation_spawn_cancel_stale",
+   "c_name": "db1_delegation_spawn_cancel_stale",
+   "c_params": [],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 17,
+   "name": "delegate_reservation_get",
+   "c_name": "db1_delegate_reservation_get",
+   "c_params": [
+    "execution_key",
+    "out_job_id",
+    "participant",
+    "participant_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "participant",
+      "type": "text",
+      "width": "DB1_AJ_PARTICIPANT_LEN"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 18,
+   "name": "delegate_reservation_adopt",
+   "c_name": "db1_delegate_reservation_adopt_sole_legacy",
+   "c_params": [
+    "execution_key",
+    "work_item_id",
+    "out_job_id",
+    "participant",
+    "participant_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "participant",
+      "type": "text",
+      "width": "DB1_AJ_PARTICIPANT_LEN"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 19,
+   "name": "delegate_reservation_save",
+   "c_name": "db1_delegate_reservation_save",
+   "c_params": [
+    "execution_key",
+    "work_item_id",
+    "job_id",
+    "participant"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "participant",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 20,
+   "name": "delegate_reservation_forget",
+   "c_name": "db1_delegate_reservation_forget",
+   "c_params": [
+    "execution_key"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 21,
+   "name": "delegate_reservation_forget_if_matches",
+   "c_name": "db1_delegate_reservation_forget_if_matches",
+   "c_params": [
+    "execution_key",
+    "job_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "forgotten",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 22,
+   "name": "delegation_checkpoint_save",
+   "c_name": "db1_delegation_checkpoint_save",
+   "c_params": [
+    "delegation_id",
+    "job_id",
+    "attempt",
+    "steps_json",
+    "last_output",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "attempt",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "steps_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "last_output",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 23,
+   "name": "delegation_checkpoint_load",
+   "c_name": "db1_delegation_checkpoint_load",
+   "c_params": [
+    "delegation_id",
+    "steps_out",
+    "steps_cap",
+    "error_out",
+    "error_cap",
+    "output_out",
+    "output_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "steps",
+      "type": "text",
+      "width": "DB1_CHECKPOINT_STEPS_LEN"
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "width": "DB1_CHECKPOINT_ERROR_LEN"
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "width": "DB1_CHECKPOINT_OUTPUT_LEN"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 24,
+   "name": "agent_job_create",
+   "c_name": "db1_agent_job_create",
+   "c_params": [
+    "role",
+    "prompt",
+    "agent_name",
+    "lease_owner"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "lease_owner",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 25,
+   "name": "agent_job_update",
+   "c_name": "db1_agent_job_update",
+   "c_params": [
+    "job_id",
+    "status",
+    "cursor_turn",
+    "result"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 26,
+   "name": "agent_job_complete",
+   "c_name": "db1_agent_job_complete",
+   "c_params": [
+    "job_id",
+    "status",
+    "cursor_turn",
+    "result",
+    "has_cost",
+    "cost_usd"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "has_cost",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "cost_usd",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 27,
+   "name": "agent_job_set_agent",
+   "c_name": "db1_agent_job_set_agent",
+   "c_params": [
+    "job_id",
+    "agent_name"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 28,
+   "name": "agent_job_heartbeat",
+   "c_name": "db1_agent_job_heartbeat",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 29,
+   "name": "agent_job_heartbeat_ext",
+   "c_name": "db1_agent_job_heartbeat_ext",
+   "c_params": [
+    "job_id",
+    "current_tool",
+    "api_call_count"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "current_tool",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "api_call_count",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 30,
+   "name": "agent_job_is_cancelled",
+   "c_name": "db1_agent_job_is_cancelled",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "cancelled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 31,
+   "name": "agent_job_classify_stale",
+   "c_name": "db1_agent_job_classify_stale",
+   "c_params": [
+    "job_id",
+    "idle_threshold_secs",
+    "in_tool_threshold_secs",
+    "out_state",
+    "out_state_cap"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "idle_threshold_secs",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "in_tool_threshold_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "state",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 32,
+   "name": "agent_job_get",
+   "c_name": "db1_agent_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "participant_token",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int"
+     },
+     {
+      "name": "lease_owner",
+      "type": "text"
+     },
+     {
+      "name": "heartbeat_at",
+      "type": "text"
+     },
+     {
+      "name": "current_tool",
+      "type": "text"
+     },
+     {
+      "name": "api_call_count",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 33,
+   "name": "agent_job_get_by_participant",
+   "c_name": "db1_agent_job_get_by_participant",
+   "c_params": [
+    "participant_token",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "participant_token",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "participant_token",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int"
+     },
+     {
+      "name": "lease_owner",
+      "type": "text"
+     },
+     {
+      "name": "heartbeat_at",
+      "type": "text"
+     },
+     {
+      "name": "current_tool",
+      "type": "text"
+     },
+     {
+      "name": "api_call_count",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 34,
+   "name": "agent_job_heartbeat_is_stale",
+   "c_name": "db1_agent_job_heartbeat_is_stale",
+   "c_params": [
+    "heartbeat_at",
+    "stale_minutes"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "heartbeat_at",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stale_minutes",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "stale",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 35,
+   "name": "agent_job_take_lease",
+   "c_name": "db1_agent_job_take_lease",
+   "c_params": [
+    "job_id",
+    "owner"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 36,
+   "name": "agent_job_list_recent",
+   "c_name": "db1_agent_job_list_recent",
+   "c_params": [
+    "out",
+    "max",
+    "include_heavy"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "include_heavy",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "participant_token",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int"
+     },
+     {
+      "name": "lease_owner",
+      "type": "text"
+     },
+     {
+      "name": "heartbeat_at",
+      "type": "text"
+     },
+     {
+      "name": "current_tool",
+      "type": "text"
+     },
+     {
+      "name": "api_call_count",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 37,
+   "name": "agent_job_list_running_ids",
+   "c_name": "db1_agent_job_list_running_ids",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 256,
+     "column": {
+      "kind": "int"
+     }
+    },
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 38,
+   "name": "agent_job_cancel_by_id",
+   "c_name": "db1_agent_job_cancel_by_id",
+   "c_params": [
+    "job_id",
+    "reason"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 39,
+   "name": "agent_job_cancel_unassigned",
+   "c_name": "db1_agent_job_cancel_unassigned",
+   "c_params": [
+    "job_id",
+    "reason",
+    "min_age_secs"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "min_age_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "cancelled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 40,
+   "name": "agent_job_cancel_nonterminal_on_restart",
+   "c_name": "db1_agent_job_cancel_nonterminal_on_restart",
+   "c_params": [
+    "reason"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 41,
+   "name": "agent_job_cancel_stale",
+   "c_name": "db1_agent_job_cancel_stale",
+   "c_params": [
+    "threshold_seconds",
+    "reason"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "threshold_seconds",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 42,
+   "name": "agent_log_entry_list",
+   "c_name": "db1_agent_log_list",
+   "c_params": [
+    "agent_filter",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "agent_filter",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_entry_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "turns",
+      "type": "int"
+     },
+     {
+      "name": "tool_calls",
+      "type": "int"
+     },
+     {
+      "name": "success",
+      "type": "int"
+     },
+     {
+      "name": "confidence",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int"
+     },
+     {
+      "name": "latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 43,
+   "name": "delegate_learning_record",
+   "c_name": "db1_delegate_learning_record",
+   "c_params": [
+    "session_id",
+    "role",
+    "failure_mode",
+    "lesson",
+    "evidence_json",
+    "confidence"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "failure_mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "lesson",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "evidence_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "confidence",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 44,
+   "name": "delegate_learning_inject_prompt",
+   "c_name": "db1_delegate_learning_inject_prompt",
+   "c_params": [
+    "role",
+    "system_prompt",
+    "top_n"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "system_prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "top_n",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "prompt",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
    }
   }
  ]
