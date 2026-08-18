@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "1a545f636fbc61cb95c20f86ded212bbe73dfe1773a1012d9e65ad35fe7955ac"
+#define AIMEE_DB2_CONTRACT_SHA256 "a6164c129f13aa2e0fbdc9e60f00db8c6b919dce84cb7a47dbccd763139e515a"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -261,6 +261,15 @@
 #define AIMEE_DB2_STATS_COUNTS_TIERS                      6u
 #define AIMEE_DB2_STATS_COUNTS_KINDS                      10u
 #define AIMEE_DB2_STATS_COUNTS_MAX                        2147483647u
+#define AIMEE_DB2_EVENT_EXPIRE                            AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EXPIRE                            AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EXPIRE                        18u
+#define AIMEE_DB2_EXPIRE_REQUEST_LEN                      24u
+#define AIMEE_DB2_EXPIRE_RESPONSE_LEN                     32u
+#define AIMEE_DB2_EXPIRE_ERROR_LEN                        24u
+#define AIMEE_DB2_EXPIRE_STALE_TIER                       "L1"
+#define AIMEE_DB2_EXPIRE_KINDS_MAX                        16u
+#define AIMEE_DB2_EXPIRE_MAX                              2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1776,6 +1785,67 @@ static inline int aimee_db2_stats_counts_reply_decode(const uint8_t *input, size
        decoded.conflicts > AIMEE_DB2_STATS_COUNTS_MAX)
       return -1;
    *stats = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_expire_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EXPIRE, 0u, 0u, output, capacity);
+}
+
+static inline int aimee_db2_expire_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EXPIRE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EXPIRE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_expire_reply_encode(uint32_t level0_deleted,
+                                                uint32_t stale_level1_deleted, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || level0_deleted > AIMEE_DB2_EXPIRE_MAX ||
+       stale_level1_deleted > AIMEE_DB2_EXPIRE_MAX ||
+       capacity < AIMEE_DB2_EXPIRE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EXPIRE, AIMEE_DB2_RESULT_OK, 8u, output,
+                                     capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, level0_deleted);
+   aimee_db2_put_u32(payload + 4u, stale_level1_deleted);
+   *output_len = AIMEE_DB2_EXPIRE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_expire_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *level0_deleted,
+                                                uint32_t *stale_level1_deleted)
+{
+   if (level0_deleted)
+      *level0_deleted = 0u;
+   if (stale_level1_deleted)
+      *stale_level1_deleted = 0u;
+   if (!level0_deleted || !stale_level1_deleted)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EXPIRE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EXPIRE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t level0 = aimee_db2_get_u32(payload);
+   uint32_t stale = aimee_db2_get_u32(payload + 4u);
+   if (level0 > AIMEE_DB2_EXPIRE_MAX || stale > AIMEE_DB2_EXPIRE_MAX)
+      return -1;
+   *level0_deleted = level0;
+   *stale_level1_deleted = stale;
    return 0;
 }
 

@@ -1548,6 +1548,38 @@
       "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
     },
     {
+      "symbol": "db2_memory_promotion_delete_l0",
+      "signature_sha256": "912605e89f87fb0961d3e301d51dfbf71edd4ea9bec00ac6c3cfb73f1dc30938",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.expire operation wipes the L0 rows together with their provenance, so this half never runs alone and no partially expired L0 state is observable across the bus."
+    },
+    {
+      "symbol": "db2_memory_promotion_delete_l0_provenance",
+      "signature_sha256": "b7a4943321c6bf9b9c61fe87df88a9d7976301df407d5140d9d0ac0ac69103cc",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.expire operation clears L0 provenance immediately before the rows it describes, inside one DB2 action that owns both halves."
+    },
+    {
+      "symbol": "db2_memory_promotion_delete_stale_l1",
+      "signature_sha256": "b807fd1e5981a78c35170a8428a29dedcef2b5ed06ec5808d0fff25614abea19",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.expire operation applies each kind's own idle window from the private lifecycle thresholds, so the stale-L1 delete is never reachable with a caller-chosen kind or window."
+    },
+    {
+      "symbol": "db2_memory_promotion_delete_stale_l1_provenance",
+      "signature_sha256": "609166d24ddec974dacd63dcc93d05b05b15d5e472eb7829d5e7c16a22af8ba6",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.expire operation clears stale-L1 provenance immediately before the rows it describes, under the same per-kind window and inside the same DB2 action."
+    },
+    {
       "symbol": "db2_memory_promotion_list_kinds_in_tier",
       "signature_sha256": "8c8d53bd4b7fd1a3b266e4973f3bb77d83c5e9e93df2ce6922a825a94d16d312",
       "disposition": "private-db2",

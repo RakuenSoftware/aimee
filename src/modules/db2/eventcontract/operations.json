@@ -780,6 +780,34 @@
           {"name": "conflicts", "type": "u32", "minimum": 0, "maximum": 2147483647}
         ]
       }
+    },
+    {
+      "family": "memory",
+      "id": 18,
+      "name": "expire",
+      "wire_format": "db2-envelope-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Expiring canonical relational memory rows and their provenance is DB2 lifecycle authority and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_promotion_delete_l0_provenance", "db2_memory_promotion_delete_l0",
+                    "db2_memory_promotion_delete_stale_l1_provenance",
+                    "db2_memory_promotion_delete_stale_l1"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"stale_l1_tier": "L1", "maximum_kinds": 16}
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "level0_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "stale_level1_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        ]
+      }
     }
   ]
 }

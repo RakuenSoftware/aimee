@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "1a545f636fbc61cb95c20f86ded212bbe73dfe1773a1012d9e65ad35fe7955ac"
+const ContractSHA256 = "a6164c129f13aa2e0fbdc9e60f00db8c6b919dce84cb7a47dbccd763139e515a"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -177,6 +177,12 @@ const OperationStatsCounts uint32 = 17
 const StatsCountsTiers = 6
 const StatsCountsKinds = 10
 const StatsCountsMax uint32 = 2147483647
+const EventExpire = EventMemory
+const StageExpire = FamilyMemory
+const OperationExpire uint32 = 18
+const ExpireStaleTier = "L1"
+const ExpireKindsMax uint32 = 16
+const ExpireMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1014,6 +1020,57 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// EncodeExpireRequest emits the empty request for the fixed expiry policy.
+func EncodeExpireRequest() []byte {
+	header, err := EncodeRequestHeader(OperationExpire, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeExpireRequest validates the exact empty operation envelope.
+func DecodeExpireRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationExpire || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeExpireReply emits both bounded deletion counts.
+func EncodeExpireReply(level0Deleted, staleLevel1Deleted uint32) ([]byte, error) {
+	if level0Deleted > ExpireMax || staleLevel1Deleted > ExpireMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationExpire, ResultOK, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, level0Deleted)
+	binary.LittleEndian.PutUint32(payload[4:], staleLevel1Deleted)
+	return reply, nil
+}
+
+// DecodeExpireReply validates the operation and both bounded counts.
+func DecodeExpireReply(reply []byte) (uint32, uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationExpire || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	level0 := binary.LittleEndian.Uint32(payload)
+	stale := binary.LittleEndian.Uint32(payload[4:])
+	if level0 > ExpireMax || stale > ExpireMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return level0, stale, nil
 }
 
 // MemoryStats is the corpus breakdown by tier and kind, plus the totals.

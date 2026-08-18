@@ -17423,9 +17423,15 @@
           "line": 50
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation wipes the L0 rows together with their provenance, so this half never runs alone and no partially expired L0 state is observable across the bus."
+      },
       "signature": "int db2_memory_promotion_delete_l0 ( void )",
       "signature_sha256": "912605e89f87fb0961d3e301d51dfbf71edd4ea9bec00ac6c3cfb73f1dc30938",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_l0"
     },
     {
@@ -17438,9 +17444,15 @@
           "line": 49
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation clears L0 provenance immediately before the rows it describes, inside one DB2 action that owns both halves."
+      },
       "signature": "int db2_memory_promotion_delete_l0_provenance ( void )",
       "signature_sha256": "b7a4943321c6bf9b9c61fe87df88a9d7976301df407d5140d9d0ac0ac69103cc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_l0_provenance"
     },
     {
@@ -17453,9 +17465,15 @@
           "line": 55
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation applies each kind's own idle window from the private lifecycle thresholds, so the stale-L1 delete is never reachable with a caller-chosen kind or window."
+      },
       "signature": "int db2_memory_promotion_delete_stale_l1 ( const char * kind , const char * days_neg_str )",
       "signature_sha256": "b807fd1e5981a78c35170a8428a29dedcef2b5ed06ec5808d0fff25614abea19",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_stale_l1"
     },
     {
@@ -17468,9 +17486,15 @@
           "line": 54
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation clears stale-L1 provenance immediately before the rows it describes, under the same per-kind window and inside the same DB2 action."
+      },
       "signature": "int db2_memory_promotion_delete_stale_l1_provenance ( const char * kind , const char * days_neg_str )",
       "signature_sha256": "609166d24ddec974dacd63dcc93d05b05b15d5e472eb7829d5e7c16a22af8ba6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_stale_l1_provenance"
     },
     {
@@ -25734,15 +25758,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "99b1358232ccd4cee4762c33dbde71b5ffbf26da0ad305914718ff9e2f81be6e",
+  "fingerprint": "7a5c6f2a0edde64ccc96d499eb8c816b692ba04acb7454b3e723d7c91a094fa2",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 673,
+    "audit_pending": 669,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 285
+    "reviewed": 289
   }
 }

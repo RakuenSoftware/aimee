@@ -280,6 +280,11 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(corpus.total == 0 && corpus.conflicts == 0 && corpus.kind_counts[9] == 0);
 
+   uint32_t level0_deleted = 99, stale_deleted = 99;
+   assert(aimee_db2_expire_call(call_client, &client, 9039, 0, &level0_deleted, &stale_deleted,
+                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(level0_deleted == 0 && stale_deleted == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

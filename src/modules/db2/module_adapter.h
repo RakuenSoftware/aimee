@@ -37,6 +37,14 @@ typedef struct
    int (*health_counters)(int promote_use_count, double promote_confidence,
                           aimee_db2_health_counters_t *counters);
    int (*stats_counts)(aimee_db2_memory_stats_t *stats);
+   /* expire composes these: DB2 owns the kind set and each kind's idle window,
+    * and pairs every row delete with its provenance delete. */
+   int (*delete_l0_provenance)(void);
+   int (*delete_l0)(void);
+   int (*list_kinds_in_tier)(const char *tier, char (*kinds)[16], int max);
+   int (*kind_expire_days)(const char *kind);
+   int (*delete_stale_l1_provenance)(const char *kind, const char *days_neg);
+   int (*delete_stale_l1)(const char *kind, const char *days_neg);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

@@ -4,8 +4,10 @@
 
 #include "c/db2.h"
 #include "c/db2_pool.h"
+#include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
 #include "c/memory_payload.h"
+#include "c/memory_promotion.h"
 #include "c/memory_query.h"
 
 static int production_health_counters(int promote_use_count, double promote_confidence,
@@ -76,6 +78,32 @@ static int production_stats_counts(aimee_db2_memory_stats_t *stats)
    stats->total = (uint32_t)raw.total;
    stats->conflicts = (uint32_t)raw.conflicts;
    return 0;
+}
+
+static int production_list_kinds_in_tier(const char *tier, char (*kinds)[16], int max)
+{
+   if (!kinds || max <= 0)
+      return 0;
+   db2_memory_promotion_kind_t rows[AIMEE_DB2_EXPIRE_KINDS_MAX];
+   if (max > (int)(sizeof(rows) / sizeof(rows[0])))
+      max = (int)(sizeof(rows) / sizeof(rows[0]));
+   int found = db2_memory_promotion_list_kinds_in_tier(tier, rows, max);
+   if (found < 0)
+      return -1;
+   if (found > max)
+      found = max;
+   for (int index = 0; index < found; index++)
+      snprintf(kinds[index], sizeof(kinds[index]), "%s", rows[index].kind);
+   return found;
+}
+
+static int production_kind_expire_days(const char *kind)
+{
+   kind_lifecycle_t lifecycle;
+   memset(&lifecycle, 0, sizeof(lifecycle));
+   /* A miss fills the default fact lifecycle, which is still a usable window. */
+   (void)db2_kind_lifecycle_load(kind, &lifecycle);
+   return lifecycle.expire_days;
 }
 
 static int production_pool_status(aimee_db2_pool_status_t *status)
@@ -206,6 +234,12 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .prune_contradictions = db2_memory_health_prune_old_contradictions,
        .health_counters = production_health_counters,
        .stats_counts = production_stats_counts,
+       .delete_l0_provenance = db2_memory_promotion_delete_l0_provenance,
+       .delete_l0 = db2_memory_promotion_delete_l0,
+       .list_kinds_in_tier = production_list_kinds_in_tier,
+       .kind_expire_days = production_kind_expire_days,
+       .delete_stale_l1_provenance = db2_memory_promotion_delete_stale_l1_provenance,
+       .delete_stale_l1 = db2_memory_promotion_delete_stale_l1,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -569,6 +603,53 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_stats_counts_reply_encode(&stats, response_body, response_capacity,
                                                  response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_expire_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_EXPIRE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->delete_l0_provenance || !backend->delete_l0 ||
+             !backend->list_kinds_in_tier || !backend->kind_expire_days ||
+             !backend->delete_stale_l1_provenance || !backend->delete_stale_l1)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+
+         /* Provenance goes first in each stage so no row outlives its record. */
+         backend->delete_l0_provenance();
+         int level0 = backend->delete_l0();
+         if (level0 < 0 || level0 > (int)AIMEE_DB2_EXPIRE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+
+         char kinds[AIMEE_DB2_EXPIRE_KINDS_MAX][16];
+         int kind_count = backend->list_kinds_in_tier(AIMEE_DB2_EXPIRE_STALE_TIER, kinds,
+                                                      (int)AIMEE_DB2_EXPIRE_KINDS_MAX);
+         if (kind_count < 0 || kind_count > (int)AIMEE_DB2_EXPIRE_KINDS_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+
+         long stale = 0;
+         for (int index = 0; index < kind_count; index++)
+         {
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            int days = backend->kind_expire_days(kinds[index]);
+            if (days <= 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            char window[16];
+            if (snprintf(window, sizeof(window), "-%d", days) >= (int)sizeof(window))
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            backend->delete_stale_l1_provenance(kinds[index], window);
+            int deleted = backend->delete_stale_l1(kinds[index], window);
+            if (deleted < 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            stale += deleted;
+            if (stale > (long)AIMEE_DB2_EXPIRE_MAX)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_expire_reply_encode((uint32_t)level0, (uint32_t)stale, response_body,
+                                           response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

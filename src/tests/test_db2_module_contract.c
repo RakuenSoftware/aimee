@@ -76,6 +76,13 @@ static uint32_t health_counters_cycles;
 static int stats_counts_result;
 static int stats_counts_calls;
 static uint32_t stats_counts_last_kind;
+static int expire_l0_value;
+static int expire_kind_count;
+static int expire_days_value;
+static int expire_stale_value;
+static int expire_l0_provenance_calls;
+static int expire_stale_provenance_calls;
+static char expire_last_window[16];
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -120,6 +127,7 @@ static int transport_expect_health_record;
 static int transport_expect_health_retention;
 static int transport_expect_health_counters;
 static int transport_expect_stats_counts;
+static int transport_expect_expire;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -512,6 +520,88 @@ int db2_memory_stats_counts(void *out)
    return -1;
 }
 
+int db2_memory_promotion_delete_l0_provenance(void)
+{
+   return 0;
+}
+
+int db2_memory_promotion_delete_l0(void)
+{
+   return 0;
+}
+
+int db2_memory_promotion_list_kinds_in_tier(const char *tier, void *out, int max)
+{
+   (void)tier;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_promotion_delete_stale_l1_provenance(const char *kind, const char *days_neg)
+{
+   (void)kind;
+   (void)days_neg;
+   return 0;
+}
+
+int db2_memory_promotion_delete_stale_l1(const char *kind, const char *days_neg)
+{
+   (void)kind;
+   (void)days_neg;
+   return 0;
+}
+
+int db2_kind_lifecycle_load(const char *kind, void *out)
+{
+   (void)kind;
+   (void)out;
+   return -1;
+}
+
+static int delete_l0_provenance(void)
+{
+   expire_l0_provenance_calls++;
+   return 0;
+}
+
+static int delete_l0(void)
+{
+   return expire_l0_value;
+}
+
+static int list_kinds_in_tier(const char *tier, char (*kinds)[16], int max)
+{
+   if (strcmp(tier, AIMEE_DB2_EXPIRE_STALE_TIER) != 0)
+      return -1;
+   if (expire_kind_count < 0 || expire_kind_count > max)
+      return expire_kind_count;
+   for (int index = 0; index < expire_kind_count; index++)
+      snprintf(kinds[index], sizeof(kinds[index]), "kind%d", index);
+   return expire_kind_count;
+}
+
+static int kind_expire_days(const char *kind)
+{
+   (void)kind;
+   return expire_days_value;
+}
+
+static int delete_stale_l1_provenance(const char *kind, const char *days_neg)
+{
+   (void)kind;
+   expire_stale_provenance_calls++;
+   snprintf(expire_last_window, sizeof(expire_last_window), "%s", days_neg);
+   return 0;
+}
+
+static int delete_stale_l1(const char *kind, const char *days_neg)
+{
+   (void)kind;
+   (void)days_neg;
+   return expire_stale_value;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -744,6 +834,13 @@ static void reset(void)
    stats_counts_result = 0;
    stats_counts_calls = 0;
    stats_counts_last_kind = 5;
+   expire_l0_value = 9;
+   expire_kind_count = 2;
+   expire_days_value = 7;
+   expire_stale_value = 4;
+   expire_l0_provenance_calls = 0;
+   expire_stale_provenance_calls = 0;
+   expire_last_window[0] = '\0';
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -783,6 +880,7 @@ static void reset(void)
    transport_expect_health_retention = 0;
    transport_expect_health_counters = 0;
    transport_expect_stats_counts = 0;
+   transport_expect_expire = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -803,7 +901,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_stats_counts              ? AIMEE_DB2_EVENT_STATS_COUNTS
+       transport_expect_expire                    ? AIMEE_DB2_EVENT_EXPIRE
+       : transport_expect_stats_counts            ? AIMEE_DB2_EVENT_STATS_COUNTS
        : transport_expect_health_counters         ? AIMEE_DB2_EVENT_HEALTH_COUNTERS
        : transport_expect_health_retention        ? AIMEE_DB2_EVENT_HEALTH_RETENTION
        : transport_expect_health_record           ? AIMEE_DB2_EVENT_HEALTH_RECORD
@@ -831,7 +930,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_stats_counts              ? AIMEE_DB2_STAGE_STATS_COUNTS
+       transport_expect_expire                    ? AIMEE_DB2_STAGE_EXPIRE
+       : transport_expect_stats_counts            ? AIMEE_DB2_STAGE_STATS_COUNTS
        : transport_expect_health_counters         ? AIMEE_DB2_STAGE_HEALTH_COUNTERS
        : transport_expect_health_retention        ? AIMEE_DB2_STAGE_HEALTH_RETENTION
        : transport_expect_health_record           ? AIMEE_DB2_STAGE_HEALTH_RECORD
@@ -862,7 +962,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_stats_counts)
+   if (transport_expect_expire)
+      assert(aimee_db2_expire_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_stats_counts)
       assert(aimee_db2_stats_counts_request_decode(request_body, request_len) == 0);
    else if (transport_expect_health_counters)
       assert(aimee_db2_health_counters_request_decode(request_body, request_len) == 0);
@@ -1771,6 +1873,32 @@ static void test_stats_counts_wire(void)
                      0x80000000u);
    assert(aimee_db2_stats_counts_reply_decode(reply, reply_len, &decoded) == -1);
    assert(decoded.total == 0 && decoded.kind_counts[0] == 0);
+}
+
+static void test_expire_wire(void)
+{
+   uint8_t request[AIMEE_DB2_EXPIRE_REQUEST_LEN] = {0};
+   assert(aimee_db2_expire_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_expire_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12u, 1u);
+   assert(aimee_db2_expire_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_EXPIRE_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, level0 = 99, stale = 99;
+   assert(aimee_db2_expire_reply_encode(9u, 17u, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_expire_reply_decode(reply, reply_len, &level0, &stale) == 0);
+   assert(level0 == 9 && stale == 17);
+
+   /* Both stages are reported, and each is bounded independently. */
+   assert(aimee_db2_expire_reply_encode(AIMEE_DB2_EXPIRE_MAX + 1u, 17u, reply, sizeof(reply),
+                                        &reply_len) == -1);
+   assert(aimee_db2_expire_reply_encode(9u, AIMEE_DB2_EXPIRE_MAX + 1u, reply, sizeof(reply),
+                                        &reply_len) == -1);
+   assert(reply_len == 0);
+   assert(aimee_db2_expire_reply_encode(9u, 17u, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u, 0x80000000u);
+   assert(aimee_db2_expire_reply_decode(reply, reply_len, &level0, &stale) == -1);
+   assert(level0 == 0 && stale == 0);
 }
 
 static void test_pool_status_wire(void)
@@ -2772,6 +2900,81 @@ static void test_stats_counts_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_expire_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {
+       .delete_l0_provenance = delete_l0_provenance,
+       .delete_l0 = delete_l0,
+       .list_kinds_in_tier = list_kinds_in_tier,
+       .kind_expire_days = kind_expire_days,
+       .delete_stale_l1_provenance = delete_stale_l1_provenance,
+       .delete_stale_l1 = delete_stale_l1,
+   };
+   uint8_t request[AIMEE_DB2_EXPIRE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EXPIRE_RESPONSE_LEN];
+   uint32_t response_len = 99, level0 = 99, stale = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_EXPIRE};
+   assert(aimee_db2_expire_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_expire_reply_decode(response, response_len, &level0, &stale) == 0);
+   /* Two kinds at 4 stale rows each, and the per-kind window reaches the delete. */
+   assert(level0 == 9 && stale == 8 && expire_l0_provenance_calls == 1 &&
+          expire_stale_provenance_calls == 2);
+   assert(strcmp(expire_last_window, "-7") == 0);
+
+   /* An empty L1 tier still answers, with no stale work done. */
+   reset();
+   expire_kind_count = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_expire_reply_decode(response, response_len, &level0, &stale) == 0);
+   assert(level0 == 9 && stale == 0 && expire_stale_provenance_calls == 0);
+
+   /* Every stage's failure fails the whole action. */
+   reset();
+   expire_l0_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   reset();
+   expire_kind_count = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   reset();
+   expire_stale_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   /* A kind whose window is missing must not silently expire everything. */
+   reset();
+   expire_days_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   /* More kinds than the declared bound is refused, not truncated. */
+   reset();
+   expire_kind_count = (int)AIMEE_DB2_EXPIRE_KINDS_MAX + 1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   /* Every composed capability is required. */
+   reset();
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   aimee_db2_module_backend_t partial = backend;
+   partial.delete_stale_l1 = NULL;
+   assert(invoke(&partial, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   partial = backend;
+   partial.kind_expire_days = NULL;
+   assert(invoke(&partial, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -3411,6 +3614,21 @@ static void test_stats_counts_typed_client(void)
    assert(memcmp(&received, &stats, sizeof(received)) == 0 && transport_calls == 1);
 }
 
+static void test_expire_typed_client(void)
+{
+   reset();
+   transport_expect_expire = 1;
+   uint32_t level0 = 99, stale = 99;
+   assert(aimee_db2_expire_call(NULL, NULL, 77, 88, &level0, &stale, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(level0 == 0 && stale == 0);
+   assert(aimee_db2_expire_reply_encode(9u, 17u, transport_response, sizeof(transport_response),
+                                        &transport_response_len) == 0);
+   assert(aimee_db2_expire_call(transport, (void *)0x1234, 77, 88, &level0, &stale, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(level0 == 9 && stale == 17 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -3599,6 +3817,7 @@ int main(void)
    test_health_retention_wire();
    test_health_counters_wire();
    test_stats_counts_wire();
+   test_expire_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -3626,6 +3845,7 @@ int main(void)
    test_health_retention_handler();
    test_health_counters_handler();
    test_stats_counts_handler();
+   test_expire_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -3653,6 +3873,7 @@ int main(void)
    test_health_retention_typed_client();
    test_health_counters_typed_client();
    test_stats_counts_typed_client();
+   test_expire_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();
