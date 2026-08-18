@@ -685,7 +685,21 @@ check_output "identical mirror-sync continuation persisted" '"seq":1' echo "$RES
 RESP=$(http_rpc "${MIRROR_REQS[5]}") || true
 check_output "identical mirror-sync reuses generation" '"generation":1' echo "$RESP"
 
-SNAPSHOT=$(find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -print -quit) || true
+# Address the mirror workspace by its own snapshot, not by whichever one find
+# happens to walk into first. Every check below derives from $SNAPSHOT -- its
+# directory, its generation, its work-N-* checkouts -- so picking a different
+# workspace's file does not fail here, it fails five checks later with content
+# that looks like a mirror bug. The server keys the directory on
+# fnv1a_hex8(root) (workspace_mirror.c), so the harness can name it exactly.
+MIRROR_HASH=$(python3 - "$MIRROR_CLIENT" <<'HASH'
+import sys
+h = 2166136261
+for byte in sys.argv[1].encode():
+    h = ((h ^ byte) * 16777619) & 0xFFFFFFFF
+print("%08x" % h)
+HASH
+)
+SNAPSHOT="$AIMEE_HOME/workspaces/$MIRROR_HASH/client.snapshot"
 check "mirror snapshot metadata published" test -s "$SNAPSHOT"
 check_output "mirror snapshot records valid .locked ref" \
     'feature.locked origin/feature.locked 2' cat "$SNAPSHOT"
