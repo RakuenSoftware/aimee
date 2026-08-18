@@ -31,6 +31,8 @@ static int session_l2_count_value;
 static int session_l2_count_calls;
 static int key_exists_value;
 static int key_exists_calls;
+static int64_t find_id_by_key_kind_value;
+static int find_id_by_key_kind_calls;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -62,6 +64,7 @@ static int transport_expect_orphaned_l0_count;
 static int transport_expect_total_count;
 static int transport_expect_session_l2_count;
 static int transport_expect_key_exists;
+static int transport_expect_find_id_by_key_kind;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -203,6 +206,22 @@ static int key_exists(const char *key)
    assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
    key_exists_calls++;
    return key_exists_value;
+}
+
+int64_t db2_memory_find_id_by_key_kind(const char *key, const char *kind)
+{
+   assert(strcmp(key, "task:deploy-fix") == 0);
+   assert(strcmp(kind, "task") == 0);
+   find_id_by_key_kind_calls++;
+   return find_id_by_key_kind_value;
+}
+
+static int64_t find_id_by_key_kind(const char *key, const char *kind)
+{
+   assert(strcmp(key, "task:deploy-fix") == 0);
+   assert(strcmp(kind, "task") == 0);
+   find_id_by_key_kind_calls++;
+   return find_id_by_key_kind_value;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -356,6 +375,8 @@ static void reset(void)
    session_l2_count_calls = 0;
    key_exists_value = 1;
    key_exists_calls = 0;
+   find_id_by_key_kind_value = 42;
+   find_id_by_key_kind_calls = 0;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -384,6 +405,7 @@ static void reset(void)
    transport_expect_total_count = 0;
    transport_expect_session_l2_count = 0;
    transport_expect_key_exists = 0;
+   transport_expect_find_id_by_key_kind = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -404,7 +426,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_key_exists            ? AIMEE_DB2_EVENT_KEY_EXISTS
+       transport_expect_find_id_by_key_kind   ? AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND
+       : transport_expect_key_exists          ? AIMEE_DB2_EVENT_KEY_EXISTS
        : transport_expect_session_l2_count    ? AIMEE_DB2_EVENT_SESSION_L2_COUNT
        : transport_expect_total_count         ? AIMEE_DB2_EVENT_TOTAL_COUNT
        : transport_expect_orphaned_l0_count   ? AIMEE_DB2_EVENT_ORPHANED_L0_COUNT
@@ -421,7 +444,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension           ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                               : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_key_exists            ? AIMEE_DB2_STAGE_KEY_EXISTS
+       transport_expect_find_id_by_key_kind   ? AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND
+       : transport_expect_key_exists          ? AIMEE_DB2_STAGE_KEY_EXISTS
        : transport_expect_session_l2_count    ? AIMEE_DB2_STAGE_SESSION_L2_COUNT
        : transport_expect_total_count         ? AIMEE_DB2_STAGE_TOTAL_COUNT
        : transport_expect_orphaned_l0_count   ? AIMEE_DB2_STAGE_ORPHANED_L0_COUNT
@@ -441,7 +465,16 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_key_exists)
+   if (transport_expect_find_id_by_key_kind)
+   {
+      char key[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX + 1u];
+      char kind[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX + 1u];
+      assert(aimee_db2_find_id_by_key_kind_request_decode(request_body, request_len, key,
+                                                          sizeof(key), kind, sizeof(kind)) == 0);
+      assert(strcmp(key, "task:deploy-fix") == 0);
+      assert(strcmp(kind, "task") == 0);
+   }
+   else if (transport_expect_key_exists)
    {
       char key[AIMEE_DB2_KEY_EXISTS_KEY_MAX + 1u];
       assert(aimee_db2_key_exists_request_decode(request_body, request_len, key, sizeof(key)) == 0);
@@ -851,6 +884,60 @@ static void test_key_exists_wire(void)
    assert(aimee_db2_key_exists_reply_decode(reply, reply_len, &exists) == 0 && exists == 1);
    assert(aimee_db2_key_exists_reply_encode(AIMEE_DB2_KEY_EXISTS_MAX + 1u, reply, sizeof(reply),
                                             &reply_len) == -1);
+}
+
+static void test_find_id_by_key_kind_wire(void)
+{
+   uint8_t request[AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN] = {0};
+   uint32_t request_len = 99;
+   char key[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX + 1u];
+   char kind[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX + 1u];
+   assert(aimee_db2_find_id_by_key_kind_request_encode("task:deploy-fix", "task", request,
+                                                       sizeof(request), &request_len) == 0);
+   assert(aimee_db2_find_id_by_key_kind_request_decode(request, request_len, key, sizeof(key), kind,
+                                                       sizeof(kind)) == 0);
+   assert(strcmp(key, "task:deploy-fix") == 0 && strcmp(kind, "task") == 0);
+   assert(aimee_db2_find_id_by_key_kind_request_encode("", "task", request, sizeof(request),
+                                                       &request_len) == -1);
+   assert(aimee_db2_find_id_by_key_kind_request_encode("task:deploy-fix", "", request,
+                                                       sizeof(request), &request_len) == -1);
+
+   char oversized_key[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX + 2u];
+   memset(oversized_key, 'x', sizeof(oversized_key) - 1u);
+   oversized_key[sizeof(oversized_key) - 1u] = '\0';
+   assert(aimee_db2_find_id_by_key_kind_request_encode(oversized_key, "task", request,
+                                                       sizeof(request), &request_len) == -1);
+   char oversized_kind[AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX + 2u];
+   memset(oversized_kind, 'x', sizeof(oversized_kind) - 1u);
+   oversized_kind[sizeof(oversized_kind) - 1u] = '\0';
+   assert(aimee_db2_find_id_by_key_kind_request_encode("task:deploy-fix", oversized_kind, request,
+                                                       sizeof(request), &request_len) == -1);
+
+   assert(aimee_db2_find_id_by_key_kind_request_encode("task:deploy-fix", "task", request,
+                                                       sizeof(request), &request_len) == 0);
+   request[AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u] = '\0';
+   assert(aimee_db2_find_id_by_key_kind_request_decode(request, request_len, key, sizeof(key), kind,
+                                                       sizeof(kind)) == -1);
+   assert(aimee_db2_find_id_by_key_kind_request_encode("task:deploy-fix", "task", request,
+                                                       sizeof(request), &request_len) == 0);
+   request[request_len - 1u] = '\0';
+   assert(aimee_db2_find_id_by_key_kind_request_decode(request, request_len, key, sizeof(key), kind,
+                                                       sizeof(kind)) == -1);
+
+   uint8_t reply[AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, found = 99;
+   uint64_t id = 99;
+   assert(aimee_db2_find_id_by_key_kind_reply_encode(1, 42, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_find_id_by_key_kind_reply_decode(reply, reply_len, &found, &id) == 0 &&
+          found == 1 && id == 42);
+   assert(aimee_db2_find_id_by_key_kind_reply_encode(0, 0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_find_id_by_key_kind_reply_decode(reply, reply_len, &found, &id) == 0 &&
+          found == 0 && id == 0);
+   assert(aimee_db2_find_id_by_key_kind_reply_encode(0, 42, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(aimee_db2_find_id_by_key_kind_reply_encode(1, 0, reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_find_id_by_key_kind_reply_encode(2, 42, reply, sizeof(reply), &reply_len) ==
+          -1);
 }
 
 static void test_pool_status_wire(void)
@@ -1449,6 +1536,35 @@ static void test_key_exists_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
 }
 
+static void test_find_id_by_key_kind_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.find_id_by_key_kind = find_id_by_key_kind};
+   uint8_t request[AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99, found = 99;
+   uint64_t id = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND};
+   assert(aimee_db2_find_id_by_key_kind_request_encode("task:deploy-fix", "task", request,
+                                                       sizeof(request), &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(find_id_by_key_kind_calls == 1);
+   assert(aimee_db2_find_id_by_key_kind_reply_decode(response, response_len, &found, &id) == 0 &&
+          found == 1 && id == 42);
+   find_id_by_key_kind_value = 0;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_find_id_by_key_kind_reply_decode(response, response_len, &found, &id) == 0 &&
+          found == 0 && id == 0);
+   find_id_by_key_kind_value = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -1874,6 +1990,27 @@ static void test_key_exists_typed_client(void)
    assert(exists == 1 && transport_calls == 1);
 }
 
+static void test_find_id_by_key_kind_typed_client(void)
+{
+   reset();
+   transport_expect_find_id_by_key_kind = 1;
+   uint32_t found = 99;
+   uint64_t id = 99;
+   assert(aimee_db2_find_id_by_key_kind_call(NULL, NULL, 77, 88, "task:deploy-fix", "task", &found,
+                                             &id, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(found == 0 && id == 0);
+   assert(aimee_db2_find_id_by_key_kind_call(transport, (void *)0x1234, 77, 88, "", "task", &found,
+                                             &id, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(aimee_db2_find_id_by_key_kind_reply_encode(
+              1, 42, transport_response, sizeof(transport_response), &transport_response_len) == 0);
+   assert(aimee_db2_find_id_by_key_kind_call(transport, (void *)0x1234, 77, 88, "task:deploy-fix",
+                                             "task", &found, &id, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(found == 1 && id == 42 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -2051,6 +2188,7 @@ int main(void)
    test_total_count_wire();
    test_session_l2_count_wire();
    test_key_exists_wire();
+   test_find_id_by_key_kind_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -2067,6 +2205,7 @@ int main(void)
    test_total_count_handler();
    test_session_l2_count_handler();
    test_key_exists_handler();
+   test_find_id_by_key_kind_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -2083,6 +2222,7 @@ int main(void)
    test_total_count_typed_client();
    test_session_l2_count_typed_client();
    test_key_exists_typed_client();
+   test_find_id_by_key_kind_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

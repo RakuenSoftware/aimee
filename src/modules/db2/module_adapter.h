@@ -16,6 +16,7 @@ typedef struct
    int64_t (*total_count)(void);
    int (*session_l2_count)(const char *source_session);
    int (*key_exists)(const char *key);
+   int64_t (*find_id_by_key_kind)(const char *key, const char *kind);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

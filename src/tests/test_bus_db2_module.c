@@ -36,6 +36,7 @@ typedef struct
    int64_t (*total_count)(void);
    int (*session_l2_count)(const char *source_session);
    int (*key_exists)(const char *key);
+   int64_t (*find_id_by_key_kind)(const char *key, const char *kind);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -76,6 +77,7 @@ static int orphaned_l0_count_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
+static int find_id_by_key_kind_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -205,6 +207,18 @@ static int key_exists(const char *key)
 {
    key_exists_calls++;
    return strcmp(key, "recovery:tool-a->tool-b") == 0 ? 1 : 0;
+}
+
+int64_t db2_memory_find_id_by_key_kind(const char *key, const char *kind)
+{
+   find_id_by_key_kind_calls++;
+   return strcmp(key, "task:deploy-fix") == 0 && strcmp(kind, "task") == 0 ? 42 : 0;
+}
+
+static int64_t find_id_by_key_kind(const char *key, const char *kind)
+{
+   find_id_by_key_kind_calls++;
+   return strcmp(key, "task:deploy-fix") == 0 && strcmp(kind, "task") == 0 ? 42 : 0;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -467,6 +481,7 @@ int main(void)
        .total_count = total_count,
        .session_l2_count = session_l2_count,
        .key_exists = key_exists,
+       .find_id_by_key_kind = find_id_by_key_kind,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -544,6 +559,13 @@ int main(void)
    assert(aimee_db2_key_exists_call(call_client, &client, 7025, 0, "recovery:tool-a->tool-b",
                                     &exists, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(exists == 1 && key_exists_calls == 1);
+
+   uint32_t found = 99;
+   uint64_t memory_id = 99;
+   assert(aimee_db2_find_id_by_key_kind_call(call_client, &client, 7026, 0, "task:deploy-fix",
+                                             "task", &found, &memory_id, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(found == 1 && memory_id == 42 && find_id_by_key_kind_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "b17d393eccb1ca8ae46c28b4c9d60a16f3620dbffc66b27ee14d9c3262a39633"
+#define AIMEE_DB2_CONTRACT_SHA256 "d329b5a1ced2c6a2f11c2283124d5feb859cb4646d2be124d7733d42b837fc0b"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -155,6 +155,17 @@
 #define AIMEE_DB2_KEY_EXISTS_ERROR_LEN                 24u
 #define AIMEE_DB2_KEY_EXISTS_KEY_MAX                   511u
 #define AIMEE_DB2_KEY_EXISTS_MAX                       1u
+#define AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND            AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND            AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND        7u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MIN_LEN  34u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN  558u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN     36u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_ERROR_LEN        24u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX          511u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX         15u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX        1u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX           9223372036854775807ull
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -784,6 +795,112 @@ static inline int aimee_db2_key_exists_reply_decode(const uint8_t *input, size_t
    if (decoded > AIMEE_DB2_KEY_EXISTS_MAX)
       return -1;
    *exists = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_find_id_by_key_kind_request_encode(
+    const char *key, const char *kind, uint8_t *output, size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!key || !kind || !output || !output_len)
+      return -1;
+   size_t key_len = 0u, kind_len = 0u;
+   while (key_len <= AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX && key[key_len])
+      ++key_len;
+   while (kind_len <= AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX && kind[kind_len])
+      ++kind_len;
+   size_t payload_len = 8u + key_len + kind_len;
+   if (key_len == 0u || key_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX ||
+       kind_len == 0u || kind_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)key_len);
+   memcpy(payload + 4, key, key_len);
+   aimee_db2_put_u32(payload + 4u + key_len, (uint32_t)kind_len);
+   memcpy(payload + 8u + key_len, kind, kind_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_find_id_by_key_kind_request_decode(
+    const uint8_t *input, size_t input_len, char *key, size_t key_capacity, char *kind,
+    size_t kind_capacity)
+{
+   if (key && key_capacity)
+      key[0] = '\0';
+   if (kind && kind_capacity)
+      kind[0] = '\0';
+   if (!key || key_capacity == 0u || !kind || kind_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND || header.flags != 0u ||
+       input_len < AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN || header.payload_len < 10u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t key_len = aimee_db2_get_u32(payload);
+   if (key_len == 0u || key_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX ||
+       header.payload_len < 8u + key_len + 1u)
+      return -1;
+   uint32_t kind_len = aimee_db2_get_u32(payload + 4u + key_len);
+   if (kind_len == 0u || kind_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX ||
+       header.payload_len != 8u + key_len + kind_len || key_capacity <= key_len ||
+       kind_capacity <= kind_len || memchr(payload + 4, '\0', key_len) != NULL ||
+       memchr(payload + 8u + key_len, '\0', kind_len) != NULL)
+      return -1;
+   memcpy(key, payload + 4, key_len);
+   key[key_len] = '\0';
+   memcpy(kind, payload + 8u + key_len, kind_len);
+   kind[kind_len] = '\0';
+   return 0;
+}
+
+static inline int aimee_db2_find_id_by_key_kind_reply_encode(
+    uint32_t found, uint64_t id, uint8_t *output, size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || found > AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX ||
+       id > AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX || (found == 0u && id != 0u) ||
+       (found == 1u && id == 0u) || capacity < AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND,
+                                     AIMEE_DB2_RESULT_OK, 12u, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, found);
+   aimee_db2_put_u64(payload + 4, id);
+   *output_len = AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_find_id_by_key_kind_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *found, uint64_t *id)
+{
+   if (found)
+      *found = 0u;
+   if (id)
+      *id = 0u;
+   if (!found || !id)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_found = aimee_db2_get_u32(payload);
+   uint64_t decoded_id = aimee_db2_get_u64(payload + 4);
+   if (decoded_found > AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX ||
+       decoded_id > AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX ||
+       (decoded_found == 0u && decoded_id != 0u) || (decoded_found == 1u && decoded_id == 0u))
+      return -1;
+   *found = decoded_found;
+   *id = decoded_id;
    return 0;
 }
 

@@ -16124,9 +16124,15 @@
           "line": 750
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
+      },
       "signature": "int64_t db2_memory_find_id_by_key_kind ( const char * key , const char * kind )",
       "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_find_id_by_key_kind"
     },
     {
@@ -25632,15 +25638,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "510c8e69485e695660de9fa45f3eadf618fd3bbf045a92ff78625a0730b7617e",
+  "fingerprint": "97ecbc62397358a9891ca7687e7bc14745f61737fb8f6c67e193a59d87d52a76",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 690,
+    "audit_pending": 689,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 268
+    "reviewed": 269
   }
 }

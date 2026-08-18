@@ -216,6 +216,13 @@ int main(int argc, char **argv)
                                     &key_exists, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(key_exists == 0);
 
+   uint32_t found = 99;
+   uint64_t memory_id = 99;
+   assert(aimee_db2_find_id_by_key_kind_call(call_client, &client, 9027, 0, "fresh-key-with-no-row",
+                                             "task", &found, &memory_id, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(found == 0 && memory_id == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

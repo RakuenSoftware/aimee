@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "b17d393eccb1ca8ae46c28b4c9d60a16f3620dbffc66b27ee14d9c3262a39633"
+const ContractSHA256 = "d329b5a1ced2c6a2f11c2283124d5feb859cb4646d2be124d7733d42b837fc0b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -106,6 +106,13 @@ const StageKeyExists = FamilyMemory
 const OperationKeyExists uint32 = 6
 const KeyExistsKeyMax = 511
 const KeyExistsMax uint32 = 1
+const EventFindIDByKeyKind = EventMemory
+const StageFindIDByKeyKind = FamilyMemory
+const OperationFindIDByKeyKind uint32 = 7
+const FindIDByKeyKindKeyMax = 511
+const FindIDByKeyKindKindMax = 15
+const FindIDByKeyKindFoundMax uint32 = 1
+const FindIDByKeyKindIDMax uint64 = 9223372036854775807
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -593,6 +600,102 @@ func DecodeKeyExistsReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return exists, nil
+}
+
+// EncodeFindIDByKeyKindRequest emits bounded canonical key and kind fields.
+func EncodeFindIDByKeyKindRequest(key, kind string) ([]byte, error) {
+	if len(key) == 0 || len(key) > FindIDByKeyKindKeyMax ||
+		len(kind) == 0 || len(kind) > FindIDByKeyKindKindMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for index := 0; index < len(key); index++ {
+		if key[index] == 0 {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	for index := 0; index < len(kind); index++ {
+		if kind[index] == 0 {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 8 + len(key) + len(kind)
+	header, err := EncodeRequestHeader(OperationFindIDByKeyKind, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(key)))
+	copy(payload[4:], key)
+	binary.LittleEndian.PutUint32(payload[4+len(key):], uint32(len(kind)))
+	copy(payload[8+len(key):], kind)
+	return request, nil
+}
+
+// DecodeFindIDByKeyKindRequest validates and returns the canonical key and kind.
+func DecodeFindIDByKeyKindRequest(request []byte) (string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFindIDByKeyKind || header.Flags != 0 ||
+		header.PayloadLen < 10 {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	keyLen := binary.LittleEndian.Uint32(payload[:4])
+	if keyLen == 0 || keyLen > FindIDByKeyKindKeyMax ||
+		uint64(8)+uint64(keyLen)+1 > uint64(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	kindOffset := 4 + int(keyLen)
+	kindLen := binary.LittleEndian.Uint32(payload[kindOffset : kindOffset+4])
+	if kindLen == 0 || kindLen > FindIDByKeyKindKindMax ||
+		uint64(header.PayloadLen) != 8+uint64(keyLen)+uint64(kindLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	key := string(payload[4:kindOffset])
+	kind := string(payload[kindOffset+4:])
+	for index := 0; index < len(key); index++ {
+		if key[index] == 0 {
+			return "", "", ErrMalformedEnvelope
+		}
+	}
+	for index := 0; index < len(kind); index++ {
+		if kind[index] == 0 {
+			return "", "", ErrMalformedEnvelope
+		}
+	}
+	return key, kind, nil
+}
+
+// EncodeFindIDByKeyKindReply emits consistent found state and identifier fields.
+func EncodeFindIDByKeyKindReply(found uint32, id uint64) ([]byte, error) {
+	if found > FindIDByKeyKindFoundMax || id > FindIDByKeyKindIDMax ||
+		found == 0 && id != 0 || found == 1 && id == 0 {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationFindIDByKeyKind, ResultOK, 12)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 12)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], found)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen+4:], id)
+	return reply, nil
+}
+
+// DecodeFindIDByKeyKindReply validates the operation and consistent lookup result.
+func DecodeFindIDByKeyKindReply(reply []byte) (uint32, uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationFindIDByKeyKind ||
+		header.Result != ResultOK || header.PayloadLen != 12 {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	found := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	id := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen+4:])
+	if found > FindIDByKeyKindFoundMax || id > FindIDByKeyKindIDMax ||
+		found == 0 && id != 0 || found == 1 && id == 0 {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return found, id, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

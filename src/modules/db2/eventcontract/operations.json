@@ -475,6 +475,35 @@
         "encoded_size_error": 24,
         "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
       }
+    },
+    {
+      "family": "memory",
+      "id": 7,
+      "name": "find_id_by_key_kind",
+      "wire_format": "db2-envelope-string-pair-u32-u64-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Exact canonical memory-key and kind lookup is relational DB2 authority and does not depend on portable ANN state.",
+      "c_symbols": ["db2_memory_find_id_by_key_kind"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 558,
+        "fields": [
+          {"name": "key", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "kind", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 15}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 36,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "found", "type": "u32", "minimum": 0, "maximum": 1},
+          {"name": "id", "type": "u64", "minimum": 0, "maximum": 9223372036854775807}
+        ]
+      }
     }
   ]
 }

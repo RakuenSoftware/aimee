@@ -236,6 +236,30 @@ class ContractTests(unittest.TestCase):
             [(0, 1)],
         )
 
+    def test_find_id_by_key_kind_vectors_cover_strings_and_result_consistency(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][16]
+        self.assertEqual(operation["name"], "find_id_by_key_kind")
+        self.assertEqual(operation["request"]["key"], "task:deploy-fix")
+        self.assertEqual(operation["request"]["kind"], "task")
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "empty_key", "key_length_mismatch", "key_too_large",
+             "key_embedded_nul", "empty_kind", "kind_length_mismatch", "kind_too_large",
+             "kind_embedded_nul", "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["found"], row["id"])
+             for row in operation["reply"]["positive"]],
+            [(0, 1, 42)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "found_too_large", "absent_with_id", "present_without_id", "id_too_large",
+             "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -424,7 +448,7 @@ class ContractTests(unittest.TestCase):
             "operation-duplicate",
         )
         self.assert_rule(
-            lambda value: value["operations"].insert(-6, {
+            lambda value: value["operations"].insert(-7, {
                 **copy.deepcopy(value["operations"][0]),
                 "id": 11,
                 "name": "health_second",
@@ -552,6 +576,25 @@ class ContractTests(unittest.TestCase):
                 "maximum_bytes", 512), "key-exists-request"),
             (lambda value: value["operations"][15]["reply"]["field"].__setitem__(
                 "maximum", 2), "key-exists-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_find_id_by_key_kind_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][16].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][16].__setitem__(
+                "results", ["ok", "not_found"]), "operation-results"),
+            (lambda value: value["operations"][16]["request"]["fields"][0].__setitem__(
+                "maximum_bytes", 512), "find-id-by-key-kind-request"),
+            (lambda value: value["operations"][16]["request"]["fields"][1].__setitem__(
+                "maximum_bytes", 16), "find-id-by-key-kind-request"),
+            (lambda value: value["operations"][16]["reply"]["fields"][0].__setitem__(
+                "maximum", 2), "find-id-by-key-kind-reply"),
+            (lambda value: value["operations"][16]["reply"]["fields"][1].__setitem__(
+                "maximum", 0xffffffffffffffff), "find-id-by-key-kind-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

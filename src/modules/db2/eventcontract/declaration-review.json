@@ -1420,6 +1420,14 @@
       "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
     },
     {
+      "symbol": "db2_memory_find_id_by_key_kind",
+      "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
+    },
+    {
       "symbol": "db2_memory_key_exists",
       "signature_sha256": "209f3694a02607a189dccf2e451c0d13190cf52ff4a48270996ef0718bdd5828",
       "disposition": "wire-operation",
