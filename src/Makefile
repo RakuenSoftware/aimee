@@ -1729,7 +1729,13 @@ subject-corpus-check: subject-corpus-gen
 	echo "subject-corpus-check: ok"
 
 # CI gate: fail if docs/gen is stale relative to the committed spec.
+# --plant-test first: docs-gen-check only diffs the OUTPUT against git, so a
+# generator whose regex stopped matching would emit an empty document and this
+# would read it as an ordinary content change. The plant proves the generator
+# refuses a source it cannot parse. (That is not hypothetical -- renaming a tier
+# token once took cli-commands.md from 812 lines to 8, silently.)
 docs-gen-check: docs-gen
+	@python3 ../scripts/gen-reference-docs.py --plant-test
 	@if ! git -C .. diff --quiet -- docs/gen/; then \
 		echo "docs-gen-check: docs/gen is stale — run 'make docs-gen' and commit the result"; \
 		git -C .. --no-pager diff --stat -- docs/gen/; \
