@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=14
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-skills
+publish=
+subscribe=
+request=
+serve=7681,7682

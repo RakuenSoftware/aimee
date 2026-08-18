@@ -169,6 +169,17 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          result = -1;
       else if (filled_out)
          *filled_out = fields_in;
+      /* Fewer values than the caller has slots for is the same contract
+         mismatch read from the other side, and it used to pass: the unfilled
+         slots keep the empty string cleared above, so the caller reads a row
+         whose last members are blank and cannot tell that from a row that is
+         blank. A list says how many rows it found through filled_out and is
+         variable by construction; every other shape has one arity, and a stage
+         answering with a different one is a stage built against a different
+         version of this contract. Two processes, two binaries, two deployment
+         times -- so say it rather than zero-fill. */
+      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
+         result = -1;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {

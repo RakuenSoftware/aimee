@@ -1383,6 +1383,17 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          result = -1;
       else if (filled_out)
          *filled_out = fields_in;
+      /* Fewer values than the caller has slots for is the same contract
+         mismatch read from the other side, and it used to pass: the unfilled
+         slots keep the empty string cleared above, so the caller reads a row
+         whose last members are blank and cannot tell that from a row that is
+         blank. A list says how many rows it found through filled_out and is
+         variable by construction; every other shape has one arity, and a stage
+         answering with a different one is a stage built against a different
+         version of this contract. Two processes, two binaries, two deployment
+         times -- so say it rather than zero-fill. */
+      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
+         result = -1;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {{
@@ -2599,7 +2610,16 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
       uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
       if (status != AIMEE_DB1_STATUS_OK && rows)
          out_count = 0u; /* nothing to report but the status */
-      write_reply(response_body, response_capacity, response_len, status, out_values, out_count);
+      /* A reply that does not fit is a failure, not a success with nothing in
+         it. write_reply refuses rather than truncating -- which is right -- but
+         discarding that answer left the caller a well-formed frame carrying no
+         rows, and a read cannot tell that from a row that is genuinely empty.
+         Say it in the frame instead: a bare status needs eight bytes, so the
+         second call fits wherever the first did not. */
+      if (write_reply(response_body, response_capacity, response_len, status, out_values,
+                      out_count) != status)
+         write_reply(response_body, response_capacity, response_len, AIMEE_DB1_STATUS_FAILED,
+                     NULL, 0u);
    }}
    free(cells_owned);
    free(numeric_owned);
