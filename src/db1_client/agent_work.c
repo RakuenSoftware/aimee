@@ -923,7 +923,9 @@ int db1_agent_log_session_outcome(const char *session_id, int *successes_out, in
    const size_t caps[] = {sizeof slot0, sizeof slot1};
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_SESSION_OUTCOME, fields, 1, values, caps, 2, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    *successes_out = (int)strtol(slot0, NULL, 10);
    *total_out = (int)strtol(slot1, NULL, 10);
    return 0;
@@ -1207,7 +1209,9 @@ int db1_coord_job_recover_owner(const char *claimed_by, int max_requeues, int *r
    const size_t caps[] = {sizeof slot0, sizeof slot1};
    int wire_status = call_stage(AIMEE_DB1_OP_COORD_OWNER_RECOVER, fields, 2, values, caps, 2, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    *requeued_out = (int)strtol(slot0, NULL, 10);
    *failed_out = (int)strtol(slot1, NULL, 10);
    return 0;
@@ -1464,7 +1468,9 @@ int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, ch
    const size_t caps[] = {role_cap, prompt_cap, files_cap, cwd_cap, persona_cap};
    int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH, fields, 1, values, caps, 5, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    return 0;
 }
 

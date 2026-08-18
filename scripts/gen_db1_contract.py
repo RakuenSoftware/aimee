@@ -41,7 +41,8 @@ STAGES_HEADER = Path("src/modules/db1/db1_stages.h")
 # daemon from util.c. In DB1_SRCS it would be a duplicate symbol there; out of
 # the module it is an undefined one here. db1_module_init.c opens the store the
 # module serves from, which the daemon opens for itself.
-MODULE_ONLY_SOURCES = frozenset({"module_adapter.c", "db1_time.c", "db1_module_init.c"})
+MODULE_ONLY_SOURCES = frozenset({"module_adapter.c", "db1_time.c", "db1_module_init.c",
+                                 "db1_module_support.c"})
 
 # DB1's principal ref. Event kinds are carved 4096 + ref*256 + stage, and a
 # family's id IS its future stage id, so the arithmetic is fixed here too.
@@ -300,10 +301,19 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             parameters = operation["c_params"]
             reply_shape = operation["reply"]
             request_shape = operation["request"]
-            inbound = 1 if "struct" in request_shape else len(request_shape["fields"])
+            inbound = (int(request_shape["struct_from"]) + 1
+                       if "struct_from" in request_shape
+                       else 1 if "struct" in request_shape
+                       else len(request_shape["fields"]))
             if "repeated" in request_shape:
                 inbound += 2  # the values array and its count
-            if operation.get("c_returns") in ("text", "int64"):
+            if operation.get("c_returns") == "text" and "scalars" in reply_shape:
+                # The document is the return; the values beside it are ordinary
+                # out-parameters and counted the ordinary way, minus the first
+                # field, which is the document itself.
+                outbound = sum(2 if str(f["type"]) == "text" and "alloc" not in f else 1
+                               for f in reply_shape["fields"][1:])
+            elif operation.get("c_returns") in ("text", "int64"):
                 # The value comes back as the return, so there is no out
                 # parameter to name -- the caller frees what it is handed, or
                 # simply reads the id.
@@ -315,10 +325,14 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                 # in, and a caller taking "char *role_out, size_t role_cap,
                 # char *prompt_out, size_t prompt_cap" is asking for two
                 # strings rather than a type.
-                outbound = sum(2 if str(f["type"]) == "text" else 1
+                # -- unless the string is an allocation the caller frees, which
+                # is one parameter and no capacity at all.
+                outbound = sum(2 if str(f["type"]) == "text" and "alloc" not in f else 1
                                for f in reply_shape["fields"])
             elif "list" in reply_shape:
-                outbound = 1                      # T *out, however wide the rows
+                # T *out, however wide the rows -- and one more when the count
+                # comes back through a parameter instead of the return.
+                outbound = 2 if "count" in reply_shape["list"] else 1
             elif "struct" in reply_shape:
                 outbound = 1                      # T *out
             elif reply_shape["fields"]:
@@ -375,11 +389,21 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             fail("results-order", f"{name} results must follow the declared result order")
 
         request_keys = {"fields", "struct"} if "struct" in operation["request"] else {"fields"}
+        # "struct_from" is the index where the struct's members begin, for a
+        # domain that takes a key AND a row. Without it the struct is the whole
+        # input, which is the ordinary case.
+        if "struct_from" in operation["request"]:
+            request_keys = request_keys | {"struct_from"}
         if "repeated" in operation["request"]:
             request_keys = request_keys | {"repeated"}
         request = keys(operation["request"], request_keys, f"{name}.request")
         if "struct" in request and not re.fullmatch(r"[a-z][a-z0-9_]*_t", str(request["struct"])):
             fail("request-struct", f"{name} request struct must be a _t type name")
+        if "struct_from" in request:
+            if "struct" not in request:
+                fail("request-struct",
+                     f"{name} says where its struct's members begin but declares no struct")
+            integer(request["struct_from"], f"{name}.request.struct_from", 1, 64)
         raw_fields = request["fields"]
         # An operation may take nothing at all -- "what is the queue's status"
         # names no row. It must then say global out loud, because a scoped
@@ -431,8 +455,31 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # hand the domain a slice of its own decoded array rather than
             # copying: field[] is already const char *[], and &field[base] is
             # exactly the const char *const * the domain takes.
-            rep = keys(request["repeated"], {"values", "count", "max_values"},
+            # A repeated value is a string unless the operation says it is a
+            # row: "struct" names the type and "fields" its members, and the
+            # frame then carries one group of cells per element.
+            rep = keys(request["repeated"],
+                       {"values", "count", "max_values", "struct", "fields"}
+                       if "struct" in request["repeated"]
+                       else {"values", "count", "max_values"},
                        f"{name}.request.repeated")
+            if "struct" in rep:
+                if not re.fullmatch(r"[a-z][a-z0-9_]*_t", str(rep["struct"])):
+                    fail("request-repeated",
+                         f"{name} repeated struct must be a _t type name")
+                if not isinstance(rep["fields"], list) or not rep["fields"]:
+                    fail("request-repeated",
+                         f"{name} repeats a row, so it declares that row's members")
+                for position, member in enumerate(rep["fields"]):
+                    shaped = keys(member, {"name", "type"},
+                                  f"{name}.request.repeated.fields[{position}]")
+                    if shaped["type"] not in FIELD_TYPES:
+                        fail("request-repeated",
+                             f"{name} repeated member {shaped['name']!r} type must be one "
+                             f"of {list(FIELD_TYPES)}")
+                    if not NAME.fullmatch(str(shaped["name"])):
+                        fail("request-repeated",
+                             f"{name} invalid repeated member {shaped['name']!r}")
             if "struct" in request:
                 fail("request-repeated", f"{name} cannot repeat and take a struct")
             if "c_params" not in operation:
@@ -441,7 +488,11 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                 if str(rep[role]) not in operation["c_params"]:
                     fail("request-repeated",
                          f"{name} repeated {role} {rep[role]!r} is not a C parameter")
-            integer(rep["max_values"], f"{name}.request.repeated.max_values", 1, 64)
+            # A repeated STRING is a search's terms and stays small. A repeated
+            # ROW is a bulk replace -- a provider's whole model list -- so it is
+            # bounded by what the frame can hold rather than by that habit.
+            integer(rep["max_values"], f"{name}.request.repeated.max_values",
+                    1, 1024 if "struct" in rep else 64)
 
         # A scoped operation must take its scoping key FIRST, because that key is
         # the boundary: DB1 rows belong to a conversation, session or repository,
@@ -491,7 +542,18 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # the rows, which one bounds them, and how many the stage will build.
             # The bound is the caller's, and it is also the allocation: a stage
             # that trusted it would let a caller ask for an arbitrary array.
+            # "allocate" says the callee owns the array as well as the rows:
+            # the parameter is T ** and the caller frees what comes back. The
+            # bound is still the caller's ceiling, not an allocation the wire
+            # may be talked into.
             allowed_list = {"out", "bound", "max_rows"}
+            if "allocate" in reply["list"]:
+                allowed_list = allowed_list | {"allocate"}
+            # "count" names a parameter that receives how many rows came back,
+            # for a domain that returns 0/-1 instead. The ceiling is then
+            # max_rows alone: there is no caller bound to clamp to.
+            if "count" in reply["list"]:
+                allowed_list = (allowed_list | {"count"}) - {"bound"}
             if "column" in reply["list"]:
                 allowed_list = allowed_list | {"column"}
             listed = keys(reply["list"], allowed_list, f"{name}.reply.list")
@@ -533,13 +595,26 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             params = list(operation["c_params"])
             if str(listed["out"]) not in params:
                 fail("reply-list", f"{name} list out {listed['out']!r} is not a C parameter")
-            if str(listed["bound"]) not in params:
+            if "count" in listed:
+                if not listed.get("allocate"):
+                    fail("reply-list",
+                         f"{name} reports its count through a parameter, which only a list "
+                         f"the callee allocates does: a caller-provided array is bounded by "
+                         f"the caller and the count is the return")
+                if str(listed["count"]) not in params:
+                    fail("reply-list",
+                         f"{name} list count {listed['count']!r} is not a C parameter")
+                if listed["count"] == listed["out"]:
+                    fail("reply-list", f"{name} list out and count must differ")
+            elif str(listed["bound"]) not in params:
                 fail("reply-list", f"{name} list bound {listed['bound']!r} is not a C parameter")
-            if listed["out"] == listed["bound"]:
+            elif listed["out"] == listed["bound"]:
                 fail("reply-list", f"{name} list out and bound must differ")
             # The remaining parameters map onto the request fields in order, so
             # the bound's position tells us which field must be the integer.
             excluded_names = {str(listed["out"])}
+            if "count" in listed:
+                excluded_names |= {str(listed["count"])}
             if "repeated" in request:
                 excluded_names |= {str(request["repeated"]["values"]),
                                    str(request["repeated"]["count"])}
@@ -548,11 +623,19 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                 fail("reply-list",
                      f"{name} has {len(inputs)} input parameters but {len(raw_fields)} "
                      f"request fields")
-            at = inputs.index(str(listed["bound"]))
-            if str(raw_fields[at]["type"]) != "int":
-                fail("reply-list",
-                     f"{name} list bound {listed['bound']!r} maps to request field "
-                     f"{raw_fields[at]['name']!r}, which must be an int")
+            if "count" not in listed:
+                at = inputs.index(str(listed["bound"]))
+                if str(raw_fields[at]["type"]) != "int":
+                    fail("reply-list",
+                         f"{name} list bound {listed['bound']!r} maps to request field "
+                         f"{raw_fields[at]['name']!r}, which must be an int")
+            if "allocate" in listed:
+                if listed["allocate"] is not True:
+                    fail("reply-list", f"{name} list allocate must be true when present")
+                if "column" in listed:
+                    fail("reply-list",
+                         f"{name} allocates its rows, so it repeats a struct: a column has "
+                         f"no row type to allocate")
             integer(listed["max_rows"], f"{name}.reply.list.max_rows", 1, 4096)
         reply_fields = reply["fields"]
         if not isinstance(reply_fields, list):
@@ -571,15 +654,19 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             allocated_member = isinstance(declared, dict) and "alloc" in declared
             if allocated_member:
                 allowed_field = allowed_field | {"alloc"}
-                if "struct" not in reply:
+                # A struct member the store allocated, or a loose value handed
+                # back through a char **. Both are memory the caller frees; the
+                # difference is only where it is delivered.
+                if "struct" not in reply and not scalar_reply:
                     fail("field-alloc",
-                         f"{name} reply field {declared['name']!r} allocates, which only a "
-                         f"struct member does")
+                         f"{name} reply field {declared['name']!r} allocates, which is a "
+                         f"struct member or a scalar and neither here")
                 if str(declared["type"]) != "text":
                     fail("field-alloc",
                          f"{name} reply field {declared['name']!r} allocates, so it "
                          f"carries text")
-                if str(declared["name"]) not in pointer_members(root, str(reply["struct"])):
+                if "struct" in reply and str(declared["name"]) not in pointer_members(
+                        root, str(reply["struct"])):
                     fail("field-alloc",
                          f"{name} reply field {declared['name']!r} allocates, but "
                          f"{reply['struct']} declares it inline: an inline array is already "
@@ -616,11 +703,15 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                     fail("reply-scalars",
                          f"{name} scalars carry numbers or text; {shape['name']!r} is "
                          f"{shape['type']!r}")
-                if (str(shape["type"]) == "text") != ("width" in shape):
+                if (str(shape["type"]) == "text") != ("width" in shape or "alloc" in shape):
                     fail("reply-scalars",
-                         f"{name} scalar {shape['name']!r} declares a width exactly when "
-                         f"it carries text: the stage cannot see the caller's buffer, so "
-                         f"the contract says how much it may produce")
+                         f"{name} scalar {shape['name']!r} declares a width or an alloc "
+                         f"exactly when it carries text: the stage cannot see the caller's "
+                         f"buffer, so the contract says how much it may produce")
+                if "width" in shape and "alloc" in shape:
+                    fail("reply-scalars",
+                         f"{name} scalar {shape['name']!r} is delivered one way: into the "
+                         f"caller's buffer, or as an allocation the caller frees")
                 if "width" in shape and not re.fullmatch(r"[A-Z][A-Z0-9_]*", str(shape["width"])):
                     fail("reply-scalars",
                          f"{name} scalar width must be a C identifier, not a literal: the "
@@ -672,7 +763,14 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                 fail("c-returns",
                      f"{name} hands back its return value, so its reply must declare "
                      f"exactly one of {list(wanted)}: its header returns {spelled}")
-        if operation.get("c_returns") == "text":
+        if operation.get("c_returns") == "text" and "scalars" in reply:
+            # A cached page is the document AND how old it is: the return is the
+            # first value, and the rest are ordinary out-parameters beside it.
+            if str(reply_fields[0]["type"]) != "text":
+                fail("c-returns",
+                     f"{name} returns a string, so the first value it declares is that "
+                     f"string; the ones after it are the out-parameters beside it")
+        elif operation.get("c_returns") == "text":
             # The reply is the return value, so there is exactly one of it and
             # its declared size is what the client allocates before it calls.
             if "struct" in reply or "list" in reply:
@@ -1365,11 +1463,19 @@ static int read_result(int status, const char *value_out)
         listed = reply.get("list")
         repeated = request.get("repeated")
         scalars = reply.get("scalars")
-        scalar_members = ([(str(f["name"]), str(f["type"])) for f in reply["fields"]]
+        beside_return = (operation.get("c_returns") == "text") and bool(reply.get("scalars"))
+        scalar_members = ([(str(f["name"]), str(f["type"]))
+                           for f in reply["fields"][1 if beside_return else 0:]]
                           if scalars else [])
+        scalar_alloc = ({str(f["name"]): int(f["alloc"]) for f in reply["fields"]
+                         if "alloc" in f} if scalars else {})
         returns_text = operation.get("c_returns") == "text"
         returns_id = operation.get("c_returns") == "int64"
-        if returns_text or returns_id:
+        returns_text_with_scalars = returns_text and bool(scalars)
+        if returns_text_with_scalars:
+            split = len(fields)
+            inputs, outputs = names[:split], names[split:]
+        elif returns_text or returns_id:
             inputs, outputs = list(names), []
         elif scalars:
             split = len(fields)
@@ -1379,9 +1485,12 @@ static int read_result(int status, const char *value_out)
             # domains put it first -- so the C order is read from c_params and
             # only the remaining parameters map onto the fields, in order.
             row_out = str(listed["out"])
-            bound = str(listed["bound"])
+            counted = str(listed["count"]) if "count" in listed else ""
+            # With no caller bound, the ceiling is the one the catalog declares
+            # -- the same number the stage refuses to exceed.
+            bound = str(listed["bound"]) if "bound" in listed else str(listed["max_rows"])
             column = listed.get("column")
-            excluded = {row_out}
+            excluded = {row_out} | ({counted} if counted else set())
             if repeated:
                 excluded |= {str(repeated["values"]), str(repeated["count"])}
             inputs = [p for p in names if p not in excluded]
@@ -1394,13 +1503,23 @@ static int read_result(int status, const char *value_out)
             inputs = [p for p in names if p != row_out]
             outputs = [row_out]
         else:
-            split = 1 if in_struct else len(fields)
+            lead = int(request["struct_from"]) if "struct_from" in request else 0
+            split = (lead + 1) if in_struct else len(fields)
             inputs, outputs = names[:split], names[split:]
 
         if in_struct:
-            # The struct is the argument; its members are the frame.
-            params = [f"const {in_struct} *{inputs[0]}"]
-            guards = [f"!{inputs[0]}"]
+            # The struct is the argument; its members are the frame. Anything
+            # before it is an ordinary argument that keeps its own type.
+            lead = int(request["struct_from"]) if "struct_from" in request else 0
+            params = [(f"int {p}" if t == "int"
+                       else f"int64_t {p}" if t == "int64"
+                       else f"double {p}" if t == "double"
+                       else f"const char *{p}")
+                      for p, t in zip(inputs[:lead], types[:lead])]
+            params.append(f"const {in_struct} *{inputs[lead]}")
+            guards = [f"!{p} || !{p}[0]" for p, t, need in
+                      zip(inputs[:lead], types[:lead], required[:lead]) if t == "text" and need]
+            guards.append(f"!{inputs[lead]}")
         else:
             # int64 is its own C type here. It only ever appeared as a struct
             # member before, where the struct's own declaration carried the
@@ -1418,7 +1537,9 @@ static int read_result(int status, const char *value_out)
         if repeated:
             # The array and its count are declared where c_params puts them.
             declared_rep = dict(zip(inputs, params))
-            declared_rep[str(repeated["values"])] = f"const char *const *{repeated['values']}"
+            declared_rep[str(repeated["values"])] = (
+                f"const {repeated['struct']} *{repeated['values']}" if "struct" in repeated
+                else f"const char *const *{repeated['values']}")
             declared_rep[str(repeated["count"])] = f"int {repeated['count']}"
             if listed:
                 declared_rep[row_out] = f"{out_struct} *{row_out}"
@@ -1427,21 +1548,36 @@ static int read_result(int status, const char *value_out)
                        f"{repeated['count']} > {repeated['max_values']}"]
             if listed:
                 guards += [f"!{row_out}", f"{bound} <= 0"]
-        elif returns_text or returns_id:
+        elif returns_text and not scalars:
             pass  # the value is the return; there is no out parameter
-        elif scalars:
-            # One parameter per numeric value, two per text one.
+        elif returns_id:
+            pass
+        elif scalars or returns_text_with_scalars:
+            # One parameter per numeric value, two per text one. The returned
+            # string is not among them: it is the return.
             position = 0
             for member, kind in scalar_members:
-                if kind == "text":
+                if kind == "text" and member in scalar_alloc:
+                    # The value is an allocation the caller frees, so there is
+                    # no capacity to pass: one parameter, one indirection more.
+                    params.append(f"char **{outputs[position]}")
+                    guards.append(f"!{outputs[position]}")
+                    position += 1
+                elif kind == "text":
                     buffer_name, cap_name = outputs[position], outputs[position + 1]
                     params.append(f"char *{buffer_name}")
                     params.append(f"size_t {cap_name}")
                     guards += [f"!{buffer_name}", f"{cap_name} == 0"]
                     position += 2
                 else:
+                    # The header's spelling, for the same reason an input takes
+                    # it: long long and int64_t are the same width and not the
+                    # same type, and declaring one where the header says the
+                    # other is a conflicting declaration.
                     ctype = {"int": "int", "int64": "int64_t", "double": "double"}[kind]
-                    params.append(f"{ctype} *{outputs[position]}")
+                    out_spelled = declared_parameters(
+                        root, str(operation.get("c_name", ""))).get(outputs[position])
+                    params.append(out_spelled or f"{ctype} *{outputs[position]}")
                     guards.append(f"!{outputs[position]}")
                     position += 1
         elif listed:
@@ -1455,9 +1591,13 @@ static int read_result(int status, const char *value_out)
                     f"char (*{row_out})[{column['width']}]" if str(column["kind"]) == "text"
                     else f"{'int64_t' if column['kind'] == 'int64' else 'int'} *{row_out}")
             else:
-                declared[row_out] = f"{out_struct} *{row_out}"
+                declared[row_out] = (f"{out_struct} **{row_out}" if listed.get("allocate")
+                                     else f"{out_struct} *{row_out}")
+            if counted:
+                declared[counted] = f"int *{counted}"
             params = [declared[p] for p in names]
-            guards += [f"!{row_out}", f"{bound} <= 0"]
+            guards += [f"!{row_out}"] + ([f"!{counted}"] if counted
+                                         else [f"{bound} <= 0"])
         elif out_struct and "out" in reply:
             declared_params = dict(zip(inputs, params))
             declared_params[str(reply["out"])] = f"{out_struct} *{reply['out']}"
@@ -1480,7 +1620,7 @@ static int read_result(int status, const char *value_out)
         if guards:
             body += [f"   if ({' || '.join(guards)})",
                      f"      return{' ' + empty if empty else ''};"]
-        if listed:
+        if listed and "bound" in listed:
             # Clamped rather than refused, because the domain clamps too: this
             # ceiling is the one the implementation already enforces, so a
             # caller asking for more has always been given fewer. Refusing here
@@ -1492,7 +1632,11 @@ static int read_result(int status, const char *value_out)
         # Integers travel as decimal text: the frame carries counted bytes, and a
         # separate numeric type on the wire would buy nothing a printf does not.
         carried = []
-        sources = ([f"{inputs[0]}->{f}" for f in fields] if in_struct else list(inputs))
+        if in_struct:
+            lead = int(request["struct_from"]) if "struct_from" in request else 0
+            sources = list(inputs[:lead]) + [f"{inputs[lead]}->{f}" for f in fields[lead:]]
+        else:
+            sources = list(inputs)
         # Only a pointer member can be NULL; an inline array always has an
         # address. None means "these are bare arguments", which always can be.
         member_pointers = pointer_members(root, in_struct) if in_struct else None
@@ -1519,20 +1663,53 @@ static int read_result(int status, const char *value_out)
             # by subtracting its own known arity from the frame's, so nothing
             # extra is sent to say how many there are.
             base = len(carried)
-            total = base + int(repeated["max_values"])
+            row_members = [(str(f["name"]), str(f["type"]))
+                           for f in repeated.get("fields", [])]
+            span = len(row_members) or 1
+            total = base + int(repeated["max_values"]) * span
             body.append(f"   const char *fields[{total}];")
             for index, value in enumerate(carried):
                 body.append(f"   fields[{index}] = {value};")
-            body.append(f"   for (int at = 0; at < {repeated['count']}; ++at)")
-            body.append(f"      fields[{base} + at] = {repeated['values']}[at] "
-                        f"? {repeated['values']}[at] : \"\";")
+            if row_members:
+                # One group of cells per element. The numeric members need
+                # somewhere to be rendered that outlives the loop, so they get
+                # one buffer per element rather than one reused buffer.
+                numeric_members = [i for i, (_, k) in enumerate(row_members) if k in NUMERIC]
+                if numeric_members:
+                    body.append(f"   char (*wire_rendered)[{NUMERIC_TEXT}] = "
+                                f"malloc((size_t){repeated['count']} * "
+                                f"{len(numeric_members)}u * sizeof *wire_rendered);")
+                    body.append("   if (!wire_rendered)")
+                    body.append("      return -1;")
+                body.append(f"   for (int at = 0; at < {repeated['count']}; ++at)")
+                body.append("   {")
+                slot = 0
+                for index, (member, kind) in enumerate(row_members):
+                    cell = f"{base} + at * {span} + {index}"
+                    if kind in NUMERIC:
+                        spec, cast = numeric_format(kind)
+                        rendered = f"wire_rendered[at * {len(numeric_members)}u + {slot}u]"
+                        body.append(f"      snprintf({rendered}, {NUMERIC_TEXT}, \"{spec}\", "
+                                    f"{cast}{repeated['values']}[at].{member});")
+                        body.append(f"      fields[{cell}] = {rendered};")
+                        slot += 1
+                    else:
+                        body.append(f"      fields[{cell}] = {repeated['values']}[at].{member};")
+                body.append("   }")
+            else:
+                body.append(f"   for (int at = 0; at < {repeated['count']}; ++at)")
+                body.append(f"      fields[{base} + at] = {repeated['values']}[at] "
+                            f"? {repeated['values']}[at] : \"\";")
         elif carried:
             body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
         else:
             # A zero-length array is not valid C; the frame carries no fields.
             body.append("   const char *const *fields = NULL;")
         op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
-        arity = (f"(uint32_t)({len(fields)} + {repeated['count']})" if repeated
+        repeated_span = len([f for f in repeated.get("fields", [])]) if repeated else 0
+        arity = ((f"(uint32_t)({len(fields)} + {repeated['count']} * {repeated_span})"
+                  if repeated_span
+                  else f"(uint32_t)({len(fields)} + {repeated['count']})") if repeated
                  else str(len(fields)))
         if returns_id:
             # The id IS the answer, so it crosses as a value and comes back as
@@ -1546,6 +1723,40 @@ static int read_result(int status, const char *value_out)
             body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
             body.append("      return -1;")
             body.append(f"   return {numeric_parse('int64', 'slot0')};")
+        elif returns_text_with_scalars:
+            cap = int(reply["fields"][0].get("alloc", reply["max_bytes"]))
+            body.append(f"   char *value = malloc({cap}u);")
+            body.append("   if (!value)")
+            body.append("      return NULL;")
+            body.append("   value[0] = '\\0';")
+            slots, caps, converts, position = ["value"], [f"{cap}u"], [], 0
+            for index, (member, kind) in enumerate(scalar_members, start=1):
+                if kind == "text":
+                    slots.append(outputs[position])
+                    caps.append(outputs[position + 1])
+                    position += 2
+                else:
+                    body.append(f"   char slot{index}[{NUMERIC_TEXT}];")
+                    slots.append(f"slot{index}")
+                    caps.append(f"sizeof slot{index}")
+                    converts.append((outputs[position], kind, f"slot{index}"))
+                    position += 1
+            body.append(f"   char *const values[] = {{{', '.join(slots)}}};")
+            body.append(f"   const size_t caps[] = {{{', '.join(caps)}}};")
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, "
+                        f"caps, {len(slots)}, NULL);")
+            # The document is the answer; an empty one is the miss the domain
+            # signalled with NULL, and the values beside it are only meaningful
+            # when there was something to be beside.
+            body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])")
+            body.append("   {")
+            body.append("      free(value);")
+            body.append("      return NULL;")
+            body.append("   }")
+            for out_name, kind, slot_name in converts:
+                body.append(f"   *{out_name} = {numeric_parse(kind, slot_name)};")
+            body.append("   char *shrunk = realloc(value, strlen(value) + 1u);")
+            body.append("   return shrunk ? shrunk : value;")
         elif scalars:
             # Each value arrives as decimal text and converts into the caller's
             # own variable, and only once the whole reply is known good: a
@@ -1555,8 +1766,26 @@ static int read_result(int status, const char *value_out)
             # numeric one lands in a slot and converts. Both are filled only
             # once the whole reply is known good.
             slots, caps, converts, position = [], [], [], 0
+            handed = []
             for index, (member, kind) in enumerate(scalar_members):
-                if kind == "text":
+                if kind == "text" and member in scalar_alloc:
+                    # Allocated here at the declared ceiling, shrunk to what
+                    # arrived, and handed over only once the whole reply is
+                    # good -- so a failure leaves the caller's pointer as it
+                    # found it rather than owning a half-filled string.
+                    ceiling = scalar_alloc[member]
+                    body.append(f"   char *held{index} = malloc({ceiling}u);")
+                    body.append(f"   if (!held{index})")
+                    body.append("   {")
+                    body += [f"      free(held{i});" for i, _ in handed]
+                    body.append("      return -1;")
+                    body.append("   }")
+                    body.append(f"   held{index}[0] = '\\0';")
+                    slots.append(f"held{index}")
+                    caps.append(f"{ceiling}u")
+                    handed.append((index, outputs[position]))
+                    position += 1
+                elif kind == "text":
                     slots.append(outputs[position])
                     caps.append(outputs[position + 1])
                     position += 2
@@ -1570,11 +1799,25 @@ static int read_result(int status, const char *value_out)
             body.append(f"   const size_t caps[] = {{{', '.join(caps)}}};")
             body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         f"{len(scalar_members)}, NULL);")
+            found = operation.get("c_returns") == "found"
             body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
-            body.append("      return -1;")
+            body.append("   {")
+            body += [f"      free(held{i});" for i, _ in handed]
+            if found:
+                # Nothing there and broken are different answers, and a caller
+                # polling for a live turn treats them differently.
+                body.append("      return wire_status == (int)AIMEE_DB1_STATUS_MISSING "
+                            "? 0 : -1;")
+            else:
+                body.append("      return -1;")
+            body.append("   }")
             for out_name, kind, slot_name in converts:
                 body.append(f"   *{out_name} = {numeric_parse(kind, slot_name)};")
-            body.append("   return 0;")
+            for index, out_name in handed:
+                body.append(f"   char *shrunk{index} = realloc(held{index}, "
+                            f"strlen(held{index}) + 1u);")
+                body.append(f"   *{out_name} = shrunk{index} ? shrunk{index} : held{index};")
+            body.append("   return 1;" if found else "   return 0;")
         elif returns_text:
             cap = int(reply["max_bytes"])
             # Allocated at the declared maximum because the size is not known
@@ -1602,6 +1845,17 @@ static int read_result(int status, const char *value_out)
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             width = len(members)
             numeric = [i for i, (_, k) in enumerate(members) if k in NUMERIC]
+            allocates = bool(listed.get("allocate"))
+            if allocates:
+                # The callee owns the array as well as the rows. It is filled
+                # into storage this side allocated and handed over only once
+                # the whole reply is known good: a caller given a half-filled
+                # array has no way to tell which half.
+                body.append(f"   {out_struct} *wire_held = calloc((size_t){bound}, "
+                            "sizeof *wire_held);")
+                body.append("   if (!wire_held)")
+                body.append("      return -1;")
+                row_out = "wire_held"
             body.append(f"   char **wire_values = malloc((size_t){bound} * {width}u * sizeof *wire_values);")
             body.append(f"   size_t *wire_caps = malloc((size_t){bound} * {width}u * sizeof *wire_caps);")
             if numeric:
@@ -1613,6 +1867,8 @@ static int read_result(int status, const char *value_out)
             body.append("   {")
             for item in owned.split(", "):
                 body.append(f"      free({item});")
+            if allocates:
+                body.append("      free(wire_held);")
             body.append("      return -1;")
             body.append("   }")
             row_allocated = {str(f["name"]): int(f["alloc"])
@@ -1647,6 +1903,7 @@ static int read_result(int status, const char *value_out)
                     body.append("         free(wire_values);")
                     body.append("         free(wire_caps);")
                     body += ["         free(wire_scratch);"] if numeric else []
+                    body += ["         free(wire_held);"] if allocates else []
                     body.append("         return -1;")
                     body.append("      }")
                     body.append(f"      {cell}[0] = '\\0';")
@@ -1677,6 +1934,8 @@ static int read_result(int status, const char *value_out)
                     body.append(f"         free({row_out}[wire_done].{other});")
                     body.append(f"         {row_out}[wire_done].{other} = NULL;")
                 body.append("      }")
+            if allocates:
+                body.append("      free(wire_held);")
             body.append("      return -1;")
             body.append("   }")
             body.append(f"   int wire_rows = (int)(wire_filled / {width}u);")
@@ -1711,7 +1970,15 @@ static int read_result(int status, const char *value_out)
                         slot += 1
                 body.append("   }")
                 body.append("   free(wire_scratch);")
-            body.append("   return wire_rows;")
+            if allocates:
+                body.append(f"   *{str(listed['out'])} = wire_held;")
+            if counted:
+                # The count is the caller's out-parameter here, so the return
+                # goes back to saying only whether the call happened.
+                body.append(f"   *{counted} = wire_rows;")
+                body.append("   return 0;")
+            else:
+                body.append("   return wire_rows;")
         elif out_struct:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             target = outputs[0]
@@ -2133,8 +2400,28 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             # Rebuild the row the caller flattened, then hand the domain the
             # struct it has always taken.
             in_struct_pointers = pointer_members(root, in_struct)
+            # Anything before the struct's members is an ordinary argument that
+            # is decoded like any other; the members start where the operation
+            # says they do.
+            lead = int(request["struct_from"]) if "struct_from" in request else 0
+            for position, kind in enumerate(types[:lead]):
+                if kind in NUMERIC:
+                    conv = ("parse_int" if kind == "int"
+                            else "parse_double" if kind == "double" else "parse_int64")
+                    ctype = ("int" if kind == "int"
+                             else "double" if kind == "double" else "int64_t")
+                    parse.append(f"      {ctype} parsed{position};\n"
+                                 f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
+                                 f"      {{\n         free(scratch);\n"
+                                 f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+                                 f"      }}\n")
+                    args.append(f"parsed{position}")
+                else:
+                    args.append(f"field[{position}]")
             parse.append(f"      {in_struct} row;\n      memset(&row, 0, sizeof row);\n")
             for position, (member, kind) in enumerate(zip(names, types)):
+                if position < lead:
+                    continue
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind == "double" else "parse_int64")
@@ -2180,6 +2467,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                         "(long long)produced);\n")
             tail.append("      row_slots[0] = row_text[0];\n")
             tail.append("      rows = row_slots;\n      row_count = 1u;\n")
+        beside = 1 if (returns_text and scalars) else 0
         if scalars:
             # The domain writes into locals; the reply is those locals rendered.
             # A text value gets a stage-side buffer: the caller's capacity is
@@ -2187,9 +2475,14 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             # declares it can produce.
             # They live at function scope for the same reason a row's does: the
             # values array escapes the case and write_reply reads it afterwards.
-            members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
-            widths = [str(reply["fields"][i]["width"])
-                      for i, (_, kind) in enumerate(members) if kind == "text"]
+            # The document, when there is one, is the first field and not a
+            # value the domain writes into: everything here indexes past it.
+            scalar_fields = reply["fields"][1 if (returns_text and scalars) else 0:]
+            members = [(str(f["name"]), str(f["type"])) for f in scalar_fields]
+            stage_alloc = {i for i, f in enumerate(scalar_fields) if "alloc" in f}
+            widths = [str(scalar_fields[i]["width"])
+                      for i, (_, kind) in enumerate(members)
+                      if kind == "text" and i not in stage_alloc]
             if widths:
                 parse.append(f"      scalar_owned = calloc(1u, {' + '.join(widths)});\n"
                              "      if (!scalar_owned)\n      {\n"
@@ -2197,28 +2490,53 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                              "         return AIMEE_MODULE_STATUS_INTERNAL;\n      }\n")
                 offset = ""
                 for index, (_, kind) in enumerate(members):
-                    if kind != "text":
+                    if kind != "text" or index in stage_alloc:
                         continue
-                    width = str(reply["fields"][index]["width"])
+                    width = str(scalar_fields[index]["width"])
                     parse.append(f"      char *scalar{index} = scalar_owned{offset};\n")
                     offset += f" + {width}"
             for index, (member, kind) in enumerate(members):
-                if kind == "text":
-                    width = str(reply["fields"][index]["width"])
+                if index in stage_alloc:
+                    # The domain allocates this one. The stage owns it from the
+                    # moment it lands: written out with the rest of the reply,
+                    # then given back after write_reply has read it.
+                    parse.append(f"      char *scalar{index} = NULL;\n")
+                    args.append(f"&scalar{index}")
+                elif kind == "text":
+                    width = str(scalar_fields[index]["width"])
                     args += [f"scalar{index}", f"(size_t){width}"]
                 else:
                     ctype = {"int": "int", "int64": "int64_t", "double": "double"}[kind]
+                    spelled_out = declared_parameters(
+                        root, str(operation.get("c_name", ""))).get(
+                            str(operation["c_params"][len(request["fields"]) + index])
+                            if "c_params" in operation else "")
+                    if spelled_out:
+                        ctype = spelled_out.rsplit("*", 1)[0].strip()
                     parse.append(f"      {ctype} scalar{index} = 0;\n")
                     args.append(f"&scalar{index}")
             for index, (member, kind) in enumerate(members):
-                if kind == "text":
-                    tail.append(f"      row_slots[{index}] = scalar{index};\n")
+                if index in stage_alloc:
+                    tail.append(f"      member_owned[{sorted(stage_alloc).index(index)}] = "
+                                f"scalar{index};\n")
+                    tail.append(f"      row_slots[{index + beside}] = scalar{index} "
+                                f"? scalar{index} : \"\";\n")
+                elif kind == "text":
+                    tail.append(f"      row_slots[{index + beside}] = scalar{index};\n")
                 else:
                     spec, cast = numeric_format(kind)
                     tail.append(f"      snprintf(row_text[{index}], sizeof row_text[{index}], "
                                 f"\"{spec}\", {cast}scalar{index});\n")
-                    tail.append(f"      row_slots[{index}] = row_text[{index}];\n")
-            tail.append(f"      rows = row_slots;\n      row_count = {len(members)}u;\n")
+                    tail.append(f"      row_slots[{index + beside}] = row_text[{index}];\n")
+            if beside:
+                tail.append("      row_slots[0] = produced ? produced : \"\";\n")
+                # rc is 1 when the document was there, so the reply is read the
+                # way a found/nothing/failed one is. Without this the row-shaped
+                # default reads "found" as a failure -- every hit would come
+                # back as a miss.
+                tail.append("      found = 1;\n")
+            tail.append(f"      rows = row_slots;\n"
+                        f"      row_count = {len(members) + beside}u;\n")
         if returns_text:
             # The domain hands back memory. The stage owns it from here: copy it
             # into the reply and free it, and refuse rather than truncate when it
@@ -2230,31 +2548,45 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             width = len(members)
             numeric = [i for i, (_, k) in enumerate(members) if k in NUMERIC]
             row_out = str(listed["out"])
-            bound = str(listed["bound"])
+            stage_counted = str(listed["count"]) if "count" in listed else ""
+            bound = str(listed["bound"]) if "bound" in listed else ""
             column = listed.get("column")
-            excluded_params = {row_out}
+            excluded_params = {row_out} | ({stage_counted} if stage_counted else set())
             if repeated:
                 excluded_params |= {str(repeated["values"]), str(repeated["count"])}
             inputs = [p for p in operation["c_params"] if p not in excluded_params]
-            at = inputs.index(bound)
-            held = args[at]
-            # The bound is the allocation, so it is checked against the ceiling
-            # the catalog declares before anything is allocated from it. A stage
-            # that took the caller's word would size an array from the wire.
-            parse.append(f"      if ({held} <= 0 || {held} > {listed['max_rows']})\n"
-                         f"      {{\n         free(scratch);\n"
-                         f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n      }}\n")
+            if bound:
+                at = inputs.index(bound)
+                held = args[at]
+                # The bound is the allocation, so it is checked against the
+                # ceiling the catalog declares before anything is allocated
+                # from it. A stage that took the caller's word would size an
+                # array from the wire.
+                parse.append(f"      if ({held} <= 0 || {held} > {listed['max_rows']})\n"
+                             f"      {{\n         free(scratch);\n"
+                             f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n      }}\n")
+            else:
+                # No caller bound crossed, so the ceiling is the catalog's own
+                # and the stage says so out loud rather than trusting a count
+                # it did not receive.
+                held = str(listed["max_rows"])
             row_decl = (
                 (f"char (*found)[{column['width']}]" if str(column["kind"]) == "text"
                  else f"{'int64_t' if column['kind'] == 'int64' else 'int'} *found")
                 if column else f"{out_struct} *found")
-            parse.append(f"      {row_decl} = calloc((size_t){held}, sizeof *found);\n"
-                         f"      if (!found)\n"
-                         f"      {{\n         free(scratch);\n"
-                         f"         return AIMEE_MODULE_STATUS_INTERNAL;\n      }}\n"
-                         f"      domain_rows = found;\n")
+            if listed.get("allocate"):
+                parse.append(f"      {row_decl} = NULL;\n")
+            else:
+                parse.append(f"      {row_decl} = calloc((size_t){held}, sizeof *found);\n"
+                             f"      if (!found)\n"
+                             f"      {{\n         free(scratch);\n"
+                             f"         return AIMEE_MODULE_STATUS_INTERNAL;\n      }}\n"
+                             f"      domain_rows = found;\n")
             ordered = dict(zip(inputs, args))
-            ordered[row_out] = "found"
+            ordered[row_out] = "&found" if listed.get("allocate") else "found"
+            if stage_counted:
+                parse.append("      int produced_rows = 0;\n")
+                ordered[stage_counted] = "&produced_rows"
             if repeated:
                 # field[] is already const char *[], contiguous and decoded, so
                 # the domain takes a pointer into it rather than a copy. It
@@ -2283,6 +2615,13 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                        f"{len(numeric)}u * sizeof *numbers);\n" if numeric else "")
             guard = "!cells" + (" || !numbers" if numeric else "")
             release = "            free(cells);\n" + ("            free(numbers);\n" if numeric else "")
+            if listed.get("allocate"):
+                tail.append("      domain_rows = found;\n")
+            if stage_counted:
+                # The domain reported how many through a parameter and answered
+                # only whether it worked. The frame carries rows, so the count
+                # becomes the answer here and a failure stays a failure.
+                tail.append("      rc = (rc == 0) ? produced_rows : -1;\n")
             tail.append(
                 "      if (rc > 0)\n"
                 "      {\n"
@@ -2375,11 +2714,56 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 tail.append("      row_slots[1] = row_text[0];\n")
                 tail.append("      rows = row_slots;\n      row_count = 2u;\n")
                 tail.append("      rc = 0;\n")
+        rep_span = len(repeated.get("fields", [])) if repeated else 0
+        if repeated and rep_span and not listed:
+            # Rebuild the rows the client flattened, hand the domain the array
+            # it has always taken, and give it back afterwards.
+            base = len(request["fields"])
+            row_type = str(repeated["struct"])
+            parse.append(f"      int repeated_rows = (int)((count - {base}u) / {rep_span}u);\n"
+                         f"      {row_type} *repeated_held = "
+                         f"calloc((size_t)repeated_rows + 1u, sizeof *repeated_held);\n"
+                         f"      if (!repeated_held)\n      {{\n         free(scratch);\n"
+                         f"         return AIMEE_MODULE_STATUS_INTERNAL;\n      }}\n"
+                         f"      domain_rows = repeated_held;\n"
+                         f"      for (int at = 0; at < repeated_rows; ++at)\n      {{\n")
+            for index, member in enumerate(repeated["fields"]):
+                cell = f"field[{base} + at * {rep_span} + {index}]"
+                mname, mkind = str(member["name"]), str(member["type"])
+                if mkind in NUMERIC:
+                    conv = ("parse_int" if mkind == "int"
+                            else "parse_double" if mkind == "double" else "parse_int64")
+                    ctype = ("int" if mkind == "int"
+                             else "double" if mkind == "double" else "int64_t")
+                    parse.append(f"         {ctype} member_{index} = 0;\n")
+                    parse.append(f"         if ({conv}({cell}, &member_{index}) != 0)\n"
+                                 f"         {{\n            free(scratch);\n"
+                                 f"            return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+                                 f"         }}\n")
+                    parse.append(f"         repeated_held[at].{mname} = member_{index};\n")
+                else:
+                    parse.append(f"         snprintf(repeated_held[at].{mname}, "
+                                 f"sizeof repeated_held[at].{mname}, \"%s\", {cell});\n")
+            parse.append("      }\n")
+            ordered = dict(zip([p for p in operation["c_params"]
+                                if p not in {str(repeated["values"]), str(repeated["count"])}],
+                               args))
+            ordered[str(repeated["values"])] = "repeated_held"
+            ordered[str(repeated["count"])] = "repeated_rows"
+            args = [ordered[p] for p in operation["c_params"]]
         # Braced only when a parsed integer needs scoping: an empty block around
         # every other case would be noise, and would move files that have not
         # changed.
-        check = (f"      if (count < {arity}u || count > {arity}u + {repeated['max_values']}u)\n"
+        # The ceiling counts CELLS, and a repeated row is several cells each.
+        ceiling = int(repeated["max_values"]) * (rep_span or 1) if repeated else 0
+        check = (f"      if (count < {arity}u || count > {arity}u + {ceiling}u)\n"
                  if repeated else f"      if (count != {arity}u)\n")
+        if rep_span:
+            # A frame that is not a whole number of rows is not this
+            # operation's frame, whatever else it satisfies.
+            check += (f"      {{\n         free(scratch);\n"
+                      f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n      }}\n"
+                      f"      if ((count - {arity}u) % {rep_span}u != 0u)\n")
         body = (check
                 + f"      {{\n"
                 f"         free(scratch);\n"
@@ -2474,7 +2858,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
     # A row whose members the domain allocated: they are written out and then
     # returned, after write_reply has copied what it needs.
     owned = max((sum(1 for f in o["reply"]["fields"] if "alloc" in f)
-                 for o in operations), default=0)
+                 for o in operations if "list" not in o["reply"]), default=0)
     member_pool = ("   /* Members the domain allocated with the row. They are released\n"
                    "      after the reply is written, not before: write_reply reads them. */\n"
                    f"   char *member_owned[{owned}] = {{0}};\n") if owned else ""

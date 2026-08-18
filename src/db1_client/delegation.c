@@ -457,7 +457,9 @@ int db1_delegate_reservation_get(const char *execution_key, int *out_job_id, cha
    const size_t caps[] = {sizeof slot0, participant_cap};
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATE_RESERVATION_GET, fields, 1, values, caps, 2, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    *out_job_id = (int)strtol(slot0, NULL, 10);
    return 0;
 }
@@ -472,7 +474,9 @@ int db1_delegate_reservation_adopt_sole_legacy(const char *execution_key, const 
    const size_t caps[] = {sizeof slot0, participant_cap};
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATE_RESERVATION_ADOPT, fields, 2, values, caps, 2, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    *out_job_id = (int)strtol(slot0, NULL, 10);
    return 0;
 }
@@ -530,7 +534,9 @@ int db1_delegation_checkpoint_load(const char *delegation_id, char *steps_out, s
    const size_t caps[] = {steps_cap, error_cap, output_cap};
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_CHECKPOINT_LOAD, fields, 1, values, caps, 3, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    return 0;
 }
 

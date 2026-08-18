@@ -40,6 +40,12 @@
 #include "agent_jobs.h"
 #include "delegate_reservation.h"
 #include "delegations.h"
+#include "primary_sessions.h"
+#include "server_sessions.h"
+#include "webchat_live.h"
+#include "model_catalog.h"
+#include "web_page_cache.h"
+#include "runtime_state.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -68,11 +74,20 @@ static void write_grant(const char *policy_dir, const char *executable)
    /* Every declared stage, not a convenient subset: an ungranted stage and an
     * unserved one are indistinguishable to a caller, so granting only what this
     * test happens to call would hide a stage that never registered. */
-   fprintf(file,
-           "version=1\nprincipal_class=1\nprincipal_ref=30\nuid=self\n"
-           "executable=%s\nserve=%u,%u,%u,%u,%u\n",
-           executable, AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
-           AIMEE_DB1_EVENT_CONVERSATION, AIMEE_DB1_EVENT_AGENT_WORK, AIMEE_DB1_EVENT_DELEGATION);
+   /* Built from a list rather than a format string with one %u per stage: the
+    * two drift the moment a stage is added, and the failure that produces is
+    * "the module never registered", which points at the module. */
+   static const unsigned served[] = {
+       AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
+       AIMEE_DB1_EVENT_CONVERSATION,     AIMEE_DB1_EVENT_AGENT_WORK,
+       AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
+       AIMEE_DB1_EVENT_RUNTIME,
+   };
+   fprintf(file, "version=1\nprincipal_class=1\nprincipal_ref=30\nuid=self\nexecutable=%s\nserve=",
+           executable);
+   for (size_t i = 0; i < sizeof served / sizeof served[0]; i++)
+      fprintf(file, "%s%u", i ? "," : "", served[i]);
+   fprintf(file, "\n");
    must(fclose(file) == 0, "write the grant manifest");
 }
 
@@ -102,6 +117,8 @@ static void start_module(const char *executable, const char *socket_path, const 
          reads as the module answering "failed" to a call it never received. */
       if (obs_bus_module_available(AIMEE_DB1_EVENT_AGENT_WORK) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_DELEGATION) &&
+          obs_bus_module_available(AIMEE_DB1_EVENT_SESSIONS) &&
+          obs_bus_module_available(AIMEE_DB1_EVENT_RUNTIME) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_CONVERSATION) &&
           obs_bus_module_available(AIMEE_DB1_EVENT_GIT_OWNERSHIP))
          return;
@@ -492,6 +509,112 @@ static void test_a_job_row_carries_what_the_store_allocated(void)
    printf("  PASS: a job row carries what the store allocated\n");
 }
 
+static void test_the_callee_allocates_what_the_caller_frees(void)
+{
+   must(db1_server_session_create("sess-a", "cli", "someone") == 0, "create a session row");
+   must(db1_server_session_set_outcome("sess-a", "done") == 0, "record its outcome");
+
+   db1_server_session_t row;
+   must(db1_server_session_get("sess-a", &row) == 0, "read the session back");
+   must(strcmp(row.outcome, "done") == 0, "the outcome crossed");
+
+   must(db1_server_session_count(NULL) == 1, "the count is a count, not a status");
+
+   /* The array AND the rows are the callee's: the caller frees both, with the
+      call it always used, and the memory now comes from this side of the bus. */
+   must(db1_primary_session_save("sess-a", "agent-1", "anthropic", "[{\"role\":\"user\"}]") == 0,
+        "save a primary session");
+   db1_primary_session_row_t *rows = NULL;
+   int listed = db1_primary_session_alloc_recent(&rows, 8);
+   must(listed == 1, "one row came back");
+   must(rows != NULL, "and the array it was allocated in");
+   must(strcmp(rows[0].session_id, "sess-a") == 0, "the row is the one just saved");
+   must(rows[0].messages_json && strcmp(rows[0].messages_json, "[{\"role\":\"user\"}]") == 0,
+        "the allocated member crossed whole");
+   db1_primary_session_rows_free(rows, listed);
+
+   /* Loose strings the callee allocates, handed back through char **. */
+   must(db1_webchat_live_set("sess-a", "turn-7", "hello there", "streaming") == 0,
+        "set a live turn");
+   char *turn_id = NULL, *text = NULL, *status = NULL;
+   long long rev = 0;
+   must(db1_webchat_live_get("sess-a", 0, &turn_id, &text, &status, &rev) == 1,
+        "read the live turn");
+   must(turn_id && strcmp(turn_id, "turn-7") == 0, "the first allocated string is its own value");
+   must(text && strcmp(text, "hello there") == 0, "and the second");
+   must(status && strcmp(status, "streaming") == 0, "and the third");
+   must(rev > 0, "the revision came with them");
+   free(turn_id);
+   free(text);
+   free(status);
+
+   /* Nothing newer than the revision just read is nothing there, not broken. */
+   char *again = NULL, *more = NULL, *state = NULL;
+   long long next = 0;
+   must(db1_webchat_live_get("sess-a", rev, &again, &more, &state, &next) == 0,
+        "a poll with nothing newer finds nothing rather than failing");
+   free(again);
+   free(more);
+   free(state);
+
+   printf("  PASS: the callee allocates what the caller frees\n");
+}
+
+static void test_a_bulk_replace_and_what_it_reads_back(void)
+{
+   must(db1_runtime_state_set("boot-count", "3") == 0, "set a runtime value");
+   char value[64] = "";
+   must(db1_runtime_state_get("boot-count", value, sizeof value) == 0,
+        "read it back, answering 0 as it always did");
+   must(strcmp(value, "3") == 0, "the value crossed");
+
+   /* An array of rows going IN: the frame carries one group of cells per
+      model, and a frame that is not a whole number of rows is refused. */
+   provider_model_t models[3];
+   memset(models, 0, sizeof models);
+   for (int i = 0; i < 3; i++)
+   {
+      snprintf(models[i].id, sizeof models[i].id, "model-%d", i);
+      snprintf(models[i].display_name, sizeof models[i].display_name, "Model %d", i);
+      models[i].context_window = 1000 * (i + 1);
+      models[i].max_output = 100 * (i + 1);
+      models[i].deprecated = (i == 2);
+   }
+   must(db1_model_catalog_replace("anthropic", models, 3) == 0, "replace the catalogue");
+   must(db1_model_catalog_is_fresh("anthropic", 3600) == 1, "and it is fresh");
+
+   /* An array of rows coming BACK, allocated by the callee, with the count
+      through a parameter rather than the return. */
+   provider_model_t *back = NULL;
+   int n = -1;
+   must(db1_model_catalog_get("anthropic", &back, &n) == 0, "read the catalogue back");
+   must(n == 3, "all three rows came back");
+   must(back != NULL, "in an array this side allocated");
+   must(strcmp(back[0].id, "model-0") == 0, "the first row is its own");
+   must(back[1].context_window == 2000, "a numeric member survived the crossing");
+   must(strcmp(back[2].id, "model-2") == 0 && back[2].deprecated == 1,
+        "and the last row did not run into the one before it");
+   db1_model_catalog_free(back, n);
+
+   /* A returned document with values beside it: the body is the answer, and the
+      age and pinned address are ordinary out-parameters. */
+   must(db1_web_page_put("https://example.invalid/x", "<html>hi</html>", "203.0.113.7") == 0,
+        "cache a page");
+   long age = -1;
+   char pinned[DB1_WEB_PAGE_ADDR_LEN] = "";
+   char *body = db1_web_page_get("https://example.invalid/x", &age, pinned, sizeof pinned);
+   must(body != NULL, "the page came back");
+   must(strcmp(body, "<html>hi</html>") == 0, "and it is the document that was stored");
+   must(age >= 0, "the age came with it");
+   must(strcmp(pinned, "203.0.113.7") == 0, "and so did the pinned address");
+   free(body);
+
+   must(db1_web_page_get("https://example.invalid/nothing", &age, pinned, sizeof pinned) == NULL,
+        "a page nobody cached is nothing rather than an empty page");
+
+   printf("  PASS: a bulk replace and what it reads back\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -532,6 +655,8 @@ int main(int argc, char **argv)
    test_coordination_claims_and_dispatches();
    test_a_cron_job_carries_its_array_member();
    test_a_job_row_carries_what_the_store_allocated();
+   test_the_callee_allocates_what_the_caller_frees();
+   test_a_bulk_replace_and_what_it_reads_back();
 
    stop_module();
    obs_bus_stop();
