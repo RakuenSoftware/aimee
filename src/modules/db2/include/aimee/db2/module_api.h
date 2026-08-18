@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "6d79ba454b8de9de63c152ffa0c8281014a11f70d8a5909a9596e9339fb59f49"
+#define AIMEE_DB2_CONTRACT_SHA256 "dfee7146af425c3ec78575c9917b448c4bb981a71e942d21b14215446acac55e"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -342,6 +342,14 @@
 #define AIMEE_DB2_DEMOTE_ID_COUNT_MAX                     1u
 #define AIMEE_DB2_DEMOTE_ID_MULTIPLIER_BITS               4606281698874543309ull
 #define AIMEE_DB2_DEMOTE_ID_MINIMUM_CONFIDENCE_BITS       4599075939470750515ull
+#define AIMEE_DB2_EVENT_HAS_WORKSPACE_TAG                 AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HAS_WORKSPACE_TAG                 AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG             26u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN           32u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN          28u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_ERROR_LEN             24u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX         9223372036854775807ull
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_MAX                   1u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2255,6 +2263,74 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_has_workspace_tag_request_encode(uint64_t memory_id,
+                                                            uint8_t *output, size_t capacity)
+{
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG, 0u, 8u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}
+
+static inline int aimee_db2_has_workspace_tag_request_decode(const uint8_t *input,
+                                                             size_t input_len,
+                                                             uint64_t *memory_id)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_has_workspace_tag_reply_encode(uint32_t tagged, uint8_t *output,
+                                                           size_t capacity,
+                                                           uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || tagged > AIMEE_DB2_HAS_WORKSPACE_TAG_MAX ||
+       capacity < AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, tagged);
+   *output_len = AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_has_workspace_tag_reply_decode(const uint8_t *input,
+                                                           size_t input_len, uint32_t *tagged)
+{
+   if (tagged)
+      *tagged = 0u;
+   if (!tagged)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_HAS_WORKSPACE_TAG_MAX)
+      return -1;
+   *tagged = decoded;
    return 0;
 }
 

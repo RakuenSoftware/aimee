@@ -1314,9 +1314,38 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 1}):
                 fail("demote-id-reply",
                      "reply must contain the single-row demotion count")
+        elif key == ("memory", 26) and name == "has_workspace_tag" and \
+                operation["wire_format"] == "db2-envelope-u64-u32-v1":
+            # A pure existence probe: the caller names the memory and learns
+            # only whether any attribution row exists, never which workspace.
+            if operation["c_symbols"] != ["db2_memory_has_any_workspace_tag"]:
+                fail("operation-c-symbols",
+                     "has_workspace_tag C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "has_workspace_tag results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "field"},
+                            "has_workspace_tag.request")
+            request_field = _keys(request["field"],
+                                  {"name", "type", "minimum", "maximum"},
+                                  "has_workspace_tag.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                      "maximum": 0x7fffffffffffffff}):
+                fail("has-workspace-tag-request",
+                     "request must name one positive memory and carry nothing else")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "has_workspace_tag.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "has_workspace_tag.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "tagged", "type": "u32", "minimum": 0, "maximum": 1}):
+                fail("has-workspace-tag-reply",
+                     "reply must contain one Boolean attribution flag")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 35 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 36 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1327,9 +1356,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "health_record", "health_retention", "health_counters", "stats_counts",
             "expire", "demote", "promote_stable", "reclassify_directives",
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
-            "demote_id"]:
+            "demote_id", "has_workspace_tag"]:
         fail("unsupported-operation",
-             "the partial generator requires the thirty-five supported operations exactly once")
+             "the partial generator requires the thirty-six supported operations exactly once")
     return catalog
 
 
@@ -1488,6 +1517,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     prune_orphaned_l0 = catalog["operations"][32]
     lifecycle_sweep_expired = catalog["operations"][33]
     demote_id = catalog["operations"][34]
+    has_workspace_tag = catalog["operations"][35]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1670,6 +1700,12 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     demote_id_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(demote_id["id"]), 0, _put_u32(1),
+    )
+    has_workspace_tag_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(has_workspace_tag["id"]), 0, _put_u64(42),
+    )
+    has_workspace_tag_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(has_workspace_tag["id"]), 0, _put_u32(1),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -3407,6 +3443,46 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (demote_id_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": has_workspace_tag["family"],
+            "id": has_workspace_tag["id"],
+            "name": has_workspace_tag["name"],
+            "request": {
+                "positive": has_workspace_tag_request.hex(),
+                "memory_id": 42,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(has_workspace_tag_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(has_workspace_tag_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(has_workspace_tag["id"]), 0,
+                               _put_u64(0)).hex()},
+                    {"mutation": "memory_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(has_workspace_tag["id"]), 0,
+                               _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": has_workspace_tag_request[:-1].hex()},
+                    {"mutation": "long", "hex": (has_workspace_tag_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "tagged": 1, "hex": has_workspace_tag_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(has_workspace_tag_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(has_workspace_tag_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(has_workspace_tag["id"]), 0, b"").hex()},
+                    {"mutation": "flag_too_large", "hex":
+                     (has_workspace_tag_ok[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex": has_workspace_tag_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (has_workspace_tag_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -3454,6 +3530,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     prune_orphaned_l0 = catalog["operations"][32]
     lifecycle_sweep_expired = catalog["operations"][33]
     demote_id = catalog["operations"][34]
+    has_workspace_tag = catalog["operations"][35]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -3952,6 +4029,19 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{demote_id['request']['policy']['confidence_multiplier_binary64_bits']}ull"),
         ("AIMEE_DB2_DEMOTE_ID_MINIMUM_CONFIDENCE_BITS",
          f"{demote_id['request']['policy']['minimum_confidence_binary64_bits']}ull"),
+        ("AIMEE_DB2_EVENT_HAS_WORKSPACE_TAG", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HAS_WORKSPACE_TAG", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG", f"{has_workspace_tag['id']}u"),
+        ("AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN",
+         f"{has_workspace_tag['request']['encoded_size']}u"),
+        ("AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN",
+         f"{has_workspace_tag['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HAS_WORKSPACE_TAG_ERROR_LEN",
+         f"{has_workspace_tag['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX",
+         f"{has_workspace_tag['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_HAS_WORKSPACE_TAG_MAX",
+         f"{has_workspace_tag['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -5894,6 +5984,74 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    return 0;
 }}
 
+static inline int aimee_db2_has_workspace_tag_request_encode(uint64_t memory_id,
+                                                            uint8_t *output, size_t capacity)
+{{
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG, 0u, 8u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}}
+
+static inline int aimee_db2_has_workspace_tag_request_decode(const uint8_t *input,
+                                                             size_t input_len,
+                                                             uint64_t *memory_id)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_has_workspace_tag_reply_encode(uint32_t tagged, uint8_t *output,
+                                                           size_t capacity,
+                                                           uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || tagged > AIMEE_DB2_HAS_WORKSPACE_TAG_MAX ||
+       capacity < AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, tagged);
+   *output_len = AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_has_workspace_tag_reply_decode(const uint8_t *input,
+                                                           size_t input_len, uint32_t *tagged)
+{{
+   if (tagged)
+      *tagged = 0u;
+   if (!tagged)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_HAS_WORKSPACE_TAG_MAX)
+      return -1;
+   *tagged = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_demote_id_request_encode(uint64_t memory_id, uint8_t *output,
                                                     size_t capacity)
 {{
@@ -6988,6 +7146,11 @@ extern "C"
        uint64_t memory_id, uint32_t *demoted_count, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_has_workspace_tag_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, uint32_t *tagged, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -7783,6 +7946,31 @@ aimee_module_call_result_t aimee_db2_demote_id_call(aimee_db2_call_fn call, void
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_has_workspace_tag_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                 uint64_t deadline_ns, uint64_t memory_id, uint32_t *tagged,
+                                 aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !tagged)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *tagged = 0u;
+   uint8_t request[AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_has_workspace_tag_request_encode(memory_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HAS_WORKSPACE_TAG, AIMEE_DB2_STAGE_HAS_WORKSPACE_TAG,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_has_workspace_tag_reply_decode(response, response_len, tagged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -8057,6 +8245,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     prune_orphaned_l0 = catalog["operations"][32]
     lifecycle_sweep_expired = catalog["operations"][33]
     demote_id = catalog["operations"][34]
+    has_workspace_tag = catalog["operations"][35]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -8291,6 +8480,11 @@ const DemoteIDMemoryIDMax uint64 = {demote_id['request']['field']['maximum']}
 const DemoteIDCountMax uint32 = {demote_id['reply']['field']['maximum']}
 const DemoteIDMultiplierBits uint64 = {demote_id['request']['policy']['confidence_multiplier_binary64_bits']}
 const DemoteIDMinimumConfidenceBits uint64 = {demote_id['request']['policy']['minimum_confidence_binary64_bits']}
+const EventHasWorkspaceTag = EventMemory
+const StageHasWorkspaceTag = FamilyMemory
+const OperationHasWorkspaceTag uint32 = {has_workspace_tag['id']}
+const HasWorkspaceTagMemoryIDMax uint64 = {has_workspace_tag['request']['field']['maximum']}
+const HasWorkspaceTagMax uint32 = {has_workspace_tag['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -8743,6 +8937,62 @@ func DecodeDemoteIDReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return demotedCount, nil
+}}
+
+// EncodeHasWorkspaceTagRequest emits the memory whose attribution is probed.
+func EncodeHasWorkspaceTagRequest(memoryID uint64) ([]byte, error) {{
+	if memoryID == 0 || memoryID > HasWorkspaceTagMemoryIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationHasWorkspaceTag, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}}
+
+// DecodeHasWorkspaceTagRequest validates the envelope and the bounded memory.
+func DecodeHasWorkspaceTagRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHasWorkspaceTag || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > HasWorkspaceTagMemoryIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return memoryID, nil
+}}
+
+// EncodeHasWorkspaceTagReply emits the Boolean attribution flag.
+func EncodeHasWorkspaceTagReply(tagged uint32) ([]byte, error) {{
+	if tagged > HasWorkspaceTagMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationHasWorkspaceTag, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], tagged)
+	return reply, nil
+}}
+
+// DecodeHasWorkspaceTagReply validates the operation and the Boolean bound.
+func DecodeHasWorkspaceTagReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHasWorkspaceTag || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	tagged := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if tagged > HasWorkspaceTagMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return tagged, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

@@ -16325,9 +16325,15 @@
           "line": 130
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.has_workspace_tag operation replaces the existence probe over workspace attribution rows, preserving its hit-or-miss result; the join stays DB2 authority and no workspace identity crosses the bus."
+      },
       "signature": "int db2_memory_has_any_workspace_tag ( int64_t memory_id )",
       "signature_sha256": "0f7d1a01cc7c7305aa6812b65a8bc2a9b5052a79f6e069f716d8b4faebb84d90",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_has_any_workspace_tag"
     },
     {
@@ -25806,15 +25812,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "428543829157e86a2c3f1a5c3a5bf23501e70d9298f9bfe3f552c4a050162ed7",
+  "fingerprint": "2281a35a52dbb67615b52df2809785fc7f79af94ef596629e8c6f8214c0d2322",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 661,
+    "audit_pending": 660,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 297
+    "reviewed": 298
   }
 }

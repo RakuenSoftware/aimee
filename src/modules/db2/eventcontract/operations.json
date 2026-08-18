@@ -999,6 +999,29 @@
         "encoded_size_error": 24,
         "field": {"name": "demoted_count", "type": "u32", "minimum": 0, "maximum": 1}
       }
+    },
+    {
+      "family": "memory",
+      "id": 26,
+      "name": "has_workspace_tag",
+      "wire_format": "db2-envelope-u64-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Whether a canonical memory carries any workspace attribution is a relational DB2 join and does not depend on portable ANN state.",
+      "c_symbols": ["db2_memory_has_any_workspace_tag"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "memory_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "tagged", "type": "u32", "minimum": 0, "maximum": 1}
+      }
     }
   ]
 }

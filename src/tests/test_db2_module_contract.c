@@ -32,6 +32,9 @@ static int lifecycle_sweep_calls;
 static int demote_id_value;
 static int demote_id_calls;
 static int64_t demote_id_last;
+static int workspace_tag_value;
+static int workspace_tag_calls;
+static int64_t workspace_tag_last;
 static int64_t total_count_value;
 static int total_count_calls;
 static int session_l2_count_value;
@@ -295,6 +298,19 @@ static int demote_id(int64_t memory_id)
    demote_id_calls++;
    demote_id_last = memory_id;
    return demote_id_value;
+}
+
+int db2_memory_has_any_workspace_tag(int64_t memory_id)
+{
+   (void)memory_id;
+   return 0;
+}
+
+static int has_workspace_tag(int64_t memory_id)
+{
+   workspace_tag_calls++;
+   workspace_tag_last = memory_id;
+   return workspace_tag_value;
 }
 
 int64_t db2_memory_count(void)
@@ -947,6 +963,9 @@ static void reset(void)
    demote_id_value = 1;
    demote_id_calls = 0;
    demote_id_last = 0;
+   workspace_tag_value = 1;
+   workspace_tag_calls = 0;
+   workspace_tag_last = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2236,6 +2255,36 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_has_workspace_tag_wire(void)
+{
+   uint8_t request[AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_has_workspace_tag_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_has_workspace_tag_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   assert(aimee_db2_has_workspace_tag_request_encode(0u, request, sizeof(request)) == -1);
+   assert(aimee_db2_has_workspace_tag_request_encode(
+              AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX + 1ull, request, sizeof(request)) == -1);
+   assert(aimee_db2_has_workspace_tag_request_encode(42u, request, sizeof(request) - 1) == -1);
+   assert(aimee_db2_has_workspace_tag_request_encode(42u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_has_workspace_tag_request_decode(request, sizeof(request), &memory_id) == -1 &&
+          memory_id == 0);
+
+   uint8_t reply[AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, tagged = 99;
+   assert(aimee_db2_has_workspace_tag_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_has_workspace_tag_reply_decode(reply, reply_len, &tagged) == 0 && tagged == 1);
+   assert(aimee_db2_has_workspace_tag_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_has_workspace_tag_reply_decode(reply, reply_len, &tagged) == 0 && tagged == 0);
+   /* The probe is LIMIT 1, so the flag is Boolean and nothing wider encodes. */
+   assert(aimee_db2_has_workspace_tag_reply_encode(2, reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_has_workspace_tag_reply_encode(1, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_has_workspace_tag_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_has_workspace_tag_reply_decode(reply, reply_len, &tagged) == -1 && tagged == 0);
 }
 
 static void test_demote_id_wire(void)
@@ -3616,6 +3665,46 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_has_workspace_tag_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.has_workspace_tag = has_workspace_tag};
+   uint8_t request[AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN];
+   uint32_t response_len = 99, tagged = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_HAS_WORKSPACE_TAG};
+   assert(aimee_db2_has_workspace_tag_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(workspace_tag_calls == 1 && workspace_tag_last == 42);
+   assert(aimee_db2_has_workspace_tag_reply_decode(response, response_len, &tagged) == 0 &&
+          tagged == 1);
+
+   /* An untagged memory is a miss, not an error: the row may simply carry no
+    * workspace attribution. */
+   workspace_tag_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_has_workspace_tag_reply_decode(response, response_len, &tagged) == 0 &&
+          tagged == 0);
+
+   /* Anything wider than Boolean means the LIMIT 1 probe changed shape. */
+   workspace_tag_value = 2;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   workspace_tag_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   workspace_tag_value = 1;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_demote_id_handler(void)
 {
    reset();
@@ -4642,6 +4731,7 @@ int main(void)
    test_prune_orphaned_l0_wire();
    test_lifecycle_sweep_expired_wire();
    test_demote_id_wire();
+   test_has_workspace_tag_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4677,6 +4767,7 @@ int main(void)
    test_prune_orphaned_l0_handler();
    test_lifecycle_sweep_expired_handler();
    test_demote_id_handler();
+   test_has_workspace_tag_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

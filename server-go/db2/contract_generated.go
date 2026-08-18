@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "6d79ba454b8de9de63c152ffa0c8281014a11f70d8a5909a9596e9339fb59f49"
+const ContractSHA256 = "dfee7146af425c3ec78575c9917b448c4bb981a71e942d21b14215446acac55e"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -233,6 +233,11 @@ const DemoteIDMemoryIDMax uint64 = 9223372036854775807
 const DemoteIDCountMax uint32 = 1
 const DemoteIDMultiplierBits uint64 = 4606281698874543309
 const DemoteIDMinimumConfidenceBits uint64 = 4599075939470750515
+const EventHasWorkspaceTag = EventMemory
+const StageHasWorkspaceTag = FamilyMemory
+const OperationHasWorkspaceTag uint32 = 26
+const HasWorkspaceTagMemoryIDMax uint64 = 9223372036854775807
+const HasWorkspaceTagMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -687,6 +692,62 @@ func DecodeDemoteIDReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return demotedCount, nil
+}
+
+// EncodeHasWorkspaceTagRequest emits the memory whose attribution is probed.
+func EncodeHasWorkspaceTagRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > HasWorkspaceTagMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationHasWorkspaceTag, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeHasWorkspaceTagRequest validates the envelope and the bounded memory.
+func DecodeHasWorkspaceTagRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHasWorkspaceTag || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > HasWorkspaceTagMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeHasWorkspaceTagReply emits the Boolean attribution flag.
+func EncodeHasWorkspaceTagReply(tagged uint32) ([]byte, error) {
+	if tagged > HasWorkspaceTagMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationHasWorkspaceTag, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], tagged)
+	return reply, nil
+}
+
+// DecodeHasWorkspaceTagReply validates the operation and the Boolean bound.
+func DecodeHasWorkspaceTagReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHasWorkspaceTag || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	tagged := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if tagged > HasWorkspaceTagMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return tagged, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

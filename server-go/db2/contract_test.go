@@ -84,6 +84,7 @@ type wireBaseline struct {
 				Count                 uint64            `json:"count"`
 				DeletedCount          uint32            `json:"deleted_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
+				Tagged                uint32            `json:"tagged"`
 				DemotedCount          uint32            `json:"demoted_count"`
 				AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
 				LowEffectivenessCount uint32            `json:"low_effectiveness_count"`
@@ -219,7 +220,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 35 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 36 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -253,7 +254,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[31].Name != "record_l4_approval" ||
 		baseline.Operations[32].Name != "prune_orphaned_l0" ||
 		baseline.Operations[33].Name != "lifecycle_sweep_expired" ||
-		baseline.Operations[34].Name != "demote_id" {
+		baseline.Operations[34].Name != "demote_id" ||
+		baseline.Operations[35].Name != "has_workspace_tag" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -450,6 +452,47 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestHasWorkspaceTagMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[35]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeHasWorkspaceTagRequest(operation.Request.MemoryID)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, err := DecodeHasWorkspaceTagRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID {
+		t.Fatalf("positive request = (%d, %v)", memoryID, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeHasWorkspaceTagRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeHasWorkspaceTagReply(vector.Tagged)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		tagged, err := DecodeHasWorkspaceTagReply(got)
+		if err != nil || tagged != vector.Tagged {
+			t.Fatalf("decode = (%d, %v)", tagged, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		tagged, err := DecodeHasWorkspaceTagReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || tagged != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, tagged, err)
+		}
+	}
+	// The probe is LIMIT 1, so the flag stays Boolean on this side too.
+	if _, err := EncodeHasWorkspaceTagReply(HasWorkspaceTagMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("non-Boolean flag encoded: %v", err)
+	}
+	if _, err := EncodeHasWorkspaceTagRequest(0); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("zero memory encoded: %v", err)
 	}
 }
 

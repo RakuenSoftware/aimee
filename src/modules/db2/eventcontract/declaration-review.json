@@ -1436,6 +1436,14 @@
       "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
     },
     {
+      "symbol": "db2_memory_has_any_workspace_tag",
+      "signature_sha256": "0f7d1a01cc7c7305aa6812b65a8bc2a9b5052a79f6e069f716d8b4faebb84d90",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.has_workspace_tag operation replaces the existence probe over workspace attribution rows, preserving its hit-or-miss result; the join stays DB2 authority and no workspace identity crosses the bus."
+    },
+    {
       "symbol": "db2_memory_health_clear_effectiveness",
       "signature_sha256": "c82ea53ebcce66af7bc7cf3f96c6422aa84695e026530afae7b1f97a9bd8efb2",
       "disposition": "wire-operation",

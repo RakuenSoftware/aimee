@@ -272,6 +272,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .prune_orphaned_l0 = db2_memory_prune_orphaned_l0,
        .lifecycle_sweep_expired = db2_memory_lifecycle_sweep_expired,
        .demote_id = db2_memory_promotion_demote_id,
+       .has_workspace_tag = db2_memory_has_any_workspace_tag,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -860,6 +861,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_demote_id_reply_encode((uint32_t)demoted, response_body, response_capacity,
                                               response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t tag_memory_id = 0u;
+      if (aimee_db2_has_workspace_tag_request_decode(request_body, request_len, &tag_memory_id) ==
+          0)
+      {
+         if (response_capacity < AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->has_workspace_tag)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The probe is LIMIT 1, so anything but zero or one means the
+          * statement drifted and the flag would no longer be a Boolean. */
+         int tagged = backend->has_workspace_tag((int64_t)tag_memory_id);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (tagged < 0 || (uint32_t)tagged > AIMEE_DB2_HAS_WORKSPACE_TAG_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_has_workspace_tag_reply_encode((uint32_t)tagged, response_body,
+                                                      response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
