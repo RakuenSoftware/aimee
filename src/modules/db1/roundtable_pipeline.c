@@ -10,8 +10,8 @@
 
 /* ---------------------------------------------------------------- runs ---- */
 
-int rtp_run_create(const char *idea, const char *done_bar, const char *repo_root,
-                   const char *base_branch, int *out_id)
+int db1_roundtable_run_create(const char *idea, const char *done_bar, const char *repo_root,
+                              const char *base_branch, int *out_id)
 {
    if (!idea || !idea[0])
       return -1;
@@ -91,7 +91,7 @@ static void rtp_map_run(rtp_run_t *r, sqlite3_stmt *s)
    " cost_source, cost_version, proposal_phase_cost_usd, impl_phase_cost_usd, total_cost_usd,"     \
    " accepted_question_count, created_at, updated_at"
 
-int rtp_run_get(int id, rtp_run_t *out)
+int db1_roundtable_run_get(int id, rtp_run_t *out)
 {
    if (!out || id <= 0)
       return -1;
@@ -113,7 +113,7 @@ int rtp_run_get(int id, rtp_run_t *out)
    return rc;
 }
 
-int rtp_run_update(const rtp_run_t *r)
+int db1_roundtable_run_update(const rtp_run_t *r)
 {
    if (!r || r->id <= 0)
       return -1;
@@ -173,7 +173,7 @@ int rtp_run_update(const rtp_run_t *r)
    return changed > 0 ? 0 : -1;
 }
 
-int rtp_run_set_state(int id, const char *state, const char *phase)
+int db1_roundtable_run_set_state(int id, const char *state, const char *phase)
 {
    if (id <= 0 || !state)
       return -1;
@@ -199,7 +199,7 @@ int rtp_run_set_state(int id, const char *state, const char *phase)
    return changed > 0 ? 0 : -1;
 }
 
-int rtp_run_cas_state(int id, const char *expected, const char *next)
+int db1_roundtable_run_cas_state(int id, const char *expected, const char *next)
 {
    if (id <= 0 || !expected || !next)
       return -1;
@@ -223,7 +223,7 @@ int rtp_run_cas_state(int id, const char *expected, const char *next)
    return changed > 0 ? 0 : -1;
 }
 
-int rtp_run_list(const char *state_filter, rtp_run_t *out, int max)
+int db1_roundtable_run_list(const char *state_filter, rtp_run_t *out, int max)
 {
    if (!out || max <= 0)
       return 0;
@@ -251,7 +251,7 @@ int rtp_run_list(const char *state_filter, rtp_run_t *out, int max)
    return n;
 }
 
-int rtp_run_count_active(void)
+int db1_roundtable_run_count_active(void)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -269,7 +269,7 @@ int rtp_run_count_active(void)
    return n;
 }
 
-int rtp_run_branch_owner(const char *repo_root, const char *head_branch, int exclude_id)
+int db1_roundtable_run_branch_owner(const char *repo_root, const char *head_branch, int exclude_id)
 {
    if (!head_branch || !head_branch[0])
       return 0;
@@ -297,8 +297,8 @@ int rtp_run_branch_owner(const char *repo_root, const char *head_branch, int exc
 
 /* -------------------------------------------------------------- passes ---- */
 
-int rtp_pass_create(int pipeline_id, const char *phase, const char *mode, int pass_no,
-                    const char *artifact_hash, int *out_id)
+int db1_roundtable_pass_create(int pipeline_id, const char *phase, const char *mode, int pass_no,
+                               const char *artifact_hash, int *out_id)
 {
    if (pipeline_id <= 0 || !phase || !mode || pass_no <= 0)
       return -1;
@@ -369,7 +369,7 @@ static void rtp_map_pass(rtp_pass_t *p, sqlite3_stmt *s)
    " chunk_done, synthesis_done, chunk_group, chunk_index, answered_count, chunk_offset,"          \
    " chunk_len, chunk_omitted, chunk_over_budget, created_at, updated_at"
 
-int rtp_pass_get(int id, rtp_pass_t *out)
+int db1_roundtable_pass_get(int id, rtp_pass_t *out)
 {
    if (!out || id <= 0)
       return -1;
@@ -391,7 +391,7 @@ int rtp_pass_get(int id, rtp_pass_t *out)
    return rc;
 }
 
-int rtp_pass_update(const rtp_pass_t *p)
+int db1_roundtable_pass_update(const rtp_pass_t *p)
 {
    if (!p || p->id <= 0)
       return -1;
@@ -442,7 +442,7 @@ int rtp_pass_update(const rtp_pass_t *p)
    return changed > 0 ? 0 : -1;
 }
 
-int rtp_pass_latest(int pipeline_id, const char *phase, rtp_pass_t *out)
+int db1_roundtable_pass_latest(int pipeline_id, const char *phase, rtp_pass_t *out)
 {
    if (!out || pipeline_id <= 0 || !phase)
       return -1;
@@ -467,7 +467,7 @@ int rtp_pass_latest(int pipeline_id, const char *phase, rtp_pass_t *out)
    return rc;
 }
 
-int rtp_pass_max_no(int pipeline_id, const char *phase)
+int db1_roundtable_pass_max_no(int pipeline_id, const char *phase)
 {
    if (pipeline_id <= 0 || !phase)
       return 0;
@@ -489,7 +489,7 @@ int rtp_pass_max_no(int pipeline_id, const char *phase)
    return n;
 }
 
-int rtp_pass_max_group(int pipeline_id, const char *phase)
+int db1_roundtable_pass_max_group(int pipeline_id, const char *phase)
 {
    if (pipeline_id <= 0 || !phase)
       return 0;
@@ -511,7 +511,8 @@ int rtp_pass_max_group(int pipeline_id, const char *phase)
    return n;
 }
 
-int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group, rtp_group_agg_t *out)
+int db1_roundtable_pass_group_agg(int pipeline_id, const char *phase, int chunk_group,
+                                  rtp_group_agg_t *out)
 {
    if (!out || pipeline_id <= 0 || !phase || chunk_group <= 0)
       return -1;
@@ -568,7 +569,7 @@ int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group, rtp_
 
 /* ------------------------------------------------------------ attempts ---- */
 
-int rtp_attempt_create(int pass_id, int attempt_no, const char *run_id, int *out_id)
+int db1_roundtable_attempt_create(int pass_id, int attempt_no, const char *run_id, int *out_id)
 {
    if (pass_id <= 0 || attempt_no <= 0)
       return -1;
@@ -623,7 +624,7 @@ static void rtp_map_attempt(rtp_attempt_t *a, sqlite3_stmt *s)
    " envelope_valid, items_truncated, truncated, degraded, cost_capped, deadline_hit, cancelled,"  \
    " lost_result, result_hash, result_snapshot, cost_usd, cost_known, submitted_at, terminal_at"
 
-int rtp_attempt_get_by_run(const char *run_id, rtp_attempt_t *out)
+int db1_roundtable_attempt_get_by_run(const char *run_id, rtp_attempt_t *out)
 {
    if (!out || !run_id || !run_id[0])
       return -1;
@@ -647,7 +648,7 @@ int rtp_attempt_get_by_run(const char *run_id, rtp_attempt_t *out)
    return rc;
 }
 
-int rtp_attempt_current(int pass_id, rtp_attempt_t *out)
+int db1_roundtable_attempt_current(int pass_id, rtp_attempt_t *out)
 {
    if (!out || pass_id <= 0)
       return -1;
@@ -671,7 +672,7 @@ int rtp_attempt_current(int pass_id, rtp_attempt_t *out)
    return rc;
 }
 
-int rtp_attempt_update(const rtp_attempt_t *a)
+int db1_roundtable_attempt_update(const rtp_attempt_t *a)
 {
    if (!a || a->id <= 0)
       return -1;
@@ -711,7 +712,7 @@ int rtp_attempt_update(const rtp_attempt_t *a)
    return changed > 0 ? 0 : -1;
 }
 
-int rtp_attempt_max_no(int pass_id)
+int db1_roundtable_attempt_max_no(int pass_id)
 {
    if (pass_id <= 0)
       return 0;
@@ -731,7 +732,7 @@ int rtp_attempt_max_no(int pass_id)
    return n;
 }
 
-int rtp_attempt_supersede_others(int pass_id, int keep_attempt_id)
+int db1_roundtable_attempt_supersede_others(int pass_id, int keep_attempt_id)
 {
    if (pass_id <= 0)
       return -1;
@@ -752,8 +753,8 @@ int rtp_attempt_supersede_others(int pass_id, int keep_attempt_id)
 
 /* --------------------------------------------------------------- gates ---- */
 
-int rtp_gate_create(int pipeline_id, int gate_no, int pr_number, const char *expected_head_sha,
-                    int *out_id)
+int db1_roundtable_gate_create(int pipeline_id, int gate_no, int pr_number,
+                               const char *expected_head_sha, int *out_id)
 {
    if (pipeline_id <= 0 || (gate_no != 1 && gate_no != 2))
       return -1;
@@ -777,7 +778,7 @@ int rtp_gate_create(int pipeline_id, int gate_no, int pr_number, const char *exp
    return rc == SQLITE_DONE ? 0 : -1;
 }
 
-int rtp_gate_get(int pipeline_id, int gate_no, rtp_gate_t *out)
+int db1_roundtable_gate_get(int pipeline_id, int gate_no, rtp_gate_t *out)
 {
    if (!out || pipeline_id <= 0)
       return -1;
@@ -820,7 +821,7 @@ int rtp_gate_get(int pipeline_id, int gate_no, rtp_gate_t *out)
    return rc;
 }
 
-int rtp_gate_update(const rtp_gate_t *g)
+int db1_roundtable_gate_update(const rtp_gate_t *g)
 {
    if (!g || g->id <= 0)
       return -1;
@@ -853,7 +854,7 @@ int rtp_gate_update(const rtp_gate_t *g)
    return changed > 0 ? 0 : -1;
 }
 
-int rtp_gate_age_exceeds_hours(int pipeline_id, int gate_no, int hours)
+int db1_roundtable_gate_age_exceeds_hours(int pipeline_id, int gate_no, int hours)
 {
    if (pipeline_id <= 0 || hours <= 0)
       return 0;

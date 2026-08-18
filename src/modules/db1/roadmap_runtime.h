@@ -54,24 +54,26 @@ extern "C"
       char updated_at[RDM_TS_LEN];
    } rdm_unit_dispatch_t;
 
-   int rdm_dispatch_upsert(const char *roadmap_id, const char *token_profile,
-                           int require_slice_discussion, int budget_ceiling_tokens);
-   int rdm_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out);
-   int rdm_dispatch_set_status(const char *roadmap_id, const char *status, const char *exit_reason);
-   int rdm_dispatch_set_phase(const char *roadmap_id, const char *phase);
+   int db1_roadmap_dispatch_upsert(const char *roadmap_id, const char *token_profile,
+                                   int require_slice_discussion, int budget_ceiling_tokens);
+   int db1_roadmap_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out);
+   int db1_roadmap_dispatch_set_status(const char *roadmap_id, const char *status,
+                                       const char *exit_reason);
+   int db1_roadmap_dispatch_set_phase(const char *roadmap_id, const char *phase);
 
-   int rdm_unit_ensure(const char *roadmap_id, const char *unit_id, const char *level,
-                       const char *tool_policy_mode);
-   int rdm_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_t *out);
-   int rdm_unit_set_state(const char *roadmap_id, const char *unit_id, const char *state);
-   int rdm_unit_claim(const char *roadmap_id, const char *unit_id, const char *owner,
-                      const char *worktree_path);
-   int rdm_unit_heartbeat(const char *roadmap_id, const char *unit_id);
-   int rdm_unit_finish(const char *roadmap_id, const char *unit_id, const char *state,
-                       const char *result, const char *error);
-   int rdm_unit_set_coord_job(const char *roadmap_id, const char *unit_id, int coord_job_id);
-   int rdm_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_id);
-   int rdm_unit_select_next(const char *roadmap_id, char *out_unit_id, size_t len);
+   int db1_roadmap_unit_ensure(const char *roadmap_id, const char *unit_id, const char *level,
+                               const char *tool_policy_mode);
+   int db1_roadmap_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_t *out);
+   int db1_roadmap_unit_set_state(const char *roadmap_id, const char *unit_id, const char *state);
+   int db1_roadmap_unit_claim(const char *roadmap_id, const char *unit_id, const char *owner,
+                              const char *worktree_path);
+   int db1_roadmap_unit_heartbeat(const char *roadmap_id, const char *unit_id);
+   int db1_roadmap_unit_finish(const char *roadmap_id, const char *unit_id, const char *state,
+                               const char *result, const char *error);
+   int db1_roadmap_unit_set_coord_job(const char *roadmap_id, const char *unit_id,
+                                      int coord_job_id);
+   int db1_roadmap_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_id);
+   int db1_roadmap_unit_select_next(const char *roadmap_id, char *out_unit_id, size_t len);
 
 #ifdef __cplusplus
 }

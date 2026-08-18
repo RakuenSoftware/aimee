@@ -268,6 +268,11 @@ const struct cJSON *cli_v1_manifest_commands(void);
  * Borrowed -- owned by the cached manifest. */
 const struct cJSON *cli_v1_manifest_dispatch(void);
 
+/* 1 when the server says this method's request body is empty. Only an explicit
+ * "args":"none" counts; anything else leaves the decision to the client's own
+ * marshaller rather than sending an empty body for a command needing arguments. */
+int cli_v1_manifest_method_takes_no_args(const char *method);
+
 /* TEST ONLY. Install a command manifest instead of fetching one from the server,
  * so a unit test can exercise route lookup without a server. Takes ownership of
  * `doc`. Never called outside tests; real invocations always fetch. */
