@@ -36,6 +36,14 @@
       "reason": "The typed lifecycle.health operation replaces production direct callers; PostgreSQL schema and extension readiness remain DB2 authority."
     },
     {
+      "symbol": "db2_is_initialized",
+      "signature_sha256": "ab28e08e5ab2385b377d678bca9b194c1689506fccfe4729c94134ec59d9626d",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.health operation proves the DB2 owner is initialized before reporting PostgreSQL and canonical KB readiness."
+    },
+    {
       "symbol": "db2_kb_health_probe",
       "signature_sha256": "c0cc00bd5827a435e096d3c14146348e2b71393d97cb0760c9dd8d6603f74dcf",
       "disposition": "wire-operation",

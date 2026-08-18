@@ -91,6 +91,7 @@ static int production_reembed_status(aimee_db2_reembed_status_t *status)
 static const aimee_db2_module_backend_t *production_backend(void)
 {
    static const aimee_db2_module_backend_t backend = {
+       .is_initialized = db2_is_initialized,
        .health_probe = db2_health_probe,
        .kb_health_probe = db2_kb_health_probe,
        .embedding_dimension = db2_embedding_dim,
@@ -123,10 +124,12 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    {
       if (response_capacity < AIMEE_DB2_RESPONSE_LEN)
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      if (!backend || !backend->health_probe || !backend->kb_health_probe)
+      if (!backend || !backend->is_initialized || !backend->health_probe ||
+          !backend->kb_health_probe)
          return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
       int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
-      if (backend->health_probe(&schema_ok, &have_pg_trgm) != 0 ||
+      if (backend->is_initialized() <= 0 ||
+          backend->health_probe(&schema_ok, &have_pg_trgm) != 0 ||
           backend->kb_health_probe(&kb_tables_ok) != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       if (aimee_module_invocation_cancelled(invocation))

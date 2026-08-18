@@ -26,6 +26,7 @@
 
 typedef struct
 {
+   int (*is_initialized)(void);
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
@@ -57,6 +58,7 @@ typedef struct
 
 static int health_calls;
 static int kb_health_calls;
+static int initialized_calls;
 static int embedding_dimension_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
@@ -82,6 +84,17 @@ static int kb_health_probe(int *kb_tables_ok)
    kb_health_calls++;
    *kb_tables_ok = 1;
    return 0;
+}
+
+static int is_initialized(void)
+{
+   initialized_calls++;
+   return 1;
+}
+
+int db2_is_initialized(void)
+{
+   return is_initialized();
 }
 
 int db2_health_probe(int *schema_ok, int *have_pg_trgm)
@@ -307,6 +320,7 @@ int main(void)
        {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_STAGE_HEALTH},
    };
    static const aimee_db2_module_backend_t backend = {
+       .is_initialized = is_initialized,
        .health_probe = health_probe,
        .kb_health_probe = kb_health_probe,
        .embedding_dimension = embedding_dimension,
@@ -347,7 +361,7 @@ int main(void)
    assert(aimee_db2_health_call(call_client, &client, 7001, 0, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(schema_ok == 1 && have_pg_trgm == 0 && kb_tables_ok == 1);
-   assert(health_calls == 1 && kb_health_calls == 1);
+   assert(initialized_calls == 1 && health_calls == 1 && kb_health_calls == 1);
 
    uint32_t domain_result = 9, dimension = 9;
    assert(aimee_db2_embedding_dimension_call(call_client, &client, 7010, 0, &domain_result,
@@ -417,7 +431,7 @@ int main(void)
    assert(aimee_db2_health_call(call_client, &client, 7004, 0, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(schema_ok == 1 && have_pg_trgm == 0 && kb_tables_ok == 1);
-   assert(health_calls == 3 && kb_health_calls == 3);
+   assert(initialized_calls == 3 && health_calls == 3 && kb_health_calls == 3);
 
    aimee_module_client_destroy(&client);
    aimee_module_process_stop();

@@ -13,6 +13,8 @@ static int cancel_after;
 static int cancel_checks;
 static int health_result;
 static int kb_health_result;
+static int initialized_value;
+static int initialized_calls;
 static int health_calls;
 static int kb_health_calls;
 static int embedding_dimension_value;
@@ -58,6 +60,17 @@ static int kb_health_probe(int *kb_tables_ok)
    if (kb_tables_ok)
       *kb_tables_ok = 1;
    return kb_health_result;
+}
+
+static int is_initialized(void)
+{
+   initialized_calls++;
+   return initialized_value;
+}
+
+int db2_is_initialized(void)
+{
+   return is_initialized();
 }
 
 int db2_health_probe(int *schema_ok, int *have_pg_trgm)
@@ -169,6 +182,8 @@ static void reset(void)
    cancel_checks = 0;
    health_result = 0;
    kb_health_result = 0;
+   initialized_value = 1;
+   initialized_calls = 0;
    health_calls = 0;
    kb_health_calls = 0;
    embedding_dimension_value = 384;
@@ -634,6 +649,7 @@ static void test_handler_success_and_failures(void)
 {
    reset();
    const aimee_db2_module_backend_t backend = {
+       .is_initialized = is_initialized,
        .health_probe = health_probe,
        .kb_health_probe = kb_health_probe,
    };
@@ -647,7 +663,7 @@ static void test_handler_success_and_failures(void)
    assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
                  &response_len) == AIMEE_MODULE_STATUS_OK);
    assert(response_len == AIMEE_DB2_RESPONSE_LEN);
-   assert(health_calls == 1 && kb_health_calls == 1);
+   assert(initialized_calls == 1 && health_calls == 1 && kb_health_calls == 1);
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
    assert(aimee_db2_health_response_decode(response, response_len, &schema_ok, &have_pg_trgm,
                                            &kb_tables_ok) == 0);
@@ -672,13 +688,19 @@ static void test_handler_success_and_failures(void)
    assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
                  &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
    health_result = 0;
+   initialized_value = 0;
+   int prior_health_calls = health_calls;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   assert(health_calls == prior_health_calls);
+   initialized_value = 1;
    kb_health_result = -1;
    assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
                  &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
 
    kb_health_result = 0;
    cancelled = 1;
-   int prior_health_calls = health_calls;
+   prior_health_calls = health_calls;
    assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
                  &response_len) == AIMEE_MODULE_STATUS_CANCELLED);
    assert(health_calls == prior_health_calls);
@@ -700,6 +722,7 @@ static void test_embedding_dimension_handler(void)
 {
    reset();
    const aimee_db2_module_backend_t backend = {
+       .is_initialized = is_initialized,
        .health_probe = health_probe,
        .kb_health_probe = kb_health_probe,
        .embedding_dimension = embedding_dimension,

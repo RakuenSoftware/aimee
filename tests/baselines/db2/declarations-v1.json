@@ -8794,9 +8794,15 @@
           "line": 14
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.health operation proves the DB2 owner is initialized before reporting PostgreSQL and canonical KB readiness."
+      },
       "signature": "int db2_is_initialized ( void )",
       "signature_sha256": "ab28e08e5ab2385b377d678bca9b194c1689506fccfe4729c94134ec59d9626d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_is_initialized"
     },
     {
@@ -24444,15 +24450,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "796efc3aa8a5960a62bec99ef5438455573f3cb44577312791ff846f9f3fbc72",
+  "fingerprint": "38ca7fc4a30062c4cec343439e450bdd7c92a22fa813328ec6e1dcdd75ee91e2",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 888,
+    "audit_pending": 887,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 70
+    "reviewed": 71
   }
 }

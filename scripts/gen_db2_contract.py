@@ -220,7 +220,8 @@ def validate_catalog(value: object) -> dict[str, object]:
             seen_c_symbols.add(symbol)
         if key == ("lifecycle", 1) and name == "health" and \
                 operation["wire_format"] == "db2-health-v1":
-            if operation["c_symbols"] != ["db2_health_probe", "db2_kb_health_probe"]:
+            if operation["c_symbols"] != [
+                    "db2_health_probe", "db2_is_initialized", "db2_kb_health_probe"]:
                 fail("operation-c-symbols", "health C symbols differ from the reviewed backend")
             if operation["results"] != ["ok"]:
                 fail("operation-results", "health results must equal ['ok']")

@@ -6,6 +6,7 @@
 
 typedef struct
 {
+   int (*is_initialized)(void);
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
