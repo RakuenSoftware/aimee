@@ -4,6 +4,14 @@
   "declarations_complete": false,
   "reviews": [
     {
+      "symbol": "canonical_index_set_exec_capture",
+      "signature_sha256": "1e99a1701424fe709b6626d44151681f875541924a23045c4226c93dfe964cac",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
+    },
+    {
       "symbol": "db2_conn",
       "signature_sha256": "4a33cfbffa38498794f2c49735e95cd914ce3cbf42a4772d2bf4f66f980d8899",
       "disposition": "private-db2",
@@ -170,6 +178,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "A caller-controlled rollback is process-local transaction cleanup; failed or cancelled maintenance operations roll back inside DB2 before returning transport status."
+    },
+    {
+      "symbol": "db2_memory_export_row_free",
+      "signature_sha256": "ba729127864e108afffe9baf8c825923f9f857206dabcdac43769c09d121f0e1",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
     },
     {
       "symbol": "db2_memory_scope_context_clear",

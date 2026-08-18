@@ -2821,9 +2821,15 @@
           "line": 38
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
+      },
       "signature": "void canonical_index_set_exec_capture ( canonical_index_exec_capture_fn capture )",
       "signature_sha256": "1e99a1701424fe709b6626d44151681f875541924a23045c4226c93dfe964cac",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "canonical_index_set_exec_capture"
     },
     {
@@ -15110,9 +15116,15 @@
           "line": 37
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
+      },
       "signature": "void db2_memory_export_row_free ( db2_memory_export_row_t * row )",
       "signature_sha256": "ba729127864e108afffe9baf8c825923f9f857206dabcdac43769c09d121f0e1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_export_row_free"
     },
     {
@@ -24648,15 +24660,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d82b7c3dcfcbe851c17751dfa85ca578ae62e928ce8bf3f8b8631bb82a605f55",
+  "fingerprint": "ef62b2787a492ec1a6d67e8c525df7317e3fc80f5587606ca0b9b662ad2f0952",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 854,
+    "audit_pending": 852,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 104
+    "reviewed": 106
   }
 }
