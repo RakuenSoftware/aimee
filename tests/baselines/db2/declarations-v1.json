@@ -14997,9 +14997,15 @@
           "line": 33
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Fetching conflict member IDs is a private read inside the future memory.conflict_resolve transaction; the pair must remain stable through conflict update, audit logging, and directive closure."
+      },
       "signature": "int db2_memory_conflict_get_pair ( int64_t conflict_id , int64_t * mem_a , int64_t * mem_b )",
       "signature_sha256": "fafe72ad1e37fb1a5a9c7189dfbb0c5bc8f3f9305738f2f30c575decac8beeb8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_conflict_get_pair"
     },
     {
@@ -15028,9 +15034,15 @@
           "line": 20
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Creating the conflict row is one private step of the future memory.conflict_record transaction, which must also create its audit, relationship, and directive evidence before replying."
+      },
       "signature": "int db2_memory_conflict_record ( int64_t mem_a , int64_t mem_b )",
       "signature_sha256": "3bd891b026c6470570fe4e24c292ada8d962b708e0ccf957a42f775eae2d4bdd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_conflict_record"
     },
     {
@@ -15043,9 +15055,15 @@
           "line": 37
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Updating a conflict row is a private step of the future memory.conflict_resolve transaction; exposing it alone would allow the audit log and contradiction directive to disagree with canonical conflict state."
+      },
       "signature": "int db2_memory_conflict_resolve ( int64_t conflict_id , const char * resolution )",
       "signature_sha256": "b74db619b0f8844fe8fd1c60daf982f9c877965acaf2de564250b3d01be8894b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_conflict_resolve"
     },
     {
@@ -15058,9 +15076,15 @@
           "line": 24
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Contradiction audit insertion is private evidence written by complete conflict record and resolve operations; a standalone best-effort wire mutation could diverge from the conflict row it documents."
+      },
       "signature": "void db2_memory_contradiction_log ( int64_t mem_a , int64_t mem_b , const char * resolution , const char * details )",
       "signature_sha256": "2f228e53e1db07542ececa5b198b0e6896b4c73c973a08ffe6f1f6cd035ea0ae",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_contradiction_log"
     },
     {
@@ -25110,15 +25134,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "29af88feea5c193a2280984e11676842d2b382e409c76f05069465d4eb1e515e",
+  "fingerprint": "33172ca80cf8634740f1fd96e4b36c967c2dd305e4d04c6dfc3304ca10f81cb8",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 777,
+    "audit_pending": 773,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 181
+    "reviewed": 185
   }
 }
