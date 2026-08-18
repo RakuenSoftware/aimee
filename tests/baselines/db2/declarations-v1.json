@@ -8725,9 +8725,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Database opening, schema application, and pool construction are private process bootstrap; the supervisor starts DB2 before exposing any bus capability."
+      },
       "signature": "int db2_init ( const char * libpq_url )",
       "signature_sha256": "e1161a27ed426ca97aaac292402aaa1955203eb4570f3313be439be9af377069",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_init"
     },
     {
@@ -19433,9 +19439,15 @@
           "line": 154
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "The configured model identity is injected into the DB2 owner before initialization; exposing a post-attachment setter would violate atomic activation."
+      },
       "signature": "void db2_set_embedder_model_id ( const char * model_id )",
       "signature_sha256": "d2b66b580397baf047e9df90d812a1db222a1c4a8ba00e30e90122b5051b4bf8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_set_embedder_model_id"
     },
     {
@@ -19507,9 +19519,15 @@
           "line": 33
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "The operator-pinned embedding width is private pre-initialization configuration; the bus exposes only the resolved effective dimension."
+      },
       "signature": "void db2_set_embedding_dim ( int dim )",
       "signature_sha256": "99674b540eb0fc94c572663bedcd2bb701ea4b42f0e25ebc0828c3272bb65813",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_set_embedding_dim"
     },
     {
@@ -19523,9 +19541,15 @@
           "line": 40
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "The descriptor-owned default width is injected during private module bootstrap and is immutable once the DB2 process attaches."
+      },
       "signature": "void db2_set_embedding_dim_default ( int dim )",
       "signature_sha256": "8d5c80638cf8793335fe18ba050619968ca20d3eab551f35469bee87d35d7570",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_set_embedding_dim_default"
     },
     {
@@ -19541,9 +19565,15 @@
           "line": 62
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Pin precedence is private startup configuration consumed while DB2 establishes canonical schema authority; it is not a runtime mutation."
+      },
       "signature": "void db2_set_embedding_dim_pinned ( int pinned )",
       "signature_sha256": "89cd217b6e68a392a0a87cae6b41e93479c29889553f42ee5acfd8dd52159b02",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_set_embedding_dim_pinned"
     },
     {
@@ -19576,9 +19606,15 @@
           "line": 188
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Pool capacity is fixed before DB2 initialization and remains private to the process owner; lifecycle.pool_status exposes the resulting bounded state."
+      },
       "signature": "void db2_set_pool_size ( int size )",
       "signature_sha256": "b3b1a3c5e88fac4fd648547ebd7dd4cd845fdf1358ab746fae1b3f3b59b3ac3d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_set_pool_size"
     },
     {
@@ -19591,9 +19627,15 @@
           "line": 25
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Schema apply-versus-verify mode is a private bootstrap choice made before opening DB2 and cannot be changed through the serving bus."
+      },
       "signature": "void db2_set_schema_readonly ( int on )",
       "signature_sha256": "8c1ba59589a1cd17b9b8a4c876a376a416e5b63c7e34c4594cea9ec21365afcd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_set_schema_readonly"
     },
     {
@@ -19692,9 +19734,15 @@
           "line": 235
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Connection and pool teardown belongs to supervised process termination; callers cannot remotely shut down the required DB2 capability."
+      },
       "signature": "void db2_shutdown ( void )",
       "signature_sha256": "0468af1713c9025ad0ffb5e493a5580da7b9ad921b97a420eacba3927ffa3c01",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_shutdown"
     },
     {
@@ -24450,15 +24498,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "38ca7fc4a30062c4cec343439e450bdd7c92a22fa813328ec6e1dcdd75ee91e2",
+  "fingerprint": "1b45dcc8088c80d4aaed18c61d5e25f38dd4b9067fd4bdc620c87f4ba327d7f5",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 887,
+    "audit_pending": 879,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 71
+    "reviewed": 79
   }
 }

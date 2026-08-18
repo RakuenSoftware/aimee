@@ -36,6 +36,14 @@
       "reason": "The typed lifecycle.health operation replaces production direct callers; PostgreSQL schema and extension readiness remain DB2 authority."
     },
     {
+      "symbol": "db2_init",
+      "signature_sha256": "e1161a27ed426ca97aaac292402aaa1955203eb4570f3313be439be9af377069",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Database opening, schema application, and pool construction are private process bootstrap; the supervisor starts DB2 before exposing any bus capability."
+    },
+    {
       "symbol": "db2_is_initialized",
       "signature_sha256": "ab28e08e5ab2385b377d678bca9b194c1689506fccfe4729c94134ec59d9626d",
       "disposition": "wire-operation",
@@ -82,6 +90,62 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.reembed_status operation replaces direct reads of the canonical maintenance marker while retaining DB2 schema and rebuild authority."
+    },
+    {
+      "symbol": "db2_set_embedder_model_id",
+      "signature_sha256": "d2b66b580397baf047e9df90d812a1db222a1c4a8ba00e30e90122b5051b4bf8",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The configured model identity is injected into the DB2 owner before initialization; exposing a post-attachment setter would violate atomic activation."
+    },
+    {
+      "symbol": "db2_set_embedding_dim",
+      "signature_sha256": "99674b540eb0fc94c572663bedcd2bb701ea4b42f0e25ebc0828c3272bb65813",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The operator-pinned embedding width is private pre-initialization configuration; the bus exposes only the resolved effective dimension."
+    },
+    {
+      "symbol": "db2_set_embedding_dim_default",
+      "signature_sha256": "8d5c80638cf8793335fe18ba050619968ca20d3eab551f35469bee87d35d7570",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The descriptor-owned default width is injected during private module bootstrap and is immutable once the DB2 process attaches."
+    },
+    {
+      "symbol": "db2_set_embedding_dim_pinned",
+      "signature_sha256": "89cd217b6e68a392a0a87cae6b41e93479c29889553f42ee5acfd8dd52159b02",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Pin precedence is private startup configuration consumed while DB2 establishes canonical schema authority; it is not a runtime mutation."
+    },
+    {
+      "symbol": "db2_set_pool_size",
+      "signature_sha256": "b3b1a3c5e88fac4fd648547ebd7dd4cd845fdf1358ab746fae1b3f3b59b3ac3d",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Pool capacity is fixed before DB2 initialization and remains private to the process owner; lifecycle.pool_status exposes the resulting bounded state."
+    },
+    {
+      "symbol": "db2_set_schema_readonly",
+      "signature_sha256": "8c1ba59589a1cd17b9b8a4c876a376a416e5b63c7e34c4594cea9ec21365afcd",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Schema apply-versus-verify mode is a private bootstrap choice made before opening DB2 and cannot be changed through the serving bus."
+    },
+    {
+      "symbol": "db2_shutdown",
+      "signature_sha256": "0468af1713c9025ad0ffb5e493a5580da7b9ad921b97a420eacba3927ffa3c01",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Connection and pool teardown belongs to supervised process termination; callers cannot remotely shut down the required DB2 capability."
     },
     {
       "symbol": "pgvec_code_delete_project",
