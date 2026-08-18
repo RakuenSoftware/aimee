@@ -3915,9 +3915,15 @@
           "line": 78
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "Returning a raw calibration-profile JSON blob leaks storage and serialization across the boundary; a typed learning.calibration_threshold operation owns scoped fallback and profile interpretation in one request."
+      },
       "signature": "int db2_calibration_profile_read ( const char * target_surface , const char * kind , const char * scope_kind , const char * scope_id , char * buf , size_t len )",
       "signature_sha256": "09fd9b5b0790dea3a0610b8dda7fc523d8afd38d972b402183476df37c607c46",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_calibration_profile_read"
     },
     {
@@ -3982,9 +3988,15 @@
           "line": 62
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "Parsing DB2-owned profile JSON is private operation logic; the future learning.calibration_threshold reply returns only the validated bounded threshold selected from the same scoped profile read."
+      },
       "signature": "int db2_calibration_threshold_from_profile_json ( const char * payload_json , double static_threshold , double * threshold_out )",
       "signature_sha256": "3643d66cd059d40957d6c018bf74b9f9120d635439bb4763a9069eb4c3f01a6a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_calibration_threshold_from_profile_json"
     },
     {
@@ -25614,15 +25626,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "19d03867d10d83721433c46d5de37758d6ffac7b891d230847861b5c05e8a427",
+  "fingerprint": "81517343159f8fe833b343e3300e1838201eada01404a42c6720daca39e3f05f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 693,
+    "audit_pending": 691,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 265
+    "reviewed": 267
   }
 }

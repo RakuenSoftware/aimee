@@ -108,6 +108,22 @@
       "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
     },
     {
+      "symbol": "db2_calibration_profile_read",
+      "signature_sha256": "09fd9b5b0790dea3a0610b8dda7fc523d8afd38d972b402183476df37c607c46",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "Returning a raw calibration-profile JSON blob leaks storage and serialization across the boundary; a typed learning.calibration_threshold operation owns scoped fallback and profile interpretation in one request."
+    },
+    {
+      "symbol": "db2_calibration_threshold_from_profile_json",
+      "signature_sha256": "3643d66cd059d40957d6c018bf74b9f9120d635439bb4763a9069eb4c3f01a6a",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "Parsing DB2-owned profile JSON is private operation logic; the future learning.calibration_threshold reply returns only the validated bounded threshold selected from the same scoped profile read."
+    },
+    {
       "symbol": "db2_conn",
       "signature_sha256": "4a33cfbffa38498794f2c49735e95cd914ce3cbf42a4772d2bf4f66f980d8899",
       "disposition": "private-db2",
