@@ -6894,9 +6894,15 @@
           "line": 44
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.embedding_dimension operation replaces production direct callers; the effective pgvector schema width remains DB2 authority."
+      },
       "signature": "int db2_embedding_dim ( void )",
       "signature_sha256": "68daa9ea74e7ddca239ff4ba399306b2cbc1c08fddf786cf009cba8c5e86307e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_embedding_dim"
     },
     {
@@ -9520,9 +9526,15 @@
           "line": 219
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
+      },
       "signature": "int db2_kb_health_probe ( int * kb_tables_ok )",
       "signature_sha256": "c0cc00bd5827a435e096d3c14146348e2b71393d97cb0760c9dd8d6603f74dcf",
-      "status": "private-test-only",
+      "status": "reviewed",
       "symbol": "db2_kb_health_probe"
     },
     {
@@ -18468,9 +18480,15 @@
           "line": 84
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.pool_status operation replaces the production health caller; PostgreSQL pool occupancy and counters remain DB2 process authority."
+      },
       "signature": "void db2_pool_stats ( int * size , int * in_use , int * waiters , long * lease_grants , long * lease_timeouts , long * stuck , long * poisoned )",
       "signature_sha256": "4efb451841b4da87a1e5b2536e284dbb5146f7a5d2187016a9756507a8bae047",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_pool_stats"
     },
     {
@@ -24396,15 +24414,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "24e2112eafed1a098e654a321b7e8968d8ed3986098f37b3c621fc476a74174d",
+  "fingerprint": "8f4b413a6e458cfb480ab5e9f05150376a4184cb8fe17fa88de704d4cddea43c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 895,
+    "audit_pending": 893,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
-    "private_test_only": 287,
-    "reviewed": 62
+    "private_test_only": 286,
+    "reviewed": 65
   }
 }

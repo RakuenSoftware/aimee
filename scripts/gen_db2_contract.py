@@ -179,11 +179,12 @@ def validate_catalog(value: object) -> dict[str, object]:
         fail("operations", "operations must be a nonempty array")
     seen_ids: set[tuple[str, int]] = set()
     seen_names: set[str] = set()
+    seen_c_symbols: set[str] = set()
     order: list[tuple[int, int]] = []
     for index, raw in enumerate(raw_operations):
         operation = _keys(raw, {
             "family", "id", "name", "wire_format", "scope", "transaction", "idempotency",
-            "results", "db3_placement", "db3_reason", "request", "reply",
+            "results", "db3_placement", "db3_reason", "c_symbols", "request", "reply",
         }, f"operations[{index}]")
         family_name = operation["family"]
         if family_name not in families:
@@ -207,8 +208,18 @@ def validate_catalog(value: object) -> dict[str, object]:
         if operation["db3_placement"] != "retained-db2":
             fail("db3-placement", f"{name} must remain in DB2")
         _string(operation["db3_reason"], f"{name}.db3_reason", 256)
+        if not isinstance(operation["c_symbols"], list) or not operation["c_symbols"] or not all(
+                isinstance(symbol, str) and NAME.fullmatch(symbol)
+                for symbol in operation["c_symbols"]):
+            fail("operation-c-symbols", f"{name} must name canonical C backend symbols")
+        for symbol in operation["c_symbols"]:
+            if symbol in seen_c_symbols:
+                fail("operation-c-symbols", f"C backend symbol {symbol!r} is duplicated")
+            seen_c_symbols.add(symbol)
         if key == ("lifecycle", 1) and name == "health" and \
                 operation["wire_format"] == "db2-health-v1":
+            if operation["c_symbols"] != ["db2_health_probe", "db2_kb_health_probe"]:
+                fail("operation-c-symbols", "health C symbols differ from the reviewed backend")
             if operation["results"] != ["ok"]:
                 fail("operation-results", "health results must equal ['ok']")
             request = _keys(operation["request"], {"magic", "encoded_size"}, "health.request")
@@ -231,6 +242,9 @@ def validate_catalog(value: object) -> dict[str, object]:
                     fail("health-flags", "health reply flags differ from version 1")
         elif key == ("lifecycle", 2) and name == "embedding_dimension" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_embedding_dim"]:
+                fail("operation-c-symbols",
+                     "embedding_dimension C symbol differs from the reviewed backend")
             if operation["results"] != ["ok", "invalid_state"]:
                 fail("operation-results",
                      "embedding_dimension results must equal ['ok', 'invalid_state']")
@@ -250,6 +264,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                 fail("embedding-dimension-reply", "reply must contain one bounded u32 on success")
         elif key == ("lifecycle", 3) and name == "pool_status" and \
                 operation["wire_format"] == "db2-envelope-pool-status-v1":
+            if operation["c_symbols"] != ["db2_pool_stats"]:
+                fail("operation-c-symbols", "pool_status C symbol differs from the reviewed backend")
             if operation["results"] != ["ok", "invalid_state"]:
                 fail("operation-results", "pool_status results must equal ['ok', 'invalid_state']")
             request = _keys(operation["request"], {"encoded_size", "payload"},
@@ -317,7 +333,8 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
     review = load_json(root / DECLARATION_REVIEW)
     ledger = load_json(root / DECLARATION_LEDGER, MAX_LEDGER_BYTES)
     if (not isinstance(review, dict) or
-            type(review.get("declarations_complete")) is not bool):
+            type(review.get("declarations_complete")) is not bool or
+            not isinstance(review.get("reviews"), list)):
         fail("declaration-review", f"{DECLARATION_REVIEW} has no completeness boolean")
     if (not isinstance(ledger, dict) or
             type(ledger.get("declarations_complete")) is not bool or
@@ -326,6 +343,35 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
         fail("declaration-ledger", f"{DECLARATION_LEDGER} has no typed completeness summary")
     if review["declarations_complete"] != ledger["declarations_complete"]:
         fail("declaration-completeness-drift", "review and generated ledger disagree")
+
+    expected: dict[str, tuple[str, str]] = {}
+    operations = catalog["operations"]
+    assert isinstance(operations, list)
+    for operation in operations:
+        assert isinstance(operation, dict)
+        symbols = operation["c_symbols"]
+        assert isinstance(symbols, list)
+        for symbol in symbols:
+            expected[str(symbol)] = (str(operation["family"]), str(operation["db3_placement"]))
+    actual: dict[str, tuple[str, str]] = {}
+    for index, row in enumerate(review["reviews"]):
+        if not isinstance(row, dict):
+            fail("declaration-review", f"review row {index} must be an object")
+        if row.get("disposition") != "wire-operation":
+            continue
+        symbol = row.get("symbol")
+        family = row.get("family")
+        placement = row.get("db3_placement")
+        if not all(isinstance(value, str) for value in (symbol, family, placement)):
+            fail("declaration-review", f"wire review row {index} has invalid fields")
+        actual[str(symbol)] = (str(family), str(placement))
+    if actual != expected:
+        fail("declaration-operation-binding",
+             f"wire reviews {sorted(actual)} differ from catalog C symbols {sorted(expected)}")
+    for symbol, binding in expected.items():
+        if actual[symbol] != binding:
+            fail("declaration-operation-binding",
+                 f"wire review for {symbol} differs from its catalog family or placement")
     if catalog["catalog_complete"] and (
             not review["declarations_complete"] or ledger["summary"]["audit_pending"] != 0):
         fail("catalog-declaration-gate", "catalog completeness requires a closed declaration audit")

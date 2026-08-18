@@ -80,13 +80,17 @@ only lifecycle is active and granted. Later operations must be typed, bounded ca
 Declaration audit:
 
 `declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
-generated ledger accounts for all 1,384 non-static function declarations in all 136 DB2 headers,
+generated ledger accounts for all 1,397 non-static function declarations in all 137 DB2 headers,
 records identical duplicate declarations by location, and fails on conflicting signatures. The
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
-confused. At this checkpoint 144 declarations are unconsumed implementation details, 283 are used
+confused. Every catalog operation names its exact C backend symbols; generation fails unless each
+symbol has a signature-bound `wire-operation` review with the same family and DB3 placement, and
+also fails if a wire review has no catalog operation. At this checkpoint 153 declarations are
+unconsumed implementation details, 286 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
 explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
-and 895 production-consumed declarations remain
+the embedding-dimension and pool-status backends are also reviewed wire operations, and 893
+production-consumed declarations remain
 without a reviewed disposition.
 
 The separate `vector-portability.json` audit covers all 76 declared `pgvec_*` symbols, including

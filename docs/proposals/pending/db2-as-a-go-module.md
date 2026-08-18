@@ -183,6 +183,10 @@ The declaration gate is separate from codec generation. A checked-in review bind
 normalized-signature hash to a closed disposition, family, DB3 placement, and reason. The generated
 ledger cross-references the exact frozen consumer set, records harmless identical declarations, and
 rejects conflicting signatures or unsupported C constructs rather than silently omitting them.
+Each catalog row also names its exact C backend symbols. Generation requires a one-to-one match with
+signature-bound `wire-operation` reviews in the same family and placement, so a codec cannot land
+without reducing the audited declaration debt and a review cannot claim a wire migration that the
+catalog does not implement.
 Test-only and unconsumed declarations do not become wire operations. The 61 currently externally
 referenced `pgvec_*` declarations are explicitly `private-db2`/`retained-db2`; this prevents provider
 names and PostgreSQL mechanics from leaking into the later DB3 contract without claiming that their

@@ -216,6 +216,8 @@ class ContractTests(unittest.TestCase):
              "operation-results"),
             (lambda value: value["operations"][0].__setitem__("db3_placement", "eligible"),
              "db3-placement"),
+            (lambda value: value["operations"][0].__setitem__("c_symbols", []),
+             "operation-c-symbols"),
             (lambda value: value["operations"][0].__setitem__("extra", 1), "keys"),
         )
         for mutate, rule in cases:
@@ -232,6 +234,7 @@ class ContractTests(unittest.TestCase):
                 **copy.deepcopy(value["operations"][0]),
                 "id": 4,
                 "name": "health_second",
+                "c_symbols": ["db2_health_second"],
             }),
             "unsupported-operation",
         )
@@ -307,6 +310,22 @@ class ContractTests(unittest.TestCase):
             db2["stages"][0]["event_kind"] = 11522
             process_path.write_text(json.dumps(process), encoding="utf-8")
             with self.assertRaisesRegex(generator.ContractError, "rule=process-activation"):
+                generator.generated(root)
+        finally:
+            temporary.cleanup()
+
+    def test_catalog_c_symbols_require_matching_signature_reviews(self) -> None:
+        temporary = self.fixture()
+        try:
+            root = Path(temporary.name)
+            review_path = root / generator.DECLARATION_REVIEW
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            row = next(item for item in review["reviews"]
+                       if item["symbol"] == "db2_pool_stats")
+            row["disposition"] = "private-db2"
+            review_path.write_text(json.dumps(review), encoding="utf-8")
+            with self.assertRaisesRegex(generator.ContractError,
+                                        "rule=declaration-operation-binding"):
                 generator.generated(root)
         finally:
             temporary.cleanup()

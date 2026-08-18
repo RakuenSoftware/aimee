@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "3bef57d69acbfa915d540c9cc4f216b690ed82fa9afc91e8408f850f630bf04c"
+const ContractSHA256 = "1cc0c702ce13a8b6f73c3e26fbd5415d55d5e7aa48c10e0e47dd2496026f70e0"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
