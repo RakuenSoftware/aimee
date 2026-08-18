@@ -558,6 +558,32 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 10,
+      "name": "retention_enforce",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Canonical content-safety retention deletes relational memory rows under the fixed restricted and sensitive policies and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_health_delete_by_sensitivity"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": [
+          {"sensitivity": "restricted", "retention_days": 7},
+          {"sensitivity": "sensitive", "retention_days": 90}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "deleted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
     }
   ]
 }

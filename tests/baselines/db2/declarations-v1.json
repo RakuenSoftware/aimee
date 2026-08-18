@@ -16412,9 +16412,15 @@
           "line": 68
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.retention_enforce operation applies the complete fixed restricted and sensitive retention policy while DB2 owns deletion of canonical relational memory rows."
+      },
       "signature": "int db2_memory_health_delete_by_sensitivity ( const char * sensitivity , int days )",
       "signature_sha256": "7a9761df6afd0f7711c7f80fc76c70583d1592c43cce9f2c68f8bdd3a7794832",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_delete_by_sensitivity"
     },
     {
@@ -25680,15 +25686,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e443f82725a1a8622433002a5e559c26bebc761da120f275b43f009e40eb8d29",
+  "fingerprint": "3e286d2a4553b166dfb4daef580581d6c83e4ddaac46016e168e8c16e1aa4921",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 682,
+    "audit_pending": 681,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 276
+    "reviewed": 277
   }
 }

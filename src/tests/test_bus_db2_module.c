@@ -40,6 +40,7 @@ typedef struct
    int (*key_exists_in_tier_pair)(const char *key, const char *tier_a, const char *tier_b);
    int (*clear_effectiveness)(int64_t memory_id);
    int (*set_effectiveness)(int64_t memory_id, double value);
+   int (*retention_delete)(const char *sensitivity, int days);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -84,6 +85,7 @@ static int find_id_by_key_kind_calls;
 static int key_exists_in_tier_pair_calls;
 static int clear_effectiveness_calls;
 static int set_effectiveness_calls;
+static int retention_delete_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -263,6 +265,26 @@ static int set_effectiveness(int64_t memory_id, double value)
 {
    set_effectiveness_calls++;
    return memory_id == 42 && value == 0.75 ? 0 : -1;
+}
+
+static int retention_delete_impl(const char *sensitivity, int days)
+{
+   retention_delete_calls++;
+   if (strcmp(sensitivity, AIMEE_DB2_RETENTION_RESTRICTED) == 0)
+      return days == (int)AIMEE_DB2_RETENTION_RESTRICTED_DAYS ? 2 : -1;
+   if (strcmp(sensitivity, AIMEE_DB2_RETENTION_SENSITIVE) == 0)
+      return days == (int)AIMEE_DB2_RETENTION_SENSITIVE_DAYS ? 3 : -1;
+   return -1;
+}
+
+int db2_memory_health_delete_by_sensitivity(const char *sensitivity, int days)
+{
+   return retention_delete_impl(sensitivity, days);
+}
+
+static int retention_delete(const char *sensitivity, int days)
+{
+   return retention_delete_impl(sensitivity, days);
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -529,6 +551,7 @@ int main(void)
        .key_exists_in_tier_pair = key_exists_in_tier_pair,
        .clear_effectiveness = clear_effectiveness,
        .set_effectiveness = set_effectiveness,
+       .retention_delete = retention_delete,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -624,6 +647,11 @@ int main(void)
    assert(aimee_db2_effectiveness_update_call(call_client, &client, 7028, 0, 42, 1, 0.75,
                                               &domain_result, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && set_effectiveness_calls == 1);
+
+   uint32_t deleted_count = 99;
+   assert(aimee_db2_retention_enforce_call(call_client, &client, 7029, 0, &deleted_count, NULL,
+                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(deleted_count == 5 && retention_delete_calls == 2);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

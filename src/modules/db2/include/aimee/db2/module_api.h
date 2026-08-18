@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "869ad095591495af20e3f2b648629291d667b0dd33f3569ce4867a6c2c2e5e43"
+#define AIMEE_DB2_CONTRACT_SHA256 "982b008286269baaa540ae0739bf2494b6168cdb0cfbfb3fe28bef911bb67d6e"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -185,6 +185,17 @@
 #define AIMEE_DB2_EFFECTIVENESS_UPDATE_ERROR_LEN          24u
 #define AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX      9223372036854775807ull
 #define AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX      1u
+#define AIMEE_DB2_EVENT_RETENTION_ENFORCE                 AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RETENTION_ENFORCE                 AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RETENTION_ENFORCE             10u
+#define AIMEE_DB2_RETENTION_ENFORCE_REQUEST_LEN           24u
+#define AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN          28u
+#define AIMEE_DB2_RETENTION_ENFORCE_ERROR_LEN             24u
+#define AIMEE_DB2_RETENTION_RESTRICTED                    "restricted"
+#define AIMEE_DB2_RETENTION_RESTRICTED_DAYS               7u
+#define AIMEE_DB2_RETENTION_SENSITIVE                     "sensitive"
+#define AIMEE_DB2_RETENTION_SENSITIVE_DAYS                90u
+#define AIMEE_DB2_RETENTION_ENFORCE_MAX                   2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1114,6 +1125,60 @@ static inline int aimee_db2_effectiveness_update_reply_decode(
        (header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_INVALID_STATE))
       return -1;
    *result = header.result;
+   return 0;
+}
+
+static inline int aimee_db2_retention_enforce_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RETENTION_ENFORCE, 0u, 0u, output,
+                                           capacity);
+}
+
+static inline int aimee_db2_retention_enforce_request_decode(const uint8_t *input,
+                                                             size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RETENTION_ENFORCE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RETENTION_ENFORCE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_retention_enforce_reply_encode(uint32_t deleted_count,
+                                                           uint8_t *output, size_t capacity,
+                                                           uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_count > AIMEE_DB2_RETENTION_ENFORCE_MAX ||
+       capacity < AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RETENTION_ENFORCE,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_count);
+   *output_len = AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_retention_enforce_reply_decode(const uint8_t *input,
+                                                           size_t input_len,
+                                                           uint32_t *deleted_count)
+{
+   if (deleted_count)
+      *deleted_count = 0u;
+   if (!deleted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RETENTION_ENFORCE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RETENTION_ENFORCE_MAX)
+      return -1;
+   *deleted_count = decoded;
    return 0;
 }
 

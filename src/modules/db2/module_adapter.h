@@ -20,6 +20,7 @@ typedef struct
    int (*key_exists_in_tier_pair)(const char *key, const char *tier_a, const char *tier_b);
    int (*clear_effectiveness)(int64_t memory_id);
    int (*set_effectiveness)(int64_t memory_id, double value);
+   int (*retention_delete)(const char *sensitivity, int days);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

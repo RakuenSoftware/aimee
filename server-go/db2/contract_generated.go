@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "869ad095591495af20e3f2b648629291d667b0dd33f3569ce4867a6c2c2e5e43"
+const ContractSHA256 = "982b008286269baaa540ae0739bf2494b6168cdb0cfbfb3fe28bef911bb67d6e"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -126,6 +126,14 @@ const StageEffectivenessUpdate = FamilyMemory
 const OperationEffectivenessUpdate uint32 = 9
 const EffectivenessUpdateMemoryIDMax uint64 = 9223372036854775807
 const EffectivenessUpdateHasValueMax uint32 = 1
+const EventRetentionEnforce = EventMemory
+const StageRetentionEnforce = FamilyMemory
+const OperationRetentionEnforce uint32 = 10
+const RetentionRestricted = "restricted"
+const RetentionRestrictedDays uint32 = 7
+const RetentionSensitive = "sensitive"
+const RetentionSensitiveDays uint32 = 90
+const RetentionEnforceMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -862,6 +870,53 @@ func DecodeEffectivenessUpdateReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return header.Result, nil
+}
+
+// EncodeRetentionEnforceRequest emits the empty request for the fixed retention policy.
+func EncodeRetentionEnforceRequest() []byte {
+	header, err := EncodeRequestHeader(OperationRetentionEnforce, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeRetentionEnforceRequest validates the exact empty operation envelope.
+func DecodeRetentionEnforceRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRetentionEnforce || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeRetentionEnforceReply emits the bounded total number of deleted rows.
+func EncodeRetentionEnforceReply(deletedCount uint32) ([]byte, error) {
+	if deletedCount > RetentionEnforceMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationRetentionEnforce, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedCount)
+	return reply, nil
+}
+
+// DecodeRetentionEnforceReply validates the operation and bounded deletion count.
+func DecodeRetentionEnforceReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRetentionEnforce ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	deletedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedCount > RetentionEnforceMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return deletedCount, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

@@ -125,6 +125,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .key_exists_in_tier_pair = db2_memory_key_exists_in_tier_pair,
        .clear_effectiveness = db2_memory_health_clear_effectiveness,
        .set_effectiveness = db2_memory_health_set_effectiveness,
+       .retention_delete = db2_memory_health_delete_by_sensitivity,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -323,6 +324,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                                                          response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_retention_enforce_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->retention_delete)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int restricted = backend->retention_delete(AIMEE_DB2_RETENTION_RESTRICTED,
+                                                    (int)AIMEE_DB2_RETENTION_RESTRICTED_DAYS);
+         int sensitive = backend->retention_delete(AIMEE_DB2_RETENTION_SENSITIVE,
+                                                   (int)AIMEE_DB2_RETENTION_SENSITIVE_DAYS);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         int64_t deleted_count = (int64_t)restricted + (int64_t)sensitive;
+         if (restricted < 0 || sensitive < 0 ||
+             deleted_count > (int64_t)AIMEE_DB2_RETENTION_ENFORCE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_retention_enforce_reply_encode((uint32_t)deleted_count, response_body,
+                                                      response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
