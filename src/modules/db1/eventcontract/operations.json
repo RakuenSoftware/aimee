@@ -230,8 +230,23 @@
   },
   {
    "id": 10,
-   "name": "workflow",
+   "name": "ensemble",
    "event_kind": 11786,
+   "active": true,
+   "doc": "multi-agent ensemble runs: one table holding a run's state, plus the template interpretation and prompt building that only the run itself uses. Template files are resolved from roots the caller names.",
+   "client_doc": "",
+   "covers": "ensemble",
+   "sources": [
+    "ensemble"
+   ],
+   "retired_sources": [
+    "ensemble.c"
+   ]
+  },
+  {
+   "id": 11,
+   "name": "workflow",
+   "event_kind": 11787,
    "active": false,
    "doc": "the workflow engine's stores, plans and traces.",
    "client_doc": "",
@@ -248,9 +263,9 @@
    "retired_sources": []
   },
   {
-   "id": 11,
+   "id": 12,
    "name": "identity",
-   "event_kind": 11787,
+   "event_kind": 11788,
    "active": false,
    "doc": "secrets and the replay stores behind token consumption.",
    "client_doc": "",
@@ -260,19 +275,6 @@
     "secrets",
     "server_identity_jti",
     "server_management_jti"
-   ],
-   "retired_sources": []
-  },
-  {
-   "id": 12,
-   "name": "ensemble",
-   "event_kind": 11788,
-   "active": false,
-   "doc": "multi-agent ensemble runs: the DB1 rows are a run's state, but the template that starts one is a file under a project root, which is a boundary question rather than a wire one.",
-   "client_doc": "",
-   "covers": "ensemble",
-   "sources": [
-    "ensemble"
    ],
    "retired_sources": []
   }
@@ -15869,6 +15871,497 @@
      }
     ],
     "max_bytes": 65536
+   }
+  },
+  {
+   "family": "ensemble",
+   "id": 1,
+   "name": "ensemble_create",
+   "c_name": "db1_ensemble_create_id",
+   "c_params": [
+    "project_root",
+    "config_dir",
+    "template_name",
+    "channel",
+    "assignments_json",
+    "out"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "project_root",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "config_dir",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "template_name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "channel",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "assignments_json",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "ensemble_id_result_t",
+    "fields": [
+     {
+      "name": "rc",
+      "type": "int"
+     },
+     {
+      "name": "err",
+      "type": "text"
+     },
+     {
+      "name": "id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "ensemble",
+   "id": 2,
+   "name": "ensemble_view",
+   "c_name": "db1_ensemble_view",
+   "c_params": [
+    "id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "ensemble_view_t",
+    "fields": [
+     {
+      "name": "rc",
+      "type": "int"
+     },
+     {
+      "name": "err",
+      "type": "text"
+     },
+     {
+      "name": "info",
+      "type": "struct",
+      "fields": [
+       {
+        "name": "id",
+        "type": "int"
+       },
+       {
+        "name": "template_name",
+        "type": "text"
+       },
+       {
+        "name": "channel",
+        "type": "text"
+       },
+       {
+        "name": "status",
+        "type": "text"
+       },
+       {
+        "name": "current_phase",
+        "type": "int"
+       },
+       {
+        "name": "current_turn",
+        "type": "int"
+       },
+       {
+        "name": "phase_count",
+        "type": "int"
+       },
+       {
+        "name": "turns_in_phase",
+        "type": "int"
+       },
+       {
+        "name": "phase_name",
+        "type": "text"
+       },
+       {
+        "name": "expected_agent",
+        "type": "text"
+       },
+       {
+        "name": "expected_role",
+        "type": "text"
+       },
+       {
+        "name": "paused_reason",
+        "type": "text"
+       },
+       {
+        "name": "created_at",
+        "type": "text"
+       },
+       {
+        "name": "updated_at",
+        "type": "text"
+       }
+      ]
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "context",
+      "type": "text",
+      "alloc": 1048576
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "ensemble",
+   "id": 3,
+   "name": "ensemble_advance",
+   "c_name": "db1_ensemble_advance_view",
+   "c_params": [
+    "id",
+    "sender",
+    "text",
+    "out"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "sender",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "text",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "ensemble_view_t",
+    "fields": [
+     {
+      "name": "rc",
+      "type": "int"
+     },
+     {
+      "name": "err",
+      "type": "text"
+     },
+     {
+      "name": "info",
+      "type": "struct",
+      "fields": [
+       {
+        "name": "id",
+        "type": "int"
+       },
+       {
+        "name": "template_name",
+        "type": "text"
+       },
+       {
+        "name": "channel",
+        "type": "text"
+       },
+       {
+        "name": "status",
+        "type": "text"
+       },
+       {
+        "name": "current_phase",
+        "type": "int"
+       },
+       {
+        "name": "current_turn",
+        "type": "int"
+       },
+       {
+        "name": "phase_count",
+        "type": "int"
+       },
+       {
+        "name": "turns_in_phase",
+        "type": "int"
+       },
+       {
+        "name": "phase_name",
+        "type": "text"
+       },
+       {
+        "name": "expected_agent",
+        "type": "text"
+       },
+       {
+        "name": "expected_role",
+        "type": "text"
+       },
+       {
+        "name": "paused_reason",
+        "type": "text"
+       },
+       {
+        "name": "created_at",
+        "type": "text"
+       },
+       {
+        "name": "updated_at",
+        "type": "text"
+       }
+      ]
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "context",
+      "type": "text",
+      "alloc": 1048576
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "ensemble",
+   "id": 4,
+   "name": "ensemble_pause",
+   "c_name": "db1_ensemble_pause",
+   "c_params": [
+    "id",
+    "reason",
+    "err",
+    "errlen"
+   ],
+   "c_returns": "rc",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "err",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 512
+   }
+  },
+  {
+   "family": "ensemble",
+   "id": 5,
+   "name": "ensemble_list",
+   "c_name": "db1_ensemble_list_rows",
+   "c_params": [
+    "out",
+    "out_count"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "struct": "ensemble_info_t",
+    "list": {
+     "out": "out",
+     "count": "out_count",
+     "max_rows": 512,
+     "allocate": true
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "template_name",
+      "type": "text"
+     },
+     {
+      "name": "channel",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "current_phase",
+      "type": "int"
+     },
+     {
+      "name": "current_turn",
+      "type": "int"
+     },
+     {
+      "name": "phase_count",
+      "type": "int"
+     },
+     {
+      "name": "turns_in_phase",
+      "type": "int"
+     },
+     {
+      "name": "phase_name",
+      "type": "text"
+     },
+     {
+      "name": "expected_agent",
+      "type": "text"
+     },
+     {
+      "name": "expected_role",
+      "type": "text"
+     },
+     {
+      "name": "paused_reason",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "ensemble",
+   "id": 6,
+   "name": "ensemble_find_current_by_channel",
+   "c_name": "db1_ensemble_find_current_id",
+   "c_params": [
+    "channel",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "channel",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "ensemble_id_result_t",
+    "fields": [
+     {
+      "name": "rc",
+      "type": "int"
+     },
+     {
+      "name": "err",
+      "type": "text"
+     },
+     {
+      "name": "id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 512
    }
   }
  ]

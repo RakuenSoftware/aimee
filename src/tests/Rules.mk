@@ -5148,6 +5148,7 @@ $(TESTPREFIX)/unit-test-db1-module-bus: \
                                        $(OBJDIR)/agent_job_release.o \
                                        $(OBJDIR)/primary_session_release.o \
                                        $(OBJDIR)/model_catalog_release.o \
+                                       $(OBJDIR)/ensemble_view.o \
                                        $(OBS_BUS_LINK_OBJS) \
                                        $(OBJDIR)/core/event_bus/bus_client.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -5260,6 +5261,9 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/telemetry_stage.o \
                                        $(OBJDIR)/modules/db1/guardrail_state_stage.o \
                                        $(OBJDIR)/modules/db1/session_state.o \
+                                       $(OBJDIR)/modules/db1/ensemble_stage.o \
+                                       $(OBJDIR)/modules/db1/ensemble.o \
+                                       $(OBJDIR)/dstr.o \
                                        $(OBJDIR)/modules/db1/token_audit.o \
                                        $(OBJDIR)/modules/db1/cost_fold.o \
                                        $(OBJDIR)/modules/db1/interaction_events.o \
@@ -6380,7 +6384,7 @@ $(TESTPREFIX)/unit-test-memory-retrieval-eval: $(OBJDIR)/kb/kb_bandit.o $(OBJDIR
 
 $(TESTPREFIX)/unit-test-ensemble: $(OBJDIR)/tests/test_ensemble.o \
                      $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/modules/db1/ensemble.o \
-                     $(OBJDIR)/ensemble_render.o \
+                     $(OBJDIR)/ensemble_render.o $(OBJDIR)/ensemble_view.o \
                      $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_elements.o $(OBJDIR)/modules/config/config_econ.o \
                      $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/yaml.o \

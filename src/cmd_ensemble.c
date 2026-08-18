@@ -134,14 +134,21 @@ void session_subcmd_start(app_ctx_t *ctx, int argc, char **argv)
       cwd[0] = '\0';
 
    int id = 0;
-   if (db1_ensemble_create(cwd, config_default_dir(), template_name, channel, assignments, &id, err,
-                           sizeof(err)) != 0)
+   char *assignments_json = cJSON_PrintUnformatted(assignments);
+   cJSON_Delete(assignments);
+   if (!assignments_json)
    {
-      fprintf(stderr, "ensemble start: %s\n", err);
-      cJSON_Delete(assignments);
+      fprintf(stderr, "ensemble start: failed to serialize assignments\n");
       return;
    }
-   cJSON_Delete(assignments);
+   int create_rc = db1_ensemble_create(cwd, config_default_dir(), template_name, channel,
+                                       assignments_json, &id, err, sizeof(err));
+   free(assignments_json);
+   if (create_rc != 0)
+   {
+      fprintf(stderr, "ensemble start: %s\n", err);
+      return;
+   }
 
    ensemble_info_t info;
    char *prompt = NULL;

@@ -382,6 +382,20 @@
 #define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY  6u
 #define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED 7u
 
+/* Family 10: multi-agent ensemble runs: one table holding a run's state, plus
+ * the template interpretation and prompt building that only the run itself
+ * uses. Template files are resolved from roots the caller names. */
+
+#define AIMEE_DB1_EVENT_ENSEMBLE 11786u
+#define AIMEE_DB1_STAGE_ENSEMBLE 10u
+
+#define AIMEE_DB1_OP_ENSEMBLE_CREATE                  1u
+#define AIMEE_DB1_OP_ENSEMBLE_VIEW                    2u
+#define AIMEE_DB1_OP_ENSEMBLE_ADVANCE                 3u
+#define AIMEE_DB1_OP_ENSEMBLE_PAUSE                   4u
+#define AIMEE_DB1_OP_ENSEMBLE_LIST                    5u
+#define AIMEE_DB1_OP_ENSEMBLE_FIND_CURRENT_BY_CHANNEL 6u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

@@ -542,17 +542,33 @@ static int wf_role_needs_dissent(const char *role)
    return 0;
 }
 
-int db1_ensemble_create(const char *project_root, const char *config_dir, const char *template_name,
-                        const char *channel, cJSON *assignments, int *out_id, char *err,
-                        size_t errlen)
+static int ensemble_create_locked(const char *project_root, const char *config_dir,
+                                  const char *template_name, const char *channel,
+                                  const char *assignments_json, int *out_id, char *err,
+                                  size_t errlen)
 {
    cJSON *tmpl = wf_template_load(project_root, config_dir, template_name, err, errlen);
    if (!tmpl)
       return -1;
 
+   /* An absent or empty document means no assignments, which is not an error:
+      a template whose participants each name their agent needs none. */
+   cJSON *assignments = NULL;
+   if (assignments_json && assignments_json[0])
+   {
+      assignments = cJSON_Parse(assignments_json);
+      if (!assignments)
+      {
+         cJSON_Delete(tmpl);
+         wf_set_err(err, errlen, "assignments are not valid JSON");
+         return -1;
+      }
+   }
+
    if (wf_expand_assignments(tmpl, assignments, err, errlen) != 0)
    {
       cJSON_Delete(tmpl);
+      cJSON_Delete(assignments);
       return -1;
    }
 
@@ -563,6 +579,7 @@ int db1_ensemble_create(const char *project_root, const char *config_dir, const 
       free(tmpl_raw);
       free(assign_raw);
       cJSON_Delete(tmpl);
+      cJSON_Delete(assignments);
       wf_set_err(err, errlen, "failed to serialize ensemble template");
       return -1;
    }
@@ -582,6 +599,7 @@ int db1_ensemble_create(const char *project_root, const char *config_dir, const 
       free(tmpl_raw);
       free(assign_raw);
       cJSON_Delete(tmpl);
+      cJSON_Delete(assignments);
       wf_set_err(err, errlen, sqlite3_errmsg(db1_conn()));
       return -1;
    }
@@ -598,6 +616,7 @@ int db1_ensemble_create(const char *project_root, const char *config_dir, const 
    free(tmpl_raw);
    free(assign_raw);
    cJSON_Delete(tmpl);
+   cJSON_Delete(assignments);
    if (rc != SQLITE_DONE)
    {
       wf_set_err(err, errlen, sqlite3_errmsg(db1_conn()));
@@ -609,8 +628,8 @@ int db1_ensemble_create(const char *project_root, const char *config_dir, const 
    return 0;
 }
 
-int db1_ensemble_get(int id, ensemble_info_t *out, char **prompt_out, char **context_out, char *err,
-                     size_t errlen)
+static int ensemble_get_locked(int id, ensemble_info_t *out, char **prompt_out, char **context_out,
+                               char *err, size_t errlen)
 {
    wf_loaded_session_t loaded;
    if (wf_load_session_row(id, &loaded, err, errlen) != 0)
@@ -652,8 +671,9 @@ int db1_ensemble_pause(int id, const char *reason, char *err, size_t errlen)
    return 0;
 }
 
-int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_info_t *out,
-                         char **prompt_out, char *err, size_t errlen)
+static int ensemble_advance_locked(int id, const char *sender, const char *text,
+                                   ensemble_info_t *out, char **prompt_out, char *err,
+                                   size_t errlen)
 {
    wf_loaded_session_t loaded;
    if (wf_load_session_row(id, &loaded, err, errlen) != 0)
@@ -763,7 +783,7 @@ int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_
    return 0;
 }
 
-int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t errlen)
+static int ensemble_list_locked(ensemble_info_t **out, int *out_count, char *err, size_t errlen)
 {
    if (!out || !out_count)
    {
@@ -874,7 +894,7 @@ int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t e
    return 0;
 }
 
-int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char *err, size_t errlen)
+static int ensemble_find_current_locked(const char *channel, int *out_id, char *err, size_t errlen)
 {
    if (!channel || !channel[0] || !out_id)
    {
@@ -911,4 +931,57 @@ int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char 
 
    *out_id = id;
    return 0;
+}
+
+/* The two reads that answer with a whole view.
+ *
+ * rc and err are filled rather than returned: the ensemble refusing a turn is
+ * something it has to SAY, and a reply that carried only a status would reduce
+ * "expected 'alice', got 'bob'" to "no". The returned int is about the store,
+ * not about the ensemble -- it is 0 whenever the view is filled at all. */
+int db1_ensemble_view(int id, ensemble_view_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc =
+       ensemble_get_locked(id, &out->info, &out->prompt, &out->context, out->err, sizeof(out->err));
+   return 0;
+}
+
+int db1_ensemble_advance_view(int id, const char *sender, const char *text, ensemble_view_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc = ensemble_advance_locked(id, sender, text, &out->info, &out->prompt, out->err,
+                                     sizeof(out->err));
+   return 0;
+}
+
+int db1_ensemble_create_id(const char *project_root, const char *config_dir,
+                           const char *template_name, const char *channel,
+                           const char *assignments_json, ensemble_id_result_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc = ensemble_create_locked(project_root, config_dir, template_name, channel,
+                                    assignments_json, &out->id, out->err, sizeof(out->err));
+   return 0;
+}
+
+int db1_ensemble_find_current_id(const char *channel, ensemble_id_result_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc = ensemble_find_current_locked(channel, &out->id, out->err, sizeof(out->err));
+   return 0;
+}
+
+int db1_ensemble_list_rows(ensemble_info_t **out, int *out_count)
+{
+   char err[ENSEMBLE_ERR_LEN];
+   return ensemble_list_locked(out, out_count, err, sizeof err);
 }

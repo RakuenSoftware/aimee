@@ -178,11 +178,21 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
                int id = 0;
                if (!getcwd(cwd, sizeof(cwd)))
                   cwd[0] = '\0';
-               rc = db1_ensemble_create(cwd, config_default_dir(), jt->valuestring,
-                                        (cJSON_IsString(jc) && jc->valuestring[0]) ? jc->valuestring
-                                                                                   : "general",
-                                        assignments, &id, errbuf, sizeof(errbuf));
+               char *assignments_json = cJSON_PrintUnformatted(assignments);
                cJSON_Delete(assignments);
+               if (!assignments_json)
+               {
+                  snprintf(errbuf, sizeof(errbuf), "failed to serialize assignments");
+                  rc = -1;
+               }
+               else
+               {
+                  rc = db1_ensemble_create(
+                      cwd, config_default_dir(), jt->valuestring,
+                      (cJSON_IsString(jc) && jc->valuestring[0]) ? jc->valuestring : "general",
+                      assignments_json, &id, errbuf, sizeof(errbuf));
+                  free(assignments_json);
+               }
                if (rc == 0)
                   rc = db1_ensemble_get(id, &info, &prompt, &context, errbuf, sizeof(errbuf));
             }

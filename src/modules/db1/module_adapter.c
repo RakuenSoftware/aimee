@@ -155,6 +155,9 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    case AIMEE_DB1_STAGE_GUARDRAIL_STATE:
       return aimee_db1_stage_guardrail_state(request_body, request_len, response_body,
                                              response_capacity, response_len);
+   case AIMEE_DB1_STAGE_ENSEMBLE:
+      return aimee_db1_stage_ensemble(request_body, request_len, response_body, response_capacity,
+                                      response_len);
    default:
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }

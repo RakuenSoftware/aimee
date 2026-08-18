@@ -33,6 +33,7 @@
 #include <aimee/audit/obs_bus.h>
 
 #include "cognify_jobs.h"
+#include "ensemble.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -70,7 +71,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_CONVERSATION,     AIMEE_DB1_EVENT_AGENT_WORK,
     AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
     AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
-    AIMEE_DB1_EVENT_GUARDRAIL_STATE,
+    AIMEE_DB1_EVENT_GUARDRAIL_STATE,  AIMEE_DB1_EVENT_ENSEMBLE,
 };
 
 static pid_t g_module = -1;
@@ -818,6 +819,82 @@ static void test_guardrail_state_crosses_with_its_collections(void)
    printf("  PASS: guardrail state crosses with its collections\n");
 }
 
+/* An ensemble refusing a turn is something it has to SAY. This checks that the
+   sentence survives the crossing, because the failure it guards against is not
+   a crash: a reply that carried only a status would turn "expected 'claude-1',
+   got 'gemini'" into -1, and the user would be told the store broke. */
+static void test_an_ensemble_verdict_crosses_as_a_sentence(void)
+{
+   char err[ENSEMBLE_ERR_LEN] = "";
+   const char *assignments = "{\"reviewer\":[\"claude-1\",\"gemini\"],\"author\":[\"claude-2\"]}";
+   int id = 0;
+   must(db1_ensemble_create(NULL, NULL, "code-review", "bus-review", assignments, &id, err,
+                            sizeof err) == 0,
+        "started an ensemble from a built-in template across the bus");
+   must(id > 0, "and it came back with an id");
+
+   ensemble_info_t info;
+   char *prompt = NULL;
+   char *context = NULL;
+   memset(&info, 0, sizeof info);
+   must(db1_ensemble_get(id, &info, &prompt, &context, err, sizeof err) == 0, "read it back");
+   must(strcmp(info.template_name, "code-review") == 0, "the template name crossed");
+   must(strcmp(info.channel, "bus-review") == 0, "the channel crossed");
+   must(info.phase_count == 3, "the phase count was derived from the stored template");
+   must(strcmp(info.expected_agent, "claude-1") == 0, "and it is claude-1's turn");
+   must(prompt != NULL && prompt[0], "the turn prompt was built and allocated across the wire");
+   free(prompt);
+   free(context);
+
+   /* The wrong speaker: a verdict, not a broken store. */
+   prompt = NULL;
+   memset(&info, 0, sizeof info);
+   must(db1_ensemble_advance(id, "gemini", "jumping the queue", &info, &prompt, err, sizeof err) !=
+            0,
+        "the ensemble refused a turn taken out of order");
+   must(strstr(err, "claude-1") && strstr(err, "gemini"),
+        "and said which agent it expected and which one spoke");
+   free(prompt);
+
+   /* The right speaker advances it. */
+   prompt = NULL;
+   memset(&info, 0, sizeof info);
+   must(db1_ensemble_advance(id, "claude-1", "looks fine", &info, &prompt, err, sizeof err) == 0,
+        "the expected speaker advanced the ensemble");
+   must(strcmp(info.expected_agent, "gemini") == 0, "and the turn passed to gemini");
+   free(prompt);
+
+   ensemble_info_t *rows = NULL;
+   int count = 0;
+   must(db1_ensemble_list(&rows, &count, err, sizeof err) == 0, "listed the ensembles");
+   must(count >= 1, "and the row the callee allocated came back");
+   int found = 0;
+   for (int at = 0; at < count; at++)
+   {
+      if (strcmp(rows[at].channel, "bus-review") != 0)
+         continue;
+      found = 1;
+      must(rows[at].phase_count == 3, "a listed row carries what the template implies");
+   }
+   free(rows);
+   must(found, "the ensemble we started is among them");
+
+   int by_channel = 0;
+   must(db1_ensemble_find_current_by_channel("bus-review", &by_channel, err, sizeof err) == 0,
+        "found the current ensemble for its channel");
+   must(by_channel == id, "and it is the one we started");
+
+   must(db1_ensemble_find_current_by_channel("no-such-channel", &by_channel, err, sizeof err) != 0,
+        "an absent channel is refused");
+   must(strstr(err, "no-such-channel") != NULL, "and the refusal names the channel it looked for");
+
+   must(db1_ensemble_pause(id, "bus test", err, sizeof err) == 0, "paused it");
+   must(db1_ensemble_pause(999999, "bus test", err, sizeof err) != 0, "an absent id is refused");
+   must(strstr(err, "999999") != NULL, "and the refusal names the id");
+
+   printf("  PASS: an ensemble verdict crosses as a sentence\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -863,6 +940,7 @@ int main(int argc, char **argv)
    test_costs_ids_and_a_nested_row();
    test_a_row_that_carries_rows();
    test_guardrail_state_crosses_with_its_collections();
+   test_an_ensemble_verdict_crosses_as_a_sentence();
 
    stop_module();
    obs_bus_stop();

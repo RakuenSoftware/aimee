@@ -1437,13 +1437,29 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
    return result;
 }}
 
-/* A write answers 0 or -1; the store either took it or it did not. */
-static int write_result(int status)
-{{
-   return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
-}}
+{write_result}{read_result}"""
 
-{read_result}"""
+
+WRITE_RESULT = """/* A write answers 0 or -1; the store either took it or it did not. */
+static int write_result(int status)
+{
+   return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
+}
+
+"""
+
+
+READ_RESULT = """/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
+   implementation returns and what its callers already branch on. */
+static int read_result(int status, const char *value_out)
+{
+   if (status == (int)AIMEE_DB1_STATUS_OK)
+      return (value_out && value_out[0]) ? 1 : 0;
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return -1;
+}
+"""
 
 
 # Header text, read and comment-stripped once per root.
@@ -1682,40 +1698,20 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         prose = "\n *\n" + "\n".join(wrap(doc, " * ", " * "))
     includes = "\n".join(f'#include "{h}"' for h in headers)
     # Emitted only where something reads a single value: a family of writes and
-    # rows has no use for it, and an unused static is a -Werror failure.
-    # A returned string maps its own miss (NULL) and never goes through this,
-    # so a family of writes, rows and returned strings has no use for it -- and
-    # an unused static is a -Werror failure.
-    # A plain read is the only shape that goes through read_result: not a row,
-    # not a list (a COLUMN has fields and no struct, so it looks like a read
-    # until you ask), and not a returned string, which maps its own miss.
-    # Stated as what a plain read IS rather than as everything it is not. The
-    # exclusion form had to be extended for every shape added -- list, column,
-    # returned string, scalars, returned id -- and each time the symptom was an
-    # unused static, which is a -Werror failure rather than a wrong answer only
-    # because the compiler happens to notice.
-    def is_plain_read(operation: dict[str, object]) -> bool:
-        reply = operation["reply"]
-        assert isinstance(reply, dict)
-        shaped = {"struct", "list", "scalars"} & set(reply)
-        return bool(reply["fields"]) and not shaped and "c_returns" not in operation
-
-    plain_read = any(is_plain_read(o) for o in operations)
-    reader = ("""/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
-   implementation returns and what its callers already branch on. */
-static int read_result(int status, const char *value_out)
-{
-   if (status == (int)AIMEE_DB1_STATUS_OK)
-      return (value_out && value_out[0]) ? 1 : 0;
-   if (status == (int)AIMEE_DB1_STATUS_MISSING)
-      return 0;
-   return -1;
-}
-""" if plain_read else "")
-    out = [CLIENT_SCAFFOLD.format(
-        stem=name, family=name.replace("_", " "), upper=upper,
-        header=includes, client_doc=prose, read_result=reader)]
-
+    # Both helpers are emitted only if the generated code calls one, because an
+    # unused static is a -Werror failure and the build stops.
+    #
+    # This used to be a predicate describing which shapes reach each helper, and
+    # it had to be extended for every shape added -- list, column, returned
+    # string, scalars, returned id -- each time discovered as a broken build
+    # rather than as a wrong answer, because the compiler happened to notice.
+    # ensemble was the next one: the first family whose every operation reads
+    # something back, so write_result had no caller.
+    #
+    # Asking the emitted text which helpers it calls cannot fall behind a shape,
+    # since a shape that does not call one is exactly a shape that does not need
+    # it. The bodies are therefore built before the scaffold that precedes them.
+    out = []
     for operation in operations:
         request = operation["request"]
         reply = operation["reply"]
@@ -2398,7 +2394,14 @@ static int read_result(int status, const char *value_out)
         body.append("}")
         out.append("\n" + "\n".join(body) + "\n")
     out.append("\n/* clang-format on */\n")
-    return "".join(out)
+
+    generated = "".join(out)
+    reader = (READ_RESULT if "read_result(" in generated else "")
+    writer = (WRITE_RESULT if "write_result(" in generated else "")
+    return CLIENT_SCAFFOLD.format(
+        stem=name, family=name.replace("_", " "), upper=upper,
+        header=includes, client_doc=prose, write_result=writer,
+        read_result=reader) + generated
 
 
 def client_families(catalog: dict[str, object]) -> list[tuple[dict, list]]:
