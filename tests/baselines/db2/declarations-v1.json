@@ -11051,9 +11051,15 @@
           "line": 183
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON decision-log wrapper is caller presentation code; a typed learning mutation bounds decision evidence and returns an explicit identifier and result."
+      },
       "signature": "cJSON * db2_kb_service_decision_log_insert_json ( int64_t task_id , const char * options , const char * chosen , const char * rationale , const char * assumptions )",
       "signature_sha256": "1d719c8aaea1826a3531c414b7a29bea7aaa126f1a44f8c6bf07bc5f2a490257",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_decision_log_insert_json"
     },
     {
@@ -11067,9 +11073,15 @@
           "line": 186
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON decision-list builder remains local serialization; DB2 returns a bounded outcome-filtered typed record set."
+      },
       "signature": "cJSON * db2_kb_service_decision_log_list_json ( const char * outcome , int limit )",
       "signature_sha256": "d1d819e2b8fba6618bbabd0d939de9de5fb34ffc199acd5bda10df91953927a3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_decision_log_list_json"
     },
     {
@@ -11098,9 +11110,15 @@
           "line": 213
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON expiry report does not cross the bus; one typed learning maintenance operation owns session expiry and returns bounded counts."
+      },
       "signature": "cJSON * db2_kb_service_directive_expire_session_json ( void )",
       "signature_sha256": "cf13cdcb62ee3c018a377947075334aa792818a2720bd7703c93f225cb53d41d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_directive_expire_session_json"
     },
     {
@@ -11113,9 +11131,15 @@
           "line": 112
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON directive-list facade cannot define the stable contract; DB2 returns bounded state- and cause-filtered typed records."
+      },
       "signature": "cJSON * db2_kb_service_directive_list_json ( const char * state , const char * cause , int max_rows )",
       "signature_sha256": "1fb783c58ebe4cc185fe630de3b79f26660259f99a030d1de74b033a797cd935",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_directive_list_json"
     },
     {
@@ -11174,9 +11198,15 @@
           "line": 198
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON feedback facade is caller-specific presentation; a typed learning mutation validates bounded polarity, title, description, and weight."
+      },
       "signature": "cJSON * db2_kb_service_feedback_record_json ( const char * polarity , const char * title , const char * description , int weight )",
       "signature_sha256": "cda9db3e47e1286f00298298a4c54d77bed81435811660b36ae66f0f3e08348e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_feedback_record_json"
     },
     {
@@ -25002,15 +25032,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3b4ab6a6cd528591da91066b1fe46e0d0c8404601b39744acf4cac0b4f190f8b",
+  "fingerprint": "4f08fece8e55e73fcce3d1c22fae3724f7d0af4f3abfc984ae02397fc4bec178",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 795,
+    "audit_pending": 790,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 163
+    "reviewed": 168
   }
 }

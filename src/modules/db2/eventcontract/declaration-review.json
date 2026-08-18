@@ -380,6 +380,46 @@
       "reason": "The cJSON state-update facade stays local; a typed learning mutation validates the closed state and returns the updated bounded record."
     },
     {
+      "symbol": "db2_kb_service_decision_log_insert_json",
+      "signature_sha256": "1d719c8aaea1826a3531c414b7a29bea7aaa126f1a44f8c6bf07bc5f2a490257",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON decision-log wrapper is caller presentation code; a typed learning mutation bounds decision evidence and returns an explicit identifier and result."
+    },
+    {
+      "symbol": "db2_kb_service_decision_log_list_json",
+      "signature_sha256": "d1d819e2b8fba6618bbabd0d939de9de5fb34ffc199acd5bda10df91953927a3",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON decision-list builder remains local serialization; DB2 returns a bounded outcome-filtered typed record set."
+    },
+    {
+      "symbol": "db2_kb_service_directive_expire_session_json",
+      "signature_sha256": "cf13cdcb62ee3c018a377947075334aa792818a2720bd7703c93f225cb53d41d",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON expiry report does not cross the bus; one typed learning maintenance operation owns session expiry and returns bounded counts."
+    },
+    {
+      "symbol": "db2_kb_service_directive_list_json",
+      "signature_sha256": "1fb783c58ebe4cc185fe630de3b79f26660259f99a030d1de74b033a797cd935",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON directive-list facade cannot define the stable contract; DB2 returns bounded state- and cause-filtered typed records."
+    },
+    {
+      "symbol": "db2_kb_service_feedback_record_json",
+      "signature_sha256": "cda9db3e47e1286f00298298a4c54d77bed81435811660b36ae66f0f3e08348e",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON feedback facade is caller-specific presentation; a typed learning mutation validates bounded polarity, title, description, and weight."
+    },
+    {
       "symbol": "db2_kb_service_learning_get_json",
       "signature_sha256": "9dd27e1e2c8bababa5057a656f302898147c6479f34aeb98d7bda861877292c2",
       "disposition": "private-db2",
