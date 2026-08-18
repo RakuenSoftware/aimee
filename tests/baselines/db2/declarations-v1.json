@@ -1488,9 +1488,15 @@
           "line": 79
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Binding an integer to an opaque PostgreSQL statement is private DB2 execution state; typed operations carry validated integer fields and bind them inside the owner process."
+      },
       "signature": "int aimee_pg_bind_int ( aimee_pg_stmt_t * stmt , const char * name , int value )",
       "signature_sha256": "de48803d2479f9823aa4e74247a2d0ebd695d70327e65fbe028dd41ee6ec0413",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_bind_int"
     },
     {
@@ -1530,9 +1536,15 @@
           "line": 80
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Binding a 64-bit value to a process-owned statement cannot cross the bus; bounded request fields are decoded and bound wholly inside DB2."
+      },
       "signature": "int aimee_pg_bind_int64 ( aimee_pg_stmt_t * stmt , const char * name , int64_t value )",
       "signature_sha256": "b82c084bef8c3500e7495382332cf1c9e73569eb4f26ffe3b17cbff69423d166",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_bind_int64"
     },
     {
@@ -1629,9 +1641,15 @@
           "line": 82
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Statement text binding exposes an opaque handle and unbounded database plumbing; each wire operation validates bounded strings before DB2 performs its own bind."
+      },
       "signature": "int aimee_pg_bind_text ( aimee_pg_stmt_t * stmt , const char * name , const char * value )",
       "signature_sha256": "8b006e201f45d11e13250e9769de12deedd2a7864649e5144f2b39f7afb7024c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_bind_text"
     },
     {
@@ -1731,9 +1749,15 @@
           "line": 94
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Reading a double from an opaque result cursor is private row decoding; DB2 validates and encodes the domain value into a bounded typed reply."
+      },
       "signature": "double aimee_pg_column_double ( aimee_pg_stmt_t * stmt , int col )",
       "signature_sha256": "824e3ac156c980e9bfcf220bdb923a7b6f60465c2fa2b37f87defefebce562ae",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_column_double"
     },
     {
@@ -1768,9 +1792,15 @@
           "line": 92
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Reading an integer from a process-owned result cursor cannot be remote API; complete operations decode rows and return explicit domain fields."
+      },
       "signature": "int aimee_pg_column_int ( aimee_pg_stmt_t * stmt , int col )",
       "signature_sha256": "4976ed3787f8cc49538a345ccef15f1cc692f9d4820370d452d7a0756ac43cc1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_column_int"
     },
     {
@@ -1819,9 +1849,15 @@
           "line": 93
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Reading a 64-bit column is local cursor traversal; DB2 owns the result lifetime and emits only the bounded typed domain value."
+      },
       "signature": "int64_t aimee_pg_column_int64 ( aimee_pg_stmt_t * stmt , int col )",
       "signature_sha256": "4eb30f0fa2b9d957b78551ddf94492436c2772d38ea32074dcc4ebff2058324c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_column_int64"
     },
     {
@@ -1926,9 +1962,15 @@
           "line": 95
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "A borrowed text pointer into PostgreSQL result storage is process-local lifetime state; DB2 copies validated bounded text into operation replies before finalizing."
+      },
       "signature": "const char * aimee_pg_column_text ( aimee_pg_stmt_t * stmt , int col )",
       "signature_sha256": "6a04c5adbe9ff6ade5ffd1b414bc046e727420df29c2ba7f5e058ae0f7e1ce26",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_column_text"
     },
     {
@@ -2000,9 +2042,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Transporting caller-supplied raw SQL would violate the DB2 ownership and schema boundary; every bus mutation names a declared operation with DB2-owned SQL."
+      },
       "signature": "int aimee_pg_exec ( void * pg_conn , const char * sql , char * errbuf , size_t errlen )",
       "signature_sha256": "957e83f033697f6d25578d0e058e84cc29bf70dde2de0146ba827e62da342cf6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_exec"
     },
     {
@@ -2134,9 +2182,15 @@
           "line": 74
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Finalizing an opaque statement is local lifetime cleanup; DB2 releases all query resources before returning any operation reply."
+      },
       "signature": "void aimee_pg_finalize ( aimee_pg_stmt_t * stmt )",
       "signature_sha256": "63db5a36e8f04c4cb261e41f2a0505d557a6114a447b3a07e57c9f53562fe497",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_finalize"
     },
     {
@@ -2319,9 +2373,15 @@
           "line": 70
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Preparing caller-provided SQL and returning an opaque statement handle cannot cross a process boundary; declared operations prepare private fixed SQL inside DB2."
+      },
       "signature": "aimee_pg_stmt_t * aimee_pg_prepare ( void * pg_conn , const char * sql , char * errbuf , size_t errlen )",
       "signature_sha256": "1d564765b62c75854b47f7adecf8215393ac96cd7f6807a3273c670a2ce0636d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_prepare"
     },
     {
@@ -2492,9 +2552,15 @@
           "line": 75
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Incremental cursor stepping would create a chatty handle protocol; DB2 exhausts or bounds the result set and returns one complete structured reply."
+      },
       "signature": "aimee_pg_step_t aimee_pg_step ( aimee_pg_stmt_t * stmt , char * errbuf , size_t errlen )",
       "signature_sha256": "93f9a7e09cf69d1a7b79ec9cc54376268b302442bdacf30465e9f56fac4bbb4d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_step"
     },
     {
@@ -2509,9 +2575,15 @@
           "line": 67
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Affected-row inspection belongs to the private statement lifetime; a mutation operation maps it to bounded domain evidence before replying."
+      },
       "signature": "int aimee_pg_stmt_changes ( aimee_pg_stmt_t * stmt )",
       "signature_sha256": "d8ca3ac81d4c4ce16b4c0df2ac40e6811e4410ff125b683fd10ab874ae2b0ee5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "aimee_pg_stmt_changes"
     },
     {
@@ -24690,15 +24762,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ea89bfe4aa6296a7bcd8f62bb19c6e3d6ef30222cf7064da089c42e21d3bb7d4",
+  "fingerprint": "e24aa251ffc481f25c6fa657ae86f09fc98b696b77ae47d3b0899920e5b9b6c4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 847,
+    "audit_pending": 835,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 111
+    "reviewed": 123
   }
 }
