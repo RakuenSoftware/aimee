@@ -13,6 +13,33 @@
  *
  * NOT here, and never: anything reading the client's own disk or environment.
  * That is the thin client's own job, not knowledge of what the server can do.
+ *
+ * WHY THE REST ARE NOT HERE YET, from reading every remaining marshaller. The
+ * blocker is not the spec language -- it is that the marshallers disagree with
+ * each other, and a spec that reproduced each disagreement would stop being
+ * data and start being a program:
+ *
+ *   - LENIENT NUMBERS. aux.test, dogfood.tag, api.enable and others parse with
+ *     atoi()/cli_args_get_int(), so "12x" becomes 12 and "abc" becomes 0 or a
+ *     default. This file's "number" refuses rather than coerces, deliberately
+ *     (see kb.grant's team_id, where rounding an id would administer the wrong
+ *     team). Serving these means fixing the coercion, not describing it.
+ *   - MISSING ENVELOPE. eval.results, dogfood.tag and others build their body
+ *     by hand and omit protocol_version, which every other request carries. The
+ *     differential test catches it immediately, which is how it was found.
+ *   - DERIVED FIELDS. catalog.show splits "provider:model" into two fields;
+ *     workspace.add inverts --no-scan into "scan": false and nests part of its
+ *     body under `args`.
+ *   - CROSS-FIELD RULES. cron.enable's --all is valid only for two of the five
+ *     cron methods; trigger.fire accepts --task OR --proposal; dogfood.tag's
+ *     --surprise and --no-surprise are exclusive. These are judgements about
+ *     what the operator meant.
+ *   - LOCAL STATE. eval.run, identity.snapshot and six others read getcwd() or
+ *     the filesystem. These must NEVER be served, whatever the spec can express.
+ *
+ * So the remaining work is normalising the marshallers, which now has a safety
+ * net: convert one, add its samples, and the differential test proves the
+ * request body did not change.
  */
 
 {"provider.list",
@@ -48,4 +75,11 @@
  "{\"usage\":\"usage: aimee trigger cancel <id>\","
  "\"fields\":[{\"json\":\"id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"id\","
  "\"required\":true}]}"},
+
+{"model.episodes",
+ "{\"fields\":[{\"json\":\"agent\",\"from\":\"positional_or_flag\",\"index\":0,"
+ "\"flag\":\"agent\"}]}"},
+
+{"graph.sync_code",
+ "{\"fields\":[{\"json\":\"project\",\"from\":\"positional\",\"index\":0}]}"},
 

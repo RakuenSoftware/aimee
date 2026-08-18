@@ -99,6 +99,19 @@ static const sample_t SAMPLES[] = {
     {"trigger.cancel", {"tr-1", NULL}},
     {"trigger.cancel", {"--id", "tr-1", NULL}},
     {"trigger.cancel", {NULL}},
+
+    /* model.episodes — optional, positional OR --agent. */
+    {"model.episodes", {NULL}},
+    {"model.episodes", {"claude", NULL}},
+    {"model.episodes", {"--agent", "claude", NULL}},
+    {"model.episodes", {"", NULL}},
+
+    /* graph.sync_code — a plain optional positional, which does NOT fall back
+     * to a flag; sampling --project proves it stays absent rather than quietly
+     * acquiring the fallback that positional_or_flag has. */
+    {"graph.sync_code", {NULL}},
+    {"graph.sync_code", {"aimee", NULL}},
+    {"graph.sync_code", {"--project", "aimee", NULL}},
 };
 
 static const char *spec_for(const char *method)
