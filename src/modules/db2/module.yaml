@@ -221,6 +221,7 @@
     "src/modules/db2/c/curator_terms.h",
     "src/modules/db2/c/curiosity.h",
     "src/modules/db2/c/db2.h",
+    "src/modules/db2/c/db2_bounded_text.h",
     "src/modules/db2/c/db2_hardening.h",
     "src/modules/db2/c/db2_internal.h",
     "src/modules/db2/c/db2_learning.h",
