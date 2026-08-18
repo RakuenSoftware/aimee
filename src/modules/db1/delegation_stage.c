@@ -789,6 +789,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_update(parsed0, field[1], parsed2, field[3]);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_COMPLETE:
@@ -864,6 +865,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_set_agent(parsed0, field[1]);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT:
@@ -885,6 +887,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_heartbeat(parsed0);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT_EXT:
@@ -917,6 +920,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_heartbeat_ext(parsed0, field[1], parsed2);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_IS_CANCELLED:
@@ -1561,7 +1565,16 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
       uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
       if (status != AIMEE_DB1_STATUS_OK && rows)
          out_count = 0u; /* nothing to report but the status */
-      write_reply(response_body, response_capacity, response_len, status, out_values, out_count);
+      /* A reply that does not fit is a failure, not a success with nothing in
+         it. write_reply refuses rather than truncating -- which is right -- but
+         discarding that answer left the caller a well-formed frame carrying no
+         rows, and a read cannot tell that from a row that is genuinely empty.
+         Say it in the frame instead: a bare status needs eight bytes, so the
+         second call fits wherever the first did not. */
+      if (write_reply(response_body, response_capacity, response_len, status, out_values,
+                      out_count) != status)
+         write_reply(response_body, response_capacity, response_len, AIMEE_DB1_STATUS_FAILED,
+                     NULL, 0u);
    }
    free(cells_owned);
    free(numeric_owned);

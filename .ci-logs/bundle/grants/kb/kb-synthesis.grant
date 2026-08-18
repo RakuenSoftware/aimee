@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=22
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-kb-synthesis
+publish=
+subscribe=
+request=
+serve=9729

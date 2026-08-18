@@ -286,6 +286,7 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_token_audit_ensure_idem_index();
+      rc = 0;
       break;
    case AIMEE_DB1_OP_TOKEN_AUDIT_COST_FOR_DELEGATION:
    {
@@ -2569,7 +2570,16 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
       uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
       if (status != AIMEE_DB1_STATUS_OK && rows)
          out_count = 0u; /* nothing to report but the status */
-      write_reply(response_body, response_capacity, response_len, status, out_values, out_count);
+      /* A reply that does not fit is a failure, not a success with nothing in
+         it. write_reply refuses rather than truncating -- which is right -- but
+         discarding that answer left the caller a well-formed frame carrying no
+         rows, and a read cannot tell that from a row that is genuinely empty.
+         Say it in the frame instead: a bare status needs eight bytes, so the
+         second call fits wherever the first did not. */
+      if (write_reply(response_body, response_capacity, response_len, status, out_values,
+                      out_count) != status)
+         write_reply(response_body, response_capacity, response_len, AIMEE_DB1_STATUS_FAILED,
+                     NULL, 0u);
    }
    free(cells_owned);
    free(numeric_owned);

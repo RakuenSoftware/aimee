@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=7
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-memory
+publish=
+subscribe=
+request=
+serve=5889,5890,5891,5892,5893,5894

@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=28
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-postgres
+publish=
+subscribe=
+request=
+serve=11265
