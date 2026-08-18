@@ -17292,9 +17292,15 @@
           "line": 257
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The raw row insert is private implementation of a complete memory.insert operation, which must validate input, insert the canonical row, attach provenance and scope, and commit before replying."
+      },
       "signature": "int64_t db2_memory_row_insert_ex ( const char * tier , const char * kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise )",
       "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_row_insert_ex"
     },
     {
@@ -17672,9 +17678,15 @@
           "line": 275
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Setting replacement validity is an internal post-insert step of the future composite memory.supersede transaction and cannot be exposed as a separately committed caller mutation."
+      },
       "signature": "void db2_memory_set_valid_from ( int64_t memory_id , const char * ts )",
       "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_set_valid_from"
     },
     {
@@ -25068,15 +25080,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "346c1a58dbe017f4fafc685d601f9d9ad12eff66fe5f964361dbf2c2ff66ca32",
+  "fingerprint": "dc7fe360962012803016438b6628433ee39ef0098bc8b864cd0fbec988dc2300",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 784,
+    "audit_pending": 782,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 174
+    "reviewed": 176
   }
 }

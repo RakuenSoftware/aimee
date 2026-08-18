@@ -724,6 +724,14 @@
       "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
     },
     {
+      "symbol": "db2_memory_row_insert_ex",
+      "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The raw row insert is private implementation of a complete memory.insert operation, which must validate input, insert the canonical row, attach provenance and scope, and commit before replying."
+    },
+    {
       "symbol": "db2_memory_scope_context_clear",
       "signature_sha256": "5d6ec5c28d8a03daa5e5943336638a584b47a7cd8e2c566b97945cf896cc2461",
       "disposition": "private-db2",
@@ -762,6 +770,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
+    },
+    {
+      "symbol": "db2_memory_set_valid_from",
+      "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Setting replacement validity is an internal post-insert step of the future composite memory.supersede transaction and cannot be exposed as a separately committed caller mutation."
     },
     {
       "symbol": "db2_memory_set_versioned_key",
