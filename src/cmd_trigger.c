@@ -55,21 +55,15 @@ static const char *trigger_socket(void)
    return sock;
 }
 
-/* No-op kept for call-site symmetry: the thin client is connectionless per call
- * now (each trigger_rpc is a one-shot /v1 dispatch). Server availability is
- * already ensured by trigger_socket() → cli_ensure_server_for_method. */
-static int trigger_connect(cli_conn_t *conn, const char *sock)
+/* Send *req over the first-class /v1 dispatch and delete req. Returns NULL on
+ * transport error (error already printed).
+ *
+ * Was trigger_rpc(conn, req), taking a cli_conn_t it ignored and a companion
+ * trigger_connect() that did nothing: leftovers from the NDJSON transport, kept
+ * for call-site symmetry after the /v1 cutover. Each call is one connectionless
+ * dispatch, so the shape now says that. */
+static cJSON *trigger_dispatch(cJSON *req)
 {
-   (void)conn;
-   (void)sock;
-   return 0;
-}
-
-/* Send *req over the first-class /v1 dispatch (local aimee-http.sock), delete req.  Returns NULL
- * on transport error (error already printed). */
-static cJSON *trigger_rpc(cli_conn_t *conn, cJSON *req)
-{
-   (void)conn;
    cJSON *resp = cli_v1_dispatch_local(req, CLIENT_DEFAULT_TIMEOUT_MS);
    cJSON_Delete(req);
    if (!resp)
@@ -128,14 +122,7 @@ static void trigger_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    if (status_filter && status_filter[0])
       cJSON_AddStringToObject(req, "status", status_filter);
 
-   cli_conn_t conn;
-   if (trigger_connect(&conn, sock) != 0)
-   {
-      cJSON_Delete(req);
-      return;
-   }
-
-   cJSON *resp = trigger_rpc(&conn, req);
+   cJSON *resp = trigger_dispatch(req);
    if (!resp)
       return;
 
@@ -190,14 +177,7 @@ static void trigger_cmd_status(app_ctx_t *ctx, int argc, char **argv)
    cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "id", argv[0]);
 
-   cli_conn_t conn;
-   if (trigger_connect(&conn, sock) != 0)
-   {
-      cJSON_Delete(req);
-      return;
-   }
-
-   cJSON *resp = trigger_rpc(&conn, req);
+   cJSON *resp = trigger_dispatch(req);
    if (!resp)
       return;
 
@@ -254,14 +234,7 @@ static void trigger_cmd_cancel(app_ctx_t *ctx, int argc, char **argv)
    cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "id", argv[0]);
 
-   cli_conn_t conn;
-   if (trigger_connect(&conn, sock) != 0)
-   {
-      cJSON_Delete(req);
-      return;
-   }
-
-   cJSON *resp = trigger_rpc(&conn, req);
+   cJSON *resp = trigger_dispatch(req);
    if (!resp)
       return;
 
@@ -352,14 +325,7 @@ static void trigger_cmd_fire(app_ctx_t *ctx, int argc, char **argv)
    if (token && token[0])
       cJSON_AddStringToObject(req, "auth_token", token);
 
-   cli_conn_t conn;
-   if (trigger_connect(&conn, sock) != 0)
-   {
-      cJSON_Delete(req);
-      return;
-   }
-
-   cJSON *resp = trigger_rpc(&conn, req);
+   cJSON *resp = trigger_dispatch(req);
    if (!resp)
       return;
 

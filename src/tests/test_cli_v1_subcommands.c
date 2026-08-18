@@ -7,7 +7,7 @@
  * the SUBCOMMAND was wrong. That message sends people hunting for a missing route
  * that already exists.
  *
- * The first cut of the helper walked rpc_routes with sizeof/sizeof, which runs
+ * The first cut of the helper walked cli_command_routes with sizeof/sizeof, which runs
  * off the end into the table's {NULL,...} sentinel and segfaults in strcmp. The
  * unknown-command case below is the regression guard for that crash. */
 
