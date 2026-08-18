@@ -215,8 +215,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q clang-format-19 ripgrep
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          i=0; until timeout 240 sudo apt-get install -y -q clang-format-19 ripgrep; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Check formatting
         if: needs.change-scope.outputs.docs_only != 'true'
         run: cd src && make lint
@@ -276,8 +276,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build
@@ -338,8 +338,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
@@ -421,8 +421,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make ccache \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make ccache \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client
       - name: Wait for Postgres
@@ -491,13 +491,13 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0
-          until sudo apt-get update -q; do
+          until timeout 240 sudo apt-get update -q; do
             i=$((i+1))
             [ "$i" -ge 5 ] && break
             echo "apt-get update retry $i (transient repo failure)"
             sleep $((i*4))
           done
-          sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -684,8 +684,8 @@ jobs:
         # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Start the identity provider
@@ -753,8 +753,8 @@ jobs:
         # PQ_CFLAGS comes from pkg-config, and L_KB/L_SERVER link -lzstd -lz.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Wait for Postgres
@@ -819,8 +819,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates \
             libpam-modules passwd
@@ -876,8 +876,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Wait for Postgres
@@ -956,8 +956,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q postgresql-client python3
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          i=0; until timeout 240 sudo apt-get install -y -q postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -988,8 +988,8 @@ jobs:
         run: |
           # Same transient-apt-mirror workaround the sibling jobs carry.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       # actions/checkout leaves refs/remotes/origin/HEAD unset -- it clones
@@ -1046,8 +1046,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Init/migrate service routing smoke test
@@ -1335,8 +1335,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Memory retrieval eval (corpus + regression check)
@@ -1452,8 +1452,8 @@ jobs:
           # Same apt hygiene as the build jobs: drop flaky third-party repos,
           # retry update with backoff.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Thin-client adoption E2E
@@ -1487,8 +1487,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make git \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make git \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev
       - name: Build + run the opt-in tree-sitter test
         run: |
@@ -1509,8 +1509,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev softhsm2 opensc
       - name: Run the SoftHSM2 PKCS#11 custody gate (must not skip)

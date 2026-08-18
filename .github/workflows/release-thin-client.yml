@@ -78,7 +78,7 @@ jobs:
         if: matrix.kind == 'linux'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q gcc make libsqlite3-dev
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Build (Linux, make)
         if: matrix.kind == 'linux'
         run: |
