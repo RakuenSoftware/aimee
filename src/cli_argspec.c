@@ -9,6 +9,7 @@
 #include "cli_argspec.h"
 
 #include "cli_v1_routes_internal.h"
+#include "cli_client.h" /* cli_v1_manifest_argspec */
 
 #include "cJSON.h"
 
@@ -248,4 +249,29 @@ cJSON *cli_argspec_build(const char *method, const cJSON *spec, int argc, char *
       return NULL;
    }
    return req;
+}
+
+int cli_argspec_try_served(const char *method, int argc, char **argv, cJSON **out)
+{
+   /* A new command that takes arguments was unusable even once its route, its
+    * catalogue entry and its dispatch row were served: the client had no way to
+    * learn that `--capability` becomes "capability".
+    *
+    * A served spec is consulted BEFORE the compiled marshallers, so it wins.
+    * That is the point, and it is safe because it cannot silently differ: every
+    * shipped spec is proven byte-identical to its marshaller by
+    * test_cli_argspec, which includes the same data file the server serves
+    * from. A spec this build cannot interpret is refused whole and falls
+    * through to the compiled path rather than sending a body it guessed. */
+   *out = NULL;
+   const cJSON *spec = cli_v1_manifest_argspec(method);
+   if (!spec)
+      return 0;
+   *out = cli_argspec_build(method, spec, argc, argv);
+   if (*out)
+      return 1;
+   /* NULL is either "a required argument is missing" — already reported, and
+    * the operator must see that rather than a second opinion from a marshaller
+    * — or an uninterpretable spec, which falls through. */
+   return marshal_request_peek_reported() ? 1 : 0;
 }

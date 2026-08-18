@@ -223,7 +223,7 @@ func TestSetupAccountReplacesGeneratedBootstrapLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := s.setupAccountStatus()
+	status := s.setupAccountStatus(generatedBootstrapUsername)
 	if status["complete"] != false || status["required"] != true ||
 		status["username"] != generatedBootstrapUsername {
 		t.Fatalf("generated bootstrap status = %#v", status)

@@ -40,6 +40,8 @@ cJSON *marshal_delegate_log(int argc, char **argv);
 cJSON *marshal_roundtable_review(int argc, char **argv);
 cJSON *marshal_delegate_status(int argc, char **argv);
 cJSON *marshal_index_blast_radius(int argc, char **argv);
+cJSON *marshal_index_ast_grep(int argc, char **argv);
+cJSON *marshal_tool_call(int argc, char **argv);
 cJSON *marshal_index_deps(int argc, char **argv);
 cJSON *marshal_index_find(int argc, char **argv);
 cJSON *marshal_index_find_callers(int argc, char **argv);

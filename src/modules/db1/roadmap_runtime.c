@@ -14,8 +14,8 @@
 
 /* ── roadmap_dispatch ────────────────────────────────────────────────────── */
 
-int rdm_dispatch_upsert(const char *roadmap_id, const char *token_profile,
-                        int require_slice_discussion, int budget_ceiling_tokens)
+int db1_roadmap_dispatch_upsert(const char *roadmap_id, const char *token_profile,
+                                int require_slice_discussion, int budget_ceiling_tokens)
 {
    sqlite3 *db = db1_conn();
    if (!db || !roadmap_id || !roadmap_id[0])
@@ -39,7 +39,7 @@ int rdm_dispatch_upsert(const char *roadmap_id, const char *token_profile,
    return rc;
 }
 
-int rdm_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out)
+int db1_roadmap_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out)
 {
    sqlite3 *db = db1_conn();
    if (!db || !roadmap_id || !roadmap_id[0] || !out)
@@ -72,7 +72,8 @@ int rdm_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out)
    return rc;
 }
 
-int rdm_dispatch_set_status(const char *roadmap_id, const char *status, const char *exit_reason)
+int db1_roadmap_dispatch_set_status(const char *roadmap_id, const char *status,
+                                    const char *exit_reason)
 {
    sqlite3 *db = db1_conn();
    if (!db || !roadmap_id || !roadmap_id[0])
@@ -93,7 +94,7 @@ int rdm_dispatch_set_status(const char *roadmap_id, const char *status, const ch
    return rc;
 }
 
-int rdm_dispatch_set_phase(const char *roadmap_id, const char *phase)
+int db1_roadmap_dispatch_set_phase(const char *roadmap_id, const char *phase)
 {
    sqlite3 *db = db1_conn();
    if (!db || !roadmap_id || !roadmap_id[0])
@@ -112,8 +113,8 @@ int rdm_dispatch_set_phase(const char *roadmap_id, const char *phase)
 
 /* ── roadmap_unit_dispatch ───────────────────────────────────────────────── */
 
-int rdm_unit_ensure(const char *roadmap_id, const char *unit_id, const char *level,
-                    const char *tool_policy_mode)
+int db1_roadmap_unit_ensure(const char *roadmap_id, const char *unit_id, const char *level,
+                            const char *tool_policy_mode)
 {
    sqlite3 *db = db1_conn();
    if (!db || !roadmap_id || !unit_id)
@@ -135,7 +136,7 @@ int rdm_unit_ensure(const char *roadmap_id, const char *unit_id, const char *lev
    return rc;
 }
 
-int rdm_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_t *out)
+int db1_roadmap_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_t *out)
 {
    sqlite3 *db = db1_conn();
    if (!db || !roadmap_id || !unit_id || !out)
@@ -179,7 +180,7 @@ int rdm_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_
    return rc;
 }
 
-int rdm_unit_set_state(const char *roadmap_id, const char *unit_id, const char *state)
+int db1_roadmap_unit_set_state(const char *roadmap_id, const char *unit_id, const char *state)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -197,8 +198,8 @@ int rdm_unit_set_state(const char *roadmap_id, const char *unit_id, const char *
    return rc;
 }
 
-int rdm_unit_claim(const char *roadmap_id, const char *unit_id, const char *owner,
-                   const char *worktree_path)
+int db1_roadmap_unit_claim(const char *roadmap_id, const char *unit_id, const char *owner,
+                           const char *worktree_path)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -224,7 +225,7 @@ int rdm_unit_claim(const char *roadmap_id, const char *unit_id, const char *owne
    return rc;
 }
 
-int rdm_unit_heartbeat(const char *roadmap_id, const char *unit_id)
+int db1_roadmap_unit_heartbeat(const char *roadmap_id, const char *unit_id)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -242,8 +243,8 @@ int rdm_unit_heartbeat(const char *roadmap_id, const char *unit_id)
    return rc;
 }
 
-int rdm_unit_finish(const char *roadmap_id, const char *unit_id, const char *state,
-                    const char *result, const char *error)
+int db1_roadmap_unit_finish(const char *roadmap_id, const char *unit_id, const char *state,
+                            const char *result, const char *error)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -264,7 +265,7 @@ int rdm_unit_finish(const char *roadmap_id, const char *unit_id, const char *sta
    return rc;
 }
 
-int rdm_unit_set_coord_job(const char *roadmap_id, const char *unit_id, int coord_job_id)
+int db1_roadmap_unit_set_coord_job(const char *roadmap_id, const char *unit_id, int coord_job_id)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -283,7 +284,7 @@ int rdm_unit_set_coord_job(const char *roadmap_id, const char *unit_id, int coor
    return rc;
 }
 
-int rdm_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_id)
+int db1_roadmap_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_id)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -301,7 +302,7 @@ int rdm_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_
    return rc;
 }
 
-int rdm_unit_select_next(const char *roadmap_id, char *out_unit_id, size_t len)
+int db1_roadmap_unit_select_next(const char *roadmap_id, char *out_unit_id, size_t len)
 {
    sqlite3 *db = db1_conn();
    if (!db || !roadmap_id || !out_unit_id)

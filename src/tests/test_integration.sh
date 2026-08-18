@@ -706,7 +706,9 @@ git init --object-format=sha256 -b feature.locked "$MIRROR_CLIENT" >/dev/null
 # head with no branch or upstream, and five assertions failed about it. That was
 # wrong. The probe has never fired in CI, and the section passes there -- the
 # 40-hex head came from reading a DIFFERENT workspace's snapshot, which the
-# selection below used to make arbitrarily.
+# selection below used to make arbitrarily. That was diagnosed independently on
+# `testing` (89aa491, "address the mirror workspace's own snapshot, not the
+# first one found"), which is the addressing this now uses.
 #
 # It stays because the precondition is real: this section drives SHA-256 ids
 # deliberately, and a runner that cannot provide one should say so once rather
@@ -773,26 +775,28 @@ check_output "identical mirror-sync continuation persisted" '"seq":1' echo "$RES
 RESP=$(http_rpc "${MIRROR_REQS[5]}") || true
 check_output "identical mirror-sync reuses generation" '"generation":1' echo "$RESP"
 
-# Select the snapshot by IDENTITY, not by whatever the filesystem yields first.
-#
-# This was `find ... -name client.snapshot -print -quit`, which returns an
-# arbitrary match -- and in CI it returned the wrong one: a snapshot with a
-# 40-hex head and no branch or upstream, which failed five assertions in a row
-# about a mirror that was fine. Locally there is one snapshot, so it was always
-# right here, and the bug stayed invisible until this harness first ran in CI.
-#
-# The assertions below are about THIS mirror, so match the head this fixture
-# just pushed.
-SNAPSHOT=$(grep -rl "$MIRROR_HEAD" "$AIMEE_HOME/workspaces" --include=client.snapshot 2>/dev/null | head -1) || true
-if [ -z "$SNAPSHOT" ]; then
-    # Nothing published for THIS head. Show what was published instead, so the
-    # failure names the mismatch rather than leaving an empty path to explain
-    # the next five assertions.
-    echo "FAIL: no client.snapshot carries the fixture head $MIRROR_HEAD"
-    echo "  published snapshots:"
+# Address the mirror workspace by its own snapshot, not by whichever one find
+# happens to walk into first. Every check below derives from $SNAPSHOT -- its
+# directory, its generation, its work-N-* checkouts -- so picking a different
+# workspace's file does not fail here, it fails five checks later with content
+# that looks like a mirror bug. The server keys the directory on
+# fnv1a_hex8(root) (workspace_mirror.c), so the harness can name it exactly.
+MIRROR_HASH=$(python3 - "$MIRROR_CLIENT" <<'HASH'
+import sys
+h = 2166136261
+for byte in sys.argv[1].encode():
+    h = ((h ^ byte) * 16777619) & 0xFFFFFFFF
+print("%08x" % h)
+HASH
+)
+SNAPSHOT="$AIMEE_HOME/workspaces/$MIRROR_HASH/client.snapshot"
+if [ ! -s "$SNAPSHOT" ]; then
+    # Show what WAS published. Without this the five checks below explain the
+    # absence one confusing assertion at a time -- which is how this bug
+    # presented in the first place, as a mirror that looked broken.
+    echo "  no snapshot at $SNAPSHOT; published snapshots were:"
     find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -exec sh -c \
         'echo "    $1: $(cat "$1")"' _ {} \; 2>/dev/null
-    FAIL=$((FAIL + 1))
 fi
 check "mirror snapshot metadata published" test -s "$SNAPSHOT"
 check_output "mirror snapshot records valid .locked ref" \

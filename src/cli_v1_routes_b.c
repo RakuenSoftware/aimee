@@ -1450,6 +1450,7 @@ static const struct
     {"identity.diff", marshal_identity_diff},
     {"identity.snapshot", marshal_identity_snapshot},
     {"index.blast_radius", marshal_index_blast_radius},
+    {"index.ast_grep", marshal_index_ast_grep},
     {"index.deps", marshal_index_deps},
     {"index.find", marshal_index_find},
     {"index.find_callers", marshal_index_find_callers},
@@ -1472,6 +1473,7 @@ static const struct
     {"kb.status", marshal_kb_status},
     {"kb.update", marshal_kb_update},
     {"mcp.recheck", marshal_mcp_recheck},
+    {"tool.call", marshal_tool_call},
     {"memory.embed", marshal_memory_embed},
     {"memory.archive", marshal_memory_archive},
     {"memory.benchmark", marshal_memory_benchmark},
@@ -1686,29 +1688,13 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
    if (cli_v1_manifest_method_takes_no_args(method))
       return marshal_no_args(method);
 
-   /* And what the server says the ARGUMENTS are. Same reason, one step further:
-    * a new command that takes arguments was still unusable, because the client
-    * had no way to learn that `--capability` becomes "capability".
-    *
-    * Consulted before the compiled marshallers, so a served spec wins — that is
-    * the point. It is safe because it cannot silently differ: every shipped
-    * spec is proven byte-identical to its marshaller by test_cli_argspec, which
-    * includes the same data file the server serves from. A spec this build
-    * cannot interpret is refused whole by cli_argspec_build, and falls through
-    * to the compiled path below rather than sending a body it guessed. */
+   /* And what the server says the ARGUMENTS are, before this build's own
+    * marshallers — see cli_argspec_try_served for why that is both the point
+    * and safe. */
    {
-      const cJSON *spec = cli_v1_manifest_argspec(method);
-      if (spec)
-      {
-         cJSON *req = cli_argspec_build(method, spec, argc, argv);
-         if (req)
-            return req;
-         /* NULL is either "a required argument is missing" — already reported,
-          * and the operator must see that rather than a second opinion from a
-          * marshaller — or an uninterpretable spec, which falls through. */
-         if (marshal_request_peek_reported())
-            return NULL;
-      }
+      cJSON *served = NULL;
+      if (cli_argspec_try_served(method, argc, argv, &served))
+         return served;
    }
 
    /* Exact-method tables (before the prefix fallbacks). */

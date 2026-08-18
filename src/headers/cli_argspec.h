@@ -50,4 +50,12 @@ struct cJSON *cli_argspec_build(const char *method, const struct cJSON *spec, in
  * honoured: half a request body is a wrong request, not a degraded one. */
 int cli_argspec_supported(const struct cJSON *spec);
 
+/* Build `method`'s body from the SERVED spec, if the server sent one.
+ *
+ * Returns 1 when the served spec is authoritative — *out holds the request, or
+ * is NULL because a required argument was missing and the usage line has
+ * already been printed. Returns 0 to fall through to the compiled marshaller:
+ * no spec was served, or it named something this build cannot interpret. */
+int cli_argspec_try_served(const char *method, int argc, char **argv, struct cJSON **out);
+
 #endif /* DEC_CLI_ARGSPEC_H */

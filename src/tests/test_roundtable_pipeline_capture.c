@@ -80,10 +80,11 @@ static void test_parse_review(void)
 static int make_pipeline_pass(int *out_pass_id)
 {
    int pid = 0;
-   assert(rtp_run_create("idea", NULL, "/r", "testing", &pid) == 0);
-   assert(rtp_run_set_state(pid, RTP_STATE_PR_REVIEW, RTP_PHASE_IMPL) == 0);
+   assert(db1_roundtable_run_create("idea", NULL, "/r", "testing", &pid) == 0);
+   assert(db1_roundtable_run_set_state(pid, RTP_STATE_PR_REVIEW, RTP_PHASE_IMPL) == 0);
    int pass_id = 0;
-   assert(rtp_pass_create(pid, RTP_PHASE_IMPL, RTP_MODE_REVIEW, 1, "arthash", &pass_id) == 0);
+   assert(db1_roundtable_pass_create(pid, RTP_PHASE_IMPL, RTP_MODE_REVIEW, 1, "arthash",
+                                     &pass_id) == 0);
    *out_pass_id = pass_id;
    return pid;
 }
@@ -103,7 +104,7 @@ static void test_seam_register_and_finalize(void)
    assert(rtp_seam_register_attempt(pass_id, "oprun_a") == 1);
 
    rtp_attempt_t a;
-   assert(rtp_attempt_get_by_run("oprun_a", &a) == 0);
+   assert(db1_roundtable_attempt_get_by_run("oprun_a", &a) == 0);
    assert(a.is_current == 1);
    assert(strcmp(a.capture_status, RTP_CAP_PENDING) == 0);
 
@@ -117,14 +118,14 @@ static void test_seam_register_and_finalize(void)
                       "\"answered_questions\":[{\"answered\":true},{\"answered\":true}]}";
    assert(rtp_seam_finalize("oprun_a", 1, 0, good) == 1);
 
-   assert(rtp_attempt_get_by_run("oprun_a", &a) == 0);
+   assert(db1_roundtable_attempt_get_by_run("oprun_a", &a) == 0);
    assert(strcmp(a.capture_status, RTP_CAP_CAPTURED) == 0);
    assert(a.envelope_valid == 1);
    assert(a.cost_known == 1);
    assert(a.result_hash[0] != '\0');
 
    rtp_pass_t p;
-   assert(rtp_pass_get(pass_id, &p) == 0);
+   assert(db1_roundtable_pass_get(pass_id, &p) == 0);
    assert(p.envelope_valid == 1);
    assert(p.converged == 1);
    assert(p.blocking_count == 0);
@@ -133,7 +134,7 @@ static void test_seam_register_and_finalize(void)
 
    /* cumulative cost roll-up into the run (#46): impl phase + total = 0.5. */
    rtp_run_t run;
-   assert(rtp_run_get(pid, &run) == 0);
+   assert(db1_roundtable_run_get(pid, &run) == 0);
    assert(run.impl_phase_cost_usd > 0.49 && run.impl_phase_cost_usd < 0.51);
    assert(run.total_cost_usd > 0.49 && run.total_cost_usd < 0.51);
    printf("  seam register + finalize: ok\n");
@@ -151,7 +152,7 @@ static void test_late_superseded_guard(void)
    assert(rtp_seam_register_attempt(pass_id, "oprun_new") == 1);
 
    rtp_attempt_t old_a;
-   assert(rtp_attempt_get_by_run("oprun_old", &old_a) == 0);
+   assert(db1_roundtable_attempt_get_by_run("oprun_old", &old_a) == 0);
    assert(old_a.is_current == 0); /* superseded by the new attempt */
 
    /* the late terminal from the OLD attempt is recorded but must NOT update the
@@ -162,11 +163,11 @@ static void test_late_superseded_guard(void)
    assert(rtp_seam_finalize("oprun_old", 1, 0, late) == 1);
 
    rtp_attempt_t old_after;
-   assert(rtp_attempt_get_by_run("oprun_old", &old_after) == 0);
+   assert(db1_roundtable_attempt_get_by_run("oprun_old", &old_after) == 0);
    assert(old_after.envelope_valid == 1); /* envelope still recorded */
 
    rtp_pass_t p;
-   assert(rtp_pass_get(pass_id, &p) == 0);
+   assert(db1_roundtable_pass_get(pass_id, &p) == 0);
    assert(p.blocking_count == 0); /* aggregate untouched by the stale attempt */
 
    /* now the current attempt finalizes and DOES update the aggregate. */
@@ -174,7 +175,7 @@ static void test_late_superseded_guard(void)
                      "\"artifact_round\":1,\"best_round\":1,\"items\":"
                      "[{\"severity\":\"blocking\"},{\"severity\":\"blocking\"}]}";
    assert(rtp_seam_finalize("oprun_new", 1, 0, cur) == 1);
-   assert(rtp_pass_get(pass_id, &p) == 0);
+   assert(db1_roundtable_pass_get(pass_id, &p) == 0);
    assert(p.blocking_count == 2);
    printf("  late/superseded guard: ok\n");
 }
@@ -190,12 +191,12 @@ static void test_lost_result(void)
    /* empty payload at terminal -> lost_result. */
    assert(rtp_seam_finalize("oprun_lost", 0, 0, "") == 1);
    rtp_attempt_t a;
-   assert(rtp_attempt_get_by_run("oprun_lost", &a) == 0);
+   assert(db1_roundtable_attempt_get_by_run("oprun_lost", &a) == 0);
    assert(a.lost_result == 1);
    assert(strcmp(a.capture_status, RTP_CAP_LOST) == 0);
 
    rtp_pass_t p;
-   assert(rtp_pass_get(pass_id, &p) == 0);
+   assert(db1_roundtable_pass_get(pass_id, &p) == 0);
    assert(strcmp(p.status, RTP_PASS_OPEN) == 0); /* awaits re-run, not captured */
    printf("  lost result: ok\n");
 }

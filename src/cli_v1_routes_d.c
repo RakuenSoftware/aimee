@@ -60,6 +60,8 @@ static const struct
     {"git.verify", pt_print_git_verify},
     /* Every git command returns MCP content blocks, the same shape verify does. */
     {"git.cli", pt_print_git_verify},
+    {"tool.call", pt_print_git_verify},
+    {"index.ast_grep", pt_print_git_verify},
     {"get_help", pt_print_get_help},
     {"server.health", pt_print_server_health},
     {"session.list", pt_print_session_list},
