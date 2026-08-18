@@ -36,6 +36,7 @@ typedef struct
    int (*prune_contradictions)(int days);
    int (*health_counters)(int promote_use_count, double promote_confidence,
                           aimee_db2_health_counters_t *counters);
+   int (*stats_counts)(aimee_db2_memory_stats_t *stats);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

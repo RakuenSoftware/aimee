@@ -18356,9 +18356,15 @@
           "line": 80
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.stats_counts operation returns the complete tier, kind, and conflict breakdown of the canonical relational corpus; the host layers its own PageRank timings on top and DB2 owns none of those."
+      },
       "signature": "int db2_memory_stats_counts ( memory_stats_t * out )",
       "signature_sha256": "efca90ae907b5403f429a06f1db17932f70a1941071d46e86b4e5630ab4a4a3b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_stats_counts"
     },
     {
@@ -25716,15 +25722,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "458cb9582e29b2b3c26c1c3d839a44ed835883ce7578f595401b42f22d64e2d5",
+  "fingerprint": "090545832784290f61d173784158388cd2270f42dca38159ad3be8b84a3370ae",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 676,
+    "audit_pending": 675,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 282
+    "reviewed": 283
   }
 }

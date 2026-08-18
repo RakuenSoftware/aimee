@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -463,6 +464,38 @@ class ContractTests(unittest.TestCase):
             ["wrong_operation", "unsupported_result", "ok_without_payload",
              "first_counter_too_large", "last_counter_too_large", "short", "long"],
         )
+
+    def test_stats_counts_vectors_cover_every_labelled_bucket(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][26]
+        self.assertEqual(operation["name"], "stats_counts")
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "short", "long"],
+        )
+        positive = operation["reply"]["positive"][0]
+        self.assertEqual(positive["tier_counts"], [3, 12, 30, 8, 2, 1])
+        self.assertEqual(positive["kind_counts"], [14, 5, 6, 9, 4, 3, 2, 1, 7, 5])
+        # The reply's own total must agree with the tier breakdown it ships with.
+        self.assertEqual(positive["total"], sum(positive["tier_counts"]))
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "first_tier_too_large", "last_kind_too_large", "conflicts_too_large",
+             "short", "long"],
+        )
+
+    def test_stats_counts_labels_match_the_catalog(self) -> None:
+        catalog = json.loads((REPO_ROOT / generator.CATALOG).read_text(encoding="utf-8"))
+        fields = catalog["operations"][26]["reply"]["fields"]
+        self.assertEqual(fields[0]["labels"], list(generator.MEMORY_TIERS))
+        self.assertEqual(fields[1]["labels"], list(generator.MEMORY_KINDS))
+        # KIND_COUNT in src/headers/aimee.h is the authority for the bucket count.
+        header = (REPO_ROOT / "src/headers/aimee.h").read_text(encoding="utf-8")
+        kind_count = int(re.search(r"#define KIND_COUNT\s+(\d+)", header).group(1))
+        self.assertEqual(len(generator.MEMORY_KINDS), kind_count)
+        for kind in generator.MEMORY_KINDS:
+            self.assertIn(f'"{kind}"', header)
 
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
@@ -986,6 +1019,30 @@ class ContractTests(unittest.TestCase):
              "health-counters-reply"),
             (lambda value: value["operations"][25]["reply"]["fields"][8].__setitem__(
                 "maximum", 0xffffffff), "health-counters-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_stats_counts_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][26].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][26].__setitem__("results", ["ok", "not_found"]),
+             "operation-results"),
+            (lambda value: value["operations"][26]["request"].__setitem__("payload", "u32"),
+             "stats-counts-request"),
+            # Dropping the last kind is exactly the gap this operation closed.
+            (lambda value: value["operations"][26]["reply"]["fields"][1]["labels"].pop(),
+             "stats-counts-reply"),
+            (lambda value: value["operations"][26]["reply"]["fields"][1].__setitem__("items", 9),
+             "stats-counts-reply"),
+            (lambda value: value["operations"][26]["reply"]["fields"][0]["labels"].reverse(),
+             "stats-counts-reply"),
+            (lambda value: value["operations"][26]["reply"].__setitem__("encoded_size_ok", 92),
+             "stats-counts-reply"),
+            (lambda value: value["operations"][26]["reply"]["fields"].pop(),
+             "stats-counts-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

@@ -53,6 +53,7 @@ typedef struct
    int (*prune_contradictions)(int days);
    int (*health_counters)(int promote_use_count, double promote_confidence,
                           aimee_db2_health_counters_t *counters);
+   int (*stats_counts)(aimee_db2_memory_stats_t *stats);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -108,6 +109,7 @@ static int health_record_promotions;
 static int prune_health_calls;
 static int prune_contradictions_calls;
 static int health_counters_calls;
+static int stats_counts_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -459,6 +461,26 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    return -1;
 }
 
+/* memory_stats_t is a host type, so the production symbol takes void * here the
+ * way db2_dim_change_reset does; these tests drive their own backend. */
+int db2_memory_stats_counts(void *out)
+{
+   (void)out;
+   return -1;
+}
+
+static int stats_counts(aimee_db2_memory_stats_t *stats)
+{
+   stats_counts_calls++;
+   *stats = (aimee_db2_memory_stats_t){
+       .tier_counts = {3, 12, 30, 8, 2, 1},
+       .kind_counts = {14, 5, 6, 9, 4, 3, 2, 1, 7, 5},
+       .total = 56,
+       .conflicts = 4,
+   };
+   return 0;
+}
+
 static int health_counters(int promote_use_count, double promote_confidence,
                            aimee_db2_health_counters_t *counters)
 {
@@ -754,6 +776,7 @@ int main(void)
        .prune_health = prune_health,
        .prune_contradictions = prune_contradictions,
        .health_counters = health_counters,
+       .stats_counts = stats_counts,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -891,6 +914,13 @@ int main(void)
           AIMEE_MODULE_CALL_OK);
    assert(counters.cycles == 7 && counters.total_contradictions == 13 &&
           counters.l2_stale_30_days == 6 && health_counters_calls == 1);
+
+   aimee_db2_memory_stats_t corpus = {0};
+   assert(aimee_db2_stats_counts_call(call_client, &client, 7036, 0, &corpus, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(corpus.tier_counts[0] == 3 && corpus.tier_counts[5] == 1 && corpus.kind_counts[0] == 14 &&
+          corpus.kind_counts[9] == 5 && corpus.total == 56 && corpus.conflicts == 4 &&
+          stats_counts_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -44,6 +44,13 @@ HEALTH_COUNTERS = (
     "cycles", "total_contradictions", "total_promotions", "total_demotions",
     "total_expirations", "new_memories", "l1_eligible", "l2_total", "l2_stale_30_days",
 )
+# Corpus breakdown buckets, in wire order. The labels are the canonical tier and
+# kind strings the backend groups by, so a bucket can never be silently dropped.
+MEMORY_TIERS = ("L0", "L1", "L2", "L3", "L4", "L5")
+MEMORY_KINDS = (
+    "fact", "preference", "decision", "episode", "task",
+    "scratch", "procedure", "policy", "workflow", "opinion",
+)
 
 
 class ContractError(ValueError):
@@ -986,9 +993,46 @@ def validate_catalog(value: object) -> dict[str, object]:
                                   "maximum": 0x7fffffff} for counter in HEALTH_COUNTERS]):
                 fail("health-counters-reply",
                      "reply must contain every bounded counter in the reviewed order")
+        elif key == ("memory", 17) and name == "stats_counts" and \
+                operation["wire_format"] == "db2-envelope-memory-stats-v1":
+            if operation["c_symbols"] != ["db2_memory_stats_counts"]:
+                fail("operation-c-symbols",
+                     "stats_counts C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "stats_counts results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "stats_counts.request")
+            if request["encoded_size"] != ENVELOPE_HEADER_LEN or request["payload"] != "none":
+                fail("stats-counts-request", "request must carry no payload")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "stats_counts.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 4:
+                fail("stats-counts-reply",
+                     "reply must contain both breakdowns, the total, and the conflict count")
+            arrays = [_keys(reply_fields[index],
+                            {"name", "type", "items", "item_minimum", "item_maximum", "labels"},
+                            f"stats_counts.reply.fields[{index}]") for index in (0, 1)]
+            scalars = [_keys(reply_fields[index], {"name", "type", "minimum", "maximum"},
+                             f"stats_counts.reply.fields[{index}]") for index in (2, 3)]
+            expected_arrays = [
+                {"name": "tier_counts", "type": "u32-array", "items": len(MEMORY_TIERS),
+                 "item_minimum": 0, "item_maximum": 0x7fffffff, "labels": list(MEMORY_TIERS)},
+                {"name": "kind_counts", "type": "u32-array", "items": len(MEMORY_KINDS),
+                 "item_minimum": 0, "item_maximum": 0x7fffffff, "labels": list(MEMORY_KINDS)},
+            ]
+            buckets = len(MEMORY_TIERS) + len(MEMORY_KINDS) + 2
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 * buckets or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    arrays != expected_arrays or
+                    scalars != [{"name": scalar, "type": "u32", "minimum": 0,
+                                 "maximum": 0x7fffffff} for scalar in ("total", "conflicts")]):
+                fail("stats-counts-reply",
+                     "reply must declare every labelled bucket in the reviewed order")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 26 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 27 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -996,9 +1040,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "session_l2_count", "key_exists", "find_id_by_key_kind",
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
-            "health_record", "health_retention", "health_counters"]:
+            "health_record", "health_retention", "health_counters", "stats_counts"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-six supported operations exactly once")
+             "the partial generator requires the twenty-seven supported operations exactly once")
     return catalog
 
 
@@ -1148,6 +1192,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     health_record = catalog["operations"][23]
     health_retention = catalog["operations"][24]
     health_counters = catalog["operations"][25]
+    stats_counts = catalog["operations"][26]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1420,6 +1465,19 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     health_counters_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(health_counters["id"]), 0,
         b"".join(_put_u32(value) for value in health_counters_values),
+    )
+    stats_counts_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(stats_counts["id"]), 0, b"",
+    )
+    stats_counts_tiers = (3, 12, 30, 8, 2, 1)
+    stats_counts_kinds = (14, 5, 6, 9, 4, 3, 2, 1, 7, 5)
+    stats_counts_total = sum(stats_counts_tiers)
+    stats_counts_conflicts = 4
+    stats_counts_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(stats_counts["id"]), 0,
+        b"".join(_put_u32(value) for value in stats_counts_tiers) +
+        b"".join(_put_u32(value) for value in stats_counts_kinds) +
+        _put_u32(stats_counts_total) + _put_u32(stats_counts_conflicts),
     )
 
     value = {
@@ -2626,6 +2684,52 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (health_counters_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": stats_counts["family"],
+            "id": stats_counts["id"],
+            "name": stats_counts["name"],
+            "request": {
+                "positive": stats_counts_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(stats_counts_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(stats_counts_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": stats_counts_request[:-1].hex()},
+                    {"mutation": "long", "hex": (stats_counts_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0,
+                     "tier_counts": list(stats_counts_tiers),
+                     "kind_counts": list(stats_counts_kinds),
+                     "total": stats_counts_total,
+                     "conflicts": stats_counts_conflicts,
+                     "hex": stats_counts_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(stats_counts_ok, 8, 16).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(stats_counts_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(stats_counts["id"]), 0, b"").hex()},
+                    {"mutation": "first_tier_too_large", "hex":
+                     mutate_u32(stats_counts_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    # The last kind bucket is the one a short mapping would drop.
+                    {"mutation": "last_kind_too_large", "hex":
+                     mutate_u32(
+                         stats_counts_ok,
+                         ENVELOPE_HEADER_LEN + 4 * (len(MEMORY_TIERS) + len(MEMORY_KINDS) - 1),
+                         0x80000000).hex()},
+                    {"mutation": "conflicts_too_large", "hex":
+                     (stats_counts_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": stats_counts_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (stats_counts_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2664,6 +2768,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     health_record = catalog["operations"][23]
     health_retention = catalog["operations"][24]
     health_counters = catalog["operations"][25]
+    stats_counts = catalog["operations"][26]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -3021,6 +3126,19 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_HEALTH_COUNTERS_FIELDS", f"{len(HEALTH_COUNTERS)}u"),
         ("AIMEE_DB2_HEALTH_COUNTERS_MAX",
          f"{health_counters['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_STATS_COUNTS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_STATS_COUNTS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_STATS_COUNTS", f"{stats_counts['id']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_REQUEST_LEN",
+         f"{stats_counts['request']['encoded_size']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN",
+         f"{stats_counts['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_ERROR_LEN",
+         f"{stats_counts['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_TIERS", f"{len(MEMORY_TIERS)}u"),
+        ("AIMEE_DB2_STATS_COUNTS_KINDS", f"{len(MEMORY_KINDS)}u"),
+        ("AIMEE_DB2_STATS_COUNTS_MAX",
+         f"{stats_counts['reply']['fields'][2]['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -4468,6 +4586,103 @@ static inline int aimee_db2_health_counters_reply_decode(const uint8_t *input, s
    return 0;
 }}
 
+typedef struct
+{{
+   uint32_t tier_counts[AIMEE_DB2_STATS_COUNTS_TIERS];
+   uint32_t kind_counts[AIMEE_DB2_STATS_COUNTS_KINDS];
+   uint32_t total;
+   uint32_t conflicts;
+}} aimee_db2_memory_stats_t;
+
+static inline int aimee_db2_stats_counts_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_STATS_COUNTS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_stats_counts_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_STATS_COUNTS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_STATS_COUNTS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_stats_counts_reply_encode(const aimee_db2_memory_stats_t *stats,
+                                                      uint8_t *output, size_t capacity,
+                                                      uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!stats || !output || !output_len)
+      return -1;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++)
+      if (stats->tier_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++)
+      if (stats->kind_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   if (stats->total > AIMEE_DB2_STATS_COUNTS_MAX ||
+       stats->conflicts > AIMEE_DB2_STATS_COUNTS_MAX)
+      return -1;
+   uint32_t payload_len = 4u * (AIMEE_DB2_STATS_COUNTS_TIERS + AIMEE_DB2_STATS_COUNTS_KINDS + 2u);
+   if (capacity < AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_STATS_COUNTS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t offset = 0u;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++, offset += 4u)
+      aimee_db2_put_u32(payload + offset, stats->tier_counts[index]);
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++, offset += 4u)
+      aimee_db2_put_u32(payload + offset, stats->kind_counts[index]);
+   aimee_db2_put_u32(payload + offset, stats->total);
+   aimee_db2_put_u32(payload + offset + 4u, stats->conflicts);
+   *output_len = AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_stats_counts_reply_decode(const uint8_t *input, size_t input_len,
+                                                      aimee_db2_memory_stats_t *stats)
+{{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!stats)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   uint32_t payload_len = 4u * (AIMEE_DB2_STATS_COUNTS_TIERS + AIMEE_DB2_STATS_COUNTS_KINDS + 2u);
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_STATS_COUNTS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_memory_stats_t decoded = {{0}};
+   uint32_t offset = 0u;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++, offset += 4u)
+   {{
+      decoded.tier_counts[index] = aimee_db2_get_u32(payload + offset);
+      if (decoded.tier_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   }}
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++, offset += 4u)
+   {{
+      decoded.kind_counts[index] = aimee_db2_get_u32(payload + offset);
+      if (decoded.kind_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   }}
+   decoded.total = aimee_db2_get_u32(payload + offset);
+   decoded.conflicts = aimee_db2_get_u32(payload + offset + 4u);
+   if (decoded.total > AIMEE_DB2_STATS_COUNTS_MAX ||
+       decoded.conflicts > AIMEE_DB2_STATS_COUNTS_MAX)
+      return -1;
+   *stats = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -5399,6 +5614,10 @@ extern "C"
        aimee_db2_health_counters_t *counters, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_stats_counts_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_memory_stats_t *stats, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -5952,6 +6171,33 @@ aimee_db2_health_counters_call(aimee_db2_call_fn call, void *call_context, uint6
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_stats_counts_call(aimee_db2_call_fn call, void *call_context,
+                                                       uint64_t trace_id, uint64_t deadline_ns,
+                                                       aimee_db2_memory_stats_t *stats,
+                                                       aimee_module_cancelled_fn cancelled,
+                                                       void *cancel_context)
+{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!call || !stats)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_STATS_COUNTS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_stats_counts_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_STATS_COUNTS, AIMEE_DB2_STAGE_STATS_COUNTS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_stats_counts_reply_decode(response, response_len, stats) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -6217,6 +6463,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     health_record = catalog["operations"][23]
     health_retention = catalog["operations"][24]
     health_counters = catalog["operations"][25]
+    stats_counts = catalog["operations"][26]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -6389,6 +6636,12 @@ const HealthCountersPromoteUseCount uint32 = {health_counters['request']['policy
 const HealthCountersPromoteConfidenceBits uint64 = {health_counters['request']['policy']['promote_confidence_binary64_bits']}
 const HealthCountersFields = {len(HEALTH_COUNTERS)}
 const HealthCountersMax uint32 = {health_counters['reply']['fields'][0]['maximum']}
+const EventStatsCounts = EventMemory
+const StageStatsCounts = FamilyMemory
+const OperationStatsCounts uint32 = {stats_counts['id']}
+const StatsCountsTiers = {len(MEMORY_TIERS)}
+const StatsCountsKinds = {len(MEMORY_KINDS)}
+const StatsCountsMax uint32 = {stats_counts['reply']['fields'][2]['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -7224,6 +7477,103 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// MemoryStats is the corpus breakdown by tier and kind, plus the totals.
+type MemoryStats struct {{
+	TierCounts [StatsCountsTiers]uint32
+	KindCounts [StatsCountsKinds]uint32
+	Total      uint32
+	Conflicts  uint32
+}}
+
+// EncodeStatsCountsRequest emits the empty request envelope.
+func EncodeStatsCountsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationStatsCounts, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeStatsCountsRequest validates the exact empty operation envelope.
+func DecodeStatsCountsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationStatsCounts || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeStatsCountsReply emits every bounded bucket in the contract's order.
+func EncodeStatsCountsReply(stats MemoryStats) ([]byte, error) {{
+	for _, value := range stats.TierCounts {{
+		if value > StatsCountsMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	for _, value := range stats.KindCounts {{
+		if value > StatsCountsMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	if stats.Total > StatsCountsMax || stats.Conflicts > StatsCountsMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 4 * (StatsCountsTiers + StatsCountsKinds + 2)
+	header, err := EncodeReplyHeader(OperationStatsCounts, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	offset := 0
+	for _, value := range stats.TierCounts {{
+		binary.LittleEndian.PutUint32(payload[offset:], value)
+		offset += 4
+	}}
+	for _, value := range stats.KindCounts {{
+		binary.LittleEndian.PutUint32(payload[offset:], value)
+		offset += 4
+	}}
+	binary.LittleEndian.PutUint32(payload[offset:], stats.Total)
+	binary.LittleEndian.PutUint32(payload[offset+4:], stats.Conflicts)
+	return reply, nil
+}}
+
+// DecodeStatsCountsReply validates the operation and every bounded bucket.
+func DecodeStatsCountsReply(reply []byte) (MemoryStats, error) {{
+	payloadLen := 4 * (StatsCountsTiers + StatsCountsKinds + 2)
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationStatsCounts || header.Result != ResultOK ||
+		header.PayloadLen != uint32(payloadLen) ||
+		len(reply) != int(EnvelopeHeaderLen)+payloadLen {{
+		return MemoryStats{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	var stats MemoryStats
+	offset := 0
+	for index := range stats.TierCounts {{
+		stats.TierCounts[index] = binary.LittleEndian.Uint32(payload[offset:])
+		if stats.TierCounts[index] > StatsCountsMax {{
+			return MemoryStats{{}}, ErrMalformedEnvelope
+		}}
+		offset += 4
+	}}
+	for index := range stats.KindCounts {{
+		stats.KindCounts[index] = binary.LittleEndian.Uint32(payload[offset:])
+		if stats.KindCounts[index] > StatsCountsMax {{
+			return MemoryStats{{}}, ErrMalformedEnvelope
+		}}
+		offset += 4
+	}}
+	stats.Total = binary.LittleEndian.Uint32(payload[offset:])
+	stats.Conflicts = binary.LittleEndian.Uint32(payload[offset+4:])
+	if stats.Total > StatsCountsMax || stats.Conflicts > StatsCountsMax {{
+		return MemoryStats{{}}, ErrMalformedEnvelope
+	}}
+	return stats, nil
 }}
 
 // HealthCounters is the rolling health-window aggregate the host derives its rates from.

@@ -275,6 +275,11 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(counters.cycles == 0 && counters.l2_stale_30_days == 0);
 
+   aimee_db2_memory_stats_t corpus = {.total = 99};
+   assert(aimee_db2_stats_counts_call(call_client, &client, 9038, 0, &corpus, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(corpus.total == 0 && corpus.conflicts == 0 && corpus.kind_counts[9] == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

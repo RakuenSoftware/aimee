@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "b6d7c2e727f963840943f0e5e5e2b1e19d34bd144e6a8299270f0d0bb7bba76e"
+const ContractSHA256 = "1a545f636fbc61cb95c20f86ded212bbe73dfe1773a1012d9e65ad35fe7955ac"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -171,6 +171,12 @@ const HealthCountersPromoteUseCount uint32 = 3
 const HealthCountersPromoteConfidenceBits uint64 = 4606281698874543309
 const HealthCountersFields = 9
 const HealthCountersMax uint32 = 2147483647
+const EventStatsCounts = EventMemory
+const StageStatsCounts = FamilyMemory
+const OperationStatsCounts uint32 = 17
+const StatsCountsTiers = 6
+const StatsCountsKinds = 10
+const StatsCountsMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1008,6 +1014,103 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// MemoryStats is the corpus breakdown by tier and kind, plus the totals.
+type MemoryStats struct {
+	TierCounts [StatsCountsTiers]uint32
+	KindCounts [StatsCountsKinds]uint32
+	Total      uint32
+	Conflicts  uint32
+}
+
+// EncodeStatsCountsRequest emits the empty request envelope.
+func EncodeStatsCountsRequest() []byte {
+	header, err := EncodeRequestHeader(OperationStatsCounts, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeStatsCountsRequest validates the exact empty operation envelope.
+func DecodeStatsCountsRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationStatsCounts || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeStatsCountsReply emits every bounded bucket in the contract's order.
+func EncodeStatsCountsReply(stats MemoryStats) ([]byte, error) {
+	for _, value := range stats.TierCounts {
+		if value > StatsCountsMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	for _, value := range stats.KindCounts {
+		if value > StatsCountsMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	if stats.Total > StatsCountsMax || stats.Conflicts > StatsCountsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 4 * (StatsCountsTiers + StatsCountsKinds + 2)
+	header, err := EncodeReplyHeader(OperationStatsCounts, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	offset := 0
+	for _, value := range stats.TierCounts {
+		binary.LittleEndian.PutUint32(payload[offset:], value)
+		offset += 4
+	}
+	for _, value := range stats.KindCounts {
+		binary.LittleEndian.PutUint32(payload[offset:], value)
+		offset += 4
+	}
+	binary.LittleEndian.PutUint32(payload[offset:], stats.Total)
+	binary.LittleEndian.PutUint32(payload[offset+4:], stats.Conflicts)
+	return reply, nil
+}
+
+// DecodeStatsCountsReply validates the operation and every bounded bucket.
+func DecodeStatsCountsReply(reply []byte) (MemoryStats, error) {
+	payloadLen := 4 * (StatsCountsTiers + StatsCountsKinds + 2)
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationStatsCounts || header.Result != ResultOK ||
+		header.PayloadLen != uint32(payloadLen) ||
+		len(reply) != int(EnvelopeHeaderLen)+payloadLen {
+		return MemoryStats{}, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	var stats MemoryStats
+	offset := 0
+	for index := range stats.TierCounts {
+		stats.TierCounts[index] = binary.LittleEndian.Uint32(payload[offset:])
+		if stats.TierCounts[index] > StatsCountsMax {
+			return MemoryStats{}, ErrMalformedEnvelope
+		}
+		offset += 4
+	}
+	for index := range stats.KindCounts {
+		stats.KindCounts[index] = binary.LittleEndian.Uint32(payload[offset:])
+		if stats.KindCounts[index] > StatsCountsMax {
+			return MemoryStats{}, ErrMalformedEnvelope
+		}
+		offset += 4
+	}
+	stats.Total = binary.LittleEndian.Uint32(payload[offset:])
+	stats.Conflicts = binary.LittleEndian.Uint32(payload[offset+4:])
+	if stats.Total > StatsCountsMax || stats.Conflicts > StatsCountsMax {
+		return MemoryStats{}, ErrMalformedEnvelope
+	}
+	return stats, nil
 }
 
 // HealthCounters is the rolling health-window aggregate the host derives its rates from.

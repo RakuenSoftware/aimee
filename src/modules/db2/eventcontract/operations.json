@@ -748,6 +748,38 @@
           {"name": "l2_stale_30_days", "type": "u32", "minimum": 0, "maximum": 2147483647}
         ]
       }
+    },
+    {
+      "family": "memory",
+      "id": 17,
+      "name": "stats_counts",
+      "wire_format": "db2-envelope-memory-stats-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Tier, kind, and conflict breakdowns of the canonical relational memory corpus are DB2 authority; the host layers only its own PageRank timings on top.",
+      "c_symbols": ["db2_memory_stats_counts"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 96,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "tier_counts", "type": "u32-array", "items": 6,
+           "item_minimum": 0, "item_maximum": 2147483647,
+           "labels": ["L0", "L1", "L2", "L3", "L4", "L5"]},
+          {"name": "kind_counts", "type": "u32-array", "items": 10,
+           "item_minimum": 0, "item_maximum": 2147483647,
+           "labels": ["fact", "preference", "decision", "episode", "task",
+                      "scratch", "procedure", "policy", "workflow", "opinion"]},
+          {"name": "total", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "conflicts", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        ]
+      }
     }
   ]
 }

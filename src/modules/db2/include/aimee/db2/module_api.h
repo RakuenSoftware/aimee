@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "b6d7c2e727f963840943f0e5e5e2b1e19d34bd144e6a8299270f0d0bb7bba76e"
+#define AIMEE_DB2_CONTRACT_SHA256 "1a545f636fbc61cb95c20f86ded212bbe73dfe1773a1012d9e65ad35fe7955ac"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -252,6 +252,15 @@
 #define AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE      0.9
 #define AIMEE_DB2_HEALTH_COUNTERS_FIELDS                  9u
 #define AIMEE_DB2_HEALTH_COUNTERS_MAX                     2147483647u
+#define AIMEE_DB2_EVENT_STATS_COUNTS                      AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_STATS_COUNTS                      AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_STATS_COUNTS                  17u
+#define AIMEE_DB2_STATS_COUNTS_REQUEST_LEN                24u
+#define AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN               96u
+#define AIMEE_DB2_STATS_COUNTS_ERROR_LEN                  24u
+#define AIMEE_DB2_STATS_COUNTS_TIERS                      6u
+#define AIMEE_DB2_STATS_COUNTS_KINDS                      10u
+#define AIMEE_DB2_STATS_COUNTS_MAX                        2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1670,6 +1679,103 @@ static inline int aimee_db2_health_counters_reply_decode(const uint8_t *input, s
    counters->l1_eligible = values[6];
    counters->l2_total = values[7];
    counters->l2_stale_30_days = values[8];
+   return 0;
+}
+
+typedef struct
+{
+   uint32_t tier_counts[AIMEE_DB2_STATS_COUNTS_TIERS];
+   uint32_t kind_counts[AIMEE_DB2_STATS_COUNTS_KINDS];
+   uint32_t total;
+   uint32_t conflicts;
+} aimee_db2_memory_stats_t;
+
+static inline int aimee_db2_stats_counts_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_STATS_COUNTS, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_stats_counts_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_STATS_COUNTS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_STATS_COUNTS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_stats_counts_reply_encode(const aimee_db2_memory_stats_t *stats,
+                                                      uint8_t *output, size_t capacity,
+                                                      uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!stats || !output || !output_len)
+      return -1;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++)
+      if (stats->tier_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++)
+      if (stats->kind_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   if (stats->total > AIMEE_DB2_STATS_COUNTS_MAX ||
+       stats->conflicts > AIMEE_DB2_STATS_COUNTS_MAX)
+      return -1;
+   uint32_t payload_len = 4u * (AIMEE_DB2_STATS_COUNTS_TIERS + AIMEE_DB2_STATS_COUNTS_KINDS + 2u);
+   if (capacity < AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_STATS_COUNTS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t offset = 0u;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++, offset += 4u)
+      aimee_db2_put_u32(payload + offset, stats->tier_counts[index]);
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++, offset += 4u)
+      aimee_db2_put_u32(payload + offset, stats->kind_counts[index]);
+   aimee_db2_put_u32(payload + offset, stats->total);
+   aimee_db2_put_u32(payload + offset + 4u, stats->conflicts);
+   *output_len = AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_stats_counts_reply_decode(const uint8_t *input, size_t input_len,
+                                                      aimee_db2_memory_stats_t *stats)
+{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!stats)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   uint32_t payload_len = 4u * (AIMEE_DB2_STATS_COUNTS_TIERS + AIMEE_DB2_STATS_COUNTS_KINDS + 2u);
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_STATS_COUNTS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_memory_stats_t decoded = {0};
+   uint32_t offset = 0u;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++, offset += 4u)
+   {
+      decoded.tier_counts[index] = aimee_db2_get_u32(payload + offset);
+      if (decoded.tier_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   }
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++, offset += 4u)
+   {
+      decoded.kind_counts[index] = aimee_db2_get_u32(payload + offset);
+      if (decoded.kind_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   }
+   decoded.total = aimee_db2_get_u32(payload + offset);
+   decoded.conflicts = aimee_db2_get_u32(payload + offset + 4u);
+   if (decoded.total > AIMEE_DB2_STATS_COUNTS_MAX ||
+       decoded.conflicts > AIMEE_DB2_STATS_COUNTS_MAX)
+      return -1;
+   *stats = decoded;
    return 0;
 }
 

@@ -75,6 +75,10 @@ type wireBaseline struct {
 				SnapshotsDeleted      uint32            `json:"snapshots_deleted"`
 				ContradictionsDeleted uint32            `json:"contradictions_deleted"`
 				Counters              map[string]uint32 `json:"counters"`
+				TierCounts            []uint32          `json:"tier_counts"`
+				KindCounts            []uint32          `json:"kind_counts"`
+				Total                 uint32            `json:"total"`
+				Conflicts             uint32            `json:"conflicts"`
 				Exists                uint32            `json:"exists"`
 				Found                 uint32            `json:"found"`
 				ID                    uint64            `json:"id"`
@@ -193,7 +197,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 26 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 27 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -218,7 +222,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[22].Name != "l2_memory_ids" ||
 		baseline.Operations[23].Name != "health_record" ||
 		baseline.Operations[24].Name != "health_retention" ||
-		baseline.Operations[25].Name != "health_counters" {
+		baseline.Operations[25].Name != "health_counters" ||
+		baseline.Operations[26].Name != "stats_counts" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -850,6 +855,57 @@ func TestHealthCountersMatchesEverySharedCVector(t *testing.T) {
 		if _, err := EncodeHealthCountersReply(counters); !errors.Is(err, ErrMalformedEnvelope) {
 			t.Fatalf("counter %d past its bound encoded: %v", index, err)
 		}
+	}
+}
+
+func TestStatsCountsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[26]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeStatsCountsRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeStatsCountsRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeStatsCountsRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		if len(vector.TierCounts) != StatsCountsTiers || len(vector.KindCounts) != StatsCountsKinds {
+			t.Fatalf("vector buckets = (%d, %d), generated = (%d, %d)",
+				len(vector.TierCounts), len(vector.KindCounts), StatsCountsTiers, StatsCountsKinds)
+		}
+		var want MemoryStats
+		copy(want.TierCounts[:], vector.TierCounts)
+		copy(want.KindCounts[:], vector.KindCounts)
+		want.Total = vector.Total
+		want.Conflicts = vector.Conflicts
+		got, err := EncodeStatsCountsReply(want)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		stats, err := DecodeStatsCountsReply(got)
+		if err != nil || stats != want {
+			t.Fatalf("decode = (%+v, %v)", stats, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		stats, err := DecodeStatsCountsReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || stats != (MemoryStats{}) {
+			t.Fatalf("negative reply %s = (%+v, %v)", vector.Mutation, stats, err)
+		}
+	}
+	// Every bucket is bounded, including the last kind a short mapping would drop.
+	var overflow MemoryStats
+	overflow.KindCounts[StatsCountsKinds-1] = StatsCountsMax + 1
+	if _, err := EncodeStatsCountsReply(overflow); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("last kind bucket past its bound encoded: %v", err)
+	}
+	overflow = MemoryStats{Conflicts: StatsCountsMax + 1}
+	if _, err := EncodeStatsCountsReply(overflow); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("conflict count past its bound encoded: %v", err)
 	}
 }
 

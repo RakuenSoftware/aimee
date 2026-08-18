@@ -44,6 +44,40 @@ static int production_health_counters(int promote_use_count, double promote_conf
    return 0;
 }
 
+static int production_stats_counts(aimee_db2_memory_stats_t *stats)
+{
+   if (!stats)
+      return -1;
+   memory_stats_t raw;
+   memset(&raw, 0, sizeof(raw));
+   if (db2_memory_stats_counts(&raw) != 0)
+      return -1;
+   if ((int)AIMEE_DB2_STATS_COUNTS_TIERS !=
+           (int)(sizeof(raw.tier_counts) / sizeof(raw.tier_counts[0])) ||
+       (int)AIMEE_DB2_STATS_COUNTS_KINDS !=
+           (int)(sizeof(raw.kind_counts) / sizeof(raw.kind_counts[0])))
+      return -1;
+   *stats = (aimee_db2_memory_stats_t){0};
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++)
+   {
+      if (raw.tier_counts[index] < 0 || raw.tier_counts[index] > (int)AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+      stats->tier_counts[index] = (uint32_t)raw.tier_counts[index];
+   }
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++)
+   {
+      if (raw.kind_counts[index] < 0 || raw.kind_counts[index] > (int)AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+      stats->kind_counts[index] = (uint32_t)raw.kind_counts[index];
+   }
+   if (raw.total < 0 || raw.total > (int)AIMEE_DB2_STATS_COUNTS_MAX || raw.conflicts < 0 ||
+       raw.conflicts > (int)AIMEE_DB2_STATS_COUNTS_MAX)
+      return -1;
+   stats->total = (uint32_t)raw.total;
+   stats->conflicts = (uint32_t)raw.conflicts;
+   return 0;
+}
+
 static int production_pool_status(aimee_db2_pool_status_t *status)
 {
    int size = 0, in_use = 0, waiters = 0;
@@ -171,6 +205,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .prune_health = db2_memory_health_prune_old,
        .prune_contradictions = db2_memory_health_prune_old_contradictions,
        .health_counters = production_health_counters,
+       .stats_counts = production_stats_counts,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -518,6 +553,22 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_health_counters_reply_encode(&counters, response_body, response_capacity,
                                                     response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_stats_counts_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->stats_counts)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         aimee_db2_memory_stats_t stats = {0};
+         if (backend->stats_counts(&stats) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_stats_counts_reply_encode(&stats, response_body, response_capacity,
+                                                 response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
