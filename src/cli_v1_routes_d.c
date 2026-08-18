@@ -220,9 +220,9 @@ static const char *delegate_output_path_from_args(int argc, char **argv)
    static const char *bool_flags[] = {"json",         "background",   "durable",
                                       "coordination", "plan",         "dry-run",
                                       "tools",        "handoff-json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
-   return rpc_get(&opts, "output");
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
+   return cli_args_get(&opts, "output");
 }
 
 static int delegate_timeout_from_args(int argc, char **argv)
@@ -230,9 +230,9 @@ static int delegate_timeout_from_args(int argc, char **argv)
    static const char *bool_flags[] = {"json",         "background",   "durable",
                                       "coordination", "plan",         "dry-run",
                                       "tools",        "handoff-json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
-   return rpc_get_int(&opts, "timeout", 0);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
+   return cli_args_get_int(&opts, "timeout", 0);
 }
 
 /* `agent probe` is a diagnostic command, so its process status must agree with
@@ -712,6 +712,18 @@ const cJSON *cli_v1_manifest_commands(void)
       return NULL;
    const cJSON *cmds = cJSON_GetObjectItemCaseSensitive(doc, "commands");
    return cJSON_IsArray(cmds) ? cmds : NULL;
+}
+
+/* The dispatch rows the server sent (cmd/verb -> method), or NULL when there is
+ * no catalogue. Borrowed -- lives in the cached manifest, which outlives every
+ * lookup. */
+const cJSON *cli_v1_manifest_dispatch(void)
+{
+   const cJSON *doc = cli_v1_manifest();
+   if (!doc)
+      return NULL;
+   const cJSON *rows = cJSON_GetObjectItemCaseSensitive(doc, "dispatch");
+   return cJSON_IsArray(rows) ? rows : NULL;
 }
 
 /* Test seam: install a manifest directly instead of fetching one. Unit tests
@@ -2044,7 +2056,7 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
 
 /* Methods that must not be dispatched until the operator has said yes.
  *
- * A LIST RATHER THAN A COLUMN in rpc_routes: that table is built with positional
+ * A LIST RATHER THAN A COLUMN in cli_command_routes: that table is built with positional
  * initializers and -Werror=missing-field-initializers, so a seventh field would mean
  * editing every one of its ~200 rows to add ", 0". The gate is worth more than the
  * adjacency.
@@ -2077,9 +2089,9 @@ static int cli_v1_confirm_or_refuse(const char *method, int argc, char **argv)
       return 1;
 
    static const char *bool_flags[] = {"confirm", "yes", "json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
-   if (rpc_get(&opts, "confirm") || rpc_get(&opts, "yes"))
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
+   if (cli_args_get(&opts, "confirm") || cli_args_get(&opts, "yes"))
       return 1;
 
    /* The first positional is the thing being acted on, when there is one. */

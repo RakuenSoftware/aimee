@@ -261,6 +261,13 @@ void cli_v1_warn_no_endpoint(const char *method);
  * Borrowed — owned by the cached manifest. */
 const struct cJSON *cli_v1_manifest_commands(void);
 
+/* The dispatch rows the server sent: an array of
+ * {cmd, sub?, method, server_method?, extract?, timeout_ms?} mapping the words a
+ * user types to a method. An ABSENT `sub` is the NULL wildcard; a present, empty
+ * one matches only when no subcommand was given. NULL when no server answered.
+ * Borrowed -- owned by the cached manifest. */
+const struct cJSON *cli_v1_manifest_dispatch(void);
+
 /* TEST ONLY. Install a command manifest instead of fetching one from the server,
  * so a unit test can exercise route lookup without a server. Takes ownership of
  * `doc`. Never called outside tests; real invocations always fetch. */
