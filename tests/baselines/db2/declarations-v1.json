@@ -16385,9 +16385,15 @@
           "line": 22
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Counting recent canonical conflicts is a private input to the complete memory health-record operation; its day window and insert remain owned by one DB2 action."
+      },
       "signature": "int db2_memory_health_count_recent_conflicts ( int days )",
       "signature_sha256": "c7bbd802aaf4e425c53511eaabd80027e38834ea131fcbae2cae372c8e14cdf8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_count_recent_conflicts"
     },
     {
@@ -16460,9 +16466,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Pruning old health snapshots is one private half of the complete memory health-retention action and must not expose a partially pruned state across the bus."
+      },
       "signature": "int db2_memory_health_prune_old ( int days )",
       "signature_sha256": "72dc451b17a01e95eb74f03a61f51af72057b38fdbe34f82a9db392a02b4a760",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_prune_old"
     },
     {
@@ -16475,9 +16487,15 @@
           "line": 30
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Pruning old contradiction rows is one private half of the complete memory health-retention action and must run with health-snapshot pruning inside DB2."
+      },
       "signature": "int db2_memory_health_prune_old_contradictions ( int days )",
       "signature_sha256": "ae9eda0fb8546c7a1c10b2665718519f24d19cde1cb250f615b2cf48c8c0d2a5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_prune_old_contradictions"
     },
     {
@@ -25650,15 +25668,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9079bafc8289d57bc865bba6ef4591e1cb8bcf38d9677acae6a560a85ec6f119",
+  "fingerprint": "4e5ab7864d95b3ac431ade2c21f97911c89d2079b5e2711c9cfdd1f1668820c0",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 687,
+    "audit_pending": 684,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 271
+    "reviewed": 274
   }
 }
