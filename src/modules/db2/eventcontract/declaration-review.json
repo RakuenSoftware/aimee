@@ -892,6 +892,158 @@
       "reason": "The expiry-sweep cJSON report stays local presentation; a typed maintenance mutation owns the sweep and returns bounded counts."
     },
     {
+      "symbol": "db2_kb_service_memory_query_edges_json",
+      "signature_sha256": "11018a2cde4fb802baeebcd1a42f3692fbea55bf25615154a849ed2e26961634",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The graph-edge cJSON response is caller rendering; a typed bounded query returns canonical edge records and truncation state."
+    },
+    {
+      "symbol": "db2_kb_service_memory_query_health_json",
+      "signature_sha256": "cf9b0e50e85689142c20c903b8e40a8ff64dd8d91e8669a85c10a52871fc54e8",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The memory-health cJSON document is presentation-only; typed bounded counters and diagnostic flags define the operation reply."
+    },
+    {
+      "symbol": "db2_kb_service_memory_recall_json",
+      "signature_sha256": "698211af653dd6e1c534bac254f6a6b9dae5939d169aaec8e7aecb2d4560cd63",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The recall cJSON envelope remains local serialization; a typed request bounds query and scope fields and returns structured recall records."
+    },
+    {
+      "symbol": "db2_kb_service_memory_reject_json",
+      "signature_sha256": "22cea8b9945d973688698ab373adae111ff68b5d104be8c5e3886af54a8b3d68",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The memory-reject cJSON wrapper is not the state-transition contract; a typed mutation validates the reason and returns explicit status."
+    },
+    {
+      "symbol": "db2_kb_service_memory_scan_conversations_json",
+      "signature_sha256": "f5d42bc8b000d6446ce51a38b54afb803af6f6410476657fa3e38073f213b1cb",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The conversation-scan cJSON input and report are compatibility presentation; a typed operation validates bounded directories and returns structured counts."
+    },
+    {
+      "symbol": "db2_kb_service_memory_scope_visibility_rank_json",
+      "signature_sha256": "7745a0a00f0127402cd0742066d61c6ab2b2177e854c3f83439587f66f6f9605",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The scope-rank cJSON object is caller presentation; a typed bounded request returns explicit visibility and rank fields."
+    },
+    {
+      "symbol": "db2_kb_service_memory_search_facts_patterns_by_keyword_json",
+      "signature_sha256": "bea6fee7be7aeef2deedf79d1023cc4d1cd7455d8c5b1a2be23f2beb58e860a1",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The keyword-search cJSON array is local rendering; a typed request bounds the keyword and returns bounded fact and pattern records."
+    },
+    {
+      "symbol": "db2_kb_service_memory_search_graph_as_of_json",
+      "signature_sha256": "c7f4503d311b0565e196413113554b4a6793191dd5d66d36a91e6d93be023d9b",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The temporal graph-search cJSON response is presentation-only; a typed operation validates the timestamp and returns bounded relation records."
+    },
+    {
+      "symbol": "db2_kb_service_memory_search_graph_json",
+      "signature_sha256": "f0bcbd12a88a054771ab7052d7a5db3a54efdc63f659556169cca0186bf6a7be",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The graph-search cJSON document remains caller serialization; typed bounded query fields and relation records define the stable reply."
+    },
+    {
+      "symbol": "db2_kb_service_memory_search_json",
+      "signature_sha256": "46f1050929505ea123cb546043465fd326da5fc268390e041ecc6b5b66c5dd38",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The general search cJSON response cannot cross the typed ABI; a bounded operation returns structured matches and explicit truncation."
+    },
+    {
+      "symbol": "db2_kb_service_memory_set_artifact_json",
+      "signature_sha256": "6146629c248d0dc124c41f797862371c2d2f1d3c7d0a065f0bd732267d195959",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The artifact-update cJSON facade is not the mutation contract; a typed operation validates bounded artifact fields and returns explicit status."
+    },
+    {
+      "symbol": "db2_kb_service_memory_stats_json",
+      "signature_sha256": "7a8d87441743282ef4ca5c64784d1044876c818f7aec459920c36770ae21994d",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The memory-stat cJSON response is compatibility rendering; fixed typed counters and scores form the stable operation reply."
+    },
+    {
+      "symbol": "db2_kb_service_memory_supersede_json",
+      "signature_sha256": "8f92a5522f742371116ff11f1f45696293536f69bfe035c07749d703c6821cb5",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The supersede cJSON wrapper cannot define or split the transaction; a typed memory.supersede operation owns version closure, replacement insert, provenance, and result."
+    },
+    {
+      "symbol": "db2_kb_service_memory_tag_scope_json",
+      "signature_sha256": "0f60d71bba322bee533f02dbcb258fde8a39675adcab059d9640896bc9f51578",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The scope-tag cJSON facade remains local presentation; a typed mutation validates the closed scope type and bounded value."
+    },
+    {
+      "symbol": "db2_kb_service_memory_tag_workspace_json",
+      "signature_sha256": "85b4d6efe781a08231e9ad0e241acd11e68095da43dcdb12f0399595e4d673e0",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The workspace-tag cJSON wrapper is not the mutation ABI; a typed operation bounds the workspace and returns explicit status."
+    },
+    {
+      "symbol": "db2_kb_service_memory_top_l2_facts_json",
+      "signature_sha256": "cb9e83e64cb01e724ea20aca72cbc29e8d81119aa060a900ef78335ed7bea6a4",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The top-L2 cJSON array is caller rendering; a typed bounded query returns ranked fact records and truncation state."
+    },
+    {
+      "symbol": "db2_kb_service_memory_touch_json",
+      "signature_sha256": "d4eacde4ecbabaa04cdefeab0d841c36c500d9503870e99b99a15f1124a60a19",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The touch cJSON wrapper remains local presentation; a typed idempotent mutation owns usage updates and returns explicit found state."
+    },
+    {
+      "symbol": "db2_kb_service_memory_update_json",
+      "signature_sha256": "3fe72aa9eaa0e1924c8104eceebc853133feda092c9492b1701ebbcea61e6085",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The memory-update cJSON facade is not the mutation contract; a typed operation validates bounded content and returns structured update status."
+    },
+    {
+      "symbol": "db2_kb_service_memory_upsert_workflow_json",
+      "signature_sha256": "d27788f0beb3146bad08d2aca1775f9f5eec493bde5c1274ed731bf6f1cabfe8",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The workflow-upsert cJSON response is compatibility presentation; a typed composite operation bounds workflow fields and owns the complete upsert."
+    },
+    {
       "symbol": "db2_kb_service_note_create_json",
       "signature_sha256": "b38f3d397de14bdd287340a701dad79c0a8d60ef73e6b0d66c505fa0a2c96b50",
       "disposition": "private-db2",
