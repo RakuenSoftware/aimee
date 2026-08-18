@@ -71,6 +71,7 @@
     "src/modules/db1/session_paths.c",
     "src/modules/db1/session_state.c",
     "src/modules/db1/sessions_stage.c",
+    "src/modules/db1/telemetry_stage.c",
     "src/modules/db1/token_audit.c",
     "src/modules/db1/tool_local_availability.c",
     "src/modules/db1/user_memory.c",

@@ -9,51 +9,20 @@
 #define IE_TABLE_CAP       50000
 #define IE_PAYLOAD_MAX_LEN 4096
 
-const char *ie_event_type_name(ie_event_type_t type)
+static const char *ie_default_actor(const char *type_name)
 {
-   switch (type)
-   {
-   case IE_USER_TURN:
-      return "user_turn";
-   case IE_AGENT_TURN:
-      return "agent_turn";
-   case IE_TOOL_CALL:
-      return "tool_call";
-   case IE_TOOL_OUTCOME:
-      return "tool_outcome";
-   case IE_DELEGATE_EXIT:
-      return "delegate_exit";
-   case IE_GUARDRAIL_DECISION:
-      return "guardrail_decision";
-   case IE_SKILL_ACTIVATION:
-      return "skill_activation";
-   case IE_USER_CORRECTION:
-      return "user_correction";
-   case IE_FAILOVER_EVENT:
-      return "failover_event";
-   case IE_MCP_PACKAGE_CHECK:
-      return "mcp_package_check";
-   default:
-      return "unknown";
-   }
-}
-
-static const char *ie_default_actor(ie_event_type_t type)
-{
-   switch (type)
-   {
-   case IE_USER_TURN:
-   case IE_USER_CORRECTION:
-      return "user";
-   case IE_DELEGATE_EXIT:
-   case IE_TOOL_OUTCOME:
-   case IE_GUARDRAIL_DECISION:
-   case IE_FAILOVER_EVENT:
-   case IE_MCP_PACKAGE_CHECK:
-      return "system";
-   default:
+   /* Matched on the name rather than the enum, because the name is what
+      crosses now and what the row has always stored. The three groups are the
+      ones the enum switch had. */
+   if (!type_name)
       return "agent";
-   }
+   if (!strcmp(type_name, "user_turn") || !strcmp(type_name, "user_correction"))
+      return "user";
+   if (!strcmp(type_name, "delegate_exit") || !strcmp(type_name, "tool_outcome") ||
+       !strcmp(type_name, "guardrail_decision") || !strcmp(type_name, "failover_event") ||
+       !strcmp(type_name, "mcp_package_check"))
+      return "system";
+   return "agent";
 }
 
 static void ie_copy_payload(const char *payload_json, char *out, size_t out_len)
@@ -85,7 +54,7 @@ static void ie_row_from_stmt(sqlite3_stmt *st, ie_event_row_t *row)
    ie_copy_column(st, 6, row->created_at, sizeof(row->created_at));
 }
 
-int interaction_events_evict_if_needed(int cap)
+int db1_interaction_event_evict_if_needed(int cap)
 {
    sqlite3 *db = db1_conn();
    if (!db)
@@ -121,14 +90,14 @@ int interaction_events_evict_if_needed(int cap)
    return rc == SQLITE_DONE ? 0 : -1;
 }
 
-int ie_record(const char *session_id, ie_event_type_t type, const char *actor,
-              const char *payload_json, const char *outcome)
+int db1_interaction_event_record(const char *session_id, const char *type_name, const char *actor,
+                                 const char *payload_json, const char *outcome)
 {
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
    if (!actor || !actor[0])
-      actor = ie_default_actor(type);
+      actor = ie_default_actor(type_name);
    if (!outcome || !outcome[0])
       outcome = "ok";
 
@@ -142,7 +111,7 @@ int ie_record(const char *session_id, ie_event_type_t type, const char *actor,
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_text(st, 1, session_id ? session_id : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(st, 2, ie_event_type_name(type), -1, SQLITE_STATIC);
+   sqlite3_bind_text(st, 2, type_name ? type_name : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(st, 3, actor, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(st, 4, payload, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(st, 5, outcome, -1, SQLITE_TRANSIENT);
@@ -150,10 +119,10 @@ int ie_record(const char *session_id, ie_event_type_t type, const char *actor,
    sqlite3_finalize(st);
    if (rc != SQLITE_DONE)
       return -1;
-   return interaction_events_evict_if_needed(IE_TABLE_CAP);
+   return db1_interaction_event_evict_if_needed(IE_TABLE_CAP);
 }
 
-int ie_list_unreflected_for_session(const char *session_id, ie_event_row_t *out, int max)
+int db1_interaction_event_list_unreflected(const char *session_id, ie_event_row_t *out, int max)
 {
    sqlite3 *db = db1_conn();
    if (!db || !out || max <= 0)
@@ -178,7 +147,7 @@ int ie_list_unreflected_for_session(const char *session_id, ie_event_row_t *out,
    return rc == SQLITE_DONE ? n : -1;
 }
 
-int ie_list_for_session(const char *session_id, ie_event_row_t *out, int max)
+int db1_interaction_event_list_for_session(const char *session_id, ie_event_row_t *out, int max)
 {
    sqlite3 *db = db1_conn();
    if (!db || !out || max <= 0 || !session_id || !session_id[0])
@@ -232,12 +201,12 @@ static int ie_mark_timestamp(const char *column, const int *ids, int count)
    return rc;
 }
 
-int ie_mark_reflected(const int *ids, int count)
+int db1_interaction_event_mark_reflected(const int *ids, int count)
 {
    return ie_mark_timestamp("reflected_at", ids, count);
 }
 
-int ie_list_promotion_feed(ie_event_row_t *out, int max)
+int db1_interaction_event_list_promotion_feed(ie_event_row_t *out, int max)
 {
    sqlite3 *db = db1_conn();
    if (!db || !out || max <= 0)
@@ -261,7 +230,7 @@ int ie_list_promotion_feed(ie_event_row_t *out, int max)
    return rc == SQLITE_DONE ? n : -1;
 }
 
-int ie_mark_promoted(const int *ids, int count)
+int db1_interaction_event_mark_promoted(const int *ids, int count)
 {
    return ie_mark_timestamp("promoted_at", ids, count);
 }

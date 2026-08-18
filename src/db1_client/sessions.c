@@ -368,7 +368,7 @@ int db1_server_session_count(const char *since_or_null)
    int wire_status = call_stage(AIMEE_DB1_OP_SERVER_SESSION_COUNT, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_server_session_list_expired(int threshold_seconds, char (*out_ids)[DB1_SS_ID_LEN], int max)
@@ -420,7 +420,7 @@ int db1_server_session_delete_expired(int threshold_seconds)
    int wire_status = call_stage(AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_primary_session_save(const char *session_id, const char *agent_name, const char *provider, const char *messages_json)
@@ -721,7 +721,7 @@ int db1_webchat_claude_session_owned_by_other(const char *principal, const char 
    int wire_status = call_stage(AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER, fields, 3, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_webchat_claude_session_bind(const char *principal, const char *aimee_session_id, const char *claude_session_id)

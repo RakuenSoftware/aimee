@@ -1144,7 +1144,7 @@ int db1_user_memory_any()
    int wire_status = call_stage(AIMEE_DB1_OP_USER_MEMORY_ANY, fields, 0, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, const char *content, double confidence, const char *source_session)

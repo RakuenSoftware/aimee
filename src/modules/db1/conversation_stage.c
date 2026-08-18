@@ -243,38 +243,50 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
       payload_rewrite_state_t row;
       memset(&row, 0, sizeof row);
       snprintf(row.session_id, sizeof row.session_id, "%s", field[0]);
-      if (parse_int64(field[1], &row.payload_epoch) != 0)
+      int64_t member_1 = 0;
+      if (parse_int64(field[1], &member_1) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int64(field[2], &row.compaction_epoch) != 0)
+      row.payload_epoch = member_1;
+      int64_t member_2 = 0;
+      if (parse_int64(field[2], &member_2) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.compaction_epoch = member_2;
       snprintf(row.last_prefix_hash, sizeof row.last_prefix_hash, "%s", field[3]);
-      if (parse_int(field[4], &row.last_payload_tokens) != 0)
+      int member_4 = 0;
+      if (parse_int(field[4], &member_4) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.last_payload_tokens = member_4;
       snprintf(row.last_rewrite_at, sizeof row.last_rewrite_at, "%s", field[5]);
-      if (parse_int(field[6], &row.deferred_rewrite_count) != 0)
+      int member_6 = 0;
+      if (parse_int(field[6], &member_6) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[7], &row.consecutive_deferred_count) != 0)
+      row.deferred_rewrite_count = member_6;
+      int member_7 = 0;
+      if (parse_int(field[7], &member_7) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[8], &row.bytes_saved_pending) != 0)
+      row.consecutive_deferred_count = member_7;
+      int member_8 = 0;
+      if (parse_int(field[8], &member_8) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.bytes_saved_pending = member_8;
       snprintf(row.rewrite_reason, sizeof row.rewrite_reason, "%s", field[9]);
       snprintf(row.updated_at, sizeof row.updated_at, "%s", field[10]);
       rc = db1_payload_rewrite_state_set(&row);
@@ -1722,7 +1734,7 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_user_memory_any();
+      int produced = db1_user_memory_any();
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
