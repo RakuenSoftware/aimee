@@ -682,6 +682,25 @@ mkdir -p "$MIRROR_CASE"
 # snapshot, reconstruction, and MCP tool path (SHA-1 is covered by unit tests).
 git init --bare --object-format=sha256 "$MIRROR_REMOTE" >/dev/null
 git init --object-format=sha256 -b feature.locked "$MIRROR_CLIENT" >/dev/null
+# This whole section deliberately drives SHA-256 object ids through the wire,
+# the snapshot, the reconstruction and the MCP Git path (SHA-1 is covered by
+# unit tests). It therefore needs a git that honours --object-format=sha256.
+#
+# A runner whose git quietly gives SHA-1 instead produced five failures in a
+# row, none of which named the cause: the snapshot carried a 40-hex head with no
+# branch or upstream, and every assertion after it disagreed about something
+# else. An absent capability is a skip, exactly like aimee-kb above -- not five
+# assertions failing about a mirror that was never the problem.
+MIRROR_OBJFMT=$(git -C "$MIRROR_CLIENT" rev-parse --show-object-format 2>/dev/null) || true
+if [ "$MIRROR_OBJFMT" = "sha256" ]; then
+    MIRROR_SHA256=1
+else
+    MIRROR_SHA256=0
+    echo "SKIP: mirror-sync end to end (git created a '$MIRROR_OBJFMT' repository despite --object-format=sha256)"
+    SKIP=$((SKIP + 22))
+fi
+
+if [ "$MIRROR_SHA256" -eq 1 ]; then
 git -C "$MIRROR_CLIENT" config user.name "Aimee Integration"
 git -C "$MIRROR_CLIENT" config user.email "aimee-integration@example.invalid"
 printf 'base\n' >"$MIRROR_CLIENT/file.txt"
@@ -734,7 +753,17 @@ check_output "identical mirror-sync continuation persisted" '"seq":1' echo "$RES
 RESP=$(http_rpc "${MIRROR_REQS[5]}") || true
 check_output "identical mirror-sync reuses generation" '"generation":1' echo "$RESP"
 
-SNAPSHOT=$(find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -print -quit) || true
+SNAPSHOT=$(grep -rl "$MIRROR_HEAD" "$AIMEE_HOME/workspaces" --include=client.snapshot 2>/dev/null | head -1) || true
+if [ -z "$SNAPSHOT" ]; then
+    # Nothing published for THIS head. Show what was published instead, so the
+    # failure names the mismatch rather than leaving an empty path to explain
+    # the next five assertions.
+    echo "FAIL: no client.snapshot carries the fixture head $MIRROR_HEAD"
+    echo "  published snapshots:"
+    find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -exec sh -c \
+        'echo "    $1: $(cat "$1")"' _ {} \; 2>/dev/null
+    FAIL=$((FAIL + 1))
+fi
 check "mirror snapshot metadata published" test -s "$SNAPSHOT"
 check_output "mirror snapshot records valid .locked ref" \
     'feature.locked origin/feature.locked 2' cat "$SNAPSHOT"
@@ -782,6 +811,8 @@ MIRROR_CLEAN_WORK=$(find "$(dirname "$SNAPSHOT")" -maxdepth 1 -type d -name 'wor
 check "clean snapshot worktree materialized on first call" test -n "$MIRROR_CLEAN_WORK"
 check "clean snapshot worktree remains clean" test -z \
     "$(git -C "$MIRROR_CLEAN_WORK" status --porcelain)"
+
+fi  # MIRROR_SHA256
 
 # ============================================================
 # 10. Server shutdown
