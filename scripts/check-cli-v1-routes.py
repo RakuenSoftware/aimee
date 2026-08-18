@@ -45,7 +45,7 @@ def main() -> int:
     if orphans:
         print("check-cli-v1-routes: FAIL — these /v1 methods have a route and a "
               "marshaller but no `aimee <cmd> <sub>` row in the dispatch table in "
-              "src/cli_v1_routes.c, so no thin client can invoke them:")
+              "src/server/cli_dispatch_defs_data.h, so no thin client can invoke them:")
         for m in orphans:
             print(f"  {m}")
         return 1
@@ -129,8 +129,7 @@ def dispatchable_without_marshaller():
     routed = set()
     for f in sorted(glob.glob(TARGET_GLOB)):
         routed |= set(ROUTE_RE.findall(Path(f).read_text(encoding="utf-8")))
-    dispatch = set(DISPATCH_RE.findall(
-        Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
+    dispatch = set(DISPATCH_RE.findall(DISPATCH_ROWS.read_text(encoding="utf-8")))
     exact, prefixes = marshal_coverage()
     # Only methods that also have a path: a dispatch row for a method with no route is
     # a different defect, reported by dispatchable_without_route(). (That was not true
@@ -148,8 +147,7 @@ def unreachable_methods():
         text = Path(f).read_text(encoding="utf-8")
         routed |= set(ROUTE_RE.findall(text))
         marshalled |= set(MARSHAL_RE.findall(text))
-    dispatch = set(DISPATCH_RE.findall(
-        Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
+    dispatch = set(DISPATCH_RE.findall(DISPATCH_ROWS.read_text(encoding="utf-8")))
     return sorted((routed & marshalled) - dispatch)
 
 
@@ -171,6 +169,9 @@ def unreachable_methods():
 # broken. Parse only the cli_command_routes[] table, so unrelated brace-lists elsewhere in the
 # file (bool flag names, response keys) cannot masquerade as dispatch rows.
 RPC_TABLE_RE = re.compile(r"\}\s*cli_command_routes\[\]\s*=\s*\{(.*?)\n\};", re.S)
+# The rows themselves live with the server now (they are served to the client);
+# src/cli_v1_routes.c only #includes them.
+DISPATCH_ROWS = ROOT / "src" / "server" / "cli_dispatch_defs_data.h"
 RPC_ROW_RE = re.compile(
     r'\{"[a-z0-9_-]+",\s*(?:NULL|"[a-z0-9 _-]*")\s*,\s*"([a-z0-9_.]+)"\s*,'
     r'\s*(NULL|"[a-z0-9_.]+")')
@@ -192,13 +193,15 @@ def dispatchable_without_route():
         text = Path(f).read_text(encoding="utf-8")
         routed |= set(ROUTE_RE.findall(text))    # bespoke[] rows still client-side
         routed |= set(PATHID_RE.findall(text))   # {id}-bearing prefix routes
-    src = Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")
-    table = RPC_TABLE_RE.search(src)
-    if not table:
-        raise SystemExit("check-cli-v1-routes: cli_command_routes[] table not found in "
-                         "src/cli_v1_routes.c; this check cannot run")
+    # The rows are a bare initializer list in the shared data file (both the
+    # server, which serves them, and the client, which falls back to them,
+    # #include it), so there is no surrounding table to match -- read it whole.
+    rows = DISPATCH_ROWS.read_text(encoding="utf-8")
+    if '{"' not in rows:
+        raise SystemExit("check-cli-v1-routes: no dispatch rows in "
+                         f"{DISPATCH_ROWS}; this check cannot run")
     effective = set()
-    for method, server_method in RPC_ROW_RE.findall(table.group(1)):
+    for method, server_method in RPC_ROW_RE.findall(rows):
         effective.add(server_method.strip('"') if server_method != "NULL" else method)
     return sorted(effective - routed)
 

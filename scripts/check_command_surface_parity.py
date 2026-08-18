@@ -23,7 +23,9 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CLI = ROOT / "src/cli_v1_routes.c"
+# The dispatch rows live with the server now (they are served to the thin
+# client); src/cli_v1_routes.c only #includes them.
+CLI = ROOT / "src/server/cli_dispatch_defs_data.h"
 MCP_DISPATCH = ROOT / "src/server/server_mcp_call_table.c"
 MCP_PROFILE = ROOT / "src/modules/protocols/mcp/mcp_tool_profile.c"
 GUIDANCE = ROOT / "src/headers/aimee_session_guidance.h"
@@ -33,13 +35,24 @@ def read(p):
     return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
 
 
+_CLI_TEXT = None  # plant-test override; None means read the real file
+
+
 def cli_routes():
-    """cli_command_routes[] entries: {"group", "verb", "group.verb", ...}."""
-    s = read(CLI)
-    start = s.find("} cli_command_routes[] = {")
-    if start == -1:
-        return {}
-    body = s[start:s.find("\n};", start)]
+    """Dispatch rows: {"group", "verb", "group.verb", ...}.
+
+    The rows are a bare initializer list in the shared data file -- both the
+    server (which serves them) and the client (which falls back to them)
+    #include it -- so there is no surrounding table to find; read it whole.
+
+    Returning {} on a parse miss made this report "0 CLI routes" and exit
+    happily, which reads as "the surfaces agree" when it means "I could not see
+    the rows". An empty read is a failure, not a result.
+    """
+    body = _CLI_TEXT if _CLI_TEXT is not None else read(CLI)
+    if '{"' not in body:
+        raise SystemExit(f"check_command_surface_parity: no dispatch rows in {CLI}; "
+                         "the extractor has drifted from the source")
     out = {}
     for m in re.finditer(r'\{"([a-z0-9_]+)",\s*"([a-z0-9_]*)",\s*"([a-z0-9_.]+)"', body):
         group, verb, method = m.groups()
@@ -97,7 +110,31 @@ def guidance_names(core):
     return names
 
 
+def _plant_test():
+    """Prove this check FAILS when it cannot see the rows.
+
+    It used to return {} on a parse miss and print "0 CLI routes ... 0 with no
+    MCP counterpart", then exit 0 -- which reads as "the surfaces agree" but
+    means "I could not see the rows". A checker that launders a parse failure
+    into a clean bill of health is worse than no checker, so prove it cannot.
+    """
+    global _CLI_TEXT
+    _CLI_TEXT = "/* planted: rows the extractor cannot see */\n"
+    try:
+        cli_routes()
+    except SystemExit:
+        print("check_command_surface_parity: plant-test ok (empty read refused)")
+        return 0
+    finally:
+        _CLI_TEXT = None
+    print("check_command_surface_parity: PLANT FAIL - an unreadable table did NOT "
+          "fail the check; it is decoration", file=sys.stderr)
+    return 1
+
+
 def main():
+    if "--plant-test" in sys.argv:
+        return _plant_test()
     ap = argparse.ArgumentParser()
     ap.add_argument("--require", action="append", default=[],
                     help="group that MUST be consistent; exits non-zero if not")

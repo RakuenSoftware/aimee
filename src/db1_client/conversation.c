@@ -741,7 +741,9 @@ int db1_conv_state_get(const char *session_id, int64_t *last_event_id_out, int *
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2};
    int wire_status = call_stage(AIMEE_DB1_OP_CONV_STATE_GET, fields, 1, values, caps, 3, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    *last_event_id_out = (int64_t)strtoll(slot0, NULL, 10);
    *chain_count_out = (int)strtol(slot1, NULL, 10);
    *event_count_out = (int)strtol(slot2, NULL, 10);
@@ -773,7 +775,9 @@ int db1_windows_session_scan_state(const char *session_id, int *count_out, int *
    const size_t caps[] = {sizeof slot0, sizeof slot1};
    int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_SCAN_STATE, fields, 1, values, caps, 2, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    *count_out = (int)strtol(slot0, NULL, 10);
    *max_seq_out = (int)strtol(slot1, NULL, 10);
    return 0;

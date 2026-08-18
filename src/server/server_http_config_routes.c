@@ -5,7 +5,8 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
-#include "cli_command_defs.h" /* the command catalogue served in the CLI manifest */
+#include "cli_command_defs.h"  /* the command catalogue served in the CLI manifest */
+#include "cli_dispatch_defs.h" /* cmd/verb -> method rows, served alongside it */
 #include "server_http.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -1224,6 +1225,12 @@ int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
    cJSON *commands = cli_command_defs_to_json();
    if (commands)
       cJSON_AddItemToObject(root, "commands", commands);
+   /* How the words a user types become a method. `routes` says how to ADDRESS a
+    * method and `commands` says what exists; without this the client can render
+    * a new command in help and still not be able to invoke it. */
+   cJSON *dispatch = cli_dispatch_defs_to_json();
+   if (dispatch)
+      cJSON_AddItemToObject(root, "dispatch", dispatch);
 
    char *s = cJSON_PrintUnformatted(root);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;

@@ -3,7 +3,7 @@
 
 `aimee help <cmd>` is served from the command catalogue
 (src/server/cli_command_defs_data.h), which the server sends to the client. It is a
-SEPARATE table from both the /v1 route map (src/cli_v1_routes.c) and the embedded
+SEPARATE table from both the dispatch rows (src/server/cli_dispatch_defs_data.h) and the embedded
 command table (src/cmd_table.c). Nothing tied them together, so a command could
 route and execute perfectly while `aimee help <cmd>` answered "Unknown command:
 <cmd>" and `aimee help --all` never listed it. That is exactly what happened to
@@ -22,7 +22,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ROUTES = ROOT / "src" / "cli_v1_routes.c"
+# The dispatch rows moved to the server so they can be served to the client;
+# src/cli_v1_routes.c only #includes them now.
+ROUTES = ROOT / "src" / "server" / "cli_dispatch_defs_data.h"
 HELP = ROOT / "src" / "server" / "cli_command_defs_data.h"
 
 # Routed commands that still lack a client_help[] entry. Shrink this, never grow it.

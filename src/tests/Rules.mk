@@ -103,7 +103,12 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/delegate_reservation.o \
                     $(OBJDIR)/modules/db1/delegation_checkpoint.o \
                     $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o \
-                    $(OBJDIR)/modules/db1/delegate_learning.o $(OBJDIR)/delegate_exit_classify.o
+                    $(OBJDIR)/modules/db1/delegate_learning.o \
+                    $(OBJDIR)/modules/db1/server_sessions.o \
+                    $(OBJDIR)/modules/db1/primary_sessions.o $(OBJDIR)/primary_session_release.o \
+                    $(OBJDIR)/modules/db1/session_paths.o \
+                    $(OBJDIR)/modules/db1/webchat_claude_sessions.o \
+                    $(OBJDIR)/modules/db1/webchat_live.o $(OBJDIR)/delegate_exit_classify.o
 
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/user_memory_merge.o \
                             $(OBJDIR)/modules/config/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/config/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
@@ -1861,14 +1866,14 @@ $(TESTPREFIX)/unit-test-primary-session-adapter: $(OBJDIR)/tests/test_primary_se
                                $(OBJDIR)/server/agent_request_shaping.o \
                                $(OBJDIR)/server/context_engine.o \
                                $(OBJDIR)/tests/support/mock_agent_http.o \
-                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o \
+                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o $(OBJDIR)/primary_session_release.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-session-search-tool: $(OBJDIR)/tests/test_session_search_tool.o \
                                $(OBJDIR)/server/session_search_tool.o \
-                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o \
+                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o $(OBJDIR)/primary_session_release.o \
                                $(OBJDIR)/modules/db1/server_sessions.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1999,7 +2004,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o \
 	                                $(OBJDIR)/tests/support/skill_jobs_stub.o \
-	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
+	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
 	                                $(OBJDIR)/tests/support/workflow_api_stub.o \
 	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
 	                                $(OBJDIR)/modules/vault/runtime_secret.o \
@@ -5069,6 +5074,7 @@ $(TESTPREFIX)/unit-test-db1-module-bus: \
                                        $(OBJDIR)/tests/test_db1_module_bus.o \
                                        $(DB1_CLIENT_OBJS) \
                                        $(OBJDIR)/agent_job_release.o \
+                                       $(OBJDIR)/primary_session_release.o \
                                        $(OBS_BUS_LINK_OBJS) \
                                        $(OBJDIR)/core/event_bus/bus_client.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -5140,6 +5146,12 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/util.o \
                                        $(OBJDIR)/modules/db1/agent_work_stage.o \
                                        $(OBJDIR)/modules/db1/delegation_stage.o \
+                                       $(OBJDIR)/modules/db1/sessions_stage.o \
+                                       $(OBJDIR)/modules/db1/server_sessions.o \
+                                       $(OBJDIR)/modules/db1/primary_sessions.o \
+                                       $(OBJDIR)/modules/db1/session_paths.o \
+                                       $(OBJDIR)/modules/db1/webchat_claude_sessions.o \
+                                       $(OBJDIR)/modules/db1/webchat_live.o \
                                        $(OBJDIR)/modules/db1/cognify_jobs.o \
                                        $(OBJDIR)/modules/db1/conv_context.o \
                                        $(OBJDIR)/modules/db1/agent_log.o \
@@ -5943,7 +5955,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/workspace_register_args.o $(OBJDIR)/server/workflow_control_bus.o \
                      $(OBJDIR)/server/server_runtime_identity.o \
-                     $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
+                     $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
@@ -5959,7 +5971,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
                            $(OBJDIR)/modules/roundtable/roundtable_pipeline_capture.o \
                            $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
-                           $(DB1_OBJS) \
+                           $(DB1_OBJS) $(DB1_MIGRATED_OBJS) \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
