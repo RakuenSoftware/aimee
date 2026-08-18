@@ -4983,9 +4983,15 @@
           "line": 226
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
+      },
       "signature": "void * ( db2_conn ) ( void )",
       "signature_sha256": "4a33cfbffa38498794f2c49735e95cd914ce3cbf42a4772d2bf4f66f980d8899",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_conn"
     },
     {
@@ -12940,9 +12946,15 @@
           "line": 215
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Lease scope terminates process-local PostgreSQL ownership and has no wire representation; it disappears when the enclosing DB2 work becomes one bounded request."
+      },
       "signature": "void db2_lease_end ( void )",
       "signature_sha256": "95d4dcf624e3c0ca7a478db19bc628afa3e18fc7a0343f966e58f2435ce6cefc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_lease_end"
     },
     {
@@ -12975,9 +12987,15 @@
           "line": 50
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "lifecycle",
+        "reason": "Idle-lease release is process-local pool hygiene, not a remote database operation; the standalone owner releases its own leases between complete bus requests."
+      },
       "signature": "void db2_lease_release_idle ( void )",
       "signature_sha256": "7f522b38bf9c12cdc2760e84ca40f7474a70a942a7633b961fc45cb4f1741ebf",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_lease_release_idle"
     },
     {
@@ -24504,15 +24522,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "781b8b4ef3707c0b4516cb06a3cf78d39339020ada37a51979d23105fb63b1db",
+  "fingerprint": "16739ae9b491db913794177d93174a8a3ca61e210acac94b8e8de9e19bf62d39",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 878,
+    "audit_pending": 875,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 80
+    "reviewed": 83
   }
 }

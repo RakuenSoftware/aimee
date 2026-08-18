@@ -4,6 +4,14 @@
   "declarations_complete": false,
   "reviews": [
     {
+      "symbol": "db2_conn",
+      "signature_sha256": "4a33cfbffa38498794f2c49735e95cd914ce3cbf42a4772d2bf4f66f980d8899",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
+    },
+    {
       "symbol": "db2_embedding_dim",
       "signature_sha256": "68daa9ea74e7ddca239ff4ba399306b2cbc1c08fddf786cf009cba8c5e86307e",
       "disposition": "wire-operation",
@@ -58,6 +66,22 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
+    },
+    {
+      "symbol": "db2_lease_end",
+      "signature_sha256": "95d4dcf624e3c0ca7a478db19bc628afa3e18fc7a0343f966e58f2435ce6cefc",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Lease scope terminates process-local PostgreSQL ownership and has no wire representation; it disappears when the enclosing DB2 work becomes one bounded request."
+    },
+    {
+      "symbol": "db2_lease_release_idle",
+      "signature_sha256": "7f522b38bf9c12cdc2760e84ca40f7474a70a942a7633b961fc45cb4f1741ebf",
+      "disposition": "private-db2",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Idle-lease release is process-local pool hygiene, not a remote database operation; the standalone owner releases its own leases between complete bus requests."
     },
     {
       "symbol": "db2_pg_stat_summary",
