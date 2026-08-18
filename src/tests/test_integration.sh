@@ -236,6 +236,41 @@ except subprocess.TimeoutExpired:
 PY
 }
 
+# Start aimee-server and WAIT for it to bind, rather than guessing.
+#
+# This was `... >/dev/null 2>&1 & sleep 1`, three times. Both halves were wrong,
+# and test_init_migrate_service.sh had already found and fixed exactly this:
+# "On a loaded CI runner startup regularly takes several seconds, and the 1s
+# guess made this the run's flakiest test." It was left unfixed here, and the
+# first CI run of this harness failed 14 checks off one early probe -- the
+# server had not finished binding, so "server started" failed and every request
+# after it cascaded.
+#
+# The discarded output was the other half. A server that fails to start says why
+# on stderr; sending that to /dev/null left CI reporting "FAIL: server started"
+# and nothing else, which is unactionable. Keep the log and print its tail when
+# the socket never appears.
+#
+# A unix-socket server binds and listens as its last init step, so
+# socket-present means ready to serve. Polling also returns as soon as it is up,
+# which is faster than the sleep it replaces on a machine that is not loaded.
+start_server() {
+    local log="$HOME/aimee-server.$$.log"
+    "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
+    SERVER_PID=$!
+    local i
+    for i in $(seq 1 300); do
+        [ -S "$HTTP_SOCK" ] && return 0
+        # A dead process will never bind; fail fast rather than waiting out the
+        # full window for a server that has already exited.
+        kill -0 "$SERVER_PID" 2>/dev/null || break
+        sleep 0.1
+    done
+    echo "server did not bind $HTTP_SOCK within 30s; its own output was:"
+    sed 's/^/    /' "$log" 2>/dev/null | tail -20
+    return 1
+}
+
 # Set once the summary has printed. Until then an exit is an ABORT, not a
 # result: `set -e` means any unguarded command that fails takes the whole run
 # with it, skipping every remaining check AND the summary. In CI that looked
@@ -283,11 +318,13 @@ check_output "no server: a command fails, naming the unreachable server" \
 # 2. Server lifecycle
 # ============================================================
 
-$AIMEE_SERVER --foreground >/dev/null 2>&1 &
-SERVER_PID=$!
-sleep 1
-
-check "server started" test -S "$HTTP_SOCK"
+# NOT `check "server started" start_server`: check() runs its command with
+# >/dev/null 2>&1, which would swallow the very diagnosis start_server exists to
+# print. Run it first, then assert on the result. (Found by planting a server
+# that refuses to start: the 14 cascading failures reproduced perfectly and the
+# reason was still invisible.)
+start_server && SERVER_STARTED=1 || SERVER_STARTED=0
+check "server started" test "$SERVER_STARTED" = 1
 
 RESP=$(srv_req '{"method":"server.info"}') || true
 check_output "server.info status" '"status":"ok"' echo "$RESP"
@@ -347,9 +384,17 @@ TCP_BEARER="integ-tcp-bearer"
 printf 'aimee:\n  api:\n    http_port: %s\n    bearer_token: %s\n' \
     "$TCP_PORT" "$TCP_BEARER" >"$TCP_HOME/.config/aimee/aimee.yaml"
 env -u AIMEE_PROFILE HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
-    "$AIMEE_SERVER" --foreground >/dev/null 2>&1 &
+    "$AIMEE_SERVER" --foreground >"$TCP_HOME/server.log" 2>&1 &
 TCP_SRV_PID=$!
-sleep 2
+# Wait for the bind rather than guessing at it, for the same reason as
+# start_server above: on a loaded runner two seconds is not reliably enough, and
+# a probe that fires early fails the assertions of a server that was about to
+# work. This one has its own HOME so it cannot share start_server.
+for _ in $(seq 1 300); do
+    [ -S "$TCP_HOME/.config/aimee/aimee-http.sock" ] && break
+    kill -0 "$TCP_SRV_PID" 2>/dev/null || break
+    sleep 0.1
+done
 UDS_BODY=$(HTTP_SOCK="$TCP_HOME/.config/aimee/aimee-http.sock" http_rpc '{"method":"provider.list"}') || true
 TCP_BODY=$(python3 -c "
 import socket, sys
@@ -401,9 +446,7 @@ check "server survives same-major build drift" kill -0 "$SERVER_PID_BEFORE"
 # recover a known foreground server so the rest of the test stays meaningful.
 if ! kill -0 "$SERVER_PID_BEFORE" 2>/dev/null; then
     pkill -f "aimee-server.*$SOCKET" 2>/dev/null || true
-    $AIMEE_SERVER --foreground >/dev/null 2>&1 &
-    SERVER_PID=$!
-    sleep 1
+    start_server || true
 fi
 
 check_output "local version long flag" "aimee" $AIMEE --version
@@ -586,9 +629,7 @@ if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
         cd "$REPO_ROOT/src"
         make ../aimee-server >/dev/null 2>&1
     )
-    $AIMEE_SERVER --foreground >/dev/null 2>&1 &
-    SERVER_PID=$!
-    sleep 1
+    start_server || true
     set +e
     RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
     HOOK_RC=$?
