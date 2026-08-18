@@ -94,6 +94,8 @@
    "retired_sources": [
     "agent_log.c",
     "cognify_jobs.c",
+    "coord_jobs.c",
+    "db1_cron_jobs.c",
     "db1_trigger.c"
    ]
   },
@@ -3978,6 +3980,1606 @@
      }
     ],
     "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 24,
+   "name": "coord_job_create",
+   "c_name": "db1_coord_job_create",
+   "c_params": [
+    "plan_id",
+    "max_concurrent"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "plan_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 25,
+   "name": "coord_task_add",
+   "c_name": "db1_coord_job_add_task",
+   "c_params": [
+    "job_id",
+    "step_id",
+    "files_json",
+    "role",
+    "prompt",
+    "cwd",
+    "persona"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "step_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "files_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cwd",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "persona",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 26,
+   "name": "coord_task_claim_next",
+   "c_name": "db1_coord_job_claim_next",
+   "c_params": [
+    "job_id",
+    "delegate_name",
+    "out"
+   ],
+   "c_returns": "member",
+   "c_member": "id",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "delegate_name",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_task_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "step_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "files",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "preempt_requeues",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 27,
+   "name": "coord_task_complete",
+   "c_name": "db1_coord_job_complete_task",
+   "c_params": [
+    "task_id",
+    "result"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 28,
+   "name": "coord_task_fail",
+   "c_name": "db1_coord_job_fail_task",
+   "c_params": [
+    "task_id",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 29,
+   "name": "coord_task_complete_owned",
+   "c_name": "db1_coord_job_complete_task_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "result"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 30,
+   "name": "coord_task_fail_owned",
+   "c_name": "db1_coord_job_fail_task_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 31,
+   "name": "coord_task_release",
+   "c_name": "db1_coord_job_release_task",
+   "c_params": [
+    "task_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 32,
+   "name": "coord_task_release_bounded",
+   "c_name": "db1_coord_job_release_task_bounded",
+   "c_params": [
+    "task_id",
+    "max_requeues"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 33,
+   "name": "coord_task_release_bounded_owned",
+   "c_name": "db1_coord_job_release_task_bounded_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "max_requeues"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 34,
+   "name": "coord_owner_recover",
+   "c_name": "db1_coord_job_recover_owner",
+   "c_params": [
+    "claimed_by",
+    "max_requeues",
+    "requeued_out",
+    "failed_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "requeued",
+      "type": "int"
+     },
+     {
+      "name": "failed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 35,
+   "name": "coord_job_get",
+   "c_name": "db1_coord_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "total_tasks",
+      "type": "int"
+     },
+     {
+      "name": "done_tasks",
+      "type": "int"
+     },
+     {
+      "name": "failed_tasks",
+      "type": "int"
+     },
+     {
+      "name": "running_tasks",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 36,
+   "name": "coord_task_list",
+   "c_name": "db1_coord_job_list_tasks",
+   "c_params": [
+    "job_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_task_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "step_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "files",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "preempt_requeues",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 37,
+   "name": "coord_job_cancel",
+   "c_name": "db1_coord_job_cancel",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 38,
+   "name": "coord_job_refresh_status",
+   "c_name": "db1_coord_job_refresh_status",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 39,
+   "name": "coord_job_file_conflict",
+   "c_name": "db1_coord_job_has_file_conflict",
+   "c_params": [
+    "job_id",
+    "files_json"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "files_json",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 40,
+   "name": "coord_job_list_recent",
+   "c_name": "db1_coord_job_list_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "total_tasks",
+      "type": "int"
+     },
+     {
+      "name": "done_tasks",
+      "type": "int"
+     },
+     {
+      "name": "failed_tasks",
+      "type": "int"
+     },
+     {
+      "name": "running_tasks",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 41,
+   "name": "coord_job_list_active_ids",
+   "c_name": "db1_coord_job_list_active_ids",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 64,
+     "column": {
+      "kind": "int"
+     }
+    },
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 42,
+   "name": "coord_task_get_dispatch",
+   "c_name": "db1_coord_task_get_dispatch",
+   "c_params": [
+    "task_id",
+    "role_out",
+    "role_cap",
+    "prompt_out",
+    "prompt_cap",
+    "files_out",
+    "files_cap",
+    "cwd_out",
+    "cwd_cap",
+    "persona_out",
+    "persona_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "width": "DB1_COORD_ROLE_LEN"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "width": "DB1_COORD_PROMPT_LEN"
+     },
+     {
+      "name": "files",
+      "type": "text",
+      "width": "DB1_COORD_FILES_LEN"
+     },
+     {
+      "name": "cwd",
+      "type": "text",
+      "width": "DB1_COORD_CWD_LEN"
+     },
+     {
+      "name": "persona",
+      "type": "text",
+      "width": "DB1_COORD_ROLE_LEN"
+     }
+    ],
+    "max_bytes": 32768
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 43,
+   "name": "cron_job_upsert",
+   "c_name": "db1_cron_job_upsert",
+   "c_params": [
+    "job"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "cron_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "schedule",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "script",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "workdir",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "context_from",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "required": false,
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_target",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 44,
+   "name": "cron_job_get",
+   "c_name": "db1_cron_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 45,
+   "name": "cron_job_load",
+   "c_name": "db1_cron_jobs_load",
+   "c_params": [
+    "out",
+    "max",
+    "enabled_only"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "enabled_only",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 32
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 46,
+   "name": "cron_job_set_enabled",
+   "c_name": "db1_cron_job_set_enabled",
+   "c_params": [
+    "job_id",
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 47,
+   "name": "cron_job_set_enabled_all",
+   "c_name": "db1_cron_jobs_set_enabled_all",
+   "c_params": [
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 48,
+   "name": "cron_job_delete",
+   "c_name": "db1_cron_job_delete",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 49,
+   "name": "cron_job_record_run",
+   "c_name": "db1_cron_job_record_run",
+   "c_params": [
+    "job_id",
+    "status",
+    "silent",
+    "delivered",
+    "output",
+    "error",
+    "output_hash"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "silent",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "delivered",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "output_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "run_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 50,
+   "name": "cron_job_list_json",
+   "c_name": "db1_cron_jobs_list_json",
+   "c_params": [],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "jobs",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 51,
+   "name": "cron_job_history_json",
+   "c_name": "db1_cron_job_history_json",
+   "c_params": [
+    "job_id",
+    "limit"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "limit",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "history",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 52,
+   "name": "cron_job_latest_output",
+   "c_name": "db1_cron_job_latest_output",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 53,
+   "name": "cron_job_last_output_hash",
+   "c_name": "db1_cron_job_last_output_hash",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output_hash",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
    }
   }
  ]

@@ -35,6 +35,8 @@
 #include "cognify_jobs.h"
 #include "agent_log.h"
 #include "conv_context.h"
+#include "coord_jobs.h"
+#include "db1_cron_jobs.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -297,6 +299,112 @@ static void test_repeated_terms_and_a_numeric_column(void)
    printf("  PASS: repeated terms and a numeric column\n");
 }
 
+static void test_coordination_claims_and_dispatches(void)
+{
+   int job = db1_coord_job_create(4242, 2);
+   must(job > 0, "create a coordination job and learn its id");
+
+   int task = db1_coord_job_add_task(job, 1, "[\"src/foo.c\"]", "builder", "make the thing",
+                                     "/work", "terse");
+   must(task > 0, "add a task and learn its id");
+
+   /* A column of plain ints -- one number per row, no struct. */
+   int active[8];
+   int njobs = db1_coord_job_list_active_ids(active, 8);
+   must(njobs >= 1, "the job is active");
+   must(active[0] > 0, "the int column carried a real id");
+
+   /* The claim fills the row AND hands back one of its members. */
+   db1_coord_task_t claimed;
+   int claimed_id = db1_coord_job_claim_next(job, "worker-a", &claimed);
+   must(claimed_id == task, "the claim returns the task id it filled in");
+   must(claimed.id == claimed_id, "the returned member is the row's own");
+   must(strcmp(claimed.claimed_by, "worker-a") == 0, "the row came back whole");
+
+   /* An empty queue is nothing there, not a failure. */
+   db1_coord_task_t nothing;
+   must(db1_coord_job_claim_next(job, "worker-b", &nothing) < 0,
+        "a second claim finds nothing left");
+
+   /* A payload-free question: yes, no and broken stay three answers. The
+      conflict is only asked of claimed work, which is why this follows the
+      claim rather than the add. */
+   must(db1_coord_job_has_file_conflict(job, "[\"src/foo.c\"]") == 1,
+        "the file the claimed task holds conflicts");
+   must(db1_coord_job_has_file_conflict(job, "[\"src/other.c\"]") == 0,
+        "a file nobody holds does not conflict, and that is not a failure");
+
+   /* Five text values out of one call, each sized by the contract. */
+   char role[DB1_COORD_ROLE_LEN] = "", prompt[DB1_COORD_PROMPT_LEN] = "";
+   char files[DB1_COORD_FILES_LEN] = "", cwd[DB1_COORD_CWD_LEN] = "";
+   char persona[DB1_COORD_ROLE_LEN] = "";
+   must(db1_coord_task_get_dispatch(task, role, sizeof role, prompt, sizeof prompt, files,
+                                    sizeof files, cwd, sizeof cwd, persona, sizeof persona) == 0,
+        "read the dispatch");
+   must(strcmp(role, "builder") == 0, "the first text scalar is its own value");
+   must(strcmp(prompt, "make the thing") == 0, "and so is the second");
+   must(strcmp(cwd, "/work") == 0, "and the fourth, which is where an offset error would show");
+   must(strcmp(persona, "terse") == 0, "and the last");
+
+   must(db1_coord_job_complete_task(task, "done") == 0, "complete the task");
+
+   db1_coord_job_t state;
+   must(db1_coord_job_get(job, &state) == 0, "read the job back");
+   must(state.total_tasks == 1 && state.done_tasks == 1, "the job counted its work");
+
+   printf("  PASS: coordination claims and dispatches\n");
+}
+
+static void test_a_cron_job_carries_its_array_member(void)
+{
+   cron_job_t job;
+   memset(&job, 0, sizeof job);
+   snprintf(job.id, sizeof job.id, "%s", "nightly");
+   snprintf(job.schedule, sizeof job.schedule, "%s", "0 3 * * *");
+   snprintf(job.mode, sizeof job.mode, "%s", "llm");
+   snprintf(job.prompt, sizeof job.prompt, "%s", "summarise the day");
+   /* All eight slots, each distinct. The domain stores them as a CSV of the
+      non-empty ones and reparses into consecutive slots, so a gap is its own
+      business -- what the wire has to prove is that eight separate values
+      cross as eight, in order, rather than one running into the next. */
+   for (int i = 0; i < CRON_JOB_MAX_SKILLS; i++)
+      snprintf(job.skills[i], sizeof job.skills[i], "skill-%d", i);
+   job.skill_count = CRON_JOB_MAX_SKILLS;
+   job.enabled = 1;
+   must(db1_cron_job_upsert(&job) == 0, "upsert a cron job with an array member");
+
+   cron_job_t back;
+   memset(&back, 0, sizeof back);
+   must(db1_cron_job_get("nightly", &back) == 0, "read the cron job back");
+   must(strcmp(back.schedule, "0 3 * * *") == 0, "the schedule survived");
+   for (int i = 0; i < CRON_JOB_MAX_SKILLS; i++)
+   {
+      char expected[32];
+      snprintf(expected, sizeof expected, "skill-%d", i);
+      must(strcmp(back.skills[i], expected) == 0, "each slot holds its own value");
+   }
+   must(back.skill_count == CRON_JOB_MAX_SKILLS, "the count came with them");
+
+   cron_job_t all[4];
+   memset(all, 0, sizeof all);
+   int loaded = db1_cron_jobs_load(all, 4, 1);
+   must(loaded == 1, "load the enabled jobs");
+   must(strcmp(all[0].skills[7], "skill-7") == 0,
+        "a listed row carries its array too, out to the last slot");
+
+   int64_t run = db1_cron_job_record_run("nightly", "ok", 0, 1, "output", "", "hash-1");
+   must(run > 0, "record a run and learn its id");
+   char *hash = db1_cron_job_last_output_hash("nightly");
+   must(hash && strcmp(hash, "hash-1") == 0, "the returned string is the hash just written");
+   free(hash);
+
+   must(db1_cron_job_set_enabled("nightly", 0) == 0, "disable it");
+   must(db1_cron_jobs_load(all, 4, 1) == 0, "and it is no longer enabled");
+   must(db1_cron_job_delete("nightly") == 0, "delete it");
+
+   printf("  PASS: a cron job carries its array member\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -334,6 +442,8 @@ int main(int argc, char **argv)
    test_ids_and_scalars_cross_the_bus();
    test_agent_log_carries_every_shape();
    test_repeated_terms_and_a_numeric_column();
+   test_coordination_claims_and_dispatches();
+   test_a_cron_job_carries_its_array_member();
 
    stop_module();
    obs_bus_stop();
