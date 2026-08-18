@@ -36,8 +36,12 @@ def _c_strings(blob):
     return s.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
 
 
+_CLI_ROWS_TEXT = None  # plant-test override; None means read the real file
+
+
 def parse_cli_commands():
-    text = (SRC / "server" / "cli_command_defs_data.h").read_text(encoding="utf-8")
+    text = (_CLI_ROWS_TEXT if _CLI_ROWS_TEXT is not None
+            else (SRC / "server" / "cli_command_defs_data.h").read_text(encoding="utf-8"))
     # Each entry begins with {"<name>", and ends at the matching `},` at the
     # entry's top level. Split on the entry-start sentinel instead of brace
     # counting (the subcmd strings contain no braces).
@@ -1561,7 +1565,38 @@ def _require(what: str, rows, source: str):
     return rows
 
 
+
+def _plant_test():
+    """Prove the generator REFUSES a source it cannot parse.
+
+    Every extractor here scrapes C with a regex, so a rename on the C side does
+    not break the parse -- it matches nothing, and the generator writes a hollow
+    document and exits 0. That is not hypothetical: when the CLI rows moved and
+    their tier enum was renamed, docs/gen/cli-commands.md went from 812 lines to
+    8 with no error, and docs-gen-check would have reported it as an ordinary
+    content change.
+
+    Plant that exact regression -- rename the tier token -- and require a
+    failure.
+    """
+    global _CLI_ROWS_TEXT
+    real = (SRC / "server" / "cli_command_defs_data.h").read_text(encoding="utf-8")
+    _CLI_ROWS_TEXT = real.replace("AIMEE_CMD_TIER_", "PLANTED_RENAMED_TIER_")
+    try:
+        _require("CLI commands", parse_cli_commands(), "planted source")
+    except SystemExit:
+        print("gen-reference-docs: plant-test ok (unparseable source refused)")
+        return 0
+    finally:
+        _CLI_ROWS_TEXT = None
+    print("gen-reference-docs: PLANT FAIL - a source that parsed to nothing did NOT "
+          "fail; the generator would emit an empty document", file=sys.stderr)
+    return 1
+
+
 def main():
+    if "--plant-test" in sys.argv:
+        return _plant_test()
     check = "--check" in sys.argv
     GEN.mkdir(parents=True, exist_ok=True)
     cli = render_cli(_require("CLI commands", parse_cli_commands(),

@@ -28,14 +28,14 @@
  * server.  Explicit project/workspace values are useful for detached clients;
  * cwd is the normal active-project source and is never resolved on the KB
  * service host. */
-static void marshal_add_memory_scope(cJSON *req, const rpc_opts_t *opts)
+static void marshal_add_memory_scope(cJSON *req, const cli_args_t *opts)
 {
    const char *v;
-   if ((v = rpc_get(opts, "project")))
+   if ((v = cli_args_get(opts, "project")))
       cJSON_AddStringToObject(req, "project", v);
-   if ((v = rpc_get(opts, "workspace")))
+   if ((v = cli_args_get(opts, "workspace")))
       cJSON_AddStringToObject(req, "workspace", v);
-   if ((v = rpc_get(opts, "scope")))
+   if ((v = cli_args_get(opts, "scope")))
       cJSON_AddStringToObject(req, "scope", v);
    char cwd[4096];
    if (getcwd(cwd, sizeof(cwd)))
@@ -44,8 +44,8 @@ static void marshal_add_memory_scope(cJSON *req, const rpc_opts_t *opts)
 
 cJSON *marshal_memory_search(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("memory.search");
 
@@ -53,7 +53,7 @@ cJSON *marshal_memory_search(int argc, char **argv)
    for (int i = 0; i < opts.pos_count; i++)
       cJSON_AddItemToArray(kw, cJSON_CreateString(opts.positional[i]));
    cJSON_AddItemToObject(req, "keywords", kw);
-   cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 10));
+   cJSON_AddNumberToObject(req, "limit", cli_args_get_int(&opts, "limit", 10));
    marshal_add_memory_scope(req, &opts);
    return req;
 }
@@ -63,12 +63,12 @@ cJSON *marshal_memory_search(int argc, char **argv)
  * endpoint; fall back to a generic hint so the command always succeeds. */
 cJSON *marshal_memory_recall(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("memory.recall");
 
-   const char *task = rpc_get(&opts, "task");
+   const char *task = cli_args_get(&opts, "task");
    if (!task && opts.pos_count > 0)
       task = opts.positional[0];
    /* --query asks the same question task_hint answers, so it feeds the same
@@ -85,11 +85,11 @@ cJSON *marshal_memory_recall(int argc, char **argv)
     * An explicit --task or positional still wins; --query only fills the hint
     * when nothing else did, so no existing invocation changes. */
    if (!task)
-      task = rpc_get(&opts, "query");
+      task = cli_args_get(&opts, "query");
    cJSON_AddStringToObject(req, "task_hint", task && task[0] ? task : "session start");
-   if (rpc_has_flag(&opts, "session-start"))
+   if (cli_args_has_flag(&opts, "session-start"))
       cJSON_AddBoolToObject(req, "session_start", 1);
-   int lt = rpc_get_int(&opts, "limit-tokens", 0);
+   int lt = cli_args_get_int(&opts, "limit-tokens", 0);
    if (lt > 0)
       cJSON_AddNumberToObject(req, "limit_tokens", lt);
    marshal_add_memory_scope(req, &opts);
@@ -113,7 +113,7 @@ cJSON *marshal_memory_recall(int argc, char **argv)
  *
  * Whitespace runs collapse to one space, which the shell had already destroyed
  * before argv reached us. Caller frees. */
-static char *positionals_joined(const rpc_opts_t *opts, int from)
+static char *positionals_joined(const cli_args_t *opts, int from)
 {
    if (!opts || from >= opts->pos_count)
       return NULL;
@@ -142,18 +142,18 @@ static char *positionals_joined(const rpc_opts_t *opts, int from)
 
 cJSON *marshal_memory_store(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("memory.store");
 
    /* Accept both positional (`memory store <key> <content>`) and flag
     * (`--key` / `--content`) forms; positional wins when present. Previously the
     * flags were silently ignored, yielding a confusing "missing key or content". */
-   const char *key = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "key");
+   const char *key = opts.pos_count > 0 ? opts.positional[0] : cli_args_get(&opts, "key");
    /* Every positional after the key is content, not just the first. */
    char *joined = positionals_joined(&opts, 1);
-   const char *content = joined ? joined : rpc_get(&opts, "content");
+   const char *content = joined ? joined : cli_args_get(&opts, "content");
    if (key)
       cJSON_AddStringToObject(req, "key", key);
    if (content)
@@ -161,13 +161,13 @@ cJSON *marshal_memory_store(int argc, char **argv)
    free(joined);
 
    const char *v;
-   if ((v = rpc_get(&opts, "tier")))
+   if ((v = cli_args_get(&opts, "tier")))
       cJSON_AddStringToObject(req, "tier", v);
-   if ((v = rpc_get(&opts, "kind")))
+   if ((v = cli_args_get(&opts, "kind")))
       cJSON_AddStringToObject(req, "kind", v);
-   if ((v = rpc_get(&opts, "session")))
+   if ((v = cli_args_get(&opts, "session")))
       cJSON_AddStringToObject(req, "session_id", v);
-   if ((v = rpc_get(&opts, "confidence")))
+   if ((v = cli_args_get(&opts, "confidence")))
       cJSON_AddNumberToObject(req, "confidence", atof(v));
    return req;
 }
@@ -180,10 +180,10 @@ cJSON *marshal_memory_store(int argc, char **argv)
 static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char *prefix,
                                    const char *tier, int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    /* Content may be positional OR --content=<value>. The flag form is required
-    * for arbitrary bodies (e.g. the .md migration): rpc_parse would otherwise
+    * for arbitrary bodies (e.g. the .md migration): cli_args_parse would otherwise
     * mis-read a value starting with `--` (frontmatter `---`) as a flag, whereas
     * a --content=... value is taken verbatim after the first '='. */
    const char *keyarg = opts.pos_count > 0 ? opts.positional[0] : NULL;
@@ -191,7 +191,7 @@ static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char
     * unquoted value arrives one word per positional, and keeping only the first
     * silently stored a fragment of what the operator said about themselves. */
    char *joined = positionals_joined(&opts, 1);
-   const char *content = joined ? joined : rpc_get(&opts, "content");
+   const char *content = joined ? joined : cli_args_get(&opts, "content");
    if (!keyarg || !keyarg[0] || !content || !content[0])
    {
       fprintf(stderr,
@@ -242,17 +242,17 @@ cJSON *marshal_memory_archive(int argc, char **argv)
 
 cJSON *marshal_memory_list(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("memory.list");
 
    const char *v;
-   if ((v = rpc_get(&opts, "tier")))
+   if ((v = cli_args_get(&opts, "tier")))
       cJSON_AddStringToObject(req, "tier", v);
-   if ((v = rpc_get(&opts, "kind")))
+   if ((v = cli_args_get(&opts, "kind")))
       cJSON_AddStringToObject(req, "kind", v);
-   cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 20));
+   cJSON_AddNumberToObject(req, "limit", cli_args_get_int(&opts, "limit", 20));
    marshal_add_memory_scope(req, &opts);
    return req;
 }
@@ -262,19 +262,19 @@ cJSON *marshal_memory_list(int argc, char **argv)
  * --as-of asks the EVENT-time question: was this memory in force then?
  * lifecycle_state cannot answer it -- a superseded row looks identically
  * superseded whether it stopped being true yesterday or last year -- so the
- * server reads the valid_from/valid_until interval instead. rpc_parse keeps the
+ * server reads the valid_from/valid_until interval instead. cli_args_parse keeps the
  * id as positional[0], so the flag cannot be mistaken for it. */
 cJSON *marshal_memory_get(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("memory.get");
    if (opts.pos_count > 0)
       cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
-   const char *as_of = rpc_get(&opts, "as-of");
+   const char *as_of = cli_args_get(&opts, "as-of");
    if (!as_of)
-      as_of = rpc_get(&opts, "as_of");
+      as_of = cli_args_get(&opts, "as_of");
    if (as_of && as_of[0])
       cJSON_AddStringToObject(req, "as_of", as_of);
    return req;
@@ -319,8 +319,8 @@ cJSON *marshal_memory_supersede(int argc, char **argv)
 
 cJSON *marshal_memory_read(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.read");
    marshal_add_memory_scope(req, &opts);
    return req;
@@ -355,21 +355,21 @@ static void marshal_add_abs_path(cJSON *req, const char *field, const char *path
  * benchmark files; when given here they are made absolute for the server. */
 cJSON *marshal_memory_benchmark(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("memory.benchmark");
 
    const char *suite = (opts.pos_count >= 1) ? opts.positional[0] : "code-graph-fusion";
    cJSON_AddStringToObject(req, "suite", suite);
-   const char *arm = rpc_get(&opts, "arm");
+   const char *arm = cli_args_get(&opts, "arm");
    if (arm)
       cJSON_AddStringToObject(req, "arm", arm);
-   const char *fstate = rpc_get(&opts, "fusion-state");
+   const char *fstate = cli_args_get(&opts, "fusion-state");
    if (fstate)
       cJSON_AddStringToObject(req, "fusion_state", fstate);
-   marshal_add_abs_path(req, "corpus", rpc_get(&opts, "corpus"));
-   marshal_add_abs_path(req, "matrix", rpc_get(&opts, "matrix"));
+   marshal_add_abs_path(req, "corpus", cli_args_get(&opts, "corpus"));
+   marshal_add_abs_path(req, "matrix", cli_args_get(&opts, "matrix"));
    return req;
 }
 

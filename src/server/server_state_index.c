@@ -363,6 +363,30 @@ int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* Did the index actually answer, or did it hand back a shaped nothing? */
+static int investigate_result_answerable(const cJSON *result)
+{
+   if (!cJSON_IsObject(result))
+      return 0;
+   const cJSON *status = cJSON_GetObjectItemCaseSensitive(result, "status");
+   const char *status_name = cJSON_IsString(status) ? status->valuestring : NULL;
+   if (status_name &&
+       (strcmp(status_name, "abstained") == 0 || strcmp(status_name, "no_answer") == 0 ||
+        strcmp(status_name, "empty") == 0 || strcmp(status_name, "error") == 0))
+      return 0;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "no_answer")))
+      return 0;
+   const cJSON *answerability = cJSON_GetObjectItemCaseSensitive(result, "answerability");
+   const cJSON *decision = cJSON_IsObject(answerability)
+                               ? cJSON_GetObjectItemCaseSensitive(answerability, "decision")
+                               : NULL;
+   if (cJSON_IsString(decision) && (strcmp(decision->valuestring, "no_answer") == 0 ||
+                                    strcmp(decision->valuestring, "abstained") == 0))
+      return 0;
+   const cJSON *results = cJSON_GetObjectItemCaseSensitive(result, "results");
+   return !cJSON_IsArray(results) || cJSON_GetArraySize(results) != 0;
+}
+
 /* One question, answered from the index with the code attached. */
 static cJSON *investigate_one(const char *query, const char *symbol, const char *project)
 {
@@ -372,9 +396,11 @@ static cJSON *investigate_one(const char *query, const char *symbol, const char 
    jo_add_str(row, "query", query);
    int st = -1;
    char *j = kb_client_code_context(query, symbol, project, &st);
+   kb_client_result_status_t kb_status = kb_client_last_result_status();
+   cJSON *parsed = NULL;
    if (j)
    {
-      cJSON *parsed = cJSON_Parse(j);
+      parsed = cJSON_Parse(j);
       if (parsed)
          cJSON_AddItemToObject(row, "result", parsed);
       else
@@ -383,6 +409,20 @@ static cJSON *investigate_one(const char *query, const char *symbol, const char 
    }
    else
       cJSON_AddNumberToObject(row, "error_status", st);
+
+   /* Say WHY the row carries nothing. An unreachable knowledge service and an
+    * index that simply has no evidence both arrive here as an empty row, and the
+    * only thing separating them was a bare error_status number the caller had to
+    * guess at -- so index.investigate, the call the session guidance tells every
+    * agent to make FIRST, reported an outage as "no evidence" and sent the agent
+    * off to search the tree by hand. Every sibling handler in this file already
+    * publishes the typed kb verdict as result_status; this one did not. */
+   kb_client_result_status_t row_status = kb_status;
+   if (investigate_result_answerable(parsed))
+      row_status = KB_CLIENT_RESULT_OK;
+   else if (kb_status == KB_CLIENT_RESULT_OK)
+      row_status = KB_CLIENT_RESULT_EMPTY;
+   cJSON_AddStringToObject(row, "result_status", kb_client_result_status_name(row_status));
    return row;
 }
 
@@ -398,6 +438,49 @@ static cJSON *investigate_one(const char *query, const char *symbol, const char 
  *
  * Several questions in ONE invocation, and that invocation folds into a shell
  * call the agent was already making. */
+/* The typed verdict investigate_one stamped on the row. */
+static const char *investigate_row_status(const cJSON *row)
+{
+   const cJSON *s = cJSON_GetObjectItemCaseSensitive(row, "result_status");
+   return cJSON_IsString(s) ? s->valuestring : "";
+}
+
+/* Only the two verdicts that mean the knowledge service never answered. A
+ * stale or abstained result IS an answer and must stay distinct from an
+ * outage -- folding those in here would restore the confusion in the other
+ * direction. */
+static int investigate_status_is_outage(const char *name)
+{
+   return strcmp(name, "unavailable") == 0 || strcmp(name, "unauthorized") == 0;
+}
+
+/* Decide what the whole investigation amounts to.
+ *
+ * Not one query reaching the knowledge service is an OUTAGE, and saying so is
+ * the point: answering ok or empty there is what made a dead kb look like a
+ * healthy index with nothing to say. Refuse the way the sibling index handlers
+ * refuse, so one caller-side check covers the family. */
+static int investigate_finish(server_conn_t *conn, cJSON *resp, const char *project, int rows,
+                              int answered, int outages)
+{
+   if (rows != 0 && answered == 0 && outages == rows)
+   {
+      aimee_log(LOG_WARN, "index.investigate",
+                "no query reached the knowledge service: status=%s project=%s queries=%d",
+                kb_client_result_status_name(kb_client_last_result_status()),
+                project && project[0] ? project : "(none)", rows);
+      cJSON_Delete(resp);
+      return send_and_free(conn,
+                           kb_last_result_object("knowledge service unavailable; the code index "
+                                                 "was never reached, so this is an outage and "
+                                                 "not an index with no evidence"));
+   }
+   /* Mirrors index.find and index.callers: ok when something answered, empty
+    * when the index answered and had nothing. */
+   cJSON_AddStringToObject(resp, "result_status", answered != 0 ? "ok" : "empty");
+   return send_and_free(conn, resp);
+}
+
 int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -420,6 +503,7 @@ int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_AddArrayToObject(resp, "results");
+   int rows = 0, answered = 0, outages = 0;
    if (batch)
    {
       cJSON *e;
@@ -428,17 +512,30 @@ int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          if (!cJSON_IsString(e) || !e->valuestring[0])
             continue; /* skip the malformed entry; the rest of the batch still answers */
          cJSON *row = investigate_one(e->valuestring, symbol, project);
-         if (row)
-            cJSON_AddItemToArray(arr, row);
+         if (!row)
+            continue;
+         rows++;
+         if (strcmp(investigate_row_status(row), "ok") == 0)
+            answered++;
+         else if (investigate_status_is_outage(investigate_row_status(row)))
+            outages++;
+         cJSON_AddItemToArray(arr, row);
       }
    }
    else
    {
       cJSON *row = investigate_one(single, symbol, project);
       if (row)
+      {
+         rows++;
+         if (strcmp(investigate_row_status(row), "ok") == 0)
+            answered++;
+         else if (investigate_status_is_outage(investigate_row_status(row)))
+            outages++;
          cJSON_AddItemToArray(arr, row);
+      }
    }
-   return send_and_free(conn, resp);
+   return investigate_finish(conn, resp, project, rows, answered, outages);
 }
 
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
