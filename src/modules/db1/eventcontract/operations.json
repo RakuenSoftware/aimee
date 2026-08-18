@@ -7,9 +7,11 @@
   "db",
   "db1_init",
   "db1_module_init",
+  "db1_module_support",
   "db1_time",
   "db1_write",
   "db_schema",
+  "maintenance",
   "module_adapter"
  ],
  "coupled_sources": [
@@ -147,22 +149,42 @@
   },
   {
    "id": 7,
-   "name": "workflow",
+   "name": "runtime",
    "event_kind": 11783,
-   "active": false,
-   "doc": "the workflow engine's stores, plans and traces.",
+   "active": true,
+   "doc": "machine-local runtime state: caches, this box's operator and clones, the model catalogue it fetched, and the snapshots it took.",
    "client_doc": "",
-   "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
+   "covers": "caches, decisions, env, fsnap, local_operator, mcp_osv_cache, model_catalog, model_pricing, project_clones, runtime_state, tool_local_availability, web_page_cache, working_profile_local",
    "sources": [
-    "execution_plans",
-    "execution_trace",
-    "pipelines",
-    "roadmap_runtime",
-    "roundtable_pipeline",
-    "wfe_binding",
-    "wfe_store"
+    "caches",
+    "decisions",
+    "env",
+    "fsnap",
+    "local_operator",
+    "mcp_osv_cache",
+    "model_catalog",
+    "model_pricing",
+    "project_clones",
+    "runtime_state",
+    "tool_local_availability",
+    "web_page_cache",
+    "working_profile_local"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "caches.c",
+    "decisions.c",
+    "env.c",
+    "fsnap.c",
+    "local_operator.c",
+    "mcp_osv_cache.c",
+    "model_catalog.c",
+    "model_pricing.c",
+    "project_clones.c",
+    "runtime_state.c",
+    "tool_local_availability.c",
+    "web_page_cache.c",
+    "working_profile_local.c"
+   ]
   },
   {
    "id": 8,
@@ -202,27 +224,20 @@
   },
   {
    "id": 10,
-   "name": "runtime",
+   "name": "workflow",
    "event_kind": 11786,
    "active": false,
-   "doc": "local runtime resolution, caches and model metadata.",
+   "doc": "the workflow engine's stores, plans and traces.",
    "client_doc": "",
-   "covers": "runtime_state, project_clones, local_operator, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache",
+   "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
    "sources": [
-    "caches",
-    "decisions",
-    "env",
-    "fsnap",
-    "local_operator",
-    "maintenance",
-    "mcp_osv_cache",
-    "model_catalog",
-    "model_pricing",
-    "project_clones",
-    "runtime_state",
-    "tool_local_availability",
-    "web_page_cache",
-    "working_profile_local"
+    "execution_plans",
+    "execution_trace",
+    "pipelines",
+    "roadmap_runtime",
+    "roundtable_pipeline",
+    "wfe_binding",
+    "wfe_store"
    ],
    "retired_sources": []
   },
@@ -8884,6 +8899,2905 @@
      }
     ],
     "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 1,
+   "name": "runtime_state_set",
+   "c_name": "db1_runtime_state_set",
+   "c_params": [
+    "key",
+    "value"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "value",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 2,
+   "name": "runtime_state_get",
+   "c_name": "db1_runtime_state_get",
+   "c_params": [
+    "key",
+    "out",
+    "out_len"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "value",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 3,
+   "name": "runtime_state_add_int",
+   "c_name": "db1_runtime_state_add_int",
+   "c_params": [
+    "key",
+    "delta",
+    "new_value_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "delta",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "new_value",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 4,
+   "name": "project_clone_upsert",
+   "c_name": "db1_project_clone_upsert",
+   "c_params": [
+    "clone_path",
+    "project_uuid",
+    "canonical_url",
+    "origin_url",
+    "upstream_url"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "project_uuid",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "canonical_url",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "origin_url",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "upstream_url",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 5,
+   "name": "project_clone_get",
+   "c_name": "db1_project_clone_get",
+   "c_params": [
+    "clone_path",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_project_clone_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text"
+     },
+     {
+      "name": "project_uuid",
+      "type": "text"
+     },
+     {
+      "name": "canonical_url",
+      "type": "text"
+     },
+     {
+      "name": "origin_url",
+      "type": "text"
+     },
+     {
+      "name": "upstream_url",
+      "type": "text"
+     },
+     {
+      "name": "last_seen_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 6,
+   "name": "project_clone_delete",
+   "c_name": "db1_project_clone_delete",
+   "c_params": [
+    "clone_path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 7,
+   "name": "project_clone_list",
+   "c_name": "db1_project_clone_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_project_clone_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text"
+     },
+     {
+      "name": "project_uuid",
+      "type": "text"
+     },
+     {
+      "name": "canonical_url",
+      "type": "text"
+     },
+     {
+      "name": "origin_url",
+      "type": "text"
+     },
+     {
+      "name": "upstream_url",
+      "type": "text"
+     },
+     {
+      "name": "last_seen_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 8,
+   "name": "project_clone_list_by_project",
+   "c_name": "db1_project_clone_list_by_project",
+   "c_params": [
+    "project_uuid",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "project_uuid",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_project_clone_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text"
+     },
+     {
+      "name": "project_uuid",
+      "type": "text"
+     },
+     {
+      "name": "canonical_url",
+      "type": "text"
+     },
+     {
+      "name": "origin_url",
+      "type": "text"
+     },
+     {
+      "name": "upstream_url",
+      "type": "text"
+     },
+     {
+      "name": "last_seen_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 9,
+   "name": "local_operator_upsert",
+   "c_name": "db1_local_operator_upsert",
+   "c_params": [
+    "secret_ref",
+    "operator_uuid",
+    "active",
+    "display_hint"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "active",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "display_hint",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 10,
+   "name": "local_operator_get",
+   "c_name": "db1_local_operator_get",
+   "c_params": [
+    "secret_ref",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_local_operator_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text"
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text"
+     },
+     {
+      "name": "active",
+      "type": "int"
+     },
+     {
+      "name": "display_hint",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 11,
+   "name": "local_operator_get_active",
+   "c_name": "db1_local_operator_get_active",
+   "c_params": [
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "struct": "db1_local_operator_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text"
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text"
+     },
+     {
+      "name": "active",
+      "type": "int"
+     },
+     {
+      "name": "display_hint",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 12,
+   "name": "local_operator_set_active",
+   "c_name": "db1_local_operator_set_active",
+   "c_params": [
+    "secret_ref"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 13,
+   "name": "local_operator_delete",
+   "c_name": "db1_local_operator_delete",
+   "c_params": [
+    "secret_ref"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 14,
+   "name": "local_operator_list",
+   "c_name": "db1_local_operator_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_local_operator_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text"
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text"
+     },
+     {
+      "name": "active",
+      "type": "int"
+     },
+     {
+      "name": "display_hint",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 15,
+   "name": "env_capability_set",
+   "c_name": "db1_env_capability_set",
+   "c_params": [
+    "key",
+    "value"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "capability",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "value",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 16,
+   "name": "env_capability_get",
+   "c_name": "db1_env_capability_get",
+   "c_params": [
+    "key",
+    "value_out",
+    "value_len",
+    "detected_at_out",
+    "detected_at_len"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "capability",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "value",
+      "type": "text",
+      "width": "DB1_ENV_VALUE_LEN"
+     },
+     {
+      "name": "detected_at",
+      "type": "text",
+      "width": "DB1_ENV_TS_LEN"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 17,
+   "name": "env_capability_list",
+   "c_name": "db1_env_capability_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_env_capability_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "key",
+      "type": "text"
+     },
+     {
+      "name": "value",
+      "type": "text"
+     },
+     {
+      "name": "detected_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 18,
+   "name": "maintenance_state_load",
+   "c_name": "db1_maintenance_state_load",
+   "c_params": [
+    "key",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_name",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_maintenance_state_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "present",
+      "type": "int"
+     },
+     {
+      "name": "last_run_at",
+      "type": "text"
+     },
+     {
+      "name": "last_memory_count",
+      "type": "int64"
+     },
+     {
+      "name": "last_changes",
+      "type": "int"
+     },
+     {
+      "name": "last_elapsed_ms",
+      "type": "double"
+     },
+     {
+      "name": "last_summary_json",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 19,
+   "name": "maintenance_state_save",
+   "c_name": "db1_maintenance_state_save",
+   "c_params": [
+    "key",
+    "st"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_maintenance_state_t",
+    "struct_from": 1,
+    "fields": [
+     {
+      "name": "state_name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "present",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "last_run_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "last_memory_count",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "last_changes",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "last_elapsed_ms",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "last_summary_json",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 20,
+   "name": "model_catalog_is_fresh",
+   "c_name": "db1_model_catalog_is_fresh",
+   "c_params": [
+    "provider",
+    "ttl_seconds"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "provider",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "ttl_seconds",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "fresh",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 21,
+   "name": "model_catalog_get",
+   "c_name": "db1_model_catalog_get",
+   "c_params": [
+    "provider",
+    "models_out",
+    "n_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "provider",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "provider_model_t",
+    "list": {
+     "out": "models_out",
+     "count": "n_out",
+     "max_rows": 512,
+     "allocate": true
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "display_name",
+      "type": "text"
+     },
+     {
+      "name": "context_window",
+      "type": "int"
+     },
+     {
+      "name": "max_output",
+      "type": "int"
+     },
+     {
+      "name": "caps",
+      "type": "int"
+     },
+     {
+      "name": "deprecated",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 22,
+   "name": "model_catalog_replace",
+   "c_name": "db1_model_catalog_replace",
+   "c_params": [
+    "provider",
+    "models",
+    "n"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "provider",
+      "type": "text",
+      "required": true
+     }
+    ],
+    "repeated": {
+     "values": "models",
+     "count": "n",
+     "max_values": 512,
+     "struct": "provider_model_t",
+     "fields": [
+      {
+       "name": "id",
+       "type": "text"
+      },
+      {
+       "name": "display_name",
+       "type": "text"
+      },
+      {
+       "name": "context_window",
+       "type": "int"
+      },
+      {
+       "name": "max_output",
+       "type": "int"
+      },
+      {
+       "name": "caps",
+       "type": "int"
+      },
+      {
+       "name": "deprecated",
+       "type": "int"
+      }
+     ]
+    }
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 23,
+   "name": "model_price_get",
+   "c_name": "db1_model_price_get",
+   "c_params": [
+    "model",
+    "in_per_mtok",
+    "out_per_mtok"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "model",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "in_per_mtok",
+      "type": "double"
+     },
+     {
+      "name": "out_per_mtok",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 24,
+   "name": "model_price_set",
+   "c_name": "db1_model_price_set",
+   "c_params": [
+    "model",
+    "in_per_mtok",
+    "out_per_mtok"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "model",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "in_per_mtok",
+      "type": "double",
+      "required": true
+     },
+     {
+      "name": "out_per_mtok",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 25,
+   "name": "model_price_delete",
+   "c_name": "db1_model_price_delete",
+   "c_params": [
+    "model"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "model",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 26,
+   "name": "working_profile_local_observe",
+   "c_name": "db1_working_profile_local_observe",
+   "c_params": [
+    "field",
+    "value",
+    "confidence",
+    "session_id",
+    "threshold"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "field",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "value",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "confidence",
+      "type": "double",
+      "required": true
+     },
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "threshold",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "promoted",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 27,
+   "name": "working_profile_local_list",
+   "c_name": "db1_working_profile_local_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_working_profile_local_state_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "field",
+      "type": "text"
+     },
+     {
+      "name": "value",
+      "type": "text"
+     },
+     {
+      "name": "observation_count",
+      "type": "int"
+     },
+     {
+      "name": "score",
+      "type": "double"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 28,
+   "name": "working_profile_local_get",
+   "c_name": "db1_working_profile_local_get",
+   "c_params": [
+    "field",
+    "out"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "field",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_working_profile_local_state_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "field",
+      "type": "text"
+     },
+     {
+      "name": "value",
+      "type": "text"
+     },
+     {
+      "name": "observation_count",
+      "type": "int"
+     },
+     {
+      "name": "score",
+      "type": "double"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 29,
+   "name": "working_profile_local_reset_field",
+   "c_name": "db1_working_profile_local_reset_field",
+   "c_params": [
+    "field"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "field",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 30,
+   "name": "tool_local_availability_set",
+   "c_name": "db1_tool_local_availability_set",
+   "c_params": [
+    "tool_uuid",
+    "usable",
+    "binary_path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "usable",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "binary_path",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 31,
+   "name": "tool_local_availability_get",
+   "c_name": "db1_tool_local_availability_get",
+   "c_params": [
+    "tool_uuid",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_tool_local_availability_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text"
+     },
+     {
+      "name": "usable",
+      "type": "int"
+     },
+     {
+      "name": "binary_path",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 32,
+   "name": "tool_local_availability_delete",
+   "c_name": "db1_tool_local_availability_delete",
+   "c_params": [
+    "tool_uuid"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 33,
+   "name": "tool_local_availability_list",
+   "c_name": "db1_tool_local_availability_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_tool_local_availability_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text"
+     },
+     {
+      "name": "usable",
+      "type": "int"
+     },
+     {
+      "name": "binary_path",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 34,
+   "name": "context_cache_get",
+   "c_name": "db1_context_cache_get",
+   "c_params": [
+    "hash",
+    "out",
+    "out_len"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "hash",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 35,
+   "name": "context_cache_put",
+   "c_name": "db1_context_cache_put",
+   "c_params": [
+    "hash",
+    "output"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "hash",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 36,
+   "name": "context_cache_invalidate",
+   "c_name": "db1_context_cache_invalidate",
+   "c_params": [],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 37,
+   "name": "context_snapshot_insert",
+   "c_name": "db1_context_snapshot_insert",
+   "c_params": [
+    "session_id",
+    "memory_id",
+    "relevance_score"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "relevance_score",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 38,
+   "name": "context_snapshot_count_min_samples",
+   "c_name": "db1_context_snapshot_count_memories_with_min_samples",
+   "c_params": [
+    "min_samples"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "min_samples",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 39,
+   "name": "context_snapshot_ids_min_samples",
+   "c_name": "db1_context_snapshot_list_memory_ids_with_min_samples",
+   "c_params": [
+    "min_samples",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "min_samples",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 1024,
+     "column": {
+      "kind": "int64"
+     }
+    },
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 40,
+   "name": "context_snapshot_count_for_memory",
+   "c_name": "db1_context_snapshot_count_for_memory",
+   "c_params": [
+    "memory_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 41,
+   "name": "context_snapshot_sessions_for_memory",
+   "c_name": "db1_context_snapshot_list_sessions_for_memory",
+   "c_params": [
+    "memory_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 512,
+     "column": {
+      "kind": "text",
+      "width": "DB1_CONTEXT_SNAPSHOT_SESSION_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 42,
+   "name": "context_snapshot_has_memory",
+   "c_name": "db1_context_snapshot_has_memory",
+   "c_params": [
+    "memory_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "present",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 43,
+   "name": "agent_cache_get",
+   "c_name": "db1_agent_cache_get",
+   "c_params": [
+    "role",
+    "prompt"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "result",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 44,
+   "name": "agent_cache_put",
+   "c_name": "db1_agent_cache_put",
+   "c_params": [
+    "role",
+    "prompt",
+    "result"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 45,
+   "name": "web_page_get",
+   "c_name": "db1_web_page_get",
+   "c_params": [
+    "url",
+    "age_secs",
+    "pinned_addr_out",
+    "pinned_addr_len"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "body",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "age_secs",
+      "type": "int64"
+     },
+     {
+      "name": "pinned_addr",
+      "type": "text",
+      "width": "DB1_WEB_PAGE_ADDR_LEN"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 46,
+   "name": "web_page_put",
+   "c_name": "db1_web_page_put",
+   "c_params": [
+    "url",
+    "body",
+    "pinned_addr"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "body",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "pinned_addr",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 47,
+   "name": "web_page_drop",
+   "c_name": "db1_web_page_drop",
+   "c_params": [
+    "url"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 48,
+   "name": "web_page_canonical_url",
+   "c_name": "db1_web_page_canonical_url",
+   "c_params": [
+    "url",
+    "out",
+    "out_len"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "canonical",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 49,
+   "name": "fsnap_create",
+   "c_name": "db1_fsnap_create",
+   "c_params": [
+    "session_id",
+    "turn",
+    "label"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "label",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 50,
+   "name": "fsnap_get_or_create",
+   "c_name": "db1_fsnap_get_or_create",
+   "c_params": [
+    "session_id",
+    "turn",
+    "label"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "label",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 51,
+   "name": "fsnap_record_file",
+   "c_name": "db1_fsnap_record_file",
+   "c_params": [
+    "snap_id",
+    "path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "path",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 52,
+   "name": "fsnap_prune",
+   "c_name": "db1_fsnap_prune",
+   "c_params": [
+    "session_id",
+    "keep"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "keep",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "pruned",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 53,
+   "name": "fsnap_list",
+   "c_name": "db1_fsnap_list",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "fsnap_info_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "turn",
+      "type": "int"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "label",
+      "type": "text"
+     },
+     {
+      "name": "file_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 54,
+   "name": "fsnap_restore",
+   "c_name": "db1_fsnap_restore",
+   "c_params": [
+    "snap_id",
+    "files_restored",
+    "files_deleted"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "files_restored",
+      "type": "int"
+     },
+     {
+      "name": "files_deleted",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 55,
+   "name": "fsnap_get",
+   "c_name": "db1_fsnap_get",
+   "c_params": [
+    "snap_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "fsnap_info_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "turn",
+      "type": "int"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "label",
+      "type": "text"
+     },
+     {
+      "name": "file_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 56,
+   "name": "decision_record",
+   "c_name": "db1_decision_record",
+   "c_params": [
+    "window_id",
+    "description",
+    "created_at"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "description",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 57,
+   "name": "mcp_osv_cache_get",
+   "c_name": "db1_mcp_osv_cache_get",
+   "c_params": [
+    "ecosystem",
+    "name",
+    "version",
+    "ttl_hours",
+    "out"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "ecosystem",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "version",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "ttl_hours",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_mcp_osv_cache_row_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "client_name",
+      "type": "text"
+     },
+     {
+      "name": "ecosystem",
+      "type": "text"
+     },
+     {
+      "name": "name",
+      "type": "text"
+     },
+     {
+      "name": "version",
+      "type": "text"
+     },
+     {
+      "name": "verdict",
+      "type": "text"
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "int64"
+     },
+     {
+      "name": "checked_at_text",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 58,
+   "name": "mcp_osv_cache_upsert",
+   "c_name": "db1_mcp_osv_cache_upsert",
+   "c_params": [
+    "ecosystem",
+    "name",
+    "version",
+    "verdict",
+    "advisory_ids"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "ecosystem",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "version",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "verdict",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 59,
+   "name": "mcp_osv_cache_list",
+   "c_name": "db1_mcp_osv_cache_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_mcp_osv_cache_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "client_name",
+      "type": "text"
+     },
+     {
+      "name": "ecosystem",
+      "type": "text"
+     },
+     {
+      "name": "name",
+      "type": "text"
+     },
+     {
+      "name": "version",
+      "type": "text"
+     },
+     {
+      "name": "verdict",
+      "type": "text"
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "int64"
+     },
+     {
+      "name": "checked_at_text",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 60,
+   "name": "mcp_osv_audit",
+   "c_name": "db1_mcp_osv_audit",
+   "c_params": [
+    "client_name",
+    "ecosystem",
+    "name",
+    "version",
+    "verdict",
+    "action",
+    "advisory_ids"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "client_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "ecosystem",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "version",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "verdict",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "action",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
    }
   }
  ]

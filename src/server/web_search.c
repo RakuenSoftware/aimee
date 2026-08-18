@@ -599,7 +599,7 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
        * refined searches, which is what the page cache exists for. A hit costs
        * no network time and does not count against the total budget. */
       long cache_age = -1;
-      char pinned[64] = "";
+      char pinned[DB1_WEB_PAGE_ADDR_LEN] = "";
       char *text = db1_web_page_get(results[i].url, &cache_age, pinned, sizeof(pinned));
       if (text)
       {

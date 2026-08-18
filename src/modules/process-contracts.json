@@ -679,6 +679,11 @@
           "id": 6,
           "name": "db1-sessions",
           "event_kind": 11782
+        },
+        {
+          "id": 7,
+          "name": "db1-runtime",
+          "event_kind": 11783
         }
       ]
     }
