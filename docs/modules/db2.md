@@ -565,7 +565,7 @@ Before activation this real process remains disabled by default. `aimee_db2_modu
 `src/modules/db2/module_init.c` is the only startup path, and it has exactly two refusal modes.
 An unset or empty `AIMEE_DB2_URL` prints `db2: AIMEE_DB2_URL is unset; refusing to serve`; a failing
 `db2_init` prints `db2: database initialization failed; refusing to serve`. The second message is
-deliberately opaque because the DSN can carry a password, so no libpq diagnostic is echoed — read the
+deliberately opaque because the DSN can carry a password, so no libpq diagnostic is echoed. Read the
 database server log, not this process, to learn why the connection failed. Neither path partially
 initializes: both return `-1` before any handler is registered, so a refusing module serves nothing
 rather than serving degraded results. Once attached, the `AIMEE_DB2_EVENT_HEALTH` lifecycle response
