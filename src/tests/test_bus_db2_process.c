@@ -243,6 +243,11 @@ int main(int argc, char **argv)
                                            NULL) == AIMEE_MODULE_CALL_OK);
    assert(deleted_count == 0);
 
+   uint32_t demoted_count = 99;
+   assert(aimee_db2_effectiveness_demote_call(call_client, &client, 9032, 0, &demoted_count, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(demoted_count == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

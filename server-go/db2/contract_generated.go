@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "982b008286269baaa540ae0739bf2494b6168cdb0cfbfb3fe28bef911bb67d6e"
+const ContractSHA256 = "9246b86c231971b643e80efbe762ddd35b8e15b3a43fcfd7d54c245e5f3beecf"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -134,6 +134,11 @@ const RetentionRestrictedDays uint32 = 7
 const RetentionSensitive = "sensitive"
 const RetentionSensitiveDays uint32 = 90
 const RetentionEnforceMax uint32 = 2147483647
+const EventEffectivenessDemote = EventMemory
+const StageEffectivenessDemote = FamilyMemory
+const OperationEffectivenessDemote uint32 = 11
+const EffectivenessDemoteThresholdBits uint64 = 4599075939470750515
+const EffectivenessDemoteMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -917,6 +922,53 @@ func DecodeRetentionEnforceReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return deletedCount, nil
+}
+
+// EncodeEffectivenessDemoteRequest emits the empty request for the fixed threshold policy.
+func EncodeEffectivenessDemoteRequest() []byte {
+	header, err := EncodeRequestHeader(OperationEffectivenessDemote, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeEffectivenessDemoteRequest validates the exact empty operation envelope.
+func DecodeEffectivenessDemoteRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessDemote || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeEffectivenessDemoteReply emits the bounded number of demoted rows.
+func EncodeEffectivenessDemoteReply(demotedCount uint32) ([]byte, error) {
+	if demotedCount > EffectivenessDemoteMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEffectivenessDemote, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], demotedCount)
+	return reply, nil
+}
+
+// DecodeEffectivenessDemoteReply validates the operation and bounded demotion count.
+func DecodeEffectivenessDemoteReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessDemote ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	demotedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if demotedCount > EffectivenessDemoteMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return demotedCount, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

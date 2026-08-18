@@ -584,6 +584,29 @@
         "encoded_size_error": 24,
         "field": {"name": "deleted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
       }
+    },
+    {
+      "family": "memory",
+      "id": 11,
+      "name": "effectiveness_demote",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Demoting canonical relational memory tiers from the host-defined effectiveness policy remains DB2 state management and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_health_demote_low_effectiveness"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"threshold_binary64_bits": 4599075939470750515}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "demoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
     }
   ]
 }

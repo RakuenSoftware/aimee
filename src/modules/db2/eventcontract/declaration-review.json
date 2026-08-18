@@ -1460,6 +1460,14 @@
       "reason": "The typed memory.retention_enforce operation applies the complete fixed restricted and sensitive retention policy while DB2 owns deletion of canonical relational memory rows."
     },
     {
+      "symbol": "db2_memory_health_demote_low_effectiveness",
+      "signature_sha256": "2648fef6d81f23e5e44eba57d21e20f8b0e2a2ed8793e56addbe1388e726c2c9",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.effectiveness_demote operation applies the fixed host effectiveness threshold while DB2 owns the canonical relational tier update."
+    },
+    {
       "symbol": "db2_memory_health_prune_old",
       "signature_sha256": "72dc451b17a01e95eb74f03a61f51af72057b38fdbe34f82a9db392a02b4a760",
       "disposition": "private-db2",

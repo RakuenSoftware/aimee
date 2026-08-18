@@ -16433,9 +16433,15 @@
           "line": 34
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_demote operation applies the fixed host effectiveness threshold while DB2 owns the canonical relational tier update."
+      },
       "signature": "int db2_memory_health_demote_low_effectiveness ( double threshold )",
       "signature_sha256": "2648fef6d81f23e5e44eba57d21e20f8b0e2a2ed8793e56addbe1388e726c2c9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_demote_low_effectiveness"
     },
     {
@@ -25686,15 +25692,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3e286d2a4553b166dfb4daef580581d6c83e4ddaac46016e168e8c16e1aa4921",
+  "fingerprint": "cfdd877e0c8e22283c5ae0a5daa3a4f8ce8dd2898875b58de031ddfe472e3453",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 681,
+    "audit_pending": 680,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 277
+    "reviewed": 278
   }
 }

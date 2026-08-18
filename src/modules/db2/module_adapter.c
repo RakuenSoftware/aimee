@@ -126,6 +126,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .clear_effectiveness = db2_memory_health_clear_effectiveness,
        .set_effectiveness = db2_memory_health_set_effectiveness,
        .retention_delete = db2_memory_health_delete_by_sensitivity,
+       .demote_effectiveness = db2_memory_health_demote_low_effectiveness,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -344,6 +345,23 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_retention_enforce_reply_encode((uint32_t)deleted_count, response_body,
                                                       response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_effectiveness_demote_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->demote_effectiveness)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int demoted_count =
+             backend->demote_effectiveness(AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (demoted_count < 0 || demoted_count > (int)AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_effectiveness_demote_reply_encode((uint32_t)demoted_count, response_body,
+                                                         response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

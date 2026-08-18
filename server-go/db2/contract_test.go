@@ -44,6 +44,7 @@ type wireBaseline struct {
 			MemoryID      uint64 `json:"memory_id"`
 			HasValue      uint32 `json:"has_value"`
 			ValueBits     uint64 `json:"value_bits"`
+			ThresholdBits uint64 `json:"threshold_bits"`
 			Negative      []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -56,6 +57,7 @@ type wireBaseline struct {
 				Dimension     uint32 `json:"dimension"`
 				Count         uint64 `json:"count"`
 				DeletedCount  uint32 `json:"deleted_count"`
+				DemotedCount  uint32 `json:"demoted_count"`
 				Exists        uint32 `json:"exists"`
 				Found         uint32 `json:"found"`
 				ID            uint64 `json:"id"`
@@ -174,7 +176,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 20 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 21 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -193,7 +195,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[16].Name != "find_id_by_key_kind" ||
 		baseline.Operations[17].Name != "key_exists_in_tier_pair" ||
 		baseline.Operations[18].Name != "effectiveness_update" ||
-		baseline.Operations[19].Name != "retention_enforce" {
+		baseline.Operations[19].Name != "retention_enforce" ||
+		baseline.Operations[20].Name != "effectiveness_demote" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -536,6 +539,43 @@ func TestRetentionEnforceMatchesEverySharedCVector(t *testing.T) {
 		deletedCount, err := DecodeRetentionEnforceReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || deletedCount != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, deletedCount, err)
+		}
+	}
+}
+
+func TestEffectivenessDemoteMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[20]
+	if operation.Request.ThresholdBits != EffectivenessDemoteThresholdBits ||
+		math.Float64bits(0.3) != EffectivenessDemoteThresholdBits {
+		t.Fatalf("threshold bits = %x, generated = %x",
+			operation.Request.ThresholdBits, EffectivenessDemoteThresholdBits)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeEffectivenessDemoteRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeEffectivenessDemoteRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeEffectivenessDemoteRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeEffectivenessDemoteReply(vector.DemotedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		demotedCount, err := DecodeEffectivenessDemoteReply(got)
+		if err != nil || demotedCount != vector.DemotedCount {
+			t.Fatalf("decode = (%d, %v)", demotedCount, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		demotedCount, err := DecodeEffectivenessDemoteReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || demotedCount != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demotedCount, err)
 		}
 	}
 }

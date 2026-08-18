@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "982b008286269baaa540ae0739bf2494b6168cdb0cfbfb3fe28bef911bb67d6e"
+#define AIMEE_DB2_CONTRACT_SHA256 "9246b86c231971b643e80efbe762ddd35b8e15b3a43fcfd7d54c245e5f3beecf"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -196,6 +196,14 @@
 #define AIMEE_DB2_RETENTION_SENSITIVE                     "sensitive"
 #define AIMEE_DB2_RETENTION_SENSITIVE_DAYS                90u
 #define AIMEE_DB2_RETENTION_ENFORCE_MAX                   2147483647u
+#define AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE          11u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_REQUEST_LEN        24u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN       28u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_ERROR_LEN          24u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD          0.3
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX                2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1179,6 +1187,60 @@ static inline int aimee_db2_retention_enforce_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_RETENTION_ENFORCE_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_effectiveness_demote_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE, 0u, 0u,
+                                           output, capacity);
+}
+
+static inline int aimee_db2_effectiveness_demote_request_decode(const uint8_t *input,
+                                                                size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EFFECTIVENESS_DEMOTE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_effectiveness_demote_reply_encode(uint32_t demoted_count,
+                                                              uint8_t *output, size_t capacity,
+                                                              uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || demoted_count > AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, demoted_count);
+   *output_len = AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_effectiveness_demote_reply_decode(const uint8_t *input,
+                                                              size_t input_len,
+                                                              uint32_t *demoted_count)
+{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (!demoted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX)
+      return -1;
+   *demoted_count = decoded;
    return 0;
 }
 

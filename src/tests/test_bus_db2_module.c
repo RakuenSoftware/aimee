@@ -41,6 +41,7 @@ typedef struct
    int (*clear_effectiveness)(int64_t memory_id);
    int (*set_effectiveness)(int64_t memory_id, double value);
    int (*retention_delete)(const char *sensitivity, int days);
+   int (*demote_effectiveness)(double threshold);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -86,6 +87,7 @@ static int key_exists_in_tier_pair_calls;
 static int clear_effectiveness_calls;
 static int set_effectiveness_calls;
 static int retention_delete_calls;
+static int demote_effectiveness_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -285,6 +287,22 @@ int db2_memory_health_delete_by_sensitivity(const char *sensitivity, int days)
 static int retention_delete(const char *sensitivity, int days)
 {
    return retention_delete_impl(sensitivity, days);
+}
+
+static int demote_effectiveness_impl(double threshold)
+{
+   demote_effectiveness_calls++;
+   return threshold == AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD ? 2 : -1;
+}
+
+int db2_memory_health_demote_low_effectiveness(double threshold)
+{
+   return demote_effectiveness_impl(threshold);
+}
+
+static int demote_effectiveness(double threshold)
+{
+   return demote_effectiveness_impl(threshold);
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -552,6 +570,7 @@ int main(void)
        .clear_effectiveness = clear_effectiveness,
        .set_effectiveness = set_effectiveness,
        .retention_delete = retention_delete,
+       .demote_effectiveness = demote_effectiveness,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -652,6 +671,11 @@ int main(void)
    assert(aimee_db2_retention_enforce_call(call_client, &client, 7029, 0, &deleted_count, NULL,
                                            NULL) == AIMEE_MODULE_CALL_OK);
    assert(deleted_count == 5 && retention_delete_calls == 2);
+
+   uint32_t demoted_count = 99;
+   assert(aimee_db2_effectiveness_demote_call(call_client, &client, 7030, 0, &demoted_count, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(demoted_count == 2 && demote_effectiveness_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
