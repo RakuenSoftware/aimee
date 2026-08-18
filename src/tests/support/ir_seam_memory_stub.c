@@ -53,3 +53,14 @@ int config_module_enabled(int config_tristate, int env_default)
 {
    return config_tristate >= 0 ? config_tristate : env_default;
 }
+
+/* The IR stage runner now records per-turn session observations; this test
+ * links the runner without the request-context object, so absorb the call. */
+void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls,
+                                        const char *intervention, const char *tool_transport)
+{
+   (void)tool_calls;
+   (void)redundant_tool_calls;
+   (void)intervention;
+   (void)tool_transport;
+}

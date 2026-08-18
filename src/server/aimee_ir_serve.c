@@ -1,5 +1,6 @@
 /* aimee_ir_serve.c -- see aimee_ir_serve.h. */
 #include "aimee_ir_serve.h"
+#include "request_context.h"
 
 #include <aimee/translation/aimee_backend.h>
 #include <aimee/translation/aimee_frontend.h>
@@ -64,8 +65,34 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
         * names what replaces the shell it is about to lose. Always on: an agent
         * that never reaches aimee's tools is not using aimee. */
        {"first_turn_shell_block", ir_stage_first_turn_shell_block, NULL, 1},
+       /* Reads the transcript the other stages just shaped, so it judges the turn
+        * that will actually be sent rather than the one that arrived. */
+       {"session_assist", aimee_ir_stage_session_assist, NULL, 1},
    };
    aimee_ir_run_transforms(ir, stages, sizeof stages / sizeof stages[0]);
+
+   /* What the turn actually did, recorded on the ingress request so the ordinary
+    * token-audit row carries behaviour beside cost. Derived from the IR, so this
+    * is one implementation for every client rather than one per wire format. */
+   aimee_ir_session_metrics_t metrics;
+   aimee_ir_session_measure(ir, &metrics);
+   int shell = 0, mcp = 0;
+   for (int i = 0; ir && i < ir->n_tools; i++)
+   {
+      const char *name = ir->tools[i].name;
+      if (name && (strstr(name, "shell") || strstr(name, "exec_command") ||
+                   strstr(name, "run_command") || strcmp(name, "bash") == 0))
+         shell = 1;
+      if ((name && strstr(name, "mcp")) ||
+          (ir->tools[i].raw && cJSON_GetObjectItemCaseSensitive(ir->tools[i].raw, "namespace")))
+         mcp = 1;
+   }
+   request_context_note_aimee_session(metrics.tool_calls, metrics.redundant_tool_calls,
+                                      metrics.intervention,
+                                      shell && mcp ? "both"
+                                      : shell      ? "cli"
+                                      : mcp        ? "mcp"
+                                                   : "none");
 }
 
 char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
