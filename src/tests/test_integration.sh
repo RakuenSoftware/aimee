@@ -236,12 +236,52 @@ except subprocess.TimeoutExpired:
 PY
 }
 
+# Start aimee-server and WAIT for it to bind, rather than guessing.
+#
+# This was `... >/dev/null 2>&1 & sleep 1`, three times. Both halves were wrong,
+# and test_init_migrate_service.sh had already found and fixed exactly this:
+# "On a loaded CI runner startup regularly takes several seconds, and the 1s
+# guess made this the run's flakiest test." It was left unfixed here, and the
+# first CI run of this harness failed 14 checks off one early probe -- the
+# server had not finished binding, so "server started" failed and every request
+# after it cascaded.
+#
+# The discarded output was the other half. A server that fails to start says why
+# on stderr; sending that to /dev/null left CI reporting "FAIL: server started"
+# and nothing else, which is unactionable. Keep the log and print its tail when
+# the socket never appears.
+#
+# A unix-socket server binds and listens as its last init step, so
+# socket-present means ready to serve. Polling also returns as soon as it is up,
+# which is faster than the sleep it replaces on a machine that is not loaded.
+start_server() {
+    local log="$HOME/aimee-server.$$.log"
+    "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
+    SERVER_PID=$!
+    local i
+    for i in $(seq 1 300); do
+        [ -S "$HTTP_SOCK" ] && return 0
+        # A dead process will never bind; fail fast rather than waiting out the
+        # full window for a server that has already exited.
+        kill -0 "$SERVER_PID" 2>/dev/null || break
+        sleep 0.1
+    done
+    echo "server did not bind $HTTP_SOCK within 30s; its own output was:"
+    sed 's/^/    /' "$log" 2>/dev/null | tail -20
+    return 1
+}
+
 # Set once the summary has printed. Until then an exit is an ABORT, not a
 # result: `set -e` means any unguarded command that fails takes the whole run
 # with it, skipping every remaining check AND the summary. In CI that looked
 # like a job which built for four minutes, ran the harness, and printed nothing
 # at all — no FAIL line, no count, nothing to read. Say so instead.
 REACHED_SUMMARY=0
+ABORT_LINE=""
+ABORT_CMD=""
+# Record WHERE, not just that. "ABORTED after 21 checks" is a number to go
+# hunting with; bash already knows the line and the command, so ask it.
+trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
 cleanup() {
     local rc=$?
@@ -250,12 +290,17 @@ cleanup() {
         echo "integration: ABORTED after $((PASS + FAIL)) checks (exit $rc)."
         echo "  The harness exited before its summary — under 'set -e' an unguarded"
         echo "  command failed, so the checks below this point never ran."
+        if [ -n "$ABORT_LINE" ]; then
+            echo "  It failed at line $ABORT_LINE: $ABORT_CMD"
+        fi
     fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
     fi
-    rm -rf "$HOME"
+    # Same rule as the TCP teardown: removing a temp dir must never change the
+    # verdict. This one already waits for its server, which is why it never bit.
+    rm -rf "$HOME" || true
 }
 trap cleanup EXIT
 
@@ -283,11 +328,13 @@ check_output "no server: a command fails, naming the unreachable server" \
 # 2. Server lifecycle
 # ============================================================
 
-$AIMEE_SERVER --foreground >/dev/null 2>&1 &
-SERVER_PID=$!
-sleep 1
-
-check "server started" test -S "$HTTP_SOCK"
+# NOT `check "server started" start_server`: check() runs its command with
+# >/dev/null 2>&1, which would swallow the very diagnosis start_server exists to
+# print. Run it first, then assert on the result. (Found by planting a server
+# that refuses to start: the 14 cascading failures reproduced perfectly and the
+# reason was still invisible.)
+start_server && SERVER_STARTED=1 || SERVER_STARTED=0
+check "server started" test "$SERVER_STARTED" = 1
 
 RESP=$(srv_req '{"method":"server.info"}') || true
 check_output "server.info status" '"status":"ok"' echo "$RESP"
@@ -322,7 +369,7 @@ check_output "server.health uptime" '"uptime"' echo "$RESP"
 # well-formed dispatch response over its first-class /v1 route.
 if [ -S "$HTTP_SOCK" ]; then
     PASS=$((PASS + 1)) # /v1 HTTP socket bound
-    HTTP_PROV=$(http_rpc '{"method":"provider.list"}')
+    HTTP_PROV=$(http_rpc '{"method":"provider.list"}') || true
     if [ -n "$HTTP_PROV" ] && python3 -c "import json,sys; json.loads(sys.argv[1])" "$HTTP_PROV" \
         2>/dev/null; then
         PASS=$((PASS + 1)) # provider.list over /v1/provider/list returned valid JSON
@@ -347,9 +394,17 @@ TCP_BEARER="integ-tcp-bearer"
 printf 'aimee:\n  api:\n    http_port: %s\n    bearer_token: %s\n' \
     "$TCP_PORT" "$TCP_BEARER" >"$TCP_HOME/.config/aimee/aimee.yaml"
 env -u AIMEE_PROFILE HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
-    "$AIMEE_SERVER" --foreground >/dev/null 2>&1 &
+    "$AIMEE_SERVER" --foreground >"$TCP_HOME/server.log" 2>&1 &
 TCP_SRV_PID=$!
-sleep 2
+# Wait for the bind rather than guessing at it, for the same reason as
+# start_server above: on a loaded runner two seconds is not reliably enough, and
+# a probe that fires early fails the assertions of a server that was about to
+# work. This one has its own HOME so it cannot share start_server.
+for _ in $(seq 1 300); do
+    [ -S "$TCP_HOME/.config/aimee/aimee-http.sock" ] && break
+    kill -0 "$TCP_SRV_PID" 2>/dev/null || break
+    sleep 0.1
+done
 UDS_BODY=$(HTTP_SOCK="$TCP_HOME/.config/aimee/aimee-http.sock" http_rpc '{"method":"provider.list"}') || true
 TCP_BODY=$(python3 -c "
 import socket, sys
@@ -381,8 +436,21 @@ else
     echo "  tcp: $TCP_BODY"
     FAIL=$((FAIL + 1))
 fi
+# Kill the TCP server and WAIT for it, before removing the home it is writing
+# to. Without the wait, `rm -rf` raced a live server recreating files as the
+# walk deleted them, and failed with
+
+#     rm: cannot remove '/tmp/aimee-tcp-XXXXXX': Directory not empty
+
+# which under `set -e` took the entire run with it -- every check after this
+# point, on every CI run of this harness. That line was in the log from the
+# first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
-rm -rf "$TCP_HOME"
+wait "$TCP_SRV_PID" 2>/dev/null || true
+# `|| true` regardless: teardown of a temporary directory must never decide
+# whether the suite continues. Even with the wait, anything else holding a file
+# open here would abort a run that has nothing left to do but report.
+rm -rf "$TCP_HOME" || true
 
 # Rebuild only the thin client with a new build ID. The existing server should
 # remain usable because compatibility is gated by major version, not build ID.
@@ -401,9 +469,7 @@ check "server survives same-major build drift" kill -0 "$SERVER_PID_BEFORE"
 # recover a known foreground server so the rest of the test stays meaningful.
 if ! kill -0 "$SERVER_PID_BEFORE" 2>/dev/null; then
     pkill -f "aimee-server.*$SOCKET" 2>/dev/null || true
-    $AIMEE_SERVER --foreground >/dev/null 2>&1 &
-    SERVER_PID=$!
-    sleep 1
+    start_server || true
 fi
 
 check_output "local version long flag" "aimee" $AIMEE --version
@@ -449,7 +515,7 @@ RESP=$(srv_req '{"method":"memory.list","limit":1}') || true
 if echo "$RESP" | grep -qF '"status":"ok"'; then
     KB_AVAILABLE=1
     PASS=$((PASS + 1))
-    RESP=$(srv_req '{"method":"rules.list"}')
+    RESP=$(srv_req '{"method":"rules.list"}') || true
     check_output "local /v1: rules.list ok" '"status":"ok"' echo "$RESP"
 else
     KB_AVAILABLE=0
@@ -539,14 +605,14 @@ fi  # DB1_SESSIONS_AVAILABLE
 # ============================================================
 
 if [ "$KB_AVAILABLE" -eq 1 ]; then
-    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}')
+    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"
-    MEM_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null)
+    MEM_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
 
-    RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}')
+    RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}') || true
     check_output "memory.list has stored entry" "integ-test" echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
     check_output "memory.get by ID" "integration test value" echo "$RESP"
 
     # `memory get --as-of` crosses client -> aimee-server -> aimee-kb, and it was
@@ -556,11 +622,11 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     # it passed, because each end was checked against a hand-written payload that
     # already contained the field. Only the real wire shows the gap, so assert it
     # here: the verdict must come back, and must NOT appear when nobody asked.
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}") || true
     check_output "memory.get --as-of echoes the timestamp" '"as_of"' echo "$RESP"
     check_output "memory.get --as-of returns an event-time verdict" '"valid_at"' echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
     if echo "$RESP" | grep -q '"valid_at"'; then
         check_output "memory.get without --as-of emits no verdict" "no valid_at" echo "found valid_at"
     else
@@ -586,11 +652,9 @@ if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
         cd "$REPO_ROOT/src"
         make ../aimee-server >/dev/null 2>&1
     )
-    $AIMEE_SERVER --foreground >/dev/null 2>&1 &
-    SERVER_PID=$!
-    sleep 1
+    start_server || true
     set +e
-    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
+    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
     HOOK_RC=$?
     set -e
 fi
@@ -633,6 +697,32 @@ mkdir -p "$MIRROR_CASE"
 # snapshot, reconstruction, and MCP tool path (SHA-1 is covered by unit tests).
 git init --bare --object-format=sha256 "$MIRROR_REMOTE" >/dev/null
 git init --object-format=sha256 -b feature.locked "$MIRROR_CLIENT" >/dev/null
+# This whole section deliberately drives SHA-256 object ids through the wire,
+# the snapshot, the reconstruction and the MCP Git path (SHA-1 is covered by
+# unit tests). It therefore needs a git that honours --object-format=sha256.
+#
+# This probe is a PRECONDITION guard, not the fix for anything observed. I added
+# it believing CI's git had produced SHA-1: the snapshot there carried a 40-hex
+# head with no branch or upstream, and five assertions failed about it. That was
+# wrong. The probe has never fired in CI, and the section passes there -- the
+# 40-hex head came from reading a DIFFERENT workspace's snapshot, which the
+# selection below used to make arbitrarily. That was diagnosed independently on
+# `testing` (89aa491, "address the mirror workspace's own snapshot, not the
+# first one found"), which is the addressing this now uses.
+#
+# It stays because the precondition is real: this section drives SHA-256 ids
+# deliberately, and a runner that cannot provide one should say so once rather
+# than fail five assertions about a mirror that was never the problem.
+MIRROR_OBJFMT=$(git -C "$MIRROR_CLIENT" rev-parse --show-object-format 2>/dev/null) || true
+if [ "$MIRROR_OBJFMT" = "sha256" ]; then
+    MIRROR_SHA256=1
+else
+    MIRROR_SHA256=0
+    echo "SKIP: mirror-sync end to end (git created a '$MIRROR_OBJFMT' repository despite --object-format=sha256)"
+    SKIP=$((SKIP + 22))
+fi
+
+if [ "$MIRROR_SHA256" -eq 1 ]; then
 git -C "$MIRROR_CLIENT" config user.name "Aimee Integration"
 git -C "$MIRROR_CLIENT" config user.email "aimee-integration@example.invalid"
 printf 'base\n' >"$MIRROR_CLIENT/file.txt"
@@ -685,7 +775,29 @@ check_output "identical mirror-sync continuation persisted" '"seq":1' echo "$RES
 RESP=$(http_rpc "${MIRROR_REQS[5]}") || true
 check_output "identical mirror-sync reuses generation" '"generation":1' echo "$RESP"
 
-SNAPSHOT=$(find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -print -quit) || true
+# Address the mirror workspace by its own snapshot, not by whichever one find
+# happens to walk into first. Every check below derives from $SNAPSHOT -- its
+# directory, its generation, its work-N-* checkouts -- so picking a different
+# workspace's file does not fail here, it fails five checks later with content
+# that looks like a mirror bug. The server keys the directory on
+# fnv1a_hex8(root) (workspace_mirror.c), so the harness can name it exactly.
+MIRROR_HASH=$(python3 - "$MIRROR_CLIENT" <<'HASH'
+import sys
+h = 2166136261
+for byte in sys.argv[1].encode():
+    h = ((h ^ byte) * 16777619) & 0xFFFFFFFF
+print("%08x" % h)
+HASH
+)
+SNAPSHOT="$AIMEE_HOME/workspaces/$MIRROR_HASH/client.snapshot"
+if [ ! -s "$SNAPSHOT" ]; then
+    # Show what WAS published. Without this the five checks below explain the
+    # absence one confusing assertion at a time -- which is how this bug
+    # presented in the first place, as a mirror that looked broken.
+    echo "  no snapshot at $SNAPSHOT; published snapshots were:"
+    find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -exec sh -c \
+        'echo "    $1: $(cat "$1")"' _ {} \; 2>/dev/null
+fi
 check "mirror snapshot metadata published" test -s "$SNAPSHOT"
 check_output "mirror snapshot records valid .locked ref" \
     'feature.locked origin/feature.locked 2' cat "$SNAPSHOT"
@@ -733,6 +845,8 @@ MIRROR_CLEAN_WORK=$(find "$(dirname "$SNAPSHOT")" -maxdepth 1 -type d -name 'wor
 check "clean snapshot worktree materialized on first call" test -n "$MIRROR_CLEAN_WORK"
 check "clean snapshot worktree remains clean" test -z \
     "$(git -C "$MIRROR_CLEAN_WORK" status --porcelain)"
+
+fi  # MIRROR_SHA256
 
 # ============================================================
 # 10. Server shutdown

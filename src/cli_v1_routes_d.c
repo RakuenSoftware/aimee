@@ -60,6 +60,8 @@ static const struct
     {"git.verify", pt_print_git_verify},
     /* Every git command returns MCP content blocks, the same shape verify does. */
     {"git.cli", pt_print_git_verify},
+    {"tool.call", pt_print_git_verify},
+    {"index.ast_grep", pt_print_git_verify},
     {"get_help", pt_print_get_help},
     {"server.health", pt_print_server_health},
     {"session.list", pt_print_session_list},
@@ -751,6 +753,39 @@ int cli_v1_manifest_method_takes_no_args(const char *method)
       return cJSON_IsString(a) && strcmp(a->valuestring, "none") == 0;
    }
    return 0;
+}
+
+/* The served argument spec for `method`, or NULL when the server sent none.
+ *
+ * The same `marshal` rows as above; the two are distinguished by what `args`
+ * is. "none" means an empty body, an OBJECT means a spec describing how the
+ * words after the command become fields. Anything else — a shape a newer
+ * server sends and this client has no idea about — is NULL here, so the client
+ * falls back to its compiled marshaller rather than acting on a row it only
+ * half understands.
+ *
+ * Borrowed from the cached manifest, not copied: it lives as long as the
+ * process, and the one caller reads it and builds immediately. */
+const cJSON *cli_v1_manifest_argspec(const char *method)
+{
+   if (!method || !method[0])
+      return NULL;
+   const cJSON *doc = cli_v1_manifest();
+   if (!doc)
+      return NULL;
+   const cJSON *rows = cJSON_GetObjectItemCaseSensitive(doc, "marshal");
+   if (!cJSON_IsArray(rows))
+      return NULL;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, rows)
+   {
+      const cJSON *m = cJSON_GetObjectItemCaseSensitive(row, "method");
+      if (!cJSON_IsString(m) || strcmp(m->valuestring, method) != 0)
+         continue;
+      const cJSON *a = cJSON_GetObjectItemCaseSensitive(row, "args");
+      return cJSON_IsObject(a) ? a : NULL;
+   }
+   return NULL;
 }
 
 /* Test seam: install a manifest directly instead of fetching one. Unit tests

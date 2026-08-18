@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 67
+Total commands: 68
 
 ## Core commands
 
@@ -68,6 +68,7 @@ Subcommands:
   scan             Scan workspaces and (re)build the index (--force)
   watch <name> <root>  Install git hooks that re-index after branch changes
   blast-radius     Show files affected by changes to a file
+  ast-grep --lang LANG [--path PATH] '<pattern>'  Structural pattern search
   structure        Show file structure
   span <file> [start] [end]  Read an exact line range (chainable with &&)
   callers          Find callers of a symbol
@@ -187,6 +188,16 @@ Subcommands:
   patch            Patch a project skill by string replacement
   lifecycle        Apply stale/archive lifecycle transitions
   autostub         Propose capability skills for uncovered tools
+```
+
+### `aimee tool`
+
+Call any Aimee capability by its registered tool name.
+
+Subcommands:
+
+```
+  call <tool> [--key value|key=value ...]  Same implementation exposed through MCP
 ```
 
 ### `aimee toolset`

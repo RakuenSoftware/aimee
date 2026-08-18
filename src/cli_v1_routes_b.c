@@ -3,6 +3,7 @@
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
+#include "cli_argspec.h"
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
 #include "cli_client.h"
@@ -1449,6 +1450,7 @@ static const struct
     {"identity.diff", marshal_identity_diff},
     {"identity.snapshot", marshal_identity_snapshot},
     {"index.blast_radius", marshal_index_blast_radius},
+    {"index.ast_grep", marshal_index_ast_grep},
     {"index.deps", marshal_index_deps},
     {"index.find", marshal_index_find},
     {"index.find_callers", marshal_index_find_callers},
@@ -1471,6 +1473,7 @@ static const struct
     {"kb.status", marshal_kb_status},
     {"kb.update", marshal_kb_update},
     {"mcp.recheck", marshal_mcp_recheck},
+    {"tool.call", marshal_tool_call},
     {"memory.embed", marshal_memory_embed},
     {"memory.archive", marshal_memory_archive},
     {"memory.benchmark", marshal_memory_benchmark},
@@ -1557,6 +1560,15 @@ int marshal_request_take_reported(void)
    int reported = g_marshal_reported;
    g_marshal_reported = 0;
    return reported;
+}
+
+/* Read the flag WITHOUT clearing it. marshal_request itself has to distinguish
+ * "a served spec already told the operator what was missing" from "the spec was
+ * uninterpretable", and taking the flag here would swallow the message the
+ * forwarder is about to check for. */
+int marshal_request_peek_reported(void)
+{
+   return g_marshal_reported;
 }
 
 cJSON *marshal_request(const char *method, int argc, char **argv)
@@ -1675,6 +1687,15 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
     * preferring its own list here would reintroduce exactly that. */
    if (cli_v1_manifest_method_takes_no_args(method))
       return marshal_no_args(method);
+
+   /* And what the server says the ARGUMENTS are, before this build's own
+    * marshallers — see cli_argspec_try_served for why that is both the point
+    * and safe. */
+   {
+      cJSON *served = NULL;
+      if (cli_argspec_try_served(method, argc, argv, &served))
+         return served;
+   }
 
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
