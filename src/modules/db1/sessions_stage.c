@@ -386,7 +386,7 @@ aimee_module_status_t aimee_db1_stage_sessions(const uint8_t *request_body, uint
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_server_session_count(field[0]);
+      int produced = db1_server_session_count(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -477,7 +477,7 @@ aimee_module_status_t aimee_db1_stage_sessions(const uint8_t *request_body, uint
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_server_session_delete_expired(parsed0);
+      int produced = db1_server_session_delete_expired(parsed0);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -782,7 +782,7 @@ aimee_module_status_t aimee_db1_stage_sessions(const uint8_t *request_body, uint
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_webchat_claude_session_owned_by_other(field[0], field[1], field[2]);
+      int produced = db1_webchat_claude_session_owned_by_other(field[0], field[1], field[2]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
