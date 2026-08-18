@@ -89,6 +89,9 @@ cJSON *marshal_request(const char *method, int argc, char **argv);
  * Reading it CLEARS it, so a stale flag cannot suppress the generic message on a later
  * command in the same process. */
 void marshal_request_note_reported(void);
+/* The same flag, read without clearing: marshal_request consults it to tell a
+ * served spec's own refusal from a spec it could not interpret. */
+int marshal_request_peek_reported(void);
 int marshal_request_take_reported(void);
 cJSON *marshal_rules_delete(int argc, char **argv);
 cJSON *marshal_session_attach(int argc, char **argv);

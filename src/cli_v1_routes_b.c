@@ -3,6 +3,7 @@
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
+#include "cli_argspec.h"
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
 #include "cli_client.h"
@@ -1559,6 +1560,15 @@ int marshal_request_take_reported(void)
    return reported;
 }
 
+/* Read the flag WITHOUT clearing it. marshal_request itself has to distinguish
+ * "a served spec already told the operator what was missing" from "the spec was
+ * uninterpretable", and taking the flag here would swallow the message the
+ * forwarder is about to check for. */
+int marshal_request_peek_reported(void)
+{
+   return g_marshal_reported;
+}
+
 cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    /* Cleared on entry so a previous command's flag cannot suppress this one's message. */
@@ -1675,6 +1685,31 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
     * preferring its own list here would reintroduce exactly that. */
    if (cli_v1_manifest_method_takes_no_args(method))
       return marshal_no_args(method);
+
+   /* And what the server says the ARGUMENTS are. Same reason, one step further:
+    * a new command that takes arguments was still unusable, because the client
+    * had no way to learn that `--capability` becomes "capability".
+    *
+    * Consulted before the compiled marshallers, so a served spec wins — that is
+    * the point. It is safe because it cannot silently differ: every shipped
+    * spec is proven byte-identical to its marshaller by test_cli_argspec, which
+    * includes the same data file the server serves from. A spec this build
+    * cannot interpret is refused whole by cli_argspec_build, and falls through
+    * to the compiled path below rather than sending a body it guessed. */
+   {
+      const cJSON *spec = cli_v1_manifest_argspec(method);
+      if (spec)
+      {
+         cJSON *req = cli_argspec_build(method, spec, argc, argv);
+         if (req)
+            return req;
+         /* NULL is either "a required argument is missing" — already reported,
+          * and the operator must see that rather than a second opinion from a
+          * marshaller — or an uninterpretable spec, which falls through. */
+         if (marshal_request_peek_reported())
+            return NULL;
+      }
+   }
 
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
