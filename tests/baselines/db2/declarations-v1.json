@@ -10577,9 +10577,15 @@
           "line": 116
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "The cJSON code-audit document is caller presentation; a typed index-family query returns bounded audit findings without making an in-process JSON tree part of the bus ABI."
+      },
       "signature": "cJSON * db2_kb_service_code_audit_json ( const char * project , int limit )",
       "signature_sha256": "2964a7afe61762f8027967928fa4f660b1a871c4e33052519fad2432c31b3670",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_code_audit_json"
     },
     {
@@ -10971,9 +10977,15 @@
           "line": 221
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The dashboard directives cJSON envelope is presentation code; a bounded typed learning query supplies directive records for the caller to serialize."
+      },
       "signature": "cJSON * db2_kb_service_dashboard_directives_json ( void )",
       "signature_sha256": "0c08b2b4f47bc6448c11427e668e4a91d819ca125148975418e85aa24aff77e0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_dashboard_directives_json"
     },
     {
@@ -10987,9 +10999,15 @@
           "line": 218
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The dashboard log cJSON builder cannot cross the module ABI; DB2 returns a bounded typed activity view and leaves HTTP serialization to its caller."
+      },
       "signature": "cJSON * db2_kb_service_dashboard_logs_json ( void )",
       "signature_sha256": "8e322a9e0289ee0ffe488c0f1ee6d429c08c2633ae8350fb8582ac7325a6731c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_dashboard_logs_json"
     },
     {
@@ -11003,9 +11021,15 @@
           "line": 217
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The dashboard memory-stat cJSON wrapper is presentation-only; typed bounded counters form the stable memory operation reply."
+      },
       "signature": "cJSON * db2_kb_service_dashboard_memory_stats_json ( void )",
       "signature_sha256": "0f57e4cb2aa0be3ac72463edc6e017bedf7d9b9639703e1e40563336d28f2a74",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_dashboard_memory_stats_json"
     },
     {
@@ -11019,9 +11043,15 @@
           "line": 220
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The dashboard recall cJSON envelope is a legacy rendering layer; a typed memory query owns the bounded recall rows and explicit truncation evidence."
+      },
       "signature": "cJSON * db2_kb_service_dashboard_recall_json ( void )",
       "signature_sha256": "59b090392099a774def89664b3402d7ce81d466537f2616f60e13ed32cfc14ad",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_dashboard_recall_json"
     },
     {
@@ -11035,9 +11065,15 @@
           "line": 219
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The dashboard reminders cJSON wrapper remains local presentation; a typed bounded query returns reminder records without exposing cJSON ownership."
+      },
       "signature": "cJSON * db2_kb_service_dashboard_reminders_json ( void )",
       "signature_sha256": "73791d4a4c30cfa81453ca0b81867aa324dd621d2296c0415e8c2431d8a39664",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_dashboard_reminders_json"
     },
     {
@@ -11293,9 +11329,15 @@
           "line": 158
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON learning-signal request and dispatch response are compatibility presentation; a typed operation validates bounded signal fields and returns a closed dispatch result."
+      },
       "signature": "cJSON * db2_kb_service_learning_propose_signal_json ( const cJSON * req )",
       "signature_sha256": "cdc43f033d3bffedbb5f253e3f605ef4ce827f5704f4a7c0a95bad5fcd4913ff",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_learning_propose_signal_json"
     },
     {
@@ -25134,15 +25176,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "33172ca80cf8634740f1fd96e4b36c967c2dd305e4d04c6dfc3304ca10f81cb8",
+  "fingerprint": "b86c8f1678f30967a5d5cda0dd4e3a95233ac0f9437be4907b9629c830623912",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 773,
+    "audit_pending": 766,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 185
+    "reviewed": 192
   }
 }

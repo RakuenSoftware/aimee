@@ -268,6 +268,14 @@
       "reason": "The cJSON list builder cannot be the stable wire shape; DB2 returns a bounded typed anti-pattern record set for caller serialization."
     },
     {
+      "symbol": "db2_kb_service_code_audit_json",
+      "signature_sha256": "2964a7afe61762f8027967928fa4f660b1a871c4e33052519fad2432c31b3670",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON code-audit document is caller presentation; a typed index-family query returns bounded audit findings without making an in-process JSON tree part of the bus ABI."
+    },
+    {
       "symbol": "db2_kb_service_collab_rules_approve_json",
       "signature_sha256": "cbaa581288601a57c58ff8d5d3c9820e84c6508129d06097cd84fa51bf1de7c3",
       "disposition": "private-db2",
@@ -380,6 +388,46 @@
       "reason": "The cJSON state-update facade stays local; a typed learning mutation validates the closed state and returns the updated bounded record."
     },
     {
+      "symbol": "db2_kb_service_dashboard_directives_json",
+      "signature_sha256": "0c08b2b4f47bc6448c11427e668e4a91d819ca125148975418e85aa24aff77e0",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The dashboard directives cJSON envelope is presentation code; a bounded typed learning query supplies directive records for the caller to serialize."
+    },
+    {
+      "symbol": "db2_kb_service_dashboard_logs_json",
+      "signature_sha256": "8e322a9e0289ee0ffe488c0f1ee6d429c08c2633ae8350fb8582ac7325a6731c",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The dashboard log cJSON builder cannot cross the module ABI; DB2 returns a bounded typed activity view and leaves HTTP serialization to its caller."
+    },
+    {
+      "symbol": "db2_kb_service_dashboard_memory_stats_json",
+      "signature_sha256": "0f57e4cb2aa0be3ac72463edc6e017bedf7d9b9639703e1e40563336d28f2a74",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The dashboard memory-stat cJSON wrapper is presentation-only; typed bounded counters form the stable memory operation reply."
+    },
+    {
+      "symbol": "db2_kb_service_dashboard_recall_json",
+      "signature_sha256": "59b090392099a774def89664b3402d7ce81d466537f2616f60e13ed32cfc14ad",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The dashboard recall cJSON envelope is a legacy rendering layer; a typed memory query owns the bounded recall rows and explicit truncation evidence."
+    },
+    {
+      "symbol": "db2_kb_service_dashboard_reminders_json",
+      "signature_sha256": "73791d4a4c30cfa81453ca0b81867aa324dd621d2296c0415e8c2431d8a39664",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The dashboard reminders cJSON wrapper remains local presentation; a typed bounded query returns reminder records without exposing cJSON ownership."
+    },
+    {
       "symbol": "db2_kb_service_decision_log_insert_json",
       "signature_sha256": "1d719c8aaea1826a3531c414b7a29bea7aaa126f1a44f8c6bf07bc5f2a490257",
       "disposition": "private-db2",
@@ -434,6 +482,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The cJSON list adapter cannot cross the typed bus; a bounded learning list operation returns fixed proposal records while the caller owns JSON serialization."
+    },
+    {
+      "symbol": "db2_kb_service_learning_propose_signal_json",
+      "signature_sha256": "cdc43f033d3bffedbb5f253e3f605ef4ce827f5704f4a7c0a95bad5fcd4913ff",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON learning-signal request and dispatch response are compatibility presentation; a typed operation validates bounded signal fields and returns a closed dispatch result."
     },
     {
       "symbol": "db2_kb_service_learning_reject_json",
