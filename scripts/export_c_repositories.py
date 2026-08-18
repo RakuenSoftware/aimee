@@ -32,17 +32,16 @@ REMOTE_ROOT = "https://github.com/RakuenSoftware"
 HOSTED_BY_EXECUTABLE = {"wfe": "/usr/local/bin/aimee-wfe"}
 PRINCIPAL_CLASS = 1
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
-# Optional: third-party sources a module compiles but does not own. A module is
-# otherwise self-contained -- it links its descriptor's sources and nothing
-# else, which is why db1_time.c exists to supply now_utc rather than the module
-# linking util.c. That rule is right for a project helper and wrong for a
-# vendored library: cJSON is 77KB of upstream code, and a per-module copy is a
-# thing to patch when upstream issues a CVE. DB2 already holds one such copy;
-# this exists so DB1 does not become the second, and is restricted to
-# src/vendor/ so "not owned" cannot quietly mean "owned by somebody else".
-C_BUILD_OPTIONAL_KEYS = {"vendor_sources"}
+# Optional validated preprocessor switches let a descriptor reproduce its
+# audited standalone mode. Third-party sources a module compiles but does not
+# own are also optional; they remain restricted to src/vendor/ so "not owned"
+# cannot quietly mean "owned by somebody else".
+C_BUILD_OPTIONAL_KEYS = {
+    "compile_definitions", "generated_headers", "header_dependencies", "vendor_sources",
+}
 VENDOR_ROOT = "src/vendor/"
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
+C_DEFINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CMAKE_TARGET_PACKAGES = {
     "OpenSSL::Crypto": "OpenSSL",
     "OpenSSL::SSL": "OpenSSL",
@@ -220,6 +219,7 @@ jobs:
 
 
 def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
+    """Return descriptor-owned source-tree inputs for the module repository."""
     result = [f"src/modules/{module_id}/module.yaml"]
     for key in ("sources", "private_headers", "public_headers", "contracts", "tests", "docs",
                 "go_sources", "go_tests"):
@@ -227,8 +227,25 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
             raise ExportError(f"{module_id}: descriptor field {key} must be a string array")
         result.extend(values)
+    build = descriptor.get("c_build")
+    if isinstance(build, dict):
+        for header in c_generated_headers(module_id, build):
+            entries = header["entries"]
+            assert isinstance(entries, list)
+            result.extend(str(entry["source"]) for entry in entries)
     if len(result) != len(set(result)):
         raise ExportError(f"{module_id}: duplicate owned file")
+    return result
+
+
+def module_repository_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
+    """Return owned files plus explicit non-owned standalone build inputs."""
+    owned = module_owned_files(module_id, descriptor)
+    build = descriptor.get("c_build")
+    dependencies = c_header_dependencies(module_id, build) if isinstance(build, dict) else []
+    result = [*owned, *dependencies]
+    if len(result) != len(set(result)):
+        raise ExportError(f"{module_id}: duplicate repository file")
     return result
 
 
@@ -313,9 +330,78 @@ int main(int argc, char **argv)
 """
 
 
+def c_header_dependencies(module_id: str, build: dict[str, object]) -> list[str]:
+    """Return validated non-owned headers copied into an isolated C export."""
+    dependencies = build.get("header_dependencies", [])
+    if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) for item in dependencies):
+        raise ExportError(f"{module_id}: c_build.header_dependencies must be a string array")
+    if dependencies != sorted(set(dependencies)):
+        raise ExportError(
+            f"{module_id}: c_build.header_dependencies must be sorted and unique")
+    module_prefix = f"src/modules/{module_id}/"
+    for dependency in dependencies:
+        pure = PurePosixPath(dependency)
+        if (not dependency.startswith("src/") or "\\" in dependency or pure.is_absolute() or
+                "." in pure.parts or ".." in pure.parts or
+                pure.as_posix() != dependency or pure.suffix != ".h"):
+            raise ExportError(f"{module_id}: unsafe header dependency {dependency!r}")
+        if dependency.startswith(module_prefix):
+            raise ExportError(
+                f"{module_id}: module-local header dependency {dependency!r} must be owned")
+    return list(dependencies)
+
+
+def c_generated_headers(module_id: str, build: dict[str, object]) -> list[dict[str, object]]:
+    """Return validated deterministic text-header declarations."""
+    generated = build.get("generated_headers", [])
+    if not isinstance(generated, list):
+        raise ExportError(f"{module_id}: c_build.generated_headers must be an array")
+    result: list[dict[str, object]] = []
+    previous_output = ""
+    for index, header in enumerate(generated):
+        if not isinstance(header, dict) or set(header) != {"entries", "output"}:
+            raise ExportError(f"{module_id}: generated header {index} has invalid keys")
+        output = header["output"]
+        pure_output = PurePosixPath(output) if isinstance(output, str) else None
+        if (not isinstance(output, str) or "\\" in output or output <= previous_output or
+                pure_output is None or pure_output.name != output or pure_output.suffix != ".h"):
+            raise ExportError(
+                f"{module_id}: generated header outputs must be sorted unique .h basenames")
+        previous_output = output
+        entries = header["entries"]
+        if not isinstance(entries, list) or not entries:
+            raise ExportError(f"{module_id}: {output} entries must be a nonempty array")
+        parsed: list[dict[str, str]] = []
+        previous_entry: tuple[str, str] | None = None
+        seen_symbols: set[str] = set()
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"source", "symbol"}:
+                raise ExportError(f"{module_id}: {output} entry has invalid keys")
+            source, symbol = entry["source"], entry["symbol"]
+            pure_source = PurePosixPath(source) if isinstance(source, str) else None
+            if (not isinstance(source, str) or not source or "\\" in source or
+                    pure_source is None or pure_source.is_absolute() or
+                    "." in pure_source.parts or ".." in pure_source.parts or
+                    pure_source.as_posix() != source):
+                raise ExportError(f"{module_id}: unsafe generated input {source!r}")
+            if not isinstance(symbol, str) or not C_DEFINE.fullmatch(symbol):
+                raise ExportError(f"{module_id}: unsafe generated symbol {symbol!r}")
+            key = (symbol, source)
+            if previous_entry is not None and key <= previous_entry:
+                raise ExportError(f"{module_id}: {output} entries must be sorted and unique")
+            if symbol in seen_symbols:
+                raise ExportError(f"{module_id}: {output} symbols must be unique")
+            previous_entry = key
+            seen_symbols.add(symbol)
+            parsed.append({"source": source, "symbol": symbol})
+        result.append({"output": output, "entries": parsed})
+    return result
+
+
 def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
-        list[str], list[str], list[str], list[str]]:
-    """Return validated C sources, include roots, pkg-config deps, and link items."""
+        list[str], list[str], list[str], list[dict[str, object]], list[str], list[str]]:
+    """Return validated C sources, includes, definitions, codegen, pkg-config, and links."""
     sources = descriptor.get("sources")
     if not isinstance(sources, list) or not sources or not all(isinstance(item, str) for item in sources):
         raise ExportError(f"{module_id}: C process must declare descriptor-owned sources")
@@ -341,6 +427,20 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
                 f"{module_id}: vendor_sources entry {entry!r} must be a .c file under "
                 f"{VENDOR_ROOT}; anything else is a source some module owns")
 
+    definitions = build.get("compile_definitions", [])
+    if not isinstance(definitions, list) or not all(
+            isinstance(item, str) for item in definitions):
+        raise ExportError(f"{module_id}: c_build.compile_definitions must be a string array")
+    if definitions != sorted(set(definitions)):
+        raise ExportError(
+            f"{module_id}: c_build.compile_definitions must be sorted and unique")
+    for definition in definitions:
+        if not C_DEFINE.fullmatch(definition):
+            raise ExportError(
+                f"{module_id}: unsafe c_build.compile_definitions token {definition!r}")
+
+    c_header_dependencies(module_id, build)
+
     parsed: dict[str, list[str]] = {}
     for field in sorted(C_BUILD_KEYS):
         entries = build[field]
@@ -364,18 +464,67 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
     # Vendored sources compile with the module but are not its own: they are
     # appended here rather than merged into `sources`, so ownership keeps
     # meaning what it says everywhere else.
-    return (c_sources + list(vendored), parsed["include_roots"], parsed["pkg_config"],
-            parsed["system_libraries"])
+    return (c_sources + list(vendored), parsed["include_roots"], definitions,
+            c_generated_headers(module_id, build),
+            parsed["pkg_config"], parsed["system_libraries"])
 
 
 def c_process_cmake(module_id: str, binary: str, version: str,
                     descriptor: dict[str, object]) -> str:
     """Generate the standalone build for a descriptor-owned C process."""
-    sources, include_roots, pkg_config, libraries = c_process_build(module_id, descriptor)
+    sources, include_roots, definitions, generated, pkg_config, libraries = c_process_build(
+        module_id, descriptor)
     source_lines = "\n".join(f"    {source}" for source in sources)
+    generated_setup = ""
+    generated_source_lines = ""
+    generated_include_line = ""
+    if generated:
+        commands: list[str] = [
+            "find_package(Python3 REQUIRED COMPONENTS Interpreter)",
+            'set(MODULE_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")',
+        ]
+        outputs: list[str] = []
+        for header in generated:
+            output = str(header["output"])
+            entries = header["entries"]
+            assert isinstance(entries, list)
+            output_expr = f'${{MODULE_GENERATED_DIR}}/{output}'
+            outputs.append(output_expr)
+            entry_lines = "\n".join(
+                f'            --entry {entry["symbol"]} '
+                f'"${{CMAKE_CURRENT_SOURCE_DIR}}/{entry["source"]}"'
+                for entry in entries
+            )
+            dependency_lines = "\n".join(
+                f'        "${{CMAKE_CURRENT_SOURCE_DIR}}/{entry["source"]}"'
+                for entry in entries
+            )
+            commands.append(f"""add_custom_command(
+    OUTPUT "{output_expr}"
+    COMMAND ${{CMAKE_COMMAND}} -E make_directory "${{MODULE_GENERATED_DIR}}"
+    COMMAND ${{Python3_EXECUTABLE}}
+            "${{CMAKE_CURRENT_SOURCE_DIR}}/scripts/generate_c_embedded_header.py"
+            --output "{output_expr}"
+{entry_lines}
+    DEPENDS
+        "${{CMAKE_CURRENT_SOURCE_DIR}}/scripts/generate_c_embedded_header.py"
+{dependency_lines}
+    VERBATIM
+)
+""")
+        generated_setup = "\n".join(commands) + "\n"
+        generated_source_lines = "\n".join(f'    "{output}"' for output in outputs) + "\n"
+        generated_include_line = "    ${MODULE_GENERATED_DIR}\n"
     include_lines = "\n".join(
         f"    ${{CMAKE_CURRENT_SOURCE_DIR}}/{root}" for root in include_roots
     )
+    definition_lines = "\n".join(f"    {definition}" for definition in definitions)
+    definition_block = ""
+    if definition_lines:
+        definition_block = f"""target_compile_definitions({binary} PRIVATE
+{definition_lines}
+)
+"""
     package_names = sorted({
         CMAKE_TARGET_PACKAGES[library]
         for library in libraries
@@ -399,18 +548,20 @@ project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C
 
 include(GNUInstallDirs)
 find_package(aimee-core {version} EXACT CONFIG REQUIRED)
-{discovery_text}if(NOT TARGET aimee::aimee-core-event-bus-client)
+{discovery_text}{generated_setup}if(NOT TARGET aimee::aimee-core-event-bus-client)
     message(FATAL_ERROR "{binary} requires the Linux event-bus client")
 endif()
 add_executable({binary}
     runtime/main.c
+{generated_source_lines}\
 {source_lines}
 )
 target_compile_features({binary} PRIVATE c_std_11)
 target_include_directories({binary} PRIVATE
+{generated_include_line}\
 {include_lines}
 )
-target_link_libraries({binary} PRIVATE
+{definition_block}target_link_libraries({binary} PRIVATE
 {link_lines}
 )
 configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
@@ -559,13 +710,14 @@ def export_module(
     if descriptor.get("id") != module_id:
         raise ExportError(f"{descriptor_path}: descriptor id mismatch")
     owned = module_owned_files(module_id, descriptor)
+    repository_files = module_repository_files(module_id, descriptor)
     declared_sources = descriptor.get("sources", [])
     assert isinstance(declared_sources, list)
     has_handler = c_process_has_handler(declared_sources)
     init_symbol = c_process_init_symbol(module_id, descriptor)
     repository = output_root / f"aimee-module-{module_id}"
     repository.mkdir()
-    for relative in owned:
+    for relative in repository_files:
         copy_file(relative, repository)
     shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
     binary = f"aimee-module-{module_id}"
@@ -590,6 +742,10 @@ serve={serve}
 """,
         )
         if runtime == "c":
+            build = descriptor.get("c_build")
+            assert isinstance(build, dict)
+            if c_generated_headers(module_id, build):
+                copy_file("scripts/generate_c_embedded_header.py", repository)
             write_text(
                 repository / "runtime/main.c",
                 module_main(module_id, principal_ref, stages, has_handler, init_symbol),
@@ -760,9 +916,11 @@ This is the independent `{module_id}` source-ownership repository.
 
 The descriptor-owned production sources, headers, tests, and documentation are
 preserved at their canonical paths so their migration history remains auditable.
+Any non-owned compatibility headers required by the standalone C build are
+declared separately, copied at canonical paths, and bound into the source digest.
 """,
     )
-    source_paths = [ROOT / item for item in owned]
+    source_paths = [ROOT / item for item in repository_files]
     manifest = {
         "schema_version": 1,
         "module": module_id,
@@ -775,6 +933,7 @@ preserved at their canonical paths so their migration history remains auditable.
         "stages": contract.get("stages", []),
         "source_sha256": digest_files(source_paths),
         "owned_files": owned,
+        "repository_files": repository_files,
     }
     write_text(repository / "SOURCE_MANIFEST.json", json.dumps(manifest, indent=2) + "\n")
     remote = f"{REMOTE_ROOT}/aimee-module-{module_id}.git"
@@ -815,7 +974,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         if contract["execution"] != "process":
             continue
         descriptor = load_json(ROOT / f"src/modules/{module_id}/module.yaml")
-        module_owned_files(module_id, descriptor)
+        module_repository_files(module_id, descriptor)
         enabled = module_id in required or descriptor.get("enabled_by_default") is True
         principal_ref = contract["principal_ref"]
         stages = contract["stages"]
@@ -830,7 +989,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
         if runtime == "c":
-            sources, include_roots, pkg_config, libraries = c_process_build(
+            sources, include_roots, definitions, generated, pkg_config, libraries = c_process_build(
                 module_id, descriptor
             )
             has_handler = c_process_has_handler(sources)
@@ -840,15 +999,22 @@ def export_runtime_bundle(output_root: Path) -> int:
                 output_root / main_path,
                 module_main(module_id, principal_ref, stages, has_handler, init_symbol),
             )
-            c_builds.append({
+            build_row: dict[str, object] = {
                 "id": module_id,
                 "binary": binary,
                 "main": main_path,
                 "sources": sources,
                 "include_roots": include_roots,
+                "compile_definitions": definitions,
                 "pkg_config": pkg_config,
                 "system_libraries": libraries,
-            })
+            }
+            header_dependencies = c_header_dependencies(module_id, descriptor["c_build"])
+            if header_dependencies:
+                build_row["header_dependencies"] = header_dependencies
+            if generated:
+                build_row["generated_headers"] = generated
+            c_builds.append(build_row)
         else:
             go_sources = descriptor.get("go_sources", [])
             if not isinstance(go_sources, list) or not go_sources:
@@ -943,8 +1109,10 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
             entry["source_sha256"] = digest_files(core_files())
         else:
             descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
-            owned = module_owned_files(repository_id, descriptor)
-            entry["source_sha256"] = digest_files([ROOT / relative for relative in owned])
+            repository_files = module_repository_files(repository_id, descriptor)
+            entry["source_sha256"] = digest_files(
+                [ROOT / relative for relative in repository_files]
+            )
     LOCK.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
     return len(entries)
 

@@ -1,0 +1,2 @@
+2026-08-18T14:39:04Z INFO  vault.env: sealed 1 first-boot credential environment value(s)
+2026-08-18T14:39:04Z INFO  vault.bootstrap: granted vault:write:server to uid:0 (local root operator)

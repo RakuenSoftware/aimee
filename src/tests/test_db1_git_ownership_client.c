@@ -31,6 +31,9 @@ static uint32_t stub_request_len;
 static uint32_t stub_frame_len;
 /* When set, the reply declares a length that disagrees with what it carries. */
 static int stub_lie_about_length;
+/* When set, the reply carries no values at all where the caller asked for one:
+   what a module built against an older contract would send. */
+static int stub_drop_the_value;
 
 int obs_bus_module_available(uint32_t event_kind)
 {
@@ -72,6 +75,15 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
         op == AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX);
    uint32_t value_len = (uint32_t)strlen(stub_value);
    uint8_t *out = (uint8_t *)response_body;
+   if (answers_with_a_value && stub_drop_the_value)
+   {
+      if (response_capacity < 8u)
+         return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      aimee_db1_put_u32(out, stub_status);
+      aimee_db1_put_u32(out + 4u, 0u);
+      *response_len = 8u;
+      return AIMEE_MODULE_CALL_OK;
+   }
    if (!answers_with_a_value)
    {
       if (response_capacity < 8u)
@@ -101,6 +113,7 @@ static void reset(void)
    stub_request_len = 0;
    stub_frame_len = 0;
    stub_lie_about_length = 0;
+   stub_drop_the_value = 0;
 }
 
 /* --- reading back the frame the client emitted ---------------------------- */
@@ -197,6 +210,25 @@ static void test_a_malformed_reply_is_refused(void)
    printf("  PASS: test_a_malformed_reply_is_refused\n");
 }
 
+/* A stage that answers with FEWER values than the caller asked for is the same
+   contract mismatch as one that answers with more, read from the other side --
+   and it used to pass. The unfilled slots keep the empty string the client
+   clears them to, so the caller read a blank where a value should have been and
+   could not tell that from a value that is genuinely blank.
+
+   This is not hypothetical across a process boundary: the daemon and the module
+   are two binaries deployed at two times, and a module built before a reply
+   grew a value sends exactly this. */
+static void test_a_reply_with_too_few_values_is_refused(void)
+{
+   char owner[128];
+   reset();
+   stub_drop_the_value = 1;
+   stub_value = "sess-9";
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == -1);
+   printf("  PASS: test_a_reply_with_too_few_values_is_refused\n");
+}
+
 static void test_bad_arguments_cost_no_round_trip(void)
 {
    char owner[128];
@@ -284,6 +316,7 @@ int main(void)
    test_reads_report_found_missing_and_error_apart();
    test_an_unreachable_module_is_an_error_not_an_absence();
    test_a_malformed_reply_is_refused();
+   test_a_reply_with_too_few_values_is_refused();
    test_a_value_that_fills_the_buffer_is_refused();
    test_bad_arguments_cost_no_round_trip();
    test_a_large_field_is_carried_not_refused();

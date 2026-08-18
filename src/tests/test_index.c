@@ -15,6 +15,85 @@
 #include "platform_test_util.h"
 #include "util.h"
 
+static int css_analysis_mode;
+static int css_token_mode;
+static int css_invalid_release_count;
+static css_stylesheet_t css_invalid_stylesheet;
+
+static css_stylesheet_t *test_css_analyze_provider(const char *text, size_t len)
+{
+   if (css_analysis_mode)
+   {
+      memset(&css_invalid_stylesheet, 0, sizeof(css_invalid_stylesheet));
+      css_invalid_stylesheet.truncated = 2;
+      return &css_invalid_stylesheet;
+   }
+   return css_analyze(text, len);
+}
+
+static void test_css_stylesheet_free_provider(css_stylesheet_t *stylesheet)
+{
+   if (stylesheet == &css_invalid_stylesheet)
+   {
+      css_invalid_release_count++;
+      return;
+   }
+   css_stylesheet_free(stylesheet);
+}
+
+static int test_css_token_provider(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                                   int max)
+{
+   if (css_token_mode == 1)
+      return max + 1;
+   if (css_token_mode == 2)
+   {
+      memset(out[0], 'x', CSS_CLASS_TOKEN_MAX);
+      return 1;
+   }
+   if (css_token_mode == 3)
+   {
+      strcpy(out[0], "duplicate");
+      strcpy(out[1], "duplicate");
+      return 2;
+   }
+   return css_extract_class_tokens(text, len, out, max);
+}
+
+static void test_css_analysis_contract(void)
+{
+   const char *css = ".one { color: black; }";
+   const char *markup = "<div className=\"one two\" />";
+   char tokens[4][CSS_CLASS_TOKEN_MAX];
+
+   aimee_db2_register_css_analysis_providers(NULL, NULL, NULL);
+   assert(canonical_index_css_analyze(css, strlen(css)) == NULL);
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+
+   aimee_db2_register_css_analysis_providers(
+       test_css_analyze_provider, test_css_stylesheet_free_provider, test_css_token_provider);
+   css_analysis_mode = 1;
+   assert(canonical_index_css_analyze(css, strlen(css)) == NULL);
+   assert(css_invalid_release_count == 1);
+
+   css_analysis_mode = 0;
+   css_stylesheet_t *stylesheet = canonical_index_css_analyze(css, strlen(css));
+   assert(stylesheet && stylesheet->rule_count == 1);
+   canonical_index_css_stylesheet_free(stylesheet);
+
+   css_token_mode = 1;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+   assert(tokens[0][0] == '\0');
+   css_token_mode = 2;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+   css_token_mode = 3;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+   css_token_mode = 0;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == 2);
+   assert(strcmp(tokens[0], "one") == 0 && strcmp(tokens[1], "two") == 0);
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 513) == -1);
+}
+
 /* Create a temp directory with a test source file */
 static char *create_test_project(void)
 {
@@ -341,6 +420,8 @@ static char *create_cochange_repo(void)
 int main(void)
 {
    printf("index: ");
+
+   test_css_analysis_contract();
 
    int missing_host_inspected = 7;
    canonical_index_set_exec_capture(NULL);

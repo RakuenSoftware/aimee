@@ -82,6 +82,27 @@ typedef struct
    uint8_t inventory_digest[32];
 } db2_vault_rewrap_inventory_summary_t;
 
+typedef struct
+{
+   int64_t (*deadline_ms)(uint32_t per_call_ms);
+   int (*operation_id_to_hex)(const uint8_t operation_id[VAULT_RESEAL_OPERATION_ID_LEN],
+                              char out[VAULT_RESEAL_OPERATION_HEX_LEN + 1]);
+   int (*operation_id_from_hex)(const char *hex,
+                                uint8_t operation_id[VAULT_RESEAL_OPERATION_ID_LEN]);
+   int (*receipt_decode)(const uint8_t *wire, size_t wire_len,
+                         vault_tpm2_reseal_receipt_t *receipt);
+   int (*receipt_digest)(const uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN], uint8_t digest[32]);
+} db2_vault_reseal_provider_t;
+
+void aimee_db2_register_vault_reseal_provider(const db2_vault_reseal_provider_t *provider);
+int64_t db2_vault_reseal_deadline_ms(uint32_t per_call_ms);
+int db2_vault_reseal_operation_id_to_hex(const uint8_t operation_id[16], char out[33]);
+int db2_vault_reseal_operation_id_from_hex(const char *hex, uint8_t operation_id[16]);
+int db2_vault_reseal_receipt_decode(const uint8_t *wire, size_t wire_len,
+                                    vault_tpm2_reseal_receipt_t *receipt);
+int db2_vault_reseal_receipt_digest(const uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN],
+                                    uint8_t digest[32]);
+
 void db2_vault_rewrap_snapshot_clear(db2_vault_rewrap_snapshot_t *snapshot);
 void db2_vault_rewrap_secret_clear(db2_vault_rewrap_secret_t *rows, size_t count);
 void db2_vault_rewrap_check_clear(db2_vault_rewrap_check_t *rows, size_t count);

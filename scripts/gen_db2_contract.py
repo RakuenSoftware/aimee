@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import struct
 import sys
 from typing import NoReturn
 
@@ -32,7 +33,24 @@ FAMILIES = (
     "maintenance",
 )
 RESULT_CODES = ("ok", "not_found", "conflict", "denied", "retryable", "invalid_state")
+ENVELOPE_REQUEST_MAGIC = 0x51523244  # "D2RQ", little-endian
+ENVELOPE_REPLY_MAGIC = 0x52523244  # "D2RR", little-endian
+ENVELOPE_HEADER_LEN = 24
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+# The rolling health-window aggregate, in the order the reviewed struct declares
+# it. Wire order is part of the contract, so it lives here rather than being
+# re-listed at each use.
+HEALTH_COUNTERS = (
+    "cycles", "total_contradictions", "total_promotions", "total_demotions",
+    "total_expirations", "new_memories", "l1_eligible", "l2_total", "l2_stale_30_days",
+)
+# Corpus breakdown buckets, in wire order. The labels are the canonical tier and
+# kind strings the backend groups by, so a bucket can never be silently dropped.
+MEMORY_TIERS = ("L0", "L1", "L2", "L3", "L4", "L5")
+MEMORY_KINDS = (
+    "fact", "preference", "decision", "episode", "task",
+    "scratch", "procedure", "policy", "workflow", "opinion",
+)
 
 
 class ContractError(ValueError):
@@ -123,7 +141,7 @@ def _string(value: object, label: str, maximum: int = 128) -> str:
 def validate_catalog(value: object) -> dict[str, object]:
     catalog = _keys(value, {
         "schema_version", "module", "wire_version", "catalog_complete", "families",
-        "result_codes", "operations",
+        "body_envelope", "result_codes", "operations",
     }, "catalog")
     if type(catalog["schema_version"]) is not int or catalog["schema_version"] != 1:
         fail("schema-version", "schema_version must equal 1")
@@ -134,7 +152,18 @@ def validate_catalog(value: object) -> dict[str, object]:
     if type(catalog["catalog_complete"]) is not bool:
         fail("catalog-complete-type", "catalog_complete must be boolean")
     if catalog["catalog_complete"]:
-        fail("catalog-complete", "the health-only catalog cannot claim declaration completeness")
+        fail("catalog-complete", "the partial catalog cannot claim declaration completeness")
+    envelope = _keys(
+        catalog["body_envelope"], {"request_magic", "reply_magic", "header_len"},
+        "body_envelope",
+    )
+    if (_integer(envelope["request_magic"], "body_envelope.request_magic", 0, 0xffffffff) !=
+            ENVELOPE_REQUEST_MAGIC or
+            _integer(envelope["reply_magic"], "body_envelope.reply_magic", 0, 0xffffffff) !=
+            ENVELOPE_REPLY_MAGIC or
+            _integer(envelope["header_len"], "body_envelope.header_len", 1, 0xffff) !=
+            ENVELOPE_HEADER_LEN):
+        fail("body-envelope", "body envelope magic or header length differs from version 1")
 
     raw_families = catalog["families"]
     if not isinstance(raw_families, list) or len(raw_families) != len(FAMILIES):
@@ -155,7 +184,7 @@ def validate_catalog(value: object) -> dict[str, object]:
         seen_kinds.add(kind)
         expected_active = index == 1
         if type(family["active"]) is not bool or family["active"] is not expected_active:
-            fail("family-active", "only lifecycle may be active in the health-only catalog")
+            fail("family-active", "only lifecycle may be active in the partial catalog")
         families[expected_name] = family
 
     if catalog["result_codes"] != list(RESULT_CODES):
@@ -165,11 +194,12 @@ def validate_catalog(value: object) -> dict[str, object]:
         fail("operations", "operations must be a nonempty array")
     seen_ids: set[tuple[str, int]] = set()
     seen_names: set[str] = set()
+    seen_c_symbols: set[str] = set()
     order: list[tuple[int, int]] = []
     for index, raw in enumerate(raw_operations):
         operation = _keys(raw, {
             "family", "id", "name", "wire_format", "scope", "transaction", "idempotency",
-            "results", "db3_placement", "db3_reason", "request", "reply",
+            "results", "db3_placement", "db3_reason", "c_symbols", "request", "reply",
         }, f"operations[{index}]")
         family_name = operation["family"]
         if family_name not in families:
@@ -187,36 +217,1020 @@ def validate_catalog(value: object) -> dict[str, object]:
         if order and position <= order[-1]:
             fail("operation-order", "operations must be sorted by family id then operation id")
         order.append(position)
-        if operation["wire_format"] != "db2-health-v1" or name != "health" or key != ("lifecycle", 1):
-            fail("unsupported-operation", "the bootstrap generator supports only lifecycle.health")
-        if operation["scope"] != "none" or operation["transaction"] != "none" or \
-                operation["idempotency"] != "safe":
-            fail("operation-semantics", "health must be unscoped, transaction-free, and safe")
-        if operation["results"] != ["ok"]:
-            fail("operation-results", "health results must equal ['ok']")
+        expected_transaction = ("single-statement" if name in ("reembed_clear",
+                                                                "effectiveness_update",
+                                                                "effectiveness_demote",
+                                                                "health_record",
+                                                                "promote_stable",
+                                                                "reclassify_directives",
+                                                                "record_l4_approval") else
+                                "single" if name in ("reembed_clear_maintenance",
+                                                     "dimension_reset") else "none")
+        # A health-cycle snapshot appends a row per call, so replaying it is not
+        # observationally neutral the way every other operation here is.
+        expected_idempotency = "unsafe" if name == "health_record" else "safe"
+        if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
+                operation["idempotency"] != expected_idempotency:
+            fail("operation-semantics",
+                 f"{name} must be unscoped, {expected_transaction}, and {expected_idempotency}")
         if operation["db3_placement"] != "retained-db2":
-            fail("db3-placement", "health must remain in DB2")
-        _string(operation["db3_reason"], "health.db3_reason", 256)
-        request = _keys(operation["request"], {"magic", "encoded_size"}, "health.request")
-        reply = _keys(operation["reply"], {"magic", "encoded_size", "flags"}, "health.reply")
-        if _integer(request["magic"], "health.request.magic", 0, 0xffffffff) != 0x51483244 or \
-                request["encoded_size"] != 8:
-            fail("health-request", "health request magic/size differ from version 1")
-        if _integer(reply["magic"], "health.reply.magic", 0, 0xffffffff) != 0x52483244 or \
-                reply["encoded_size"] != 16:
-            fail("health-reply", "health reply magic/size differ from version 1")
-        expected_flags = ((0, "schema"), (1, "pg_trgm"), (2, "kb_tables"))
-        if not isinstance(reply["flags"], list) or len(reply["flags"]) != len(expected_flags):
-            fail("health-flags", "health reply flags differ from version 1")
-        for flag_index, (raw_flag, expected_flag) in enumerate(
-                zip(reply["flags"], expected_flags, strict=True)):
-            flag = _keys(raw_flag, {"bit", "name"}, f"health.reply.flags[{flag_index}]")
-            bit, flag_name = expected_flag
-            if _integer(flag["bit"], f"health.reply.flags[{flag_index}].bit", 0, 31) != bit or \
-                    flag["name"] != flag_name:
+            fail("db3-placement", f"{name} must remain in DB2")
+        _string(operation["db3_reason"], f"{name}.db3_reason", 256)
+        if not isinstance(operation["c_symbols"], list) or not operation["c_symbols"] or not all(
+                isinstance(symbol, str) and NAME.fullmatch(symbol)
+                for symbol in operation["c_symbols"]):
+            fail("operation-c-symbols", f"{name} must name canonical C backend symbols")
+        for symbol in operation["c_symbols"]:
+            if symbol in seen_c_symbols:
+                fail("operation-c-symbols", f"C backend symbol {symbol!r} is duplicated")
+            seen_c_symbols.add(symbol)
+        if key == ("lifecycle", 1) and name == "health" and \
+                operation["wire_format"] == "db2-health-v1":
+            if operation["c_symbols"] != [
+                    "db2_health_probe", "db2_is_initialized", "db2_kb_health_probe"]:
+                fail("operation-c-symbols", "health C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health results must equal ['ok']")
+            request = _keys(operation["request"], {"magic", "encoded_size"}, "health.request")
+            reply = _keys(operation["reply"], {"magic", "encoded_size", "flags"}, "health.reply")
+            if _integer(request["magic"], "health.request.magic", 0, 0xffffffff) != 0x51483244 or \
+                    request["encoded_size"] != 8:
+                fail("health-request", "health request magic/size differ from version 1")
+            if _integer(reply["magic"], "health.reply.magic", 0, 0xffffffff) != 0x52483244 or \
+                    reply["encoded_size"] != 16:
+                fail("health-reply", "health reply magic/size differ from version 1")
+            expected_flags = ((0, "schema"), (1, "pg_trgm"), (2, "kb_tables"))
+            if not isinstance(reply["flags"], list) or len(reply["flags"]) != len(expected_flags):
                 fail("health-flags", "health reply flags differ from version 1")
-    if len(raw_operations) != 1:
-        fail("unsupported-operation", "the bootstrap generator requires exactly one health operation")
+            for flag_index, (raw_flag, expected_flag) in enumerate(
+                    zip(reply["flags"], expected_flags, strict=True)):
+                flag = _keys(raw_flag, {"bit", "name"}, f"health.reply.flags[{flag_index}]")
+                bit, flag_name = expected_flag
+                if _integer(flag["bit"], f"health.reply.flags[{flag_index}].bit", 0, 31) != bit or \
+                        flag["name"] != flag_name:
+                    fail("health-flags", "health reply flags differ from version 1")
+        elif key == ("lifecycle", 2) and name == "embedding_dimension" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_embedding_dim"]:
+                fail("operation-c-symbols",
+                     "embedding_dimension C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "embedding_dimension results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "embedding_dimension.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "embedding_dimension.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "embedding_dimension.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("embedding-dimension-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "dimension", "type": "u32", "minimum": 1,
+                              "maximum": 4000}):
+                fail("embedding-dimension-reply", "reply must contain one bounded u32 on success")
+        elif key == ("lifecycle", 3) and name == "pool_status" and \
+                operation["wire_format"] == "db2-envelope-pool-status-v1":
+            if operation["c_symbols"] != ["db2_pool_stats"]:
+                fail("operation-c-symbols", "pool_status C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results", "pool_status results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "pool_status.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "pool_status.reply")
+            expected_fields = [
+                {"name": "size", "type": "u32", "minimum": 1, "maximum": 256},
+                {"name": "in_use", "type": "u32", "minimum": 0, "maximum": 256},
+                {"name": "waiters", "type": "u32", "minimum": 0, "maximum": 0xffffffff},
+                {"name": "lease_grants", "type": "u64", "minimum": 0},
+                {"name": "lease_timeouts", "type": "u64", "minimum": 0},
+                {"name": "stuck", "type": "u64", "minimum": 0},
+                {"name": "poisoned", "type": "u64", "minimum": 0},
+            ]
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("pool-status-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 44 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != expected_fields):
+                fail("pool-status-reply", "reply must contain the canonical bounded pool snapshot")
+        elif key == ("lifecycle", 4) and name == "embedding_refusals" and \
+                operation["wire_format"] == "db2-envelope-embedding-refusals-v1":
+            if operation["c_symbols"] != ["db2_embedding_dim_last_offered",
+                                           "db2_embedding_dim_refused_count"]:
+                fail("operation-c-symbols",
+                     "embedding_refusals C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "embedding_refusals results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "embedding_refusals.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "embedding_refusals.reply")
+            expected_fields = [
+                {"name": "refused_count", "type": "u64", "minimum": 0},
+                {"name": "last_offered", "type": "u32", "minimum": 0,
+                 "maximum": 0x7fffffff},
+            ]
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("embedding-refusals-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 12 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != expected_fields):
+                fail("embedding-refusals-reply",
+                     "reply must contain the canonical bounded refusal snapshot")
+        elif key == ("lifecycle", 5) and name == "postgres_status" and \
+                operation["wire_format"] == "db2-envelope-postgres-status-v1":
+            if operation["c_symbols"] != ["db2_pg_stat_summary"]:
+                fail("operation-c-symbols",
+                     "postgres_status C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "postgres_status results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "postgres_status.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "postgres_status.reply")
+            expected_fields = [
+                {"name": "available", "type": "u32", "minimum": 0, "maximum": 15},
+                {"name": "active_connections", "type": "u32", "minimum": 0,
+                 "maximum": 0x7fffffff},
+                {"name": "max_connections", "type": "u32", "minimum": 0,
+                 "maximum": 0x7fffffff},
+                {"name": "is_replica", "type": "u32", "minimum": 0, "maximum": 1},
+                {"name": "replica_lag_bytes", "type": "u64", "minimum": 0},
+            ]
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("postgres-status-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 24 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != expected_fields):
+                fail("postgres-status-reply",
+                     "reply must contain the canonical bounded PostgreSQL status")
+        elif key == ("lifecycle", 6) and name == "reembed_status" and \
+                operation["wire_format"] == "db2-envelope-reembed-status-v1":
+            if operation["c_symbols"] != ["db2_reembed_in_progress_get"]:
+                fail("operation-c-symbols",
+                     "reembed_status C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "not_found", "invalid_state"]:
+                fail("operation-results",
+                     "reembed_status results must equal ['ok', 'not_found', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "reembed_status.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "reembed_status.reply")
+            expected_fields = [
+                {"name": "target_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
+                {"name": "started_epoch", "type": "u64", "minimum": 1},
+            ]
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("reembed-status-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 12 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != expected_fields):
+                fail("reembed-status-reply",
+                     "reply must contain the canonical bounded maintenance marker")
+        elif key == ("lifecycle", 7) and name == "reembed_clear" and \
+                operation["wire_format"] == "db2-envelope-reembed-clear-v1":
+            if operation["c_symbols"] != ["db2_reembed_in_progress_clear"]:
+                fail("operation-c-symbols",
+                     "reembed_clear C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "reembed_clear results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "reembed_clear.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "reembed_clear.reply")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("reembed-clear-request", "request must be an empty version-1 envelope")
+            if reply != {"encoded_size_ok": ENVELOPE_HEADER_LEN,
+                         "encoded_size_error": ENVELOPE_HEADER_LEN, "fields": []}:
+                fail("reembed-clear-reply", "reply must be an empty closed-result envelope")
+        elif key == ("lifecycle", 8) and name == "reembed_clear_maintenance" and \
+                operation["wire_format"] == "db2-envelope-reembed-clear-maintenance-v1":
+            if operation["c_symbols"] != ["db2_reembed_clear_maintenance"]:
+                fail("operation-c-symbols",
+                     "reembed_clear_maintenance C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "conflict", "invalid_state"]:
+                fail("operation-results",
+                     "reembed_clear_maintenance results must equal "
+                     "['ok', 'conflict', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "field"},
+                            "reembed_clear_maintenance.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "reembed_clear_maintenance.request.field")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_payload", "encoded_size_error", "payload_results",
+                           "fields"}, "reembed_clear_maintenance.reply")
+            expected_fields = [
+                {"name": "was_in_progress", "type": "u32", "minimum": 0, "maximum": 1},
+                {"name": "recorded_dimension", "type": "u32", "minimum": 0, "maximum": 4000},
+                {"name": "running_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
+            ]
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 4 or
+                    request_field != {"name": "force", "type": "u32", "minimum": 0,
+                                      "maximum": 1}):
+                fail("reembed-clear-maintenance-request",
+                     "request must contain one canonical boolean u32")
+            if (reply["encoded_size_payload"] != ENVELOPE_HEADER_LEN + 12 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["payload_results"] != ["ok", "conflict"] or
+                    reply["fields"] != expected_fields):
+                fail("reembed-clear-maintenance-reply",
+                     "ok/conflict replies must contain the canonical consistency snapshot")
+        elif key == ("lifecycle", 9) and name == "embedder_serving_id" and \
+                operation["wire_format"] == "db2-envelope-embedder-serving-id-v1":
+            if operation["c_symbols"] != ["db2_embedder_serving_id"]:
+                fail("operation-c-symbols",
+                     "embedder_serving_id C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "embedder_serving_id results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "embedder_serving_id.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok",
+                           "encoded_size_error", "field"},
+                          "embedder_serving_id.reply")
+            field = _keys(reply["field"],
+                          {"name", "type", "minimum_bytes", "maximum_bytes"},
+                          "embedder_serving_id.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("embedder-serving-id-request",
+                     "request must be an empty version-1 envelope")
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + 159 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "serving_id", "type": "opaque-string",
+                              "minimum_bytes": 0, "maximum_bytes": 159}):
+                fail("embedder-serving-id-reply",
+                     "success must contain one length-prefixed bounded opaque string")
+        elif key == ("lifecycle", 10) and name == "dimension_reset" and \
+                operation["wire_format"] == "db2-envelope-dimension-reset-v1":
+            if operation["c_symbols"] != ["db2_dim_change_reset"]:
+                fail("operation-c-symbols",
+                     "dimension_reset C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "conflict", "denied", "invalid_state"]:
+                fail("operation-results",
+                     "dimension_reset results must equal "
+                     "['ok', 'conflict', 'denied', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "fields"},
+                            "dimension_reset.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_payload", "encoded_size_error", "payload_results",
+                           "fields"}, "dimension_reset.reply")
+            expected_request_fields = [
+                {"name": "target_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
+                {"name": "force", "type": "u32", "minimum": 0, "maximum": 1},
+                {"name": "dry_run", "type": "u32", "minimum": 0, "maximum": 1},
+            ]
+            expected_reply_fields = [
+                {"name": "recorded_dimension", "type": "u32", "minimum": 0,
+                 "maximum": 4000},
+                {"name": "target_dimension", "type": "u32", "minimum": 1,
+                 "maximum": 4000},
+                {"name": "tables_discovered", "type": "u32", "minimum": 0,
+                 "maximum": 16},
+                {"name": "tables_dropped", "type": "u32", "minimum": 0, "maximum": 16},
+                {"name": "rows_cleared", "type": "u64", "minimum": 0},
+                {"name": "curator_requeued", "type": "i32", "minimum": -1,
+                 "maximum": 0x7fffffff},
+                {"name": "evidence_requeued", "type": "i32", "minimum": -1,
+                 "maximum": 0x7fffffff},
+            ]
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 12 or
+                    request["fields"] != expected_request_fields):
+                fail("dimension-reset-request",
+                     "request must contain target dimension and canonical force/dry-run booleans")
+            if (reply["encoded_size_payload"] != ENVELOPE_HEADER_LEN + 32 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["payload_results"] != ["ok", "conflict", "denied"] or
+                    reply["fields"] != expected_reply_fields):
+                fail("dimension-reset-reply",
+                     "actionable results must contain the bounded reset-plan snapshot")
+        elif key == ("memory", 1) and name == "level3_count" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_count_l3"]:
+                fail("operation-c-symbols",
+                     "level3_count C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "level3_count results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "level3_count.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "level3_count.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "level3_count.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("level3-count-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("level3-count-reply", "reply must contain one bounded u32 count")
+        elif key == ("memory", 2) and name == "level2_count" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_count_l2"]:
+                fail("operation-c-symbols",
+                     "level2_count C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "level2_count results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "level2_count.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "level2_count.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "level2_count.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("level2-count-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("level2-count-reply", "reply must contain one bounded u32 count")
+        elif key == ("memory", 3) and name == "orphaned_l0_count" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_count_orphaned_l0"]:
+                fail("operation-c-symbols",
+                     "orphaned_l0_count C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "orphaned_l0_count results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "orphaned_l0_count.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "orphaned_l0_count.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "orphaned_l0_count.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("orphaned-l0-count-request",
+                     "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("orphaned-l0-count-reply", "reply must contain one bounded u32 count")
+        elif key == ("memory", 4) and name == "total_count" and \
+                operation["wire_format"] == "db2-envelope-u64-v1":
+            if operation["c_symbols"] != ["db2_memory_count"]:
+                fail("operation-c-symbols",
+                     "total_count C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "total_count results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "total_count.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "total_count.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "total_count.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("total-count-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "count", "type": "u64", "minimum": 0,
+                              "maximum": 0x7fffffffffffffff}):
+                fail("total-count-reply", "reply must contain one bounded u64 count")
+        elif key == ("memory", 5) and name == "session_l2_count" and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_count_l2_for_session"]:
+                fail("operation-c-symbols",
+                     "session_l2_count C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "session_l2_count results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "field"},
+                            "session_l2_count.request")
+            request_field = _keys(request["field"],
+                                  {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                  "session_l2_count.request.field")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "session_l2_count.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "session_l2_count.reply.field")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 5 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 4 + 127 or
+                    request_field != {"name": "source_session", "type": "utf8",
+                                      "minimum_bytes": 1, "maximum_bytes": 127}):
+                fail("session-l2-count-request",
+                     "request must contain one non-empty bounded session identifier")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("session-l2-count-reply", "reply must contain one bounded u32 count")
+        elif key == ("memory", 6) and name == "key_exists" and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_key_exists"]:
+                fail("operation-c-symbols", "key_exists C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "key_exists results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "field"},
+                            "key_exists.request")
+            request_field = _keys(request["field"],
+                                  {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                  "key_exists.request.field")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "key_exists.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "key_exists.reply.field")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 5 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 4 + 511 or
+                    request_field != {"name": "key", "type": "utf8",
+                                      "minimum_bytes": 1, "maximum_bytes": 511}):
+                fail("key-exists-request", "request must contain one non-empty bounded memory key")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "exists", "type": "u32", "minimum": 0,
+                                    "maximum": 1}):
+                fail("key-exists-reply", "reply must contain one boolean u32 value")
+        elif key == ("memory", 7) and name == "find_id_by_key_kind" and \
+                operation["wire_format"] == "db2-envelope-string-pair-u32-u64-v1":
+            if operation["c_symbols"] != ["db2_memory_find_id_by_key_kind"]:
+                fail("operation-c-symbols",
+                     "find_id_by_key_kind C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "find_id_by_key_kind results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "find_id_by_key_kind.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 2:
+                fail("find-id-by-key-kind-request", "request must contain exactly two fields")
+            request_key = _keys(request_fields[0],
+                                {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                "find_id_by_key_kind.request.fields[0]")
+            request_kind = _keys(request_fields[1],
+                                 {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                 "find_id_by_key_kind.request.fields[1]")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "find_id_by_key_kind.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("find-id-by-key-kind-reply", "reply must contain exactly two fields")
+            reply_found = _keys(reply_fields[0], {"name", "type", "minimum", "maximum"},
+                                "find_id_by_key_kind.reply.fields[0]")
+            reply_id = _keys(reply_fields[1], {"name", "type", "minimum", "maximum"},
+                             "find_id_by_key_kind.reply.fields[1]")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 10 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 8 + 511 + 15 or
+                    request_key != {"name": "key", "type": "utf8", "minimum_bytes": 1,
+                                    "maximum_bytes": 511} or
+                    request_kind != {"name": "kind", "type": "utf8", "minimum_bytes": 1,
+                                     "maximum_bytes": 15}):
+                fail("find-id-by-key-kind-request",
+                     "request must contain bounded non-empty canonical key and kind fields")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 12 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_found != {"name": "found", "type": "u32", "minimum": 0,
+                                    "maximum": 1} or
+                    reply_id != {"name": "id", "type": "u64", "minimum": 0,
+                                 "maximum": 0x7fffffffffffffff}):
+                fail("find-id-by-key-kind-reply",
+                     "reply must contain consistent found and bounded identifier fields")
+        elif key == ("memory", 8) and name == "key_exists_in_tier_pair" and \
+                operation["wire_format"] == "db2-envelope-string-triple-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_key_exists_in_tier_pair"]:
+                fail("operation-c-symbols",
+                     "key_exists_in_tier_pair C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "key_exists_in_tier_pair results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "key_exists_in_tier_pair.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("key-exists-in-tier-pair-request",
+                     "request must contain exactly three fields")
+            request_key = _keys(request_fields[0],
+                                {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                "key_exists_in_tier_pair.request.fields[0]")
+            request_tier_a = _keys(request_fields[1],
+                                   {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                   "key_exists_in_tier_pair.request.fields[1]")
+            request_tier_b = _keys(request_fields[2],
+                                   {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                   "key_exists_in_tier_pair.request.fields[2]")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "key_exists_in_tier_pair.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "key_exists_in_tier_pair.reply.field")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 15 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 511 + 15 + 15 or
+                    request_key != {"name": "key", "type": "utf8", "minimum_bytes": 1,
+                                    "maximum_bytes": 511} or
+                    request_tier_a != {"name": "tier_a", "type": "utf8", "minimum_bytes": 1,
+                                       "maximum_bytes": 15} or
+                    request_tier_b != {"name": "tier_b", "type": "utf8", "minimum_bytes": 1,
+                                       "maximum_bytes": 15}):
+                fail("key-exists-in-tier-pair-request",
+                     "request must contain bounded non-empty canonical key and tier fields")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "exists", "type": "u32", "minimum": 0,
+                                    "maximum": 1}):
+                fail("key-exists-in-tier-pair-reply",
+                     "reply must contain one boolean u32 value")
+        elif key == ("memory", 9) and name == "effectiveness_update" and \
+                operation["wire_format"] == "db2-envelope-u64-u32-f64-v1":
+            if operation["c_symbols"] != ["db2_memory_health_clear_effectiveness",
+                                           "db2_memory_health_set_effectiveness"]:
+                fail("operation-c-symbols",
+                     "effectiveness_update C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "effectiveness_update results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "fields", "consistency"},
+                            "effectiveness_update.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("effectiveness-update-request", "request must contain exactly three fields")
+            memory_id = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                              "effectiveness_update.request.fields[0]")
+            has_value = _keys(request_fields[1], {"name", "type", "minimum", "maximum"},
+                              "effectiveness_update.request.fields[1]")
+            value = _keys(request_fields[2], {"name", "type", "encoding"},
+                          "effectiveness_update.request.fields[2]")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "effectiveness_update.reply")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 20 or
+                    memory_id != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                  "maximum": 0x7fffffffffffffff} or
+                    has_value != {"name": "has_value", "type": "u32", "minimum": 0,
+                                  "maximum": 1} or
+                    value != {"name": "value", "type": "f64",
+                              "encoding": "ieee754-binary64-le"} or
+                    request["consistency"] !=
+                    "has_value=0 requires value bits to be positive zero"):
+                fail("effectiveness-update-request",
+                     "request must contain a positive identifier and canonical nullable binary64")
+            if reply != {"encoded_size_ok": ENVELOPE_HEADER_LEN,
+                         "encoded_size_error": ENVELOPE_HEADER_LEN, "fields": []}:
+                fail("effectiveness-update-reply", "reply must be an empty closed-result envelope")
+        elif key == ("memory", 10) and name == "retention_enforce" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_health_delete_by_sensitivity"]:
+                fail("operation-c-symbols",
+                     "retention_enforce C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "retention_enforce results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "retention_enforce.request")
+            policy = request["policy"]
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    policy != [
+                        {"sensitivity": "restricted", "retention_days": 7},
+                        {"sensitivity": "sensitive", "retention_days": 90},
+                    ]):
+                fail("retention-enforce-request",
+                     "request must carry no payload and use the fixed canonical retention policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "retention_enforce.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "retention_enforce.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "deleted_count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("retention-enforce-reply", "reply must contain one bounded deletion count")
+        elif key == ("memory", 11) and name == "effectiveness_demote" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_health_demote_low_effectiveness"]:
+                fail("operation-c-symbols",
+                     "effectiveness_demote C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "effectiveness_demote results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "effectiveness_demote.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"threshold_binary64_bits": 0x3fd3333333333333}):
+                fail("effectiveness-demote-request",
+                     "request must carry no payload and use the fixed canonical threshold")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "effectiveness_demote.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "effectiveness_demote.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "demoted_count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("effectiveness-demote-reply", "reply must contain one bounded demotion count")
+        elif key == ("memory", 12) and name == "effectiveness_stats" and \
+                operation["wire_format"] == "db2-envelope-f64-u32-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_health_effectiveness_stats"]:
+                fail("operation-c-symbols",
+                     "effectiveness_stats C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "effectiveness_stats results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "effectiveness_stats.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"low_threshold_binary64_bits": 0x3fd3333333333333}):
+                fail("effectiveness-stats-request",
+                     "request must carry no payload and use the fixed canonical low threshold")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "effectiveness_stats.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 3:
+                fail("effectiveness-stats-reply", "reply must contain exactly three fields")
+            average = _keys(reply_fields[0],
+                            {"name", "type", "encoding", "minimum_binary64_bits",
+                             "maximum_binary64_bits"},
+                            "effectiveness_stats.reply.fields[0]")
+            low = _keys(reply_fields[1], {"name", "type", "minimum", "maximum"},
+                        "effectiveness_stats.reply.fields[1]")
+            high = _keys(reply_fields[2], {"name", "type", "minimum", "maximum"},
+                         "effectiveness_stats.reply.fields[2]")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 16 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    average != {"name": "avg_effectiveness", "type": "f64",
+                                "encoding": "ieee754-binary64-le",
+                                "minimum_binary64_bits": 0,
+                                "maximum_binary64_bits": 0x3ff0000000000000} or
+                    low != {"name": "low_effectiveness_count", "type": "u32", "minimum": 0,
+                            "maximum": 0x7fffffff} or
+                    high != {"name": "high_impact_count", "type": "u32", "minimum": 0,
+                             "maximum": 0x7fffffff}):
+                fail("effectiveness-stats-reply",
+                     "reply must contain the bounded average and the two bounded counts")
+        elif key == ("memory", 13) and name == "l2_memory_ids" and \
+                operation["wire_format"] == "db2-envelope-u64-list-v1":
+            if operation["c_symbols"] != ["db2_memory_health_list_l2_memory_ids"]:
+                fail("operation-c-symbols",
+                     "l2_memory_ids C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "l2_memory_ids results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "l2_memory_ids.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"maximum_ids": 2048}):
+                fail("l2-memory-ids-request",
+                     "request must carry no payload and use the fixed canonical identifier bound")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "field"},
+                          "l2_memory_ids.reply")
+            reply_field = _keys(reply["field"],
+                                {"name", "type", "minimum_items", "maximum_items",
+                                 "item_minimum", "item_maximum"},
+                                "l2_memory_ids.reply.field")
+            maximum_ids = request["policy"]["maximum_ids"]
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + maximum_ids * 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "memory_ids", "type": "u64-list",
+                                    "minimum_items": 0, "maximum_items": maximum_ids,
+                                    "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
+                fail("l2-memory-ids-reply",
+                     "reply must be a counted identifier list bounded by the request policy")
+        elif key == ("memory", 14) and name == "health_record" and \
+                operation["wire_format"] == "db2-envelope-u32-triple-v1":
+            # The corpus total and the conflict count stay private-db2: the handler
+            # composes them behind this operation rather than naming them on the wire.
+            if operation["c_symbols"] != ["db2_memory_health_record"]:
+                fail("operation-c-symbols",
+                     "health_record C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health_record results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "policy", "fields"},
+                            "health_record.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("health-record-request", "request must contain exactly three counters")
+            counters = [_keys(field, {"name", "type", "minimum", "maximum"},
+                              f"health_record.request.fields[{index}]")
+                        for index, field in enumerate(request_fields)]
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 12 or
+                    request["policy"] != {"conflict_window_days": 1} or
+                    counters != [{"name": counter, "type": "u32", "minimum": 0,
+                                  "maximum": 0x7fffffff}
+                                 for counter in ("promotions", "demotions", "expirations")]):
+                fail("health-record-request",
+                     "request must carry the three bounded counters and the fixed conflict window")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "health_record.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("health-record-reply", "reply must acknowledge the cycle without a payload")
+        elif key == ("memory", 15) and name == "health_retention" and \
+                operation["wire_format"] == "db2-envelope-u32-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_health_prune_old",
+                                          "db2_memory_health_prune_old_contradictions"]:
+                fail("operation-c-symbols",
+                     "health_retention C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health_retention results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "health_retention.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"snapshot_retention_days": 90,
+                                          "contradiction_retention_days": 90}):
+                fail("health-retention-request",
+                     "request must carry no payload and use the complete fixed retention policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "health_retention.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("health-retention-reply", "reply must report both halves of the action")
+            counts = [_keys(field, {"name", "type", "minimum", "maximum"},
+                            f"health_retention.reply.fields[{index}]")
+                      for index, field in enumerate(reply_fields)]
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    counts != [{"name": name_, "type": "u32", "minimum": 0,
+                                "maximum": 0x7fffffff}
+                               for name_ in ("snapshots_deleted", "contradictions_deleted")]):
+                fail("health-retention-reply",
+                     "reply must contain the two bounded deletion counts")
+        elif key == ("memory", 16) and name == "health_counters" and \
+                operation["wire_format"] == "db2-envelope-health-counters-v1":
+            if operation["c_symbols"] != ["db2_memory_health_query_counters"]:
+                fail("operation-c-symbols",
+                     "health_counters C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health_counters results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "health_counters.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"promote_use_count": 3,
+                                          "promote_confidence_binary64_bits":
+                                              0x3feccccccccccccd}):
+                fail("health-counters-request",
+                     "request must carry no payload and use the fixed canonical promotion policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "health_counters.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != len(HEALTH_COUNTERS):
+                fail("health-counters-reply",
+                     "reply must contain the complete rolling-window aggregate")
+            counters = [_keys(field, {"name", "type", "minimum", "maximum"},
+                              f"health_counters.reply.fields[{index}]")
+                        for index, field in enumerate(reply_fields)]
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 * len(HEALTH_COUNTERS) or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    counters != [{"name": counter, "type": "u32", "minimum": 0,
+                                  "maximum": 0x7fffffff} for counter in HEALTH_COUNTERS]):
+                fail("health-counters-reply",
+                     "reply must contain every bounded counter in the reviewed order")
+        elif key == ("memory", 17) and name == "stats_counts" and \
+                operation["wire_format"] == "db2-envelope-memory-stats-v1":
+            if operation["c_symbols"] != ["db2_memory_stats_counts"]:
+                fail("operation-c-symbols",
+                     "stats_counts C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "stats_counts results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "stats_counts.request")
+            if request["encoded_size"] != ENVELOPE_HEADER_LEN or request["payload"] != "none":
+                fail("stats-counts-request", "request must carry no payload")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "stats_counts.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 4:
+                fail("stats-counts-reply",
+                     "reply must contain both breakdowns, the total, and the conflict count")
+            arrays = [_keys(reply_fields[index],
+                            {"name", "type", "items", "item_minimum", "item_maximum", "labels"},
+                            f"stats_counts.reply.fields[{index}]") for index in (0, 1)]
+            scalars = [_keys(reply_fields[index], {"name", "type", "minimum", "maximum"},
+                             f"stats_counts.reply.fields[{index}]") for index in (2, 3)]
+            expected_arrays = [
+                {"name": "tier_counts", "type": "u32-array", "items": len(MEMORY_TIERS),
+                 "item_minimum": 0, "item_maximum": 0x7fffffff, "labels": list(MEMORY_TIERS)},
+                {"name": "kind_counts", "type": "u32-array", "items": len(MEMORY_KINDS),
+                 "item_minimum": 0, "item_maximum": 0x7fffffff, "labels": list(MEMORY_KINDS)},
+            ]
+            buckets = len(MEMORY_TIERS) + len(MEMORY_KINDS) + 2
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 * buckets or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    arrays != expected_arrays or
+                    scalars != [{"name": scalar, "type": "u32", "minimum": 0,
+                                 "maximum": 0x7fffffff} for scalar in ("total", "conflicts")]):
+                fail("stats-counts-reply",
+                     "reply must declare every labelled bucket in the reviewed order")
+        elif key == ("memory", 18) and name == "expire" and \
+                operation["wire_format"] == "db2-envelope-u32-pair-v1":
+            # Each row delete is paired with its provenance delete; the private
+            # kind and lifecycle lookups stay behind the handler.
+            if operation["c_symbols"] != ["db2_memory_promotion_delete_l0_provenance",
+                                          "db2_memory_promotion_delete_l0",
+                                          "db2_memory_promotion_delete_stale_l1_provenance",
+                                          "db2_memory_promotion_delete_stale_l1"]:
+                fail("operation-c-symbols",
+                     "expire C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "expire results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "expire.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"stale_l1_tier": "L1", "maximum_kinds": 16}):
+                fail("expire-request",
+                     "request must carry no payload and use the fixed tier and kind bound")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"}, "expire.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("expire-reply", "reply must report both expiry stages")
+            counts = [_keys(field, {"name", "type", "minimum", "maximum"},
+                            f"expire.reply.fields[{index}]")
+                      for index, field in enumerate(reply_fields)]
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    counts != [{"name": name_, "type": "u32", "minimum": 0,
+                                "maximum": 0x7fffffff}
+                               for name_ in ("level0_deleted", "stale_level1_deleted")]):
+                fail("expire-reply", "reply must contain both bounded deletion counts")
+        elif key == ("memory", 19) and name == "demote" and \
+                operation["wire_format"] == "db2-envelope-u32-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_demote_kind",
+                                          "db2_memory_promotion_demote_cascade"]:
+                fail("operation-c-symbols",
+                     "demote C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "demote results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "demote.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"demote_tier": "L2", "maximum_kinds": 16}):
+                fail("demote-request",
+                     "request must carry no payload and use the fixed tier and kind bound")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields", "consistency"},
+                          "demote.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("demote-reply", "reply must report the demotion and its cascade")
+            counts = [_keys(field, {"name", "type", "minimum", "maximum"},
+                            f"demote.reply.fields[{index}]")
+                      for index, field in enumerate(reply_fields)]
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["consistency"] != "demoted_count=0 requires cascaded_count=0" or
+                    counts != [{"name": name_, "type": "u32", "minimum": 0,
+                                "maximum": 0x7fffffff}
+                               for name_ in ("demoted_count", "cascaded_count")]):
+                fail("demote-reply",
+                     "reply must contain both bounded counts and the cascade invariant")
+        elif key == ("memory", 20) and name == "promote_stable" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_promote_stable_l2_to_l3"]:
+                fail("operation-c-symbols",
+                     "promote_stable C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "promote_stable results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "promote_stable.request")
+            policy = _keys(request["policy"],
+                           {"source_tier", "target_tier", "kinds",
+                            "minimum_confidence_binary64_bits", "minimum_use_count",
+                            "stable_days"},
+                           "promote_stable.request.policy")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    policy != {"source_tier": "L2", "target_tier": "L3",
+                               "kinds": ["fact", "preference"],
+                               "minimum_confidence_binary64_bits": 0x3fee666666666666,
+                               "minimum_use_count": 5, "stable_days": 30}):
+                fail("promote-stable-request",
+                     "request must carry no payload and use the complete fixed stability policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "promote_stable.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "promote_stable.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "promoted_count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("promote-stable-reply", "reply must contain one bounded promotion count")
+        elif key == ("memory", 21) and name == "reclassify_directives" and \
+                operation["wire_format"] == "db2-envelope-flag-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_reclassify_directives"]:
+                fail("operation-c-symbols",
+                     "reclassify_directives C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "reclassify_directives results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "policy", "field"},
+                            "reclassify_directives.request")
+            policy = _keys(request["policy"],
+                           {"source_tier", "target_tier", "kinds", "gated_kind"},
+                           "reclassify_directives.request.policy")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "reclassify_directives.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 4 or
+                    policy != {"source_tier": "L3", "target_tier": "L4",
+                               "kinds": ["policy", "workflow"], "gated_kind": "policy"} or
+                    request_field != {"name": "require_approval", "type": "u32", "minimum": 0,
+                                      "maximum": 1}):
+                fail("reclassify-directives-request",
+                     "request must fix the tiers and kinds and carry only the approval gate")
+            # The gate only narrows the gated kind; the other directive kind is
+            # always eligible, so a gated_kind outside the promotable set would
+            # make the gate meaningless.
+            if policy["gated_kind"] not in policy["kinds"]:
+                fail("reclassify-directives-request",
+                     "the gated kind must be one of the promotable directive kinds")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "reclassify_directives.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "reclassify_directives.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "reclassified_count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("reclassify-directives-reply",
+                     "reply must contain one bounded reclassification count")
+        elif key == ("memory", 22) and name == "record_l4_approval" and \
+                operation["wire_format"] == "db2-envelope-u64-string-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_record_l4_approval"]:
+                fail("operation-c-symbols",
+                     "record_l4_approval C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "record_l4_approval results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "policy", "fields"},
+                            "record_l4_approval.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("record-l4-approval-request",
+                     "request must carry the memory, the approver, and the note")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "record_l4_approval.request.fields[0]")
+            approver = _keys(request_fields[1],
+                             {"name", "type", "minimum_bytes", "maximum_bytes"},
+                             "record_l4_approval.request.fields[1]")
+            note = _keys(request_fields[2], {"name", "type", "minimum_bytes", "maximum_bytes"},
+                         "record_l4_approval.request.fields[2]")
+            # The approver is who is accountable for the promotion, so it is
+            # required; the note is optional colour.
+            if (request["policy"] != {"target_tier": "L4"} or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    approver != {"name": "approver", "type": "utf8", "minimum_bytes": 1,
+                                 "maximum_bytes": 63} or
+                    note != {"name": "note", "type": "utf8", "minimum_bytes": 0,
+                             "maximum_bytes": 511}):
+                fail("record-l4-approval-request",
+                     "request must fix the approved tier and bound the approver and note")
+            if (request["encoded_size_min"] !=
+                    ENVELOPE_HEADER_LEN + 8 + 4 + approver["minimum_bytes"] + 4 +
+                    note["minimum_bytes"] or
+                    request["encoded_size_max"] !=
+                    ENVELOPE_HEADER_LEN + 8 + 4 + approver["maximum_bytes"] + 4 +
+                    note["maximum_bytes"]):
+                fail("record-l4-approval-request",
+                     "encoded sizes must follow from the declared field bounds")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "record_l4_approval.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("record-l4-approval-reply",
+                     "reply must acknowledge the approval without a payload")
+        else:
+            fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
+    if len(raw_operations) != 32 or [item["name"] for item in raw_operations] != [
+            "health", "embedding_dimension", "pool_status", "embedding_refusals",
+            "postgres_status", "reembed_status", "reembed_clear",
+            "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
+            "level3_count", "level2_count", "orphaned_l0_count", "total_count",
+            "session_l2_count", "key_exists", "find_id_by_key_kind",
+            "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
+            "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
+            "health_record", "health_retention", "health_counters", "stats_counts",
+            "expire", "demote", "promote_stable", "reclassify_directives",
+            "record_l4_approval"]:
+        fail("unsupported-operation",
+             "the partial generator requires the thirty-two supported operations exactly once")
     return catalog
 
 
@@ -257,7 +1271,8 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
     review = load_json(root / DECLARATION_REVIEW)
     ledger = load_json(root / DECLARATION_LEDGER, MAX_LEDGER_BYTES)
     if (not isinstance(review, dict) or
-            type(review.get("declarations_complete")) is not bool):
+            type(review.get("declarations_complete")) is not bool or
+            not isinstance(review.get("reviews"), list)):
         fail("declaration-review", f"{DECLARATION_REVIEW} has no completeness boolean")
     if (not isinstance(ledger, dict) or
             type(ledger.get("declarations_complete")) is not bool or
@@ -266,6 +1281,35 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
         fail("declaration-ledger", f"{DECLARATION_LEDGER} has no typed completeness summary")
     if review["declarations_complete"] != ledger["declarations_complete"]:
         fail("declaration-completeness-drift", "review and generated ledger disagree")
+
+    expected: dict[str, tuple[str, str]] = {}
+    operations = catalog["operations"]
+    assert isinstance(operations, list)
+    for operation in operations:
+        assert isinstance(operation, dict)
+        symbols = operation["c_symbols"]
+        assert isinstance(symbols, list)
+        for symbol in symbols:
+            expected[str(symbol)] = (str(operation["family"]), str(operation["db3_placement"]))
+    actual: dict[str, tuple[str, str]] = {}
+    for index, row in enumerate(review["reviews"]):
+        if not isinstance(row, dict):
+            fail("declaration-review", f"review row {index} must be an object")
+        if row.get("disposition") != "wire-operation":
+            continue
+        symbol = row.get("symbol")
+        family = row.get("family")
+        placement = row.get("db3_placement")
+        if not all(isinstance(value, str) for value in (symbol, family, placement)):
+            fail("declaration-review", f"wire review row {index} has invalid fields")
+        actual[str(symbol)] = (str(family), str(placement))
+    if actual != expected:
+        fail("declaration-operation-binding",
+             f"wire reviews {sorted(actual)} differ from catalog C symbols {sorted(expected)}")
+    for symbol, binding in expected.items():
+        if actual[symbol] != binding:
+            fail("declaration-operation-binding",
+                 f"wire review for {symbol} differs from its catalog family or placement")
     if catalog["catalog_complete"] and (
             not review["declarations_complete"] or ledger["summary"]["audit_pending"] != 0):
         fail("catalog-declaration-gate", "catalog completeness requires a closed declaration audit")
@@ -281,15 +1325,399 @@ def _put_u32(value: int) -> bytes:
     return value.to_bytes(4, "little")
 
 
+def _put_u16(value: int) -> bytes:
+    return value.to_bytes(2, "little")
+
+
+def _put_u64(value: int) -> bytes:
+    return value.to_bytes(8, "little")
+
+
+def _binary64_literal(bits: int) -> str:
+    """Render a catalog binary64 bit pattern as a finite C and Go floating literal."""
+    if not isinstance(bits, int) or isinstance(bits, bool) or not 0 <= bits <= 0xFFFFFFFFFFFFFFFF:
+        fail("binary64-literal", "binary64 bound must be an unsigned 64-bit bit pattern")
+    value = struct.unpack("<d", _put_u64(bits))[0]
+    if value != value or value in (float("inf"), float("-inf")):
+        fail("binary64-literal", "binary64 bound must be finite")
+    text = repr(value)
+    return text if ("." in text or "e" in text or "E" in text) else text + ".0"
+
+
+def _envelope(
+        catalog: dict[str, object], magic: int, operation: int, code: int, payload: bytes) -> bytes:
+    return (
+        _put_u32(magic) + _put_u16(int(catalog["wire_version"])) +
+        _put_u16(ENVELOPE_HEADER_LEN) + _put_u32(operation) + _put_u32(code) +
+        _put_u32(len(payload)) + _put_u32(0) + payload
+    )
+
+
 def baseline_bytes(catalog: dict[str, object]) -> bytes:
-    operation = catalog["operations"][0]
-    request = _put_u32(operation["request"]["magic"]) + _put_u32(catalog["wire_version"])
+    health = catalog["operations"][0]
+    embedding_dimension = catalog["operations"][1]
+    pool_status = catalog["operations"][2]
+    embedding_refusals = catalog["operations"][3]
+    postgres_status = catalog["operations"][4]
+    reembed_status = catalog["operations"][5]
+    reembed_clear = catalog["operations"][6]
+    reembed_clear_maintenance = catalog["operations"][7]
+    embedder_serving_id = catalog["operations"][8]
+    dimension_reset = catalog["operations"][9]
+    level3_count = catalog["operations"][10]
+    level2_count = catalog["operations"][11]
+    orphaned_l0_count = catalog["operations"][12]
+    total_count = catalog["operations"][13]
+    session_l2_count = catalog["operations"][14]
+    key_exists = catalog["operations"][15]
+    find_id_by_key_kind = catalog["operations"][16]
+    key_exists_in_tier_pair = catalog["operations"][17]
+    effectiveness_update = catalog["operations"][18]
+    retention_enforce = catalog["operations"][19]
+    effectiveness_demote = catalog["operations"][20]
+    effectiveness_stats = catalog["operations"][21]
+    l2_memory_ids = catalog["operations"][22]
+    health_record = catalog["operations"][23]
+    health_retention = catalog["operations"][24]
+    health_counters = catalog["operations"][25]
+    stats_counts = catalog["operations"][26]
+    expire = catalog["operations"][27]
+    demote = catalog["operations"][28]
+    promote_stable = catalog["operations"][29]
+    reclassify_directives = catalog["operations"][30]
+    record_l4_approval = catalog["operations"][31]
+    request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
-        body = (_put_u32(operation["reply"]["magic"]) + _put_u32(catalog["wire_version"]) +
+        body = (_put_u32(health["reply"]["magic"]) + _put_u32(catalog["wire_version"]) +
                 _put_u32(flags) + _put_u32(0))
         replies.append({"flags": flags, "hex": body.hex()})
     response = bytes.fromhex(replies[0]["hex"])
+    envelope_payload = bytes.fromhex("aabbcc")
+    envelope_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, 0x01020304, 5, envelope_payload,
+    )
+    envelope_replies = [
+        {
+            "result": index,
+            "hex": _envelope(
+                catalog, ENVELOPE_REPLY_MAGIC, 0x01020304, index, envelope_payload,
+            ).hex(),
+        }
+        for index in range(len(RESULT_CODES))
+    ]
+    envelope_reply = bytes.fromhex(envelope_replies[0]["hex"])
+
+    def mutate_u32(frame: bytes, offset: int, value: int) -> bytes:
+        return frame[:offset] + _put_u32(value) + frame[offset + 4:]
+
+    dimension_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(embedding_dimension["id"]), 0, b"",
+    )
+    dimension_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_dimension["id"]), 0, _put_u32(384),
+    )
+    dimension_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_dimension["id"]), 5, b"",
+    )
+    pool_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(pool_status["id"]), 0, b"",
+    )
+    pool_payload = (_put_u32(16) + _put_u32(2) + _put_u32(1) + _put_u64(10) +
+                    _put_u64(3) + _put_u64(4) + _put_u64(5))
+    pool_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(pool_status["id"]), 0, pool_payload,
+    )
+    pool_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(pool_status["id"]), 5, b"",
+    )
+    refusals_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(embedding_refusals["id"]), 0, b"",
+    )
+    refusals_payload = _put_u64(7) + _put_u32(768)
+    refusals_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_refusals["id"]), 0, refusals_payload,
+    )
+    refusals_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_refusals["id"]), 5, b"",
+    )
+    postgres_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(postgres_status["id"]), 0, b"",
+    )
+    postgres_payload = (_put_u32(15) + _put_u32(12) + _put_u32(100) + _put_u32(1) +
+                        _put_u64(1048576))
+    postgres_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(postgres_status["id"]), 0, postgres_payload,
+    )
+    postgres_partial_payload = (_put_u32(3) + _put_u32(12) + _put_u32(100) +
+                                _put_u32(0) + _put_u64(0))
+    postgres_partial = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(postgres_status["id"]), 0,
+        postgres_partial_payload,
+    )
+    postgres_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(postgres_status["id"]), 5, b"",
+    )
+    reembed_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reembed_status["id"]), 0, b"",
+    )
+    reembed_payload = _put_u32(384) + _put_u64(1700000000)
+    reembed_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_status["id"]), 0, reembed_payload,
+    )
+    reembed_absent = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_status["id"]), 1, b"",
+    )
+    reembed_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_status["id"]), 5, b"",
+    )
+    reembed_clear_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reembed_clear["id"]), 0, b"",
+    )
+    reembed_clear_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear["id"]), 0, b"",
+    )
+    reembed_clear_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear["id"]), 5, b"",
+    )
+    maintenance_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reembed_clear_maintenance["id"]), 0, _put_u32(0),
+    )
+    maintenance_ok_payload = _put_u32(1) + _put_u32(384) + _put_u32(384)
+    maintenance_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear_maintenance["id"]), 0,
+        maintenance_ok_payload,
+    )
+    maintenance_conflict_payload = _put_u32(1) + _put_u32(768) + _put_u32(384)
+    maintenance_conflict = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear_maintenance["id"]), 2,
+        maintenance_conflict_payload,
+    )
+    maintenance_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_clear_maintenance["id"]), 5, b"",
+    )
+    serving_id_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(embedder_serving_id["id"]), 0, b"",
+    )
+    serving_id = b"bekko-a25m/8721341054416418"
+    serving_id_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 0,
+        _put_u32(len(serving_id)) + serving_id,
+    )
+    serving_id_empty = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 0, _put_u32(0),
+    )
+    serving_id_max_value = b"x" * 159
+    serving_id_max = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 0,
+        _put_u32(len(serving_id_max_value)) + serving_id_max_value,
+    )
+    serving_id_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedder_serving_id["id"]), 5, b"",
+    )
+    reset_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(dimension_reset["id"]), 0,
+        _put_u32(384) + _put_u32(0) + _put_u32(1),
+    )
+    reset_payload = (_put_u32(768) + _put_u32(384) + _put_u32(6) + _put_u32(0) +
+                     _put_u64(1234) + _put_u32(0) + _put_u32(0))
+    reset_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(dimension_reset["id"]), 0, reset_payload,
+    )
+    reset_conflict = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(dimension_reset["id"]), 2, reset_payload,
+    )
+    reset_denied = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(dimension_reset["id"]), 3, reset_payload,
+    )
+    reset_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(dimension_reset["id"]), 5, b"",
+    )
+    level3_count_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(level3_count["id"]), 0, b"",
+    )
+    level3_count_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(level3_count["id"]), 0, _put_u32(42),
+    )
+    level2_count_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(level2_count["id"]), 0, b"",
+    )
+    level2_count_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(level2_count["id"]), 0, _put_u32(17),
+    )
+    orphaned_l0_count_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(orphaned_l0_count["id"]), 0, b"",
+    )
+    orphaned_l0_count_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(orphaned_l0_count["id"]), 0, _put_u32(5),
+    )
+    total_count_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
+    )
+    total_count_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(total_count["id"]), 0, _put_u64(1234567890123),
+    )
+    source_session = b"session-123"
+    session_l2_count_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(session_l2_count["id"]), 0,
+        _put_u32(len(source_session)) + source_session,
+    )
+    session_l2_count_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(session_l2_count["id"]), 0, _put_u32(3),
+    )
+    memory_key = b"recovery:tool-a->tool-b"
+    key_exists_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(key_exists["id"]), 0,
+        _put_u32(len(memory_key)) + memory_key,
+    )
+    key_exists_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(key_exists["id"]), 0, _put_u32(1),
+    )
+    lookup_key = b"task:deploy-fix"
+    lookup_kind = b"task"
+    find_id_by_key_kind_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(find_id_by_key_kind["id"]), 0,
+        _put_u32(len(lookup_key)) + lookup_key + _put_u32(len(lookup_kind)) + lookup_kind,
+    )
+    find_id_by_key_kind_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(find_id_by_key_kind["id"]), 0,
+        _put_u32(1) + _put_u64(42),
+    )
+    lookup_tier_a = b"L3"
+    lookup_tier_b = b"L4"
+    key_exists_in_tier_pair_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(key_exists_in_tier_pair["id"]), 0,
+        _put_u32(len(memory_key)) + memory_key +
+        _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+        _put_u32(len(lookup_tier_b)) + lookup_tier_b,
+    )
+    key_exists_in_tier_pair_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(key_exists_in_tier_pair["id"]), 0, _put_u32(1),
+    )
+    effectiveness_value_bits = 0x3fe8000000000000  # 0.75
+    effectiveness_update_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(effectiveness_update["id"]), 0,
+        _put_u64(42) + _put_u32(1) + _put_u64(effectiveness_value_bits),
+    )
+    effectiveness_update_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_update["id"]), 0, b"",
+    )
+    effectiveness_update_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_update["id"]), 5, b"",
+    )
+    retention_enforce_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(retention_enforce["id"]), 0, b"",
+    )
+    retention_enforce_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(retention_enforce["id"]), 0, _put_u32(4),
+    )
+    effectiveness_demote_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(effectiveness_demote["id"]), 0, b"",
+    )
+    effectiveness_demote_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_demote["id"]), 0, _put_u32(2),
+    )
+    effectiveness_stats_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(effectiveness_stats["id"]), 0, b"",
+    )
+    effectiveness_stats_average_bits = 0x3fe0000000000000
+    effectiveness_stats_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_stats["id"]), 0,
+        _put_u64(effectiveness_stats_average_bits) + _put_u32(3) + _put_u32(1),
+    )
+    l2_memory_ids_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(l2_memory_ids["id"]), 0, b"",
+    )
+    l2_memory_ids_values = (7, 19, 9223372036854775807)
+    l2_memory_ids_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(l2_memory_ids["id"]), 0,
+        _put_u32(len(l2_memory_ids_values)) + b"".join(
+            _put_u64(value) for value in l2_memory_ids_values),
+    )
+    l2_memory_ids_empty = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(l2_memory_ids["id"]), 0, _put_u32(0),
+    )
+    health_record_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(health_record["id"]), 0,
+        _put_u32(4) + _put_u32(2) + _put_u32(9),
+    )
+    health_record_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(health_record["id"]), 0, b"",
+    )
+    health_retention_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(health_retention["id"]), 0, b"",
+    )
+    health_retention_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(health_retention["id"]), 0,
+        _put_u32(11) + _put_u32(3),
+    )
+    health_counters_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(health_counters["id"]), 0, b"",
+    )
+    health_counters_values = (7, 13, 5, 2, 4, 21, 9, 30, 6)
+    health_counters_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(health_counters["id"]), 0,
+        b"".join(_put_u32(value) for value in health_counters_values),
+    )
+    stats_counts_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(stats_counts["id"]), 0, b"",
+    )
+    stats_counts_tiers = (3, 12, 30, 8, 2, 1)
+    stats_counts_kinds = (14, 5, 6, 9, 4, 3, 2, 1, 7, 5)
+    stats_counts_total = sum(stats_counts_tiers)
+    stats_counts_conflicts = 4
+    stats_counts_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(stats_counts["id"]), 0,
+        b"".join(_put_u32(value) for value in stats_counts_tiers) +
+        b"".join(_put_u32(value) for value in stats_counts_kinds) +
+        _put_u32(stats_counts_total) + _put_u32(stats_counts_conflicts),
+    )
+    expire_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(expire["id"]), 0, b"",
+    )
+    expire_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(expire["id"]), 0, _put_u32(9) + _put_u32(17),
+    )
+    demote_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(demote["id"]), 0, b"",
+    )
+    demote_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(demote["id"]), 0, _put_u32(6) + _put_u32(2),
+    )
+    demote_idle = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(demote["id"]), 0, _put_u32(0) + _put_u32(0),
+    )
+    promote_stable_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(promote_stable["id"]), 0, b"",
+    )
+    promote_stable_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(promote_stable["id"]), 0, _put_u32(4),
+    )
+    reclassify_gated_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reclassify_directives["id"]), 0, _put_u32(1),
+    )
+    reclassify_open_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reclassify_directives["id"]), 0, _put_u32(0),
+    )
+    reclassify_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reclassify_directives["id"]), 0, _put_u32(3),
+    )
+    approval_approver = b"operator"
+    approval_note = b"reviewed with the platform team"
+    approval_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+        _put_u64(42) + _put_u32(len(approval_approver)) + approval_approver +
+        _put_u32(len(approval_note)) + approval_note,
+    )
+    # An empty note is legal; an empty approver is not.
+    approval_bare_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+        _put_u64(42) + _put_u32(len(approval_approver)) + approval_approver + _put_u32(0),
+    )
+    approval_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(record_l4_approval["id"]), 0, b"",
+    )
+
     value = {
         "schema_version": 1,
         "catalog_sha256": catalog_fingerprint(catalog),
@@ -298,10 +1726,57 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
         "result_codes": [
             {"id": index, "name": name} for index, name in enumerate(catalog["result_codes"])
         ],
+        "body_envelope": {
+            "header_len": ENVELOPE_HEADER_LEN,
+            "request": {
+                "positive": envelope_request.hex(),
+                "negative": [
+                    {"mutation": "bad_magic", "hex":
+                     (bytes([envelope_request[0] ^ 1]) + envelope_request[1:]).hex()},
+                    {"mutation": "bad_version", "hex":
+                     (envelope_request[:4] + bytes([envelope_request[4] ^ 1]) +
+                      envelope_request[5:]).hex()},
+                    {"mutation": "bad_header_len", "hex":
+                     (envelope_request[:6] + bytes([envelope_request[6] ^ 1]) +
+                      envelope_request[7:]).hex()},
+                    {"mutation": "zero_operation", "hex":
+                     mutate_u32(envelope_request, 8, 0).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(envelope_request, 16, len(envelope_payload) + 1).hex()},
+                    {"mutation": "reserved", "hex":
+                     mutate_u32(envelope_request, 20, 1).hex()},
+                    {"mutation": "short", "hex": envelope_request[:-1].hex()},
+                    {"mutation": "long", "hex": (envelope_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": envelope_replies,
+                "negative": [
+                    {"mutation": "bad_magic", "hex":
+                     (bytes([envelope_reply[0] ^ 1]) + envelope_reply[1:]).hex()},
+                    {"mutation": "bad_version", "hex":
+                     (envelope_reply[:4] + bytes([envelope_reply[4] ^ 1]) +
+                      envelope_reply[5:]).hex()},
+                    {"mutation": "bad_header_len", "hex":
+                     (envelope_reply[:6] + bytes([envelope_reply[6] ^ 1]) +
+                      envelope_reply[7:]).hex()},
+                    {"mutation": "zero_operation", "hex":
+                     mutate_u32(envelope_reply, 8, 0).hex()},
+                    {"mutation": "unknown_result", "hex":
+                     mutate_u32(envelope_reply, 12, len(RESULT_CODES)).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(envelope_reply, 16, len(envelope_payload) + 1).hex()},
+                    {"mutation": "reserved", "hex":
+                     mutate_u32(envelope_reply, 20, 1).hex()},
+                    {"mutation": "short", "hex": envelope_reply[:-1].hex()},
+                    {"mutation": "long", "hex": (envelope_reply + b"\0").hex()},
+                ],
+            },
+        },
         "operations": [{
-            "family": operation["family"],
-            "id": operation["id"],
-            "name": operation["name"],
+            "family": health["family"],
+            "id": health["id"],
+            "name": health["name"],
             "request": {
                 "positive": request.hex(),
                 "negative": [
@@ -322,6 +1797,1388 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (response + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": embedding_dimension["family"],
+            "id": embedding_dimension["id"],
+            "name": embedding_dimension["name"],
+            "request": {
+                "positive": dimension_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(dimension_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(dimension_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": dimension_request[:-1].hex()},
+                    {"mutation": "long", "hex": (dimension_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "dimension": 384, "hex": dimension_ok.hex()},
+                    {"result": 5, "dimension": 0, "hex": dimension_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(dimension_ok, 8, 1).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(dimension_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedding_dimension["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(dimension_ok, 12, 5).hex()},
+                    {"mutation": "zero_dimension", "hex":
+                     (dimension_ok[:-4] + _put_u32(0)).hex()},
+                    {"mutation": "dimension_too_large", "hex":
+                     (dimension_ok[:-4] + _put_u32(4001)).hex()},
+                    {"mutation": "short", "hex": dimension_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (dimension_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": pool_status["family"],
+            "id": pool_status["id"],
+            "name": pool_status["name"],
+            "request": {
+                "positive": pool_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex": mutate_u32(pool_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(pool_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": pool_request[:-1].hex()},
+                    {"mutation": "long", "hex": (pool_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "size": 16, "in_use": 2, "waiters": 1,
+                     "lease_grants": 10, "lease_timeouts": 3, "stuck": 4, "poisoned": 5,
+                     "hex": pool_ok.hex()},
+                    {"result": 5, "size": 0, "in_use": 0, "waiters": 0,
+                     "lease_grants": 0, "lease_timeouts": 0, "stuck": 0, "poisoned": 0,
+                     "hex": pool_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex": mutate_u32(pool_ok, 8, 2).hex()},
+                    {"mutation": "unsupported_result", "hex": mutate_u32(pool_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(pool_status["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(pool_ok, 12, 5).hex()},
+                    {"mutation": "zero_size", "hex":
+                     mutate_u32(pool_ok, ENVELOPE_HEADER_LEN, 0).hex()},
+                    {"mutation": "size_too_large", "hex":
+                     mutate_u32(pool_ok, ENVELOPE_HEADER_LEN, 257).hex()},
+                    {"mutation": "in_use_too_large", "hex":
+                     mutate_u32(pool_ok, ENVELOPE_HEADER_LEN + 4, 17).hex()},
+                    {"mutation": "short", "hex": pool_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (pool_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": embedding_refusals["family"],
+            "id": embedding_refusals["id"],
+            "name": embedding_refusals["name"],
+            "request": {
+                "positive": refusals_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(refusals_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(refusals_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": refusals_request[:-1].hex()},
+                    {"mutation": "long", "hex": (refusals_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "refused_count": 7, "last_offered": 768,
+                     "hex": refusals_ok.hex()},
+                    {"result": 5, "refused_count": 0, "last_offered": 0,
+                     "hex": refusals_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(refusals_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(refusals_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedding_refusals["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(refusals_ok, 12, 5).hex()},
+                    {"mutation": "count_without_dimension", "hex":
+                     mutate_u32(refusals_ok, ENVELOPE_HEADER_LEN + 8, 0).hex()},
+                    {"mutation": "dimension_without_count", "hex":
+                     (refusals_ok[:ENVELOPE_HEADER_LEN] + _put_u64(0) + _put_u32(768)).hex()},
+                    {"mutation": "offered_too_large", "hex":
+                     mutate_u32(refusals_ok, ENVELOPE_HEADER_LEN + 8, 0x80000000).hex()},
+                    {"mutation": "short", "hex": refusals_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (refusals_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": postgres_status["family"],
+            "id": postgres_status["id"],
+            "name": postgres_status["name"],
+            "request": {
+                "positive": postgres_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(postgres_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(postgres_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": postgres_request[:-1].hex()},
+                    {"mutation": "long", "hex": (postgres_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "available": 15, "active_connections": 12,
+                     "max_connections": 100, "is_replica": 1,
+                     "replica_lag_bytes": 1048576, "hex": postgres_ok.hex()},
+                    {"result": 0, "available": 3, "active_connections": 12,
+                     "max_connections": 100, "is_replica": 0,
+                     "replica_lag_bytes": 0, "hex": postgres_partial.hex()},
+                    {"result": 5, "available": 0, "active_connections": 0,
+                     "max_connections": 0, "is_replica": 0,
+                     "replica_lag_bytes": 0, "hex": postgres_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(postgres_ok, 8, 4).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(postgres_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(postgres_status["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(postgres_ok, 12, 5).hex()},
+                    {"mutation": "unknown_availability", "hex":
+                     mutate_u32(postgres_ok, ENVELOPE_HEADER_LEN, 16).hex()},
+                    {"mutation": "active_without_availability", "hex":
+                     mutate_u32(postgres_ok, ENVELOPE_HEADER_LEN, 14).hex()},
+                    {"mutation": "max_without_availability", "hex":
+                     mutate_u32(postgres_ok, ENVELOPE_HEADER_LEN, 13).hex()},
+                    {"mutation": "role_without_availability", "hex":
+                     mutate_u32(postgres_ok, ENVELOPE_HEADER_LEN, 11).hex()},
+                    {"mutation": "lag_without_availability", "hex":
+                     mutate_u32(postgres_ok, ENVELOPE_HEADER_LEN, 7).hex()},
+                    {"mutation": "lag_on_primary", "hex":
+                     mutate_u32(postgres_ok, ENVELOPE_HEADER_LEN + 12, 0).hex()},
+                    {"mutation": "invalid_replica_role", "hex":
+                     mutate_u32(postgres_ok, ENVELOPE_HEADER_LEN + 12, 2).hex()},
+                    {"mutation": "short", "hex": postgres_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (postgres_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": reembed_status["family"],
+            "id": reembed_status["id"],
+            "name": reembed_status["name"],
+            "request": {
+                "positive": reembed_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(reembed_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(reembed_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": reembed_request[:-1].hex()},
+                    {"mutation": "long", "hex": (reembed_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "target_dimension": 384, "started_epoch": 1700000000,
+                     "hex": reembed_ok.hex()},
+                    {"result": 1, "target_dimension": 0, "started_epoch": 0,
+                     "hex": reembed_absent.hex()},
+                    {"result": 5, "target_dimension": 0, "started_epoch": 0,
+                     "hex": reembed_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(reembed_ok, 8, 5).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(reembed_ok, 12, 2).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_status["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(reembed_ok, 12, 1).hex()},
+                    {"mutation": "zero_dimension", "hex":
+                     mutate_u32(reembed_ok, ENVELOPE_HEADER_LEN, 0).hex()},
+                    {"mutation": "dimension_too_large", "hex":
+                     mutate_u32(reembed_ok, ENVELOPE_HEADER_LEN, 4001).hex()},
+                    {"mutation": "zero_epoch", "hex":
+                     (reembed_ok[:ENVELOPE_HEADER_LEN + 4] + _put_u64(0)).hex()},
+                    {"mutation": "short", "hex": reembed_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (reembed_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": reembed_clear["family"],
+            "id": reembed_clear["id"],
+            "name": reembed_clear["name"],
+            "request": {
+                "positive": reembed_clear_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(reembed_clear_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(reembed_clear_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": reembed_clear_request[:-1].hex()},
+                    {"mutation": "long", "hex": (reembed_clear_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": reembed_clear_ok.hex()},
+                    {"result": 5, "hex": reembed_clear_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(reembed_clear_ok, 8, 6).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(reembed_clear_ok, 12, 1).hex()},
+                    {"mutation": "ok_with_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_clear["id"]), 0, b"\0").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_clear["id"]), 5, b"\0").hex()},
+                    {"mutation": "short", "hex": reembed_clear_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (reembed_clear_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": reembed_clear_maintenance["family"],
+            "id": reembed_clear_maintenance["id"],
+            "name": reembed_clear_maintenance["name"],
+            "request": {
+                "positive": maintenance_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(maintenance_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(maintenance_request, 16, 0).hex()},
+                    {"mutation": "invalid_force", "hex":
+                     mutate_u32(maintenance_request, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "short", "hex": maintenance_request[:-1].hex()},
+                    {"mutation": "long", "hex": (maintenance_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "was_in_progress": 1, "recorded_dimension": 384,
+                     "running_dimension": 384, "hex": maintenance_ok.hex()},
+                    {"result": 2, "was_in_progress": 1, "recorded_dimension": 768,
+                     "running_dimension": 384, "hex": maintenance_conflict.hex()},
+                    {"result": 5, "was_in_progress": 0, "recorded_dimension": 0,
+                     "running_dimension": 0, "hex": maintenance_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(maintenance_ok, 8, 7).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(maintenance_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_clear_maintenance["id"]), 0, b"").hex()},
+                    {"mutation": "conflict_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_clear_maintenance["id"]), 2, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(maintenance_ok, 12, 5).hex()},
+                    {"mutation": "invalid_was_in_progress", "hex":
+                     mutate_u32(maintenance_ok, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "recorded_too_large", "hex":
+                     mutate_u32(maintenance_ok, ENVELOPE_HEADER_LEN + 4, 4001).hex()},
+                    {"mutation": "zero_running_dimension", "hex":
+                     mutate_u32(maintenance_ok, ENVELOPE_HEADER_LEN + 8, 0).hex()},
+                    {"mutation": "conflict_without_mismatch", "hex":
+                     mutate_u32(maintenance_conflict, ENVELOPE_HEADER_LEN + 4, 384).hex()},
+                    {"mutation": "short", "hex": maintenance_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (maintenance_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": embedder_serving_id["family"],
+            "id": embedder_serving_id["id"],
+            "name": embedder_serving_id["name"],
+            "request": {
+                "positive": serving_id_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(serving_id_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(serving_id_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": serving_id_request[:-1].hex()},
+                    {"mutation": "long", "hex": (serving_id_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "serving_id": serving_id.decode(),
+                     "hex": serving_id_ok.hex()},
+                    {"result": 0, "serving_id": "", "hex": serving_id_empty.hex()},
+                    {"result": 0, "serving_id": serving_id_max_value.decode(),
+                     "hex": serving_id_max.hex()},
+                    {"result": 5, "serving_id": "", "hex": serving_id_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(serving_id_ok, 8, 8).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(serving_id_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedder_serving_id["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(serving_id_ok, 12, 5).hex()},
+                    {"mutation": "length_mismatch", "hex":
+                     mutate_u32(serving_id_ok, ENVELOPE_HEADER_LEN,
+                                len(serving_id) + 1).hex()},
+                    {"mutation": "length_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedder_serving_id["id"]), 0,
+                               _put_u32(160) + (b"x" * 160)).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     (serving_id_ok[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": serving_id_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (serving_id_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": dimension_reset["family"],
+            "id": dimension_reset["id"],
+            "name": dimension_reset["name"],
+            "request": {
+                "positive": reset_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex": mutate_u32(reset_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(reset_request, 16, 8).hex()},
+                    {"mutation": "target_zero", "hex":
+                     mutate_u32(reset_request, ENVELOPE_HEADER_LEN, 0).hex()},
+                    {"mutation": "target_too_large", "hex":
+                     mutate_u32(reset_request, ENVELOPE_HEADER_LEN, 4001).hex()},
+                    {"mutation": "invalid_force", "hex":
+                     mutate_u32(reset_request, ENVELOPE_HEADER_LEN + 4, 2).hex()},
+                    {"mutation": "invalid_dry_run", "hex":
+                     mutate_u32(reset_request, ENVELOPE_HEADER_LEN + 8, 2).hex()},
+                    {"mutation": "short", "hex": reset_request[:-1].hex()},
+                    {"mutation": "long", "hex": (reset_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": reset_ok.hex()},
+                    {"result": 2, "hex": reset_conflict.hex()},
+                    {"result": 3, "hex": reset_denied.hex()},
+                    {"result": 5, "hex": reset_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(reset_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(reset_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(dimension_reset["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(reset_ok, 12, 5).hex()},
+                    {"mutation": "target_zero", "hex":
+                     mutate_u32(reset_ok, ENVELOPE_HEADER_LEN + 4, 0).hex()},
+                    {"mutation": "tables_too_large", "hex":
+                     mutate_u32(reset_ok, ENVELOPE_HEADER_LEN + 8, 17).hex()},
+                    {"mutation": "short", "hex": reset_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (reset_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": level3_count["family"],
+            "id": level3_count["id"],
+            "name": level3_count["name"],
+            "request": {
+                "positive": level3_count_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(level3_count_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(level3_count_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": level3_count_request[:-1].hex()},
+                    {"mutation": "long", "hex": (level3_count_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "count": 42, "hex": level3_count_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(level3_count_ok, 8, 2).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(level3_count_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(level3_count["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (level3_count_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": level3_count_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (level3_count_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": level2_count["family"],
+            "id": level2_count["id"],
+            "name": level2_count["name"],
+            "request": {
+                "positive": level2_count_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(level2_count_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(level2_count_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": level2_count_request[:-1].hex()},
+                    {"mutation": "long", "hex": (level2_count_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "count": 17, "hex": level2_count_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(level2_count_ok, 8, 1).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(level2_count_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(level2_count["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (level2_count_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": level2_count_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (level2_count_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": orphaned_l0_count["family"],
+            "id": orphaned_l0_count["id"],
+            "name": orphaned_l0_count["name"],
+            "request": {
+                "positive": orphaned_l0_count_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(orphaned_l0_count_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(orphaned_l0_count_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": orphaned_l0_count_request[:-1].hex()},
+                    {"mutation": "long", "hex": (orphaned_l0_count_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "count": 5, "hex": orphaned_l0_count_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(orphaned_l0_count_ok, 8, 2).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(orphaned_l0_count_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(orphaned_l0_count["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (orphaned_l0_count_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": orphaned_l0_count_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (orphaned_l0_count_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": total_count["family"],
+            "id": total_count["id"],
+            "name": total_count["name"],
+            "request": {
+                "positive": total_count_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(total_count_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(total_count_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": total_count_request[:-1].hex()},
+                    {"mutation": "long", "hex": (total_count_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "count": 1234567890123, "hex": total_count_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(total_count_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(total_count_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(total_count["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (total_count_ok[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": total_count_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (total_count_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": session_l2_count["family"],
+            "id": session_l2_count["id"],
+            "name": session_l2_count["name"],
+            "request": {
+                "positive": session_l2_count_request.hex(),
+                "source_session": source_session.decode(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(session_l2_count_request, 12, 1).hex()},
+                    {"mutation": "empty_session", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(session_l2_count["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "length_mismatch", "hex":
+                     mutate_u32(session_l2_count_request, ENVELOPE_HEADER_LEN,
+                                len(source_session) + 1).hex()},
+                    {"mutation": "session_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(session_l2_count["id"]), 0,
+                               _put_u32(128) + b"x" * 128).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     (session_l2_count_request[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": session_l2_count_request[:-1].hex()},
+                    {"mutation": "long", "hex": (session_l2_count_request + b"x").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "count": 3, "hex": session_l2_count_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(session_l2_count_ok, 8, 4).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(session_l2_count_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(session_l2_count["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (session_l2_count_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": session_l2_count_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (session_l2_count_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": key_exists["family"],
+            "id": key_exists["id"],
+            "name": key_exists["name"],
+            "request": {
+                "positive": key_exists_request.hex(),
+                "key": memory_key.decode(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(key_exists_request, 12, 1).hex()},
+                    {"mutation": "empty_key", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "length_mismatch", "hex":
+                     mutate_u32(key_exists_request, ENVELOPE_HEADER_LEN,
+                                len(memory_key) + 1).hex()},
+                    {"mutation": "key_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(key_exists["id"]), 0,
+                               _put_u32(512) + b"x" * 512).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     (key_exists_request[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": key_exists_request[:-1].hex()},
+                    {"mutation": "long", "hex": (key_exists_request + b"x").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "exists": 1, "hex": key_exists_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(key_exists_ok, 8, 5).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(key_exists_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(key_exists["id"]), 0, b"").hex()},
+                    {"mutation": "exists_too_large", "hex":
+                     (key_exists_ok[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex": key_exists_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (key_exists_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": find_id_by_key_kind["family"],
+            "id": find_id_by_key_kind["id"],
+            "name": find_id_by_key_kind["name"],
+            "request": {
+                "positive": find_id_by_key_kind_request.hex(),
+                "key": lookup_key.decode(),
+                "kind": lookup_kind.decode(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(find_id_by_key_kind_request, 12, 1).hex()},
+                    {"mutation": "empty_key", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(find_id_by_key_kind["id"]), 0,
+                               _put_u32(0) + _put_u32(len(lookup_kind)) + lookup_kind).hex()},
+                    {"mutation": "key_length_mismatch", "hex":
+                     mutate_u32(find_id_by_key_kind_request, ENVELOPE_HEADER_LEN,
+                                len(lookup_key) + 1).hex()},
+                    {"mutation": "key_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(find_id_by_key_kind["id"]), 0,
+                               _put_u32(512) + b"x" * 512 +
+                               _put_u32(len(lookup_kind)) + lookup_kind).hex()},
+                    {"mutation": "key_embedded_nul", "hex":
+                     (find_id_by_key_kind_request[:ENVELOPE_HEADER_LEN + 4] + b"\0" +
+                      find_id_by_key_kind_request[ENVELOPE_HEADER_LEN + 5:]).hex()},
+                    {"mutation": "empty_kind", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(find_id_by_key_kind["id"]), 0,
+                               _put_u32(len(lookup_key)) + lookup_key + _put_u32(0)).hex()},
+                    {"mutation": "kind_length_mismatch", "hex":
+                     mutate_u32(find_id_by_key_kind_request,
+                                ENVELOPE_HEADER_LEN + 4 + len(lookup_key),
+                                len(lookup_kind) + 1).hex()},
+                    {"mutation": "kind_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(find_id_by_key_kind["id"]), 0,
+                               _put_u32(len(lookup_key)) + lookup_key +
+                               _put_u32(16) + b"x" * 16).hex()},
+                    {"mutation": "kind_embedded_nul", "hex":
+                     (find_id_by_key_kind_request[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": find_id_by_key_kind_request[:-1].hex()},
+                    {"mutation": "long", "hex": (find_id_by_key_kind_request + b"x").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "found": 1, "id": 42,
+                     "hex": find_id_by_key_kind_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(find_id_by_key_kind_ok, 8, 6).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(find_id_by_key_kind_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(find_id_by_key_kind["id"]), 0, b"").hex()},
+                    {"mutation": "found_too_large", "hex":
+                     (find_id_by_key_kind_ok[:ENVELOPE_HEADER_LEN] + _put_u32(2) +
+                      find_id_by_key_kind_ok[ENVELOPE_HEADER_LEN + 4:]).hex()},
+                    {"mutation": "absent_with_id", "hex":
+                     (find_id_by_key_kind_ok[:ENVELOPE_HEADER_LEN] + _put_u32(0) +
+                      _put_u64(42)).hex()},
+                    {"mutation": "present_without_id", "hex":
+                     (find_id_by_key_kind_ok[:ENVELOPE_HEADER_LEN + 4] + _put_u64(0)).hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (find_id_by_key_kind_ok[:ENVELOPE_HEADER_LEN + 4] +
+                      _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": find_id_by_key_kind_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (find_id_by_key_kind_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": key_exists_in_tier_pair["family"],
+            "id": key_exists_in_tier_pair["id"],
+            "name": key_exists_in_tier_pair["name"],
+            "request": {
+                "positive": key_exists_in_tier_pair_request.hex(),
+                "key": memory_key.decode(),
+                "tier_a": lookup_tier_a.decode(),
+                "tier_b": lookup_tier_b.decode(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request, 12, 1).hex()},
+                    {"mutation": "empty_key", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(0) +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "key_length_mismatch", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request, ENVELOPE_HEADER_LEN,
+                                len(memory_key) + 1).hex()},
+                    {"mutation": "key_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(512) + b"x" * 512 +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "key_embedded_nul", "hex":
+                     (key_exists_in_tier_pair_request[:ENVELOPE_HEADER_LEN + 4] + b"\0" +
+                      key_exists_in_tier_pair_request[ENVELOPE_HEADER_LEN + 5:]).hex()},
+                    {"mutation": "empty_tier_a", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key + _put_u32(0) +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "tier_a_length_mismatch", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request,
+                                ENVELOPE_HEADER_LEN + 4 + len(memory_key),
+                                len(lookup_tier_a) + 1).hex()},
+                    {"mutation": "tier_a_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key +
+                               _put_u32(16) + b"x" * 16 +
+                               _put_u32(len(lookup_tier_b)) + lookup_tier_b).hex()},
+                    {"mutation": "tier_a_embedded_nul", "hex":
+                     (key_exists_in_tier_pair_request[
+                         :ENVELOPE_HEADER_LEN + 8 + len(memory_key)] + b"\0" +
+                      key_exists_in_tier_pair_request[
+                          ENVELOPE_HEADER_LEN + 9 + len(memory_key):]).hex()},
+                    {"mutation": "empty_tier_b", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(0)).hex()},
+                    {"mutation": "tier_b_length_mismatch", "hex":
+                     mutate_u32(key_exists_in_tier_pair_request,
+                                ENVELOPE_HEADER_LEN + 8 + len(memory_key) + len(lookup_tier_a),
+                                len(lookup_tier_b) + 1).hex()},
+                    {"mutation": "tier_b_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0,
+                               _put_u32(len(memory_key)) + memory_key +
+                               _put_u32(len(lookup_tier_a)) + lookup_tier_a +
+                               _put_u32(16) + b"x" * 16).hex()},
+                    {"mutation": "tier_b_embedded_nul", "hex":
+                     (key_exists_in_tier_pair_request[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex":
+                     key_exists_in_tier_pair_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (key_exists_in_tier_pair_request + b"x").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "exists": 1, "hex": key_exists_in_tier_pair_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(key_exists_in_tier_pair_ok, 8, 7).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(key_exists_in_tier_pair_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(key_exists_in_tier_pair["id"]), 0, b"").hex()},
+                    {"mutation": "exists_too_large", "hex":
+                     (key_exists_in_tier_pair_ok[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex": key_exists_in_tier_pair_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (key_exists_in_tier_pair_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": effectiveness_update["family"],
+            "id": effectiveness_update["id"],
+            "name": effectiveness_update["name"],
+            "request": {
+                "positive": effectiveness_update_request.hex(),
+                "memory_id": 42,
+                "has_value": 1,
+                "value_bits": effectiveness_value_bits,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(effectiveness_update_request, 12, 1).hex()},
+                    {"mutation": "zero_memory_id", "hex":
+                     (effectiveness_update_request[:ENVELOPE_HEADER_LEN] + _put_u64(0) +
+                      effectiveness_update_request[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "memory_id_too_large", "hex":
+                     (effectiveness_update_request[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0x8000000000000000) +
+                      effectiveness_update_request[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "has_value_too_large", "hex":
+                     mutate_u32(effectiveness_update_request, ENVELOPE_HEADER_LEN + 8, 2).hex()},
+                    {"mutation": "clear_with_value", "hex":
+                     mutate_u32(effectiveness_update_request, ENVELOPE_HEADER_LEN + 8, 0).hex()},
+                    {"mutation": "short", "hex": effectiveness_update_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_update_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": effectiveness_update_ok.hex()},
+                    {"result": 5, "hex": effectiveness_update_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(effectiveness_update_ok, 8, 8).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(effectiveness_update_ok, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(effectiveness_update["id"]), 0, b"\0").hex()},
+                    {"mutation": "short", "hex": effectiveness_update_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_update_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": retention_enforce["family"],
+            "id": retention_enforce["id"],
+            "name": retention_enforce["name"],
+            "request": {
+                "positive": retention_enforce_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(retention_enforce_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(retention_enforce_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": retention_enforce_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (retention_enforce_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "deleted_count": 4, "hex": retention_enforce_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(retention_enforce_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(retention_enforce_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(retention_enforce["id"]), 0, b"").hex()},
+                    {"mutation": "deleted_count_too_large", "hex":
+                     (retention_enforce_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": retention_enforce_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (retention_enforce_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": effectiveness_demote["family"],
+            "id": effectiveness_demote["id"],
+            "name": effectiveness_demote["name"],
+            "request": {
+                "positive": effectiveness_demote_request.hex(),
+                "threshold_bits": 0x3fd3333333333333,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(effectiveness_demote_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(effectiveness_demote_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": effectiveness_demote_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_demote_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "demoted_count": 2, "hex": effectiveness_demote_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(effectiveness_demote_ok, 8, 10).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(effectiveness_demote_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(effectiveness_demote["id"]), 0, b"").hex()},
+                    {"mutation": "demoted_count_too_large", "hex":
+                     (effectiveness_demote_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": effectiveness_demote_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_demote_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": effectiveness_stats["family"],
+            "id": effectiveness_stats["id"],
+            "name": effectiveness_stats["name"],
+            "request": {
+                "positive": effectiveness_stats_request.hex(),
+                "low_threshold_bits": 0x3fd3333333333333,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(effectiveness_stats_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(effectiveness_stats_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": effectiveness_stats_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_stats_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "avg_effectiveness_bits": effectiveness_stats_average_bits,
+                     "low_effectiveness_count": 3, "high_impact_count": 1,
+                     "hex": effectiveness_stats_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(effectiveness_stats_ok, 8, 11).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(effectiveness_stats_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(effectiveness_stats["id"]), 0, b"").hex()},
+                    {"mutation": "average_above_maximum", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0x3ff0000000000001) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "average_negative", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0xbfe0000000000000) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "average_not_a_number", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0x7ff8000000000000) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "low_effectiveness_count_too_large", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN + 8] +
+                      _put_u32(0x80000000) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 12:]).hex()},
+                    {"mutation": "high_impact_count_too_large", "hex":
+                     (effectiveness_stats_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": effectiveness_stats_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_stats_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": l2_memory_ids["family"],
+            "id": l2_memory_ids["id"],
+            "name": l2_memory_ids["name"],
+            "request": {
+                "positive": l2_memory_ids_request.hex(),
+                "maximum_ids": l2_memory_ids["request"]["policy"]["maximum_ids"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(l2_memory_ids_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(l2_memory_ids_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": l2_memory_ids_request[:-1].hex()},
+                    {"mutation": "long", "hex": (l2_memory_ids_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "memory_ids": list(l2_memory_ids_values),
+                     "hex": l2_memory_ids_ok.hex()},
+                    {"result": 0, "memory_ids": [], "hex": l2_memory_ids_empty.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(l2_memory_ids_ok, 8, 12).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(l2_memory_ids_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_count", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(l2_memory_ids["id"]), 0, b"").hex()},
+                    {"mutation": "count_exceeds_payload", "hex":
+                     mutate_u32(l2_memory_ids_ok, ENVELOPE_HEADER_LEN, 4).hex()},
+                    {"mutation": "count_below_payload", "hex":
+                     mutate_u32(l2_memory_ids_ok, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "count_above_maximum", "hex":
+                     mutate_u32(l2_memory_ids_ok, ENVELOPE_HEADER_LEN, 2049).hex()},
+                    {"mutation": "identifier_zero", "hex":
+                     (l2_memory_ids_ok[:ENVELOPE_HEADER_LEN + 4] + _put_u64(0) +
+                      l2_memory_ids_ok[ENVELOPE_HEADER_LEN + 12:]).hex()},
+                    {"mutation": "identifier_above_maximum", "hex":
+                     (l2_memory_ids_ok[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": l2_memory_ids_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (l2_memory_ids_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": health_record["family"],
+            "id": health_record["id"],
+            "name": health_record["name"],
+            "request": {
+                "positive": health_record_request.hex(),
+                "promotions": 4,
+                "demotions": 2,
+                "expirations": 9,
+                "conflict_window_days":
+                    health_record["request"]["policy"]["conflict_window_days"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(health_record_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(health_record_request, 16, 8).hex()},
+                    {"mutation": "promotions_too_large", "hex":
+                     mutate_u32(health_record_request, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "demotions_too_large", "hex":
+                     mutate_u32(health_record_request, ENVELOPE_HEADER_LEN + 4, 0x80000000).hex()},
+                    {"mutation": "expirations_too_large", "hex":
+                     mutate_u32(health_record_request, ENVELOPE_HEADER_LEN + 8, 0x80000000).hex()},
+                    {"mutation": "short", "hex": health_record_request[:-1].hex()},
+                    {"mutation": "long", "hex": (health_record_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": health_record_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(health_record_ok, 8, 13).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(health_record_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(health_record["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": health_record_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (health_record_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": health_retention["family"],
+            "id": health_retention["id"],
+            "name": health_retention["name"],
+            "request": {
+                "positive": health_retention_request.hex(),
+                "snapshot_retention_days":
+                    health_retention["request"]["policy"]["snapshot_retention_days"],
+                "contradiction_retention_days":
+                    health_retention["request"]["policy"]["contradiction_retention_days"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(health_retention_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(health_retention_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": health_retention_request[:-1].hex()},
+                    {"mutation": "long", "hex": (health_retention_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "snapshots_deleted": 11, "contradictions_deleted": 3,
+                     "hex": health_retention_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(health_retention_ok, 8, 14).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(health_retention_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(health_retention["id"]), 0, b"").hex()},
+                    {"mutation": "snapshots_deleted_too_large", "hex":
+                     mutate_u32(health_retention_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "contradictions_deleted_too_large", "hex":
+                     mutate_u32(health_retention_ok, ENVELOPE_HEADER_LEN + 4, 0x80000000).hex()},
+                    {"mutation": "short", "hex": health_retention_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (health_retention_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": health_counters["family"],
+            "id": health_counters["id"],
+            "name": health_counters["name"],
+            "request": {
+                "positive": health_counters_request.hex(),
+                "promote_use_count":
+                    health_counters["request"]["policy"]["promote_use_count"],
+                "promote_confidence_bits":
+                    health_counters["request"]["policy"]["promote_confidence_binary64_bits"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(health_counters_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(health_counters_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": health_counters_request[:-1].hex()},
+                    {"mutation": "long", "hex": (health_counters_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0,
+                     "counters": dict(zip(HEALTH_COUNTERS, health_counters_values)),
+                     "hex": health_counters_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(health_counters_ok, 8, 15).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(health_counters_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(health_counters["id"]), 0, b"").hex()},
+                    # Every counter is bounded, including the last one on the wire.
+                    {"mutation": "first_counter_too_large", "hex":
+                     mutate_u32(health_counters_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "last_counter_too_large", "hex":
+                     (health_counters_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": health_counters_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (health_counters_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": stats_counts["family"],
+            "id": stats_counts["id"],
+            "name": stats_counts["name"],
+            "request": {
+                "positive": stats_counts_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(stats_counts_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(stats_counts_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": stats_counts_request[:-1].hex()},
+                    {"mutation": "long", "hex": (stats_counts_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0,
+                     "tier_counts": list(stats_counts_tiers),
+                     "kind_counts": list(stats_counts_kinds),
+                     "total": stats_counts_total,
+                     "conflicts": stats_counts_conflicts,
+                     "hex": stats_counts_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(stats_counts_ok, 8, 16).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(stats_counts_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(stats_counts["id"]), 0, b"").hex()},
+                    {"mutation": "first_tier_too_large", "hex":
+                     mutate_u32(stats_counts_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    # The last kind bucket is the one a short mapping would drop.
+                    {"mutation": "last_kind_too_large", "hex":
+                     mutate_u32(
+                         stats_counts_ok,
+                         ENVELOPE_HEADER_LEN + 4 * (len(MEMORY_TIERS) + len(MEMORY_KINDS) - 1),
+                         0x80000000).hex()},
+                    {"mutation": "conflicts_too_large", "hex":
+                     (stats_counts_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": stats_counts_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (stats_counts_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": expire["family"],
+            "id": expire["id"],
+            "name": expire["name"],
+            "request": {
+                "positive": expire_request.hex(),
+                "stale_l1_tier": expire["request"]["policy"]["stale_l1_tier"],
+                "maximum_kinds": expire["request"]["policy"]["maximum_kinds"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(expire_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(expire_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": expire_request[:-1].hex()},
+                    {"mutation": "long", "hex": (expire_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "level0_deleted": 9, "stale_level1_deleted": 17,
+                     "hex": expire_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(expire_ok, 8, 17).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(expire_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(expire["id"]), 0, b"").hex()},
+                    {"mutation": "level0_deleted_too_large", "hex":
+                     mutate_u32(expire_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "stale_level1_deleted_too_large", "hex":
+                     mutate_u32(expire_ok, ENVELOPE_HEADER_LEN + 4, 0x80000000).hex()},
+                    {"mutation": "short", "hex": expire_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (expire_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": demote["family"],
+            "id": demote["id"],
+            "name": demote["name"],
+            "request": {
+                "positive": demote_request.hex(),
+                "demote_tier": demote["request"]["policy"]["demote_tier"],
+                "maximum_kinds": demote["request"]["policy"]["maximum_kinds"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(demote_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(demote_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": demote_request[:-1].hex()},
+                    {"mutation": "long", "hex": (demote_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "demoted_count": 6, "cascaded_count": 2,
+                     "hex": demote_ok.hex()},
+                    {"result": 0, "demoted_count": 0, "cascaded_count": 0,
+                     "hex": demote_idle.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(demote_ok, 8, 18).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(demote_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(demote["id"]), 0, b"").hex()},
+                    {"mutation": "demoted_count_too_large", "hex":
+                     mutate_u32(demote_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "cascaded_count_too_large", "hex":
+                     mutate_u32(demote_ok, ENVELOPE_HEADER_LEN + 4, 0x80000000).hex()},
+                    # A cascade without a demotion contradicts the invariant.
+                    {"mutation": "cascade_without_demotion", "hex":
+                     mutate_u32(demote_idle, ENVELOPE_HEADER_LEN + 4, 1).hex()},
+                    {"mutation": "short", "hex": demote_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (demote_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": promote_stable["family"],
+            "id": promote_stable["id"],
+            "name": promote_stable["name"],
+            "request": {
+                "positive": promote_stable_request.hex(),
+                "source_tier": promote_stable["request"]["policy"]["source_tier"],
+                "target_tier": promote_stable["request"]["policy"]["target_tier"],
+                "kinds": list(promote_stable["request"]["policy"]["kinds"]),
+                "confidence_bits":
+                    promote_stable["request"]["policy"]["minimum_confidence_binary64_bits"],
+                "use_count": promote_stable["request"]["policy"]["minimum_use_count"],
+                "stable_days": promote_stable["request"]["policy"]["stable_days"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(promote_stable_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(promote_stable_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": promote_stable_request[:-1].hex()},
+                    {"mutation": "long", "hex": (promote_stable_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "promoted_count": 4, "hex": promote_stable_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(promote_stable_ok, 8, 19).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(promote_stable_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(promote_stable["id"]), 0, b"").hex()},
+                    {"mutation": "promoted_count_too_large", "hex":
+                     (promote_stable_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": promote_stable_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (promote_stable_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": reclassify_directives["family"],
+            "id": reclassify_directives["id"],
+            "name": reclassify_directives["name"],
+            "request": {
+                # Both gate settings are canonical: the batch path runs open,
+                # the operator approval path runs gated.
+                "positive": reclassify_gated_request.hex(),
+                "require_approval": 1,
+                "open_positive": reclassify_open_request.hex(),
+                "source_tier": reclassify_directives["request"]["policy"]["source_tier"],
+                "target_tier": reclassify_directives["request"]["policy"]["target_tier"],
+                "kinds": list(reclassify_directives["request"]["policy"]["kinds"]),
+                "gated_kind": reclassify_directives["request"]["policy"]["gated_kind"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(reclassify_gated_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(reclassify_gated_request, 16, 0).hex()},
+                    {"mutation": "gate_out_of_range", "hex":
+                     mutate_u32(reclassify_gated_request, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "short", "hex": reclassify_gated_request[:-1].hex()},
+                    {"mutation": "long", "hex": (reclassify_gated_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "reclassified_count": 3, "hex": reclassify_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(reclassify_ok, 8, 20).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(reclassify_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reclassify_directives["id"]), 0, b"").hex()},
+                    {"mutation": "reclassified_count_too_large", "hex":
+                     (reclassify_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": reclassify_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (reclassify_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": record_l4_approval["family"],
+            "id": record_l4_approval["id"],
+            "name": record_l4_approval["name"],
+            "request": {
+                "positive": approval_request.hex(),
+                "memory_id": 42,
+                "approver": approval_approver.decode("ascii"),
+                "note": approval_note.decode("ascii"),
+                "bare_positive": approval_bare_request.hex(),
+                "target_tier": record_l4_approval["request"]["policy"]["target_tier"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(approval_request, 12, 1).hex()},
+                    {"mutation": "memory_id_zero", "hex":
+                     (approval_request[:ENVELOPE_HEADER_LEN] + _put_u64(0) +
+                      approval_request[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "approver_empty", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u64(42) + _put_u32(0) + _put_u32(0)).hex()},
+                    {"mutation": "approver_too_long", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u64(42) + _put_u32(64) + b"a" * 64 + _put_u32(0)).hex()},
+                    {"mutation": "approver_length_overruns_payload", "hex":
+                     mutate_u32(approval_request, ENVELOPE_HEADER_LEN + 8, 60).hex()},
+                    {"mutation": "approver_embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u64(42) + _put_u32(8) + b"opera\0tor" [:8] +
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": approval_request[:-1].hex()},
+                    {"mutation": "long", "hex": (approval_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": approval_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(approval_ok, 8, 21).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(approval_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(record_l4_approval["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": approval_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (approval_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -334,8 +3191,39 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
 
     fingerprint = catalog_fingerprint(catalog)
     families = catalog["families"]
-    operation = catalog["operations"][0]
-    flags = operation["reply"]["flags"]
+    health = catalog["operations"][0]
+    embedding_dimension = catalog["operations"][1]
+    pool_status = catalog["operations"][2]
+    embedding_refusals = catalog["operations"][3]
+    postgres_status = catalog["operations"][4]
+    reembed_status = catalog["operations"][5]
+    reembed_clear = catalog["operations"][6]
+    reembed_clear_maintenance = catalog["operations"][7]
+    embedder_serving_id = catalog["operations"][8]
+    dimension_reset = catalog["operations"][9]
+    level3_count = catalog["operations"][10]
+    level2_count = catalog["operations"][11]
+    orphaned_l0_count = catalog["operations"][12]
+    total_count = catalog["operations"][13]
+    session_l2_count = catalog["operations"][14]
+    key_exists = catalog["operations"][15]
+    find_id_by_key_kind = catalog["operations"][16]
+    key_exists_in_tier_pair = catalog["operations"][17]
+    effectiveness_update = catalog["operations"][18]
+    retention_enforce = catalog["operations"][19]
+    effectiveness_demote = catalog["operations"][20]
+    effectiveness_stats = catalog["operations"][21]
+    l2_memory_ids = catalog["operations"][22]
+    health_record = catalog["operations"][23]
+    health_retention = catalog["operations"][24]
+    health_counters = catalog["operations"][25]
+    stats_counts = catalog["operations"][26]
+    expire = catalog["operations"][27]
+    demote = catalog["operations"][28]
+    promote_stable = catalog["operations"][29]
+    reclassify_directives = catalog["operations"][30]
+    record_l4_approval = catalog["operations"][31]
+    flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
         ("AIMEE_DB2_WIRE_VERSION", f"{catalog['wire_version']}u"),
@@ -354,13 +3242,442 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     operation_macros = macros([
         ("AIMEE_DB2_EVENT_HEALTH", "AIMEE_DB2_EVENT_LIFECYCLE"),
         ("AIMEE_DB2_STAGE_HEALTH", "AIMEE_DB2_FAMILY_LIFECYCLE"),
-        ("AIMEE_DB2_OPERATION_HEALTH", f"{operation['id']}u"),
+        ("AIMEE_DB2_OPERATION_HEALTH", f"{health['id']}u"),
         ("AIMEE_DB2_REQUEST_MAGIC",
-         f"0x{operation['request']['magic']:08x}u /* \"D2HQ\", little-endian */"),
+         f"0x{health['request']['magic']:08x}u /* \"D2HQ\", little-endian */"),
         ("AIMEE_DB2_RESPONSE_MAGIC",
-         f"0x{operation['reply']['magic']:08x}u /* \"D2HR\", little-endian */"),
-        ("AIMEE_DB2_REQUEST_LEN", f"{operation['request']['encoded_size']}u"),
-        ("AIMEE_DB2_RESPONSE_LEN", f"{operation['reply']['encoded_size']}u"),
+         f"0x{health['reply']['magic']:08x}u /* \"D2HR\", little-endian */"),
+        ("AIMEE_DB2_REQUEST_LEN", f"{health['request']['encoded_size']}u"),
+        ("AIMEE_DB2_RESPONSE_LEN", f"{health['reply']['encoded_size']}u"),
+        ("AIMEE_DB2_EVENT_EMBEDDING_DIMENSION", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_EMBEDDING_DIMENSION", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION", f"{embedding_dimension['id']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN",
+         f"{embedding_dimension['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN",
+         f"{embedding_dimension['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN",
+         f"{embedding_dimension['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_MIN",
+         f"{embedding_dimension['reply']['field']['minimum']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_MAX",
+         f"{embedding_dimension['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_POOL_STATUS", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_POOL_STATUS", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_POOL_STATUS", f"{pool_status['id']}u"),
+        ("AIMEE_DB2_POOL_STATUS_REQUEST_LEN", f"{pool_status['request']['encoded_size']}u"),
+        ("AIMEE_DB2_POOL_STATUS_RESPONSE_LEN", f"{pool_status['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_POOL_STATUS_ERROR_LEN", f"{pool_status['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_POOL_SIZE_MAX", "256u"),
+        ("AIMEE_DB2_EVENT_EMBEDDING_REFUSALS", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_EMBEDDING_REFUSALS", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS", f"{embedding_refusals['id']}u"),
+        ("AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN",
+         f"{embedding_refusals['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN",
+         f"{embedding_refusals['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN",
+         f"{embedding_refusals['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EMBEDDING_OFFERED_MAX", "2147483647u"),
+        ("AIMEE_DB2_EVENT_POSTGRES_STATUS", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_POSTGRES_STATUS", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_POSTGRES_STATUS", f"{postgres_status['id']}u"),
+        ("AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN",
+         f"{postgres_status['request']['encoded_size']}u"),
+        ("AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN",
+         f"{postgres_status['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN",
+         f"{postgres_status['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE", "0x1u"),
+        ("AIMEE_DB2_POSTGRES_AVAILABLE_MAX", "0x2u"),
+        ("AIMEE_DB2_POSTGRES_AVAILABLE_ROLE", "0x4u"),
+        ("AIMEE_DB2_POSTGRES_AVAILABLE_LAG", "0x8u"),
+        ("AIMEE_DB2_POSTGRES_AVAILABLE_ALL", "0xfu"),
+        ("AIMEE_DB2_POSTGRES_COUNT_MAX", "2147483647u"),
+        ("AIMEE_DB2_EVENT_REEMBED_STATUS", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_REEMBED_STATUS", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_REEMBED_STATUS", f"{reembed_status['id']}u"),
+        ("AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN",
+         f"{reembed_status['request']['encoded_size']}u"),
+        ("AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN",
+         f"{reembed_status['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_REEMBED_STATUS_ERROR_LEN",
+         f"{reembed_status['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_REEMBED_DIMENSION_MIN", "1u"),
+        ("AIMEE_DB2_REEMBED_DIMENSION_MAX", "4000u"),
+        ("AIMEE_DB2_EVENT_REEMBED_CLEAR", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_REEMBED_CLEAR", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_REEMBED_CLEAR", f"{reembed_clear['id']}u"),
+        ("AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN",
+         f"{reembed_clear['request']['encoded_size']}u"),
+        ("AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN",
+         f"{reembed_clear['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR",
+         f"{reembed_clear_maintenance['id']}u"),
+        ("AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN",
+         f"{reembed_clear_maintenance['request']['encoded_size']}u"),
+        ("AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN",
+         f"{reembed_clear_maintenance['reply']['encoded_size_payload']}u"),
+        ("AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN",
+         f"{reembed_clear_maintenance['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID", f"{embedder_serving_id['id']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN",
+         f"{embedder_serving_id['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MIN_LEN",
+         f"{embedder_serving_id['reply']['encoded_size_min_ok']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN",
+         f"{embedder_serving_id['reply']['encoded_size_max_ok']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN",
+         f"{embedder_serving_id['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EMBEDDER_SERVING_ID_MAX",
+         f"{embedder_serving_id['reply']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_EVENT_DIMENSION_RESET", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_DIMENSION_RESET", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_DIMENSION_RESET", f"{dimension_reset['id']}u"),
+        ("AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN",
+         f"{dimension_reset['request']['encoded_size']}u"),
+        ("AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN",
+         f"{dimension_reset['reply']['encoded_size_payload']}u"),
+        ("AIMEE_DB2_DIMENSION_RESET_ERROR_LEN",
+         f"{dimension_reset['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_DIMENSION_RESET_TABLES_MAX", "16u"),
+        ("AIMEE_DB2_EVENT_LEVEL3_COUNT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_LEVEL3_COUNT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_LEVEL3_COUNT", f"{level3_count['id']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN",
+         f"{level3_count['request']['encoded_size']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN",
+         f"{level3_count['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_ERROR_LEN",
+         f"{level3_count['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_MAX",
+         f"{level3_count['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_LEVEL2_COUNT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_LEVEL2_COUNT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_LEVEL2_COUNT", f"{level2_count['id']}u"),
+        ("AIMEE_DB2_LEVEL2_COUNT_REQUEST_LEN",
+         f"{level2_count['request']['encoded_size']}u"),
+        ("AIMEE_DB2_LEVEL2_COUNT_RESPONSE_LEN",
+         f"{level2_count['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_LEVEL2_COUNT_ERROR_LEN",
+         f"{level2_count['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_LEVEL2_COUNT_MAX",
+         f"{level2_count['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_ORPHANED_L0_COUNT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_ORPHANED_L0_COUNT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_ORPHANED_L0_COUNT", f"{orphaned_l0_count['id']}u"),
+        ("AIMEE_DB2_ORPHANED_L0_COUNT_REQUEST_LEN",
+         f"{orphaned_l0_count['request']['encoded_size']}u"),
+        ("AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN",
+         f"{orphaned_l0_count['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_ORPHANED_L0_COUNT_ERROR_LEN",
+         f"{orphaned_l0_count['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_ORPHANED_L0_COUNT_MAX",
+         f"{orphaned_l0_count['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_TOTAL_COUNT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_TOTAL_COUNT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_TOTAL_COUNT", f"{total_count['id']}u"),
+        ("AIMEE_DB2_TOTAL_COUNT_REQUEST_LEN",
+         f"{total_count['request']['encoded_size']}u"),
+        ("AIMEE_DB2_TOTAL_COUNT_RESPONSE_LEN",
+         f"{total_count['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_TOTAL_COUNT_ERROR_LEN",
+         f"{total_count['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_TOTAL_COUNT_MAX",
+         f"{total_count['reply']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_SESSION_L2_COUNT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_SESSION_L2_COUNT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_SESSION_L2_COUNT", f"{session_l2_count['id']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MIN_LEN",
+         f"{session_l2_count['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN",
+         f"{session_l2_count['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN",
+         f"{session_l2_count['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_ERROR_LEN",
+         f"{session_l2_count['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX",
+         f"{session_l2_count['request']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_MAX",
+         f"{session_l2_count['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_KEY_EXISTS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_KEY_EXISTS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_KEY_EXISTS", f"{key_exists['id']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_REQUEST_MIN_LEN",
+         f"{key_exists['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_REQUEST_MAX_LEN",
+         f"{key_exists['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN",
+         f"{key_exists['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_ERROR_LEN",
+         f"{key_exists['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_KEY_MAX",
+         f"{key_exists['request']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_MAX",
+         f"{key_exists['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND", f"{find_id_by_key_kind['id']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MIN_LEN",
+         f"{find_id_by_key_kind['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN",
+         f"{find_id_by_key_kind['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN",
+         f"{find_id_by_key_kind['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_ERROR_LEN",
+         f"{find_id_by_key_kind['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX",
+         f"{find_id_by_key_kind['request']['fields'][0]['maximum_bytes']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX",
+         f"{find_id_by_key_kind['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX",
+         f"{find_id_by_key_kind['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX",
+         f"{find_id_by_key_kind['reply']['fields'][1]['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR",
+         f"{key_exists_in_tier_pair['id']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MIN_LEN",
+         f"{key_exists_in_tier_pair['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN",
+         f"{key_exists_in_tier_pair['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN",
+         f"{key_exists_in_tier_pair['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_ERROR_LEN",
+         f"{key_exists_in_tier_pair['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX",
+         f"{key_exists_in_tier_pair['request']['fields'][0]['maximum_bytes']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX",
+         f"{key_exists_in_tier_pair['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX",
+         f"{key_exists_in_tier_pair['request']['fields'][2]['maximum_bytes']}u"),
+        ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX",
+         f"{key_exists_in_tier_pair['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE", f"{effectiveness_update['id']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN",
+         f"{effectiveness_update['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN",
+         f"{effectiveness_update['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_ERROR_LEN",
+         f"{effectiveness_update['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX",
+         f"{effectiveness_update['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX",
+         f"{effectiveness_update['request']['fields'][1]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_RETENTION_ENFORCE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_RETENTION_ENFORCE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_RETENTION_ENFORCE", f"{retention_enforce['id']}u"),
+        ("AIMEE_DB2_RETENTION_ENFORCE_REQUEST_LEN",
+         f"{retention_enforce['request']['encoded_size']}u"),
+        ("AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN",
+         f"{retention_enforce['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_RETENTION_ENFORCE_ERROR_LEN",
+         f"{retention_enforce['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_RETENTION_RESTRICTED", '"restricted"'),
+        ("AIMEE_DB2_RETENTION_RESTRICTED_DAYS",
+         f"{retention_enforce['request']['policy'][0]['retention_days']}u"),
+        ("AIMEE_DB2_RETENTION_SENSITIVE", '"sensitive"'),
+        ("AIMEE_DB2_RETENTION_SENSITIVE_DAYS",
+         f"{retention_enforce['request']['policy'][1]['retention_days']}u"),
+        ("AIMEE_DB2_RETENTION_ENFORCE_MAX",
+         f"{retention_enforce['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE", f"{effectiveness_demote['id']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_DEMOTE_REQUEST_LEN",
+         f"{effectiveness_demote['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN",
+         f"{effectiveness_demote['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_DEMOTE_ERROR_LEN",
+         f"{effectiveness_demote['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD", "0.3"),
+        ("AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX",
+         f"{effectiveness_demote['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_EFFECTIVENESS_STATS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_EFFECTIVENESS_STATS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS", f"{effectiveness_stats['id']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN",
+         f"{effectiveness_stats['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN",
+         f"{effectiveness_stats['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_ERROR_LEN",
+         f"{effectiveness_stats['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD", "0.3"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN",
+         _binary64_literal(effectiveness_stats["reply"]["fields"][0]["minimum_binary64_bits"])),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX",
+         _binary64_literal(effectiveness_stats["reply"]["fields"][0]["maximum_binary64_bits"])),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX",
+         f"{effectiveness_stats['reply']['fields'][1]['maximum']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX",
+         f"{effectiveness_stats['reply']['fields'][2]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_L2_MEMORY_IDS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_L2_MEMORY_IDS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_L2_MEMORY_IDS", f"{l2_memory_ids['id']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN",
+         f"{l2_memory_ids['request']['encoded_size']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MIN_LEN",
+         f"{l2_memory_ids['reply']['encoded_size_min_ok']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN",
+         f"{l2_memory_ids['reply']['encoded_size_max_ok']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_ERROR_LEN",
+         f"{l2_memory_ids['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_L2_MEMORY_IDS_MAX",
+         f"{l2_memory_ids['reply']['field']['maximum_items']}u"),
+        ("AIMEE_DB2_L2_MEMORY_ID_MIN",
+         f"{l2_memory_ids['reply']['field']['item_minimum']}u"),
+        ("AIMEE_DB2_L2_MEMORY_ID_MAX",
+         f"{l2_memory_ids['reply']['field']['item_maximum']}ull"),
+        ("AIMEE_DB2_EVENT_HEALTH_RECORD", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HEALTH_RECORD", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HEALTH_RECORD", f"{health_record['id']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN",
+         f"{health_record['request']['encoded_size']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN",
+         f"{health_record['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_ERROR_LEN",
+         f"{health_record['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS",
+         f"{health_record['request']['policy']['conflict_window_days']}"),
+        ("AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX",
+         f"{health_record['request']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_HEALTH_RETENTION", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HEALTH_RETENTION", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HEALTH_RETENTION", f"{health_retention['id']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN",
+         f"{health_retention['request']['encoded_size']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN",
+         f"{health_retention['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_ERROR_LEN",
+         f"{health_retention['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HEALTH_RETENTION_SNAPSHOT_DAYS",
+         f"{health_retention['request']['policy']['snapshot_retention_days']}"),
+        ("AIMEE_DB2_HEALTH_RETENTION_CONTRADICTION_DAYS",
+         f"{health_retention['request']['policy']['contradiction_retention_days']}"),
+        ("AIMEE_DB2_HEALTH_RETENTION_MAX",
+         f"{health_retention['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_HEALTH_COUNTERS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HEALTH_COUNTERS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HEALTH_COUNTERS", f"{health_counters['id']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN",
+         f"{health_counters['request']['encoded_size']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN",
+         f"{health_counters['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_ERROR_LEN",
+         f"{health_counters['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT",
+         f"{health_counters['request']['policy']['promote_use_count']}"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE",
+         _binary64_literal(
+             health_counters["request"]["policy"]["promote_confidence_binary64_bits"])),
+        ("AIMEE_DB2_HEALTH_COUNTERS_FIELDS", f"{len(HEALTH_COUNTERS)}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_MAX",
+         f"{health_counters['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_STATS_COUNTS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_STATS_COUNTS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_STATS_COUNTS", f"{stats_counts['id']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_REQUEST_LEN",
+         f"{stats_counts['request']['encoded_size']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN",
+         f"{stats_counts['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_ERROR_LEN",
+         f"{stats_counts['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_STATS_COUNTS_TIERS", f"{len(MEMORY_TIERS)}u"),
+        ("AIMEE_DB2_STATS_COUNTS_KINDS", f"{len(MEMORY_KINDS)}u"),
+        ("AIMEE_DB2_STATS_COUNTS_MAX",
+         f"{stats_counts['reply']['fields'][2]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_EXPIRE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_EXPIRE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_EXPIRE", f"{expire['id']}u"),
+        ("AIMEE_DB2_EXPIRE_REQUEST_LEN", f"{expire['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EXPIRE_RESPONSE_LEN", f"{expire['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EXPIRE_ERROR_LEN", f"{expire['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EXPIRE_STALE_TIER", f"\"{expire['request']['policy']['stale_l1_tier']}\""),
+        ("AIMEE_DB2_EXPIRE_KINDS_MAX", f"{expire['request']['policy']['maximum_kinds']}u"),
+        ("AIMEE_DB2_EXPIRE_MAX", f"{expire['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_DEMOTE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_DEMOTE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_DEMOTE", f"{demote['id']}u"),
+        ("AIMEE_DB2_DEMOTE_REQUEST_LEN", f"{demote['request']['encoded_size']}u"),
+        ("AIMEE_DB2_DEMOTE_RESPONSE_LEN", f"{demote['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_DEMOTE_ERROR_LEN", f"{demote['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_DEMOTE_TIER", f"\"{demote['request']['policy']['demote_tier']}\""),
+        ("AIMEE_DB2_DEMOTE_KINDS_MAX", f"{demote['request']['policy']['maximum_kinds']}u"),
+        ("AIMEE_DB2_DEMOTE_MAX", f"{demote['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_PROMOTE_STABLE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_PROMOTE_STABLE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_PROMOTE_STABLE", f"{promote_stable['id']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN",
+         f"{promote_stable['request']['encoded_size']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN",
+         f"{promote_stable['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_ERROR_LEN",
+         f"{promote_stable['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_SOURCE_TIER",
+         f"\"{promote_stable['request']['policy']['source_tier']}\""),
+        ("AIMEE_DB2_PROMOTE_STABLE_TARGET_TIER",
+         f"\"{promote_stable['request']['policy']['target_tier']}\""),
+        ("AIMEE_DB2_PROMOTE_STABLE_CONFIDENCE",
+         _binary64_literal(
+             promote_stable["request"]["policy"]["minimum_confidence_binary64_bits"])),
+        ("AIMEE_DB2_PROMOTE_STABLE_USE_COUNT",
+         f"{promote_stable['request']['policy']['minimum_use_count']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_DAYS",
+         f"{promote_stable['request']['policy']['stable_days']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_MAX",
+         f"{promote_stable['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES", f"{reclassify_directives['id']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN",
+         f"{reclassify_directives['request']['encoded_size']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN",
+         f"{reclassify_directives['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_ERROR_LEN",
+         f"{reclassify_directives['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_SOURCE_TIER",
+         f"\"{reclassify_directives['request']['policy']['source_tier']}\""),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_TARGET_TIER",
+         f"\"{reclassify_directives['request']['policy']['target_tier']}\""),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATED_KIND",
+         f"\"{reclassify_directives['request']['policy']['gated_kind']}\""),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX",
+         f"{reclassify_directives['request']['field']['maximum']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX",
+         f"{reclassify_directives['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_RECORD_L4_APPROVAL", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_RECORD_L4_APPROVAL", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL", f"{record_l4_approval['id']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MIN_LEN",
+         f"{record_l4_approval['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN",
+         f"{record_l4_approval['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN",
+         f"{record_l4_approval['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_ERROR_LEN",
+         f"{record_l4_approval['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_TIER",
+         f"\"{record_l4_approval['request']['policy']['target_tier']}\""),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX",
+         f"{record_l4_approval['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX",
+         f"{record_l4_approval['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX",
+         f"{record_l4_approval['request']['fields'][2]['maximum_bytes']}u"),
+    ])
+    envelope_macros = macros([
+        ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
+         f"0x{ENVELOPE_REQUEST_MAGIC:08x}u /* \"D2RQ\", little-endian */"),
+        ("AIMEE_DB2_ENVELOPE_REPLY_MAGIC",
+         f"0x{ENVELOPE_REPLY_MAGIC:08x}u /* \"D2RR\", little-endian */"),
+        ("AIMEE_DB2_ENVELOPE_HEADER_LEN", f"{ENVELOPE_HEADER_LEN}u"),
     ])
     all_flags = sum(1 << item["bit"] for item in flags)
     flag_macros = macros([
@@ -374,6 +3691,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 {version_macros}
 
@@ -385,7 +3703,79 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
 
 {operation_macros}
 
+{envelope_macros}
+
 {flag_macros}
+
+typedef struct
+{{
+   uint32_t operation;
+   uint32_t flags;
+   uint32_t payload_len;
+}} aimee_db2_request_header_t;
+
+typedef struct
+{{
+   uint32_t operation;
+   uint32_t result;
+   uint32_t payload_len;
+}} aimee_db2_reply_header_t;
+
+typedef struct
+{{
+   uint32_t size;
+   uint32_t in_use;
+   uint32_t waiters;
+   uint64_t lease_grants;
+   uint64_t lease_timeouts;
+   uint64_t stuck;
+   uint64_t poisoned;
+}} aimee_db2_pool_status_t;
+
+typedef struct
+{{
+   uint64_t refused_count;
+   uint32_t last_offered;
+}} aimee_db2_embedding_refusals_t;
+
+typedef struct
+{{
+   uint32_t available;
+   uint32_t active_connections;
+   uint32_t max_connections;
+   uint32_t is_replica;
+   uint64_t replica_lag_bytes;
+}} aimee_db2_postgres_status_t;
+
+typedef struct
+{{
+   uint32_t target_dimension;
+   uint64_t started_epoch;
+}} aimee_db2_reembed_status_t;
+
+typedef struct
+{{
+   uint32_t was_in_progress;
+   uint32_t recorded_dimension;
+   uint32_t running_dimension;
+}} aimee_db2_reembed_clear_maintenance_t;
+
+typedef struct
+{{
+   uint32_t recorded_dimension;
+   uint32_t target_dimension;
+   uint32_t tables_discovered;
+   uint32_t tables_dropped;
+   uint64_t rows_cleared;
+   int32_t curator_requeued;
+   int32_t evidence_requeued;
+}} aimee_db2_dimension_reset_t;
+
+static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
+{{
+   output[0] = (uint8_t)value;
+   output[1] = (uint8_t)(value >> 8u);
+}}
 
 static inline void aimee_db2_put_u32(uint8_t *output, uint32_t value)
 {{
@@ -399,6 +3789,2539 @@ static inline uint32_t aimee_db2_get_u32(const uint8_t *input)
    for (unsigned index = 0; index < 4; ++index)
       value |= (uint32_t)input[index] << (index * 8u);
    return value;
+}}
+
+static inline uint16_t aimee_db2_get_u16(const uint8_t *input)
+{{
+   return (uint16_t)((uint16_t)input[0] | (uint16_t)((uint16_t)input[1] << 8u));
+}}
+
+static inline void aimee_db2_put_u64(uint8_t *output, uint64_t value)
+{{
+   for (unsigned index = 0; index < 8; ++index)
+      output[index] = (uint8_t)(value >> (index * 8u));
+}}
+
+static inline uint64_t aimee_db2_get_u64(const uint8_t *input)
+{{
+   uint64_t value = 0;
+   for (unsigned index = 0; index < 8; ++index)
+      value |= (uint64_t)input[index] << (index * 8u);
+   return value;
+}}
+
+static inline int aimee_db2_request_header_encode(uint32_t operation, uint32_t flags,
+                                                  uint32_t payload_len, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN || operation == 0)
+      return -1;
+   aimee_db2_put_u32(output, AIMEE_DB2_ENVELOPE_REQUEST_MAGIC);
+   aimee_db2_put_u16(output + 4, (uint16_t)AIMEE_DB2_WIRE_VERSION);
+   aimee_db2_put_u16(output + 6, (uint16_t)AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   aimee_db2_put_u32(output + 8, operation);
+   aimee_db2_put_u32(output + 12, flags);
+   aimee_db2_put_u32(output + 16, payload_len);
+   aimee_db2_put_u32(output + 20, 0u);
+   return 0;
+}}
+
+static inline int aimee_db2_request_header_decode(const uint8_t *input, size_t input_len,
+                                                  aimee_db2_request_header_t *header)
+{{
+   if (header)
+      *header = (aimee_db2_request_header_t){{0}};
+   if (!input || !header || input_len < AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input) != AIMEE_DB2_ENVELOPE_REQUEST_MAGIC ||
+       aimee_db2_get_u16(input + 4) != AIMEE_DB2_WIRE_VERSION ||
+       aimee_db2_get_u16(input + 6) != AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input + 8) == 0 || aimee_db2_get_u32(input + 20) != 0u ||
+       (size_t)aimee_db2_get_u32(input + 16) !=
+           input_len - AIMEE_DB2_ENVELOPE_HEADER_LEN)
+      return -1;
+   header->operation = aimee_db2_get_u32(input + 8);
+   header->flags = aimee_db2_get_u32(input + 12);
+   header->payload_len = aimee_db2_get_u32(input + 16);
+   return 0;
+}}
+
+static inline int aimee_db2_reply_header_encode(uint32_t operation, uint32_t result,
+                                                uint32_t payload_len, uint8_t *output,
+                                                size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN || operation == 0 ||
+       result > AIMEE_DB2_RESULT_INVALID_STATE)
+      return -1;
+   aimee_db2_put_u32(output, AIMEE_DB2_ENVELOPE_REPLY_MAGIC);
+   aimee_db2_put_u16(output + 4, (uint16_t)AIMEE_DB2_WIRE_VERSION);
+   aimee_db2_put_u16(output + 6, (uint16_t)AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   aimee_db2_put_u32(output + 8, operation);
+   aimee_db2_put_u32(output + 12, result);
+   aimee_db2_put_u32(output + 16, payload_len);
+   aimee_db2_put_u32(output + 20, 0u);
+   return 0;
+}}
+
+static inline int aimee_db2_reply_header_decode(const uint8_t *input, size_t input_len,
+                                                aimee_db2_reply_header_t *header)
+{{
+   if (header)
+      *header = (aimee_db2_reply_header_t){{0}};
+   if (!input || !header || input_len < AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input) != AIMEE_DB2_ENVELOPE_REPLY_MAGIC ||
+       aimee_db2_get_u16(input + 4) != AIMEE_DB2_WIRE_VERSION ||
+       aimee_db2_get_u16(input + 6) != AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input + 8) == 0 ||
+       aimee_db2_get_u32(input + 12) > AIMEE_DB2_RESULT_INVALID_STATE ||
+       aimee_db2_get_u32(input + 20) != 0u ||
+       (size_t)aimee_db2_get_u32(input + 16) !=
+           input_len - AIMEE_DB2_ENVELOPE_HEADER_LEN)
+      return -1;
+   header->operation = aimee_db2_get_u32(input + 8);
+   header->result = aimee_db2_get_u32(input + 12);
+   header->payload_len = aimee_db2_get_u32(input + 16);
+   return 0;
+}}
+
+static inline int aimee_db2_embedding_dimension_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_embedding_dimension_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_embedding_dimension_reply_encode(uint32_t result,
+                                                             uint32_t dimension,
+                                                             uint8_t *output, size_t capacity,
+                                                             uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (dimension < AIMEE_DB2_EMBEDDING_DIMENSION_MIN ||
+          dimension > AIMEE_DB2_EMBEDDING_DIMENSION_MAX ||
+          capacity < AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN)
+         return -1;
+      payload_len = 4u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || dimension != 0u ||
+            capacity < AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (payload_len != 0u)
+      aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, dimension);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_embedding_dimension_reply_decode(const uint8_t *input,
+                                                             size_t input_len,
+                                                             uint32_t *result,
+                                                             uint32_t *dimension)
+{{
+   if (result)
+      *result = 0u;
+   if (dimension)
+      *dimension = 0u;
+   if (!result || !dimension)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded < AIMEE_DB2_EMBEDDING_DIMENSION_MIN ||
+       decoded > AIMEE_DB2_EMBEDDING_DIMENSION_MAX)
+      return -1;
+   *result = header.result;
+   *dimension = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_level3_count_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LEVEL3_COUNT, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_level3_count_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_LEVEL3_COUNT && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_level3_count_reply_encode(uint32_t count, uint8_t *output,
+                                                      size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_LEVEL3_COUNT_MAX ||
+       capacity < AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_LEVEL3_COUNT, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_level3_count_reply_decode(const uint8_t *input, size_t input_len,
+                                                      uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_LEVEL3_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_LEVEL3_COUNT_MAX)
+      return -1;
+   *count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_level2_count_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LEVEL2_COUNT, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_level2_count_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_LEVEL2_COUNT_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_LEVEL2_COUNT && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_level2_count_reply_encode(uint32_t count, uint8_t *output,
+                                                      size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_LEVEL2_COUNT_MAX ||
+       capacity < AIMEE_DB2_LEVEL2_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_LEVEL2_COUNT, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_LEVEL2_COUNT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_level2_count_reply_decode(const uint8_t *input, size_t input_len,
+                                                      uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_LEVEL2_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_LEVEL2_COUNT_MAX)
+      return -1;
+   *count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_orphaned_l0_count_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ORPHANED_L0_COUNT, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_orphaned_l0_count_request_decode(const uint8_t *input,
+                                                             size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_ORPHANED_L0_COUNT_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_ORPHANED_L0_COUNT &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_orphaned_l0_count_reply_encode(uint32_t count, uint8_t *output,
+                                                           size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_ORPHANED_L0_COUNT_MAX ||
+       capacity < AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ORPHANED_L0_COUNT,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_orphaned_l0_count_reply_decode(const uint8_t *input,
+                                                           size_t input_len, uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ORPHANED_L0_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_ORPHANED_L0_COUNT_MAX)
+      return -1;
+   *count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_total_count_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TOTAL_COUNT, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_total_count_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TOTAL_COUNT_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TOTAL_COUNT &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_total_count_reply_encode(uint64_t count, uint8_t *output,
+                                                      size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_TOTAL_COUNT_MAX ||
+       capacity < AIMEE_DB2_TOTAL_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TOTAL_COUNT,
+                                     AIMEE_DB2_RESULT_OK, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_TOTAL_COUNT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_total_count_reply_decode(const uint8_t *input, size_t input_len,
+                                                      uint64_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TOTAL_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_TOTAL_COUNT_MAX)
+      return -1;
+   *count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_request_encode(const char *source_session,
+                                                            uint8_t *output, size_t capacity,
+                                                            uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!source_session || !output || !output_len)
+      return -1;
+   size_t session_len = 0u;
+   while (session_len <= AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX &&
+          source_session[session_len])
+      ++session_len;
+   if (session_len == 0u || session_len > AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + session_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_SESSION_L2_COUNT, 0u,
+                                       4u + (uint32_t)session_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)session_len);
+   memcpy(payload + 4, source_session, session_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)session_len;
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_request_decode(
+    const uint8_t *input, size_t input_len, char *source_session, size_t source_session_capacity)
+{{
+   if (source_session && source_session_capacity)
+      source_session[0] = '\\0';
+   if (!source_session || source_session_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_L2_COUNT || header.flags != 0u ||
+       input_len < AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN || header.payload_len < 5u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_len = aimee_db2_get_u32(payload);
+   if (decoded_len == 0u || decoded_len > AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX ||
+       header.payload_len != 4u + decoded_len || source_session_capacity <= decoded_len ||
+       memchr(payload + 4, '\\0', decoded_len) != NULL)
+      return -1;
+   memcpy(source_session, payload + 4, decoded_len);
+   source_session[decoded_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_reply_encode(uint32_t count, uint8_t *output,
+                                                          size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_SESSION_L2_COUNT_MAX ||
+       capacity < AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_SESSION_L2_COUNT,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_reply_decode(const uint8_t *input,
+                                                          size_t input_len, uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_L2_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_SESSION_L2_COUNT_MAX)
+      return -1;
+   *count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_request_encode(const char *key, uint8_t *output,
+                                                      size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!key || !output || !output_len)
+      return -1;
+   size_t key_len = 0u;
+   while (key_len <= AIMEE_DB2_KEY_EXISTS_KEY_MAX && key[key_len])
+      ++key_len;
+   if (key_len == 0u || key_len > AIMEE_DB2_KEY_EXISTS_KEY_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + key_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KEY_EXISTS, 0u,
+                                       4u + (uint32_t)key_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)key_len);
+   memcpy(payload + 4, key, key_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)key_len;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_request_decode(const uint8_t *input, size_t input_len,
+                                                      char *key, size_t key_capacity)
+{{
+   if (key && key_capacity)
+      key[0] = '\\0';
+   if (!key || key_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KEY_EXISTS || header.flags != 0u ||
+       input_len < AIMEE_DB2_KEY_EXISTS_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_KEY_EXISTS_REQUEST_MAX_LEN || header.payload_len < 5u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_len = aimee_db2_get_u32(payload);
+   if (decoded_len == 0u || decoded_len > AIMEE_DB2_KEY_EXISTS_KEY_MAX ||
+       header.payload_len != 4u + decoded_len || key_capacity <= decoded_len ||
+       memchr(payload + 4, '\\0', decoded_len) != NULL)
+      return -1;
+   memcpy(key, payload + 4, decoded_len);
+   key[decoded_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_reply_encode(uint32_t exists, uint8_t *output,
+                                                    size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || exists > AIMEE_DB2_KEY_EXISTS_MAX ||
+       capacity < AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_KEY_EXISTS, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, exists);
+   *output_len = AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_reply_decode(const uint8_t *input, size_t input_len,
+                                                    uint32_t *exists)
+{{
+   if (exists)
+      *exists = 0u;
+   if (!exists)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KEY_EXISTS || header.result != AIMEE_DB2_RESULT_OK ||
+       header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_KEY_EXISTS_MAX)
+      return -1;
+   *exists = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_find_id_by_key_kind_request_encode(
+    const char *key, const char *kind, uint8_t *output, size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!key || !kind || !output || !output_len)
+      return -1;
+   size_t key_len = 0u, kind_len = 0u;
+   while (key_len <= AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX && key[key_len])
+      ++key_len;
+   while (kind_len <= AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX && kind[kind_len])
+      ++kind_len;
+   size_t payload_len = 8u + key_len + kind_len;
+   if (key_len == 0u || key_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX ||
+       kind_len == 0u || kind_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)key_len);
+   memcpy(payload + 4, key, key_len);
+   aimee_db2_put_u32(payload + 4u + key_len, (uint32_t)kind_len);
+   memcpy(payload + 8u + key_len, kind, kind_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_find_id_by_key_kind_request_decode(
+    const uint8_t *input, size_t input_len, char *key, size_t key_capacity, char *kind,
+    size_t kind_capacity)
+{{
+   if (key && key_capacity)
+      key[0] = '\\0';
+   if (kind && kind_capacity)
+      kind[0] = '\\0';
+   if (!key || key_capacity == 0u || !kind || kind_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND || header.flags != 0u ||
+       input_len < AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN || header.payload_len < 10u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t key_len = aimee_db2_get_u32(payload);
+   if (key_len == 0u || key_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX ||
+       header.payload_len < 8u + key_len + 1u)
+      return -1;
+   uint32_t kind_len = aimee_db2_get_u32(payload + 4u + key_len);
+   if (kind_len == 0u || kind_len > AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX ||
+       header.payload_len != 8u + key_len + kind_len || key_capacity <= key_len ||
+       kind_capacity <= kind_len || memchr(payload + 4, '\\0', key_len) != NULL ||
+       memchr(payload + 8u + key_len, '\\0', kind_len) != NULL)
+      return -1;
+   memcpy(key, payload + 4, key_len);
+   key[key_len] = '\\0';
+   memcpy(kind, payload + 8u + key_len, kind_len);
+   kind[kind_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_find_id_by_key_kind_reply_encode(
+    uint32_t found, uint64_t id, uint8_t *output, size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || found > AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX ||
+       id > AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX || (found == 0u && id != 0u) ||
+       (found == 1u && id == 0u) || capacity < AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND,
+                                     AIMEE_DB2_RESULT_OK, 12u, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, found);
+   aimee_db2_put_u64(payload + 4, id);
+   *output_len = AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_find_id_by_key_kind_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *found, uint64_t *id)
+{{
+   if (found)
+      *found = 0u;
+   if (id)
+      *id = 0u;
+   if (!found || !id)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_found = aimee_db2_get_u32(payload);
+   uint64_t decoded_id = aimee_db2_get_u64(payload + 4);
+   if (decoded_found > AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX ||
+       decoded_id > AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX ||
+       (decoded_found == 0u && decoded_id != 0u) || (decoded_found == 1u && decoded_id == 0u))
+      return -1;
+   *found = decoded_found;
+   *id = decoded_id;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_request_encode(
+    const char *key, const char *tier_a, const char *tier_b, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!key || !tier_a || !tier_b || !output || !output_len)
+      return -1;
+   size_t key_len = 0u, tier_a_len = 0u, tier_b_len = 0u;
+   while (key_len <= AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX && key[key_len])
+      ++key_len;
+   while (tier_a_len <= AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX && tier_a[tier_a_len])
+      ++tier_a_len;
+   while (tier_b_len <= AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX && tier_b[tier_b_len])
+      ++tier_b_len;
+   size_t payload_len = 12u + key_len + tier_a_len + tier_b_len;
+   if (key_len == 0u || key_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX ||
+       tier_a_len == 0u || tier_a_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX ||
+       tier_b_len == 0u || tier_b_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)key_len);
+   memcpy(payload + 4u, key, key_len);
+   aimee_db2_put_u32(payload + 4u + key_len, (uint32_t)tier_a_len);
+   memcpy(payload + 8u + key_len, tier_a, tier_a_len);
+   aimee_db2_put_u32(payload + 8u + key_len + tier_a_len, (uint32_t)tier_b_len);
+   memcpy(payload + 12u + key_len + tier_a_len, tier_b, tier_b_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_request_decode(
+    const uint8_t *input, size_t input_len, char *key, size_t key_capacity, char *tier_a,
+    size_t tier_a_capacity, char *tier_b, size_t tier_b_capacity)
+{{
+   if (key && key_capacity)
+      key[0] = '\\0';
+   if (tier_a && tier_a_capacity)
+      tier_a[0] = '\\0';
+   if (tier_b && tier_b_capacity)
+      tier_b[0] = '\\0';
+   if (!key || key_capacity == 0u || !tier_a || tier_a_capacity == 0u || !tier_b ||
+       tier_b_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR || header.flags != 0u ||
+       input_len < AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN || header.payload_len < 15u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t key_len = aimee_db2_get_u32(payload);
+   if (key_len == 0u || key_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX ||
+       header.payload_len < 12u + key_len + 2u)
+      return -1;
+   uint32_t tier_a_len = aimee_db2_get_u32(payload + 4u + key_len);
+   if (tier_a_len == 0u || tier_a_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX ||
+       header.payload_len < 12u + key_len + tier_a_len + 1u)
+      return -1;
+   uint32_t tier_b_len = aimee_db2_get_u32(payload + 8u + key_len + tier_a_len);
+   if (tier_b_len == 0u || tier_b_len > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX ||
+       header.payload_len != 12u + key_len + tier_a_len + tier_b_len ||
+       key_capacity <= key_len || tier_a_capacity <= tier_a_len || tier_b_capacity <= tier_b_len ||
+       memchr(payload + 4u, '\\0', key_len) != NULL ||
+       memchr(payload + 8u + key_len, '\\0', tier_a_len) != NULL ||
+       memchr(payload + 12u + key_len + tier_a_len, '\\0', tier_b_len) != NULL)
+      return -1;
+   memcpy(key, payload + 4u, key_len);
+   key[key_len] = '\\0';
+   memcpy(tier_a, payload + 8u + key_len, tier_a_len);
+   tier_a[tier_a_len] = '\\0';
+   memcpy(tier_b, payload + 12u + key_len + tier_a_len, tier_b_len);
+   tier_b[tier_b_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_reply_encode(
+    uint32_t exists, uint8_t *output, size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || exists > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX ||
+       capacity < AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, exists);
+   *output_len = AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_key_exists_in_tier_pair_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *exists)
+{{
+   if (exists)
+      *exists = 0u;
+   if (!exists)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX)
+      return -1;
+   *exists = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_update_request_encode(
+    uint64_t memory_id, uint32_t has_value, double value, uint8_t *output, size_t capacity)
+{{
+   uint64_t value_bits = 0u;
+   if (sizeof(value) != sizeof(value_bits))
+      return -1;
+   memcpy(&value_bits, &value, sizeof(value_bits));
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX ||
+       has_value > AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX ||
+       (has_value == 0u && value_bits != 0u) ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE, 0u, 20u, output,
+                                       capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, has_value);
+   aimee_db2_put_u64(payload + 12u, value_bits);
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_update_request_decode(
+    const uint8_t *input, size_t input_len, uint64_t *memory_id, uint32_t *has_value,
+    double *value)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (has_value)
+      *has_value = 0u;
+   if (value)
+      *value = 0.0;
+   if (!memory_id || !has_value || !value || sizeof(*value) != sizeof(uint64_t))
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE || header.flags != 0u ||
+       header.payload_len != 20u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t decoded_has_value = aimee_db2_get_u32(payload + 8u);
+   uint64_t value_bits = aimee_db2_get_u64(payload + 12u);
+   if (decoded_memory_id == 0u ||
+       decoded_memory_id > AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX ||
+       decoded_has_value > AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX ||
+       (decoded_has_value == 0u && value_bits != 0u))
+      return -1;
+   memcpy(value, &value_bits, sizeof(value_bits));
+   *memory_id = decoded_memory_id;
+   *has_value = decoded_has_value;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_update_reply_encode(uint32_t result, uint8_t *output,
+                                                              size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN ||
+       (result != AIMEE_DB2_RESULT_OK && result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE, result, 0u,
+                                        output, capacity);
+}}
+
+static inline int aimee_db2_effectiveness_update_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result)
+{{
+   if (result)
+      *result = 0u;
+   if (!result)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE || header.payload_len != 0u ||
+       (header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   *result = header.result;
+   return 0;
+}}
+
+static inline int aimee_db2_retention_enforce_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RETENTION_ENFORCE, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_retention_enforce_request_decode(const uint8_t *input,
+                                                             size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RETENTION_ENFORCE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RETENTION_ENFORCE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_retention_enforce_reply_encode(uint32_t deleted_count,
+                                                           uint8_t *output, size_t capacity,
+                                                           uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_count > AIMEE_DB2_RETENTION_ENFORCE_MAX ||
+       capacity < AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RETENTION_ENFORCE,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_count);
+   *output_len = AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_retention_enforce_reply_decode(const uint8_t *input,
+                                                           size_t input_len,
+                                                           uint32_t *deleted_count)
+{{
+   if (deleted_count)
+      *deleted_count = 0u;
+   if (!deleted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RETENTION_ENFORCE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RETENTION_ENFORCE_MAX)
+      return -1;
+   *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_demote_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_effectiveness_demote_request_decode(const uint8_t *input,
+                                                                size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EFFECTIVENESS_DEMOTE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_effectiveness_demote_reply_encode(uint32_t demoted_count,
+                                                              uint8_t *output, size_t capacity,
+                                                              uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || demoted_count > AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, demoted_count);
+   *output_len = AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_demote_reply_decode(const uint8_t *input,
+                                                              size_t input_len,
+                                                              uint32_t *demoted_count)
+{{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (!demoted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX)
+      return -1;
+   *demoted_count = decoded;
+   return 0;
+}}
+
+typedef struct
+{{
+   double avg_effectiveness;
+   uint32_t low_effectiveness_count;
+   uint32_t high_impact_count;
+}} aimee_db2_effectiveness_stats_t;
+
+static inline int aimee_db2_effectiveness_stats_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_effectiveness_stats_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_effectiveness_stats_reply_encode(
+    const aimee_db2_effectiveness_stats_t *stats, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   uint64_t average_bits = 0u;
+   if (!stats || !output || !output_len ||
+       sizeof(stats->avg_effectiveness) != sizeof(average_bits))
+      return -1;
+   if (!(stats->avg_effectiveness >= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN) ||
+       !(stats->avg_effectiveness <= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX) ||
+       stats->low_effectiveness_count > AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX ||
+       stats->high_impact_count > AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS,
+                                     AIMEE_DB2_RESULT_OK, 16u, output, capacity) != 0)
+      return -1;
+   memcpy(&average_bits, &stats->avg_effectiveness, sizeof(average_bits));
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, average_bits);
+   aimee_db2_put_u32(payload + 8u, stats->low_effectiveness_count);
+   aimee_db2_put_u32(payload + 12u, stats->high_impact_count);
+   *output_len = AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_stats_reply_decode(
+    const uint8_t *input, size_t input_len, aimee_db2_effectiveness_stats_t *stats)
+{{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!stats || sizeof(stats->avg_effectiveness) != sizeof(uint64_t))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 16u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t average_bits = aimee_db2_get_u64(payload);
+   uint32_t low = aimee_db2_get_u32(payload + 8u);
+   uint32_t high = aimee_db2_get_u32(payload + 12u);
+   double average = 0.0;
+   memcpy(&average, &average_bits, sizeof(average_bits));
+   if (!(average >= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN) ||
+       !(average <= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX) ||
+       low > AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX ||
+       high > AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX)
+      return -1;
+   stats->avg_effectiveness = average;
+   stats->low_effectiveness_count = low;
+   stats->high_impact_count = high;
+   return 0;
+}}
+
+static inline int aimee_db2_l2_memory_ids_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_L2_MEMORY_IDS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_l2_memory_ids_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_L2_MEMORY_IDS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_l2_memory_ids_reply_encode(const uint64_t *memory_ids, uint32_t count,
+                                                       uint8_t *output, size_t capacity,
+                                                       uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) ||
+       count > AIMEE_DB2_L2_MEMORY_IDS_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_L2_MEMORY_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_L2_MEMORY_ID_MAX)
+         return -1;
+   uint32_t payload_len = 4u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_L2_MEMORY_IDS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 4u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_l2_memory_ids_reply_decode(const uint8_t *input, size_t input_len,
+                                                       uint64_t *memory_ids, uint32_t capacity,
+                                                       uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_L2_MEMORY_IDS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_L2_MEMORY_IDS_MAX || header.payload_len != 4u + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {{
+      uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
+      if (value < AIMEE_DB2_L2_MEMORY_ID_MIN || value > AIMEE_DB2_L2_MEMORY_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }}
+   *count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_health_record_request_encode(uint32_t promotions, uint32_t demotions,
+                                                         uint32_t expirations, uint8_t *output,
+                                                         size_t capacity)
+{{
+   if (!output || promotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       demotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       expirations > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       capacity < AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_RECORD, 0u, 12u, output,
+                                       capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, promotions);
+   aimee_db2_put_u32(payload + 4u, demotions);
+   aimee_db2_put_u32(payload + 8u, expirations);
+   return 0;
+}}
+
+static inline int aimee_db2_health_record_request_decode(const uint8_t *input, size_t input_len,
+                                                         uint32_t *promotions,
+                                                         uint32_t *demotions,
+                                                         uint32_t *expirations)
+{{
+   if (promotions)
+      *promotions = 0u;
+   if (demotions)
+      *demotions = 0u;
+   if (expirations)
+      *expirations = 0u;
+   if (!promotions || !demotions || !expirations)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_RECORD || header.flags != 0u ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_promotions = aimee_db2_get_u32(payload);
+   uint32_t decoded_demotions = aimee_db2_get_u32(payload + 4u);
+   uint32_t decoded_expirations = aimee_db2_get_u32(payload + 8u);
+   if (decoded_promotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       decoded_demotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       decoded_expirations > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX)
+      return -1;
+   *promotions = decoded_promotions;
+   *demotions = decoded_demotions;
+   *expirations = decoded_expirations;
+   return 0;
+}}
+
+static inline int aimee_db2_health_record_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_RECORD, AIMEE_DB2_RESULT_OK, 0u,
+                                        output, capacity);
+}}
+
+static inline int aimee_db2_health_record_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_RECORD &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_health_retention_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_RETENTION, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_health_retention_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_RETENTION &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_health_retention_reply_encode(uint32_t snapshots_deleted,
+                                                          uint32_t contradictions_deleted,
+                                                          uint8_t *output, size_t capacity,
+                                                          uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || snapshots_deleted > AIMEE_DB2_HEALTH_RETENTION_MAX ||
+       contradictions_deleted > AIMEE_DB2_HEALTH_RETENTION_MAX ||
+       capacity < AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_RETENTION, AIMEE_DB2_RESULT_OK, 8u,
+                                     output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, snapshots_deleted);
+   aimee_db2_put_u32(payload + 4u, contradictions_deleted);
+   *output_len = AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_health_retention_reply_decode(const uint8_t *input, size_t input_len,
+                                                          uint32_t *snapshots_deleted,
+                                                          uint32_t *contradictions_deleted)
+{{
+   if (snapshots_deleted)
+      *snapshots_deleted = 0u;
+   if (contradictions_deleted)
+      *contradictions_deleted = 0u;
+   if (!snapshots_deleted || !contradictions_deleted)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_RETENTION ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t snapshots = aimee_db2_get_u32(payload);
+   uint32_t contradictions = aimee_db2_get_u32(payload + 4u);
+   if (snapshots > AIMEE_DB2_HEALTH_RETENTION_MAX ||
+       contradictions > AIMEE_DB2_HEALTH_RETENTION_MAX)
+      return -1;
+   *snapshots_deleted = snapshots;
+   *contradictions_deleted = contradictions;
+   return 0;
+}}
+
+typedef struct
+{{
+   uint32_t cycles;
+   uint32_t total_contradictions;
+   uint32_t total_promotions;
+   uint32_t total_demotions;
+   uint32_t total_expirations;
+   uint32_t new_memories;
+   uint32_t l1_eligible;
+   uint32_t l2_total;
+   uint32_t l2_stale_30_days;
+}} aimee_db2_health_counters_t;
+
+static inline int aimee_db2_health_counters_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_COUNTERS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_health_counters_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_COUNTERS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_health_counters_reply_encode(const aimee_db2_health_counters_t *counters,
+                                                         uint8_t *output, size_t capacity,
+                                                         uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!counters || !output || !output_len)
+      return -1;
+   const uint32_t values[AIMEE_DB2_HEALTH_COUNTERS_FIELDS] = {{
+       counters->cycles,           counters->total_contradictions, counters->total_promotions,
+       counters->total_demotions,  counters->total_expirations,    counters->new_memories,
+       counters->l1_eligible,      counters->l2_total,             counters->l2_stale_30_days,
+   }};
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+      if (values[index] > AIMEE_DB2_HEALTH_COUNTERS_MAX)
+         return -1;
+   uint32_t payload_len = 4u * AIMEE_DB2_HEALTH_COUNTERS_FIELDS;
+   if (capacity < AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_COUNTERS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+      aimee_db2_put_u32(payload + index * 4u, values[index]);
+   *output_len = AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_health_counters_reply_decode(const uint8_t *input, size_t input_len,
+                                                         aimee_db2_health_counters_t *counters)
+{{
+   if (counters)
+      memset(counters, 0, sizeof(*counters));
+   if (!counters)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_COUNTERS ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       header.payload_len != 4u * AIMEE_DB2_HEALTH_COUNTERS_FIELDS)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t values[AIMEE_DB2_HEALTH_COUNTERS_FIELDS];
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+   {{
+      values[index] = aimee_db2_get_u32(payload + index * 4u);
+      if (values[index] > AIMEE_DB2_HEALTH_COUNTERS_MAX)
+         return -1;
+   }}
+   counters->cycles = values[0];
+   counters->total_contradictions = values[1];
+   counters->total_promotions = values[2];
+   counters->total_demotions = values[3];
+   counters->total_expirations = values[4];
+   counters->new_memories = values[5];
+   counters->l1_eligible = values[6];
+   counters->l2_total = values[7];
+   counters->l2_stale_30_days = values[8];
+   return 0;
+}}
+
+typedef struct
+{{
+   uint32_t tier_counts[AIMEE_DB2_STATS_COUNTS_TIERS];
+   uint32_t kind_counts[AIMEE_DB2_STATS_COUNTS_KINDS];
+   uint32_t total;
+   uint32_t conflicts;
+}} aimee_db2_memory_stats_t;
+
+static inline int aimee_db2_stats_counts_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_STATS_COUNTS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_stats_counts_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_STATS_COUNTS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_STATS_COUNTS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_stats_counts_reply_encode(const aimee_db2_memory_stats_t *stats,
+                                                      uint8_t *output, size_t capacity,
+                                                      uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!stats || !output || !output_len)
+      return -1;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++)
+      if (stats->tier_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++)
+      if (stats->kind_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   if (stats->total > AIMEE_DB2_STATS_COUNTS_MAX ||
+       stats->conflicts > AIMEE_DB2_STATS_COUNTS_MAX)
+      return -1;
+   uint32_t payload_len = 4u * (AIMEE_DB2_STATS_COUNTS_TIERS + AIMEE_DB2_STATS_COUNTS_KINDS + 2u);
+   if (capacity < AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_STATS_COUNTS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t offset = 0u;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++, offset += 4u)
+      aimee_db2_put_u32(payload + offset, stats->tier_counts[index]);
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++, offset += 4u)
+      aimee_db2_put_u32(payload + offset, stats->kind_counts[index]);
+   aimee_db2_put_u32(payload + offset, stats->total);
+   aimee_db2_put_u32(payload + offset + 4u, stats->conflicts);
+   *output_len = AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_stats_counts_reply_decode(const uint8_t *input, size_t input_len,
+                                                      aimee_db2_memory_stats_t *stats)
+{{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!stats)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   uint32_t payload_len = 4u * (AIMEE_DB2_STATS_COUNTS_TIERS + AIMEE_DB2_STATS_COUNTS_KINDS + 2u);
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_STATS_COUNTS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_memory_stats_t decoded = {{0}};
+   uint32_t offset = 0u;
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_TIERS; index++, offset += 4u)
+   {{
+      decoded.tier_counts[index] = aimee_db2_get_u32(payload + offset);
+      if (decoded.tier_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   }}
+   for (uint32_t index = 0u; index < AIMEE_DB2_STATS_COUNTS_KINDS; index++, offset += 4u)
+   {{
+      decoded.kind_counts[index] = aimee_db2_get_u32(payload + offset);
+      if (decoded.kind_counts[index] > AIMEE_DB2_STATS_COUNTS_MAX)
+         return -1;
+   }}
+   decoded.total = aimee_db2_get_u32(payload + offset);
+   decoded.conflicts = aimee_db2_get_u32(payload + offset + 4u);
+   if (decoded.total > AIMEE_DB2_STATS_COUNTS_MAX ||
+       decoded.conflicts > AIMEE_DB2_STATS_COUNTS_MAX)
+      return -1;
+   *stats = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_expire_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EXPIRE, 0u, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_expire_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EXPIRE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EXPIRE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_expire_reply_encode(uint32_t level0_deleted,
+                                                uint32_t stale_level1_deleted, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || level0_deleted > AIMEE_DB2_EXPIRE_MAX ||
+       stale_level1_deleted > AIMEE_DB2_EXPIRE_MAX ||
+       capacity < AIMEE_DB2_EXPIRE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EXPIRE, AIMEE_DB2_RESULT_OK, 8u, output,
+                                     capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, level0_deleted);
+   aimee_db2_put_u32(payload + 4u, stale_level1_deleted);
+   *output_len = AIMEE_DB2_EXPIRE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_expire_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *level0_deleted,
+                                                uint32_t *stale_level1_deleted)
+{{
+   if (level0_deleted)
+      *level0_deleted = 0u;
+   if (stale_level1_deleted)
+      *stale_level1_deleted = 0u;
+   if (!level0_deleted || !stale_level1_deleted)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EXPIRE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EXPIRE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t level0 = aimee_db2_get_u32(payload);
+   uint32_t stale = aimee_db2_get_u32(payload + 4u);
+   if (level0 > AIMEE_DB2_EXPIRE_MAX || stale > AIMEE_DB2_EXPIRE_MAX)
+      return -1;
+   *level0_deleted = level0;
+   *stale_level1_deleted = stale;
+   return 0;
+}}
+
+static inline int aimee_db2_demote_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DEMOTE, 0u, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_demote_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DEMOTE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DEMOTE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_demote_reply_encode(uint32_t demoted_count, uint32_t cascaded_count,
+                                                uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || demoted_count > AIMEE_DB2_DEMOTE_MAX ||
+       cascaded_count > AIMEE_DB2_DEMOTE_MAX ||
+       (demoted_count == 0u && cascaded_count != 0u) ||
+       capacity < AIMEE_DB2_DEMOTE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DEMOTE, AIMEE_DB2_RESULT_OK, 8u, output,
+                                     capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, demoted_count);
+   aimee_db2_put_u32(payload + 4u, cascaded_count);
+   *output_len = AIMEE_DB2_DEMOTE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_demote_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *demoted_count,
+                                                uint32_t *cascaded_count)
+{{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (cascaded_count)
+      *cascaded_count = 0u;
+   if (!demoted_count || !cascaded_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DEMOTE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DEMOTE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t demoted = aimee_db2_get_u32(payload);
+   uint32_t cascaded = aimee_db2_get_u32(payload + 4u);
+   if (demoted > AIMEE_DB2_DEMOTE_MAX || cascaded > AIMEE_DB2_DEMOTE_MAX)
+      return -1;
+   /* The cascade only runs when something was demoted, so a reply claiming
+    * cascaded rows with nothing demoted is malformed. */
+   if (demoted == 0u && cascaded != 0u)
+      return -1;
+   *demoted_count = demoted;
+   *cascaded_count = cascaded;
+   return 0;
+}}
+
+static inline int aimee_db2_promote_stable_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PROMOTE_STABLE, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_promote_stable_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PROMOTE_STABLE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_promote_stable_reply_encode(uint32_t promoted_count, uint8_t *output,
+                                                        size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || promoted_count > AIMEE_DB2_PROMOTE_STABLE_MAX ||
+       capacity < AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PROMOTE_STABLE, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, promoted_count);
+   *output_len = AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_promote_stable_reply_decode(const uint8_t *input, size_t input_len,
+                                                        uint32_t *promoted_count)
+{{
+   if (promoted_count)
+      *promoted_count = 0u;
+   if (!promoted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_PROMOTE_STABLE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_PROMOTE_STABLE_MAX)
+      return -1;
+   *promoted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_reclassify_directives_request_encode(uint32_t require_approval,
+                                                                 uint8_t *output, size_t capacity)
+{{
+   if (!output || require_approval > AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX ||
+       capacity < AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES, 0u, 4u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, require_approval);
+   return 0;
+}}
+
+static inline int aimee_db2_reclassify_directives_request_decode(const uint8_t *input,
+                                                                 size_t input_len,
+                                                                 uint32_t *require_approval)
+{{
+   if (require_approval)
+      *require_approval = 0u;
+   if (!require_approval)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES || header.flags != 0u ||
+       header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX)
+      return -1;
+   *require_approval = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_reclassify_directives_reply_encode(uint32_t reclassified_count,
+                                                               uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || reclassified_count > AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX ||
+       capacity < AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, reclassified_count);
+   *output_len = AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_reclassify_directives_reply_decode(const uint8_t *input,
+                                                               size_t input_len,
+                                                               uint32_t *reclassified_count)
+{{
+   if (reclassified_count)
+      *reclassified_count = 0u;
+   if (!reclassified_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX)
+      return -1;
+   *reclassified_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_record_l4_approval_request_encode(uint64_t memory_id,
+                                                              const char *approver,
+                                                              const char *note, uint8_t *output,
+                                                              size_t capacity,
+                                                              uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!approver || !note || !output || !output_len)
+      return -1;
+   size_t approver_len = 0u, note_len = 0u;
+   while (approver_len <= AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX && approver[approver_len])
+      ++approver_len;
+   while (note_len <= AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX && note[note_len])
+      ++note_len;
+   size_t payload_len = 16u + approver_len + note_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX ||
+       approver_len == 0u || approver_len > AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX ||
+       note_len > AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)approver_len);
+   memcpy(payload + 12u, approver, approver_len);
+   aimee_db2_put_u32(payload + 12u + approver_len, (uint32_t)note_len);
+   memcpy(payload + 16u + approver_len, note, note_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_record_l4_approval_request_decode(
+    const uint8_t *input, size_t input_len, uint64_t *memory_id, char *approver,
+    size_t approver_capacity, char *note, size_t note_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (approver && approver_capacity)
+      approver[0] = '\\0';
+   if (note && note_capacity)
+      note[0] = '\\0';
+   if (!memory_id || !approver || approver_capacity == 0u || !note || note_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL || header.flags != 0u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len ||
+       header.payload_len < 16u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_id = aimee_db2_get_u64(payload);
+   uint32_t approver_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_id == 0u || decoded_id > AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX ||
+       approver_len == 0u || approver_len > AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX ||
+       header.payload_len < 16u + approver_len)
+      return -1;
+   uint32_t note_len = aimee_db2_get_u32(payload + 12u + approver_len);
+   if (note_len > AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX ||
+       header.payload_len != 16u + approver_len + note_len ||
+       approver_capacity < (size_t)approver_len + 1u || note_capacity < (size_t)note_len + 1u)
+      return -1;
+   /* Reject embedded NULs: the backend binds these as C strings. */
+   if (memchr(payload + 12u, 0, approver_len) ||
+       (note_len && memchr(payload + 16u + approver_len, 0, note_len)))
+      return -1;
+   memcpy(approver, payload + 12u, approver_len);
+   approver[approver_len] = '\\0';
+   memcpy(note, payload + 16u + approver_len, note_len);
+   note[note_len] = '\\0';
+   *memory_id = decoded_id;
+   return 0;
+}}
+
+static inline int aimee_db2_record_l4_approval_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_record_l4_approval_reply_decode(const uint8_t *input,
+                                                            size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_pool_status_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_POOL_STATUS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_POOL_STATUS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_pool_status_reply_encode(uint32_t result,
+                                                     const aimee_db2_pool_status_t *status,
+                                                     uint8_t *output, size_t capacity,
+                                                     uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!status || status->size == 0u || status->size > AIMEE_DB2_POOL_SIZE_MAX ||
+          status->in_use > status->size || capacity < AIMEE_DB2_POOL_STATUS_RESPONSE_LEN)
+         return -1;
+      payload_len = 44u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_POOL_STATUS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, result, payload_len, output,
+                                     capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->size);
+      aimee_db2_put_u32(payload + 4, status->in_use);
+      aimee_db2_put_u32(payload + 8, status->waiters);
+      aimee_db2_put_u64(payload + 12, status->lease_grants);
+      aimee_db2_put_u64(payload + 20, status->lease_timeouts);
+      aimee_db2_put_u64(payload + 28, status->stuck);
+      aimee_db2_put_u64(payload + 36, status->poisoned);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_pool_status_reply_decode(const uint8_t *input, size_t input_len,
+                                                     uint32_t *result,
+                                                     aimee_db2_pool_status_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_pool_status_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_POOL_STATUS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 44u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_pool_status_t decoded = {{
+       .size = aimee_db2_get_u32(payload),
+       .in_use = aimee_db2_get_u32(payload + 4),
+       .waiters = aimee_db2_get_u32(payload + 8),
+       .lease_grants = aimee_db2_get_u64(payload + 12),
+       .lease_timeouts = aimee_db2_get_u64(payload + 20),
+       .stuck = aimee_db2_get_u64(payload + 28),
+       .poisoned = aimee_db2_get_u64(payload + 36),
+   }};
+   if (decoded.size == 0u || decoded.size > AIMEE_DB2_POOL_SIZE_MAX ||
+       decoded.in_use > decoded.size)
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_embedding_refusals_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_embedding_refusals_request_decode(const uint8_t *input,
+                                                              size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_embedding_refusals_reply_encode(
+    uint32_t result, const aimee_db2_embedding_refusals_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!status || status->last_offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX ||
+          ((status->refused_count == 0u) != (status->last_offered == 0u)) ||
+          capacity < AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, status->refused_count);
+      aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN + 8, status->last_offered);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_embedding_refusals_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_embedding_refusals_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_embedding_refusals_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 12u)
+      return -1;
+   aimee_db2_embedding_refusals_t decoded = {{
+       .refused_count = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN),
+       .last_offered = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN + 8),
+   }};
+   if (decoded.last_offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX ||
+       ((decoded.refused_count == 0u) != (decoded.last_offered == 0u)))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_postgres_status_valid(const aimee_db2_postgres_status_t *status)
+{{
+   if (!status || (status->available & ~AIMEE_DB2_POSTGRES_AVAILABLE_ALL) != 0u ||
+       status->active_connections > AIMEE_DB2_POSTGRES_COUNT_MAX ||
+       status->max_connections > AIMEE_DB2_POSTGRES_COUNT_MAX)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE) == 0u &&
+       status->active_connections != 0u)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_MAX) == 0u &&
+       status->max_connections != 0u)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_ROLE) == 0u)
+   {{
+      if (status->is_replica != 0u)
+         return 0;
+   }}
+   else if (status->is_replica > 1u)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_LAG) == 0u)
+      return status->replica_lag_bytes == 0u;
+   return (status->available & AIMEE_DB2_POSTGRES_AVAILABLE_ROLE) != 0u &&
+          status->is_replica == 1u;
+}}
+
+static inline int aimee_db2_postgres_status_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POSTGRES_STATUS, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_postgres_status_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_POSTGRES_STATUS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_postgres_status_reply_encode(
+    uint32_t result, const aimee_db2_postgres_status_t *status, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!aimee_db2_postgres_status_valid(status) ||
+          capacity < AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN)
+         return -1;
+      payload_len = 24u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_POSTGRES_STATUS, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->available);
+      aimee_db2_put_u32(payload + 4, status->active_connections);
+      aimee_db2_put_u32(payload + 8, status->max_connections);
+      aimee_db2_put_u32(payload + 12, status->is_replica);
+      aimee_db2_put_u64(payload + 16, status->replica_lag_bytes);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_postgres_status_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_postgres_status_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_postgres_status_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_POSTGRES_STATUS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 24u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_postgres_status_t decoded = {{
+       .available = aimee_db2_get_u32(payload),
+       .active_connections = aimee_db2_get_u32(payload + 4),
+       .max_connections = aimee_db2_get_u32(payload + 8),
+       .is_replica = aimee_db2_get_u32(payload + 12),
+       .replica_lag_bytes = aimee_db2_get_u64(payload + 16),
+   }};
+   if (!aimee_db2_postgres_status_valid(&decoded))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_status_valid(const aimee_db2_reembed_status_t *status)
+{{
+   return status && status->target_dimension >= AIMEE_DB2_REEMBED_DIMENSION_MIN &&
+          status->target_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX && status->started_epoch > 0u;
+}}
+
+static inline int aimee_db2_reembed_status_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REEMBED_STATUS, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_reembed_status_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REEMBED_STATUS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_reembed_status_reply_encode(
+    uint32_t result, const aimee_db2_reembed_status_t *status, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!aimee_db2_reembed_status_valid(status) ||
+          capacity < AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }}
+   else if ((result != AIMEE_DB2_RESULT_NOT_FOUND &&
+             result != AIMEE_DB2_RESULT_INVALID_STATE) ||
+            status || capacity < AIMEE_DB2_REEMBED_STATUS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REEMBED_STATUS, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->target_dimension);
+      aimee_db2_put_u64(payload + 4, status->started_epoch);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_status_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result, aimee_db2_reembed_status_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_status_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_STATUS)
+      return -1;
+   if ((header.result == AIMEE_DB2_RESULT_NOT_FOUND ||
+        header.result == AIMEE_DB2_RESULT_INVALID_STATE) &&
+       header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_reembed_status_t decoded = {{
+       .target_dimension = aimee_db2_get_u32(payload),
+       .started_epoch = aimee_db2_get_u64(payload + 4),
+   }};
+   if (!aimee_db2_reembed_status_valid(&decoded))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REEMBED_CLEAR, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_reembed_clear_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REEMBED_CLEAR && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_reembed_clear_reply_encode(uint32_t result, uint8_t *output,
+                                                       size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len || capacity < AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN ||
+       (result != AIMEE_DB2_RESULT_OK && result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REEMBED_CLEAR, result, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_reply_decode(const uint8_t *input, size_t input_len,
+                                                       uint32_t *result)
+{{
+   if (result)
+      *result = 0u;
+   if (!result)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_CLEAR || header.payload_len != 0u ||
+       (header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   *result = header.result;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_valid(
+    const aimee_db2_reembed_clear_maintenance_t *status)
+{{
+   return status && status->was_in_progress <= 1u &&
+          status->recorded_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX &&
+          status->running_dimension >= AIMEE_DB2_REEMBED_DIMENSION_MIN &&
+          status->running_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_request_encode(
+    uint32_t force, uint8_t *output, size_t capacity)
+{{
+   if (force > 1u || !output || capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR, 0u, 4u,
+                                       output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, force);
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_request_decode(
+    const uint8_t *input, size_t input_len, uint32_t *force)
+{{
+   if (force)
+      *force = 0u;
+   aimee_db2_request_header_t header = {{0}};
+   if (!force || aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR || header.flags != 0u ||
+       header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > 1u)
+      return -1;
+   *force = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_reply_encode(
+    uint32_t result, const aimee_db2_reembed_clear_maintenance_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK || result == AIMEE_DB2_RESULT_CONFLICT)
+   {{
+      if (!aimee_db2_reembed_clear_maintenance_valid(status) ||
+          (result == AIMEE_DB2_RESULT_CONFLICT &&
+           (status->recorded_dimension == 0u ||
+            status->recorded_dimension == status->running_dimension)) ||
+          capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->was_in_progress);
+      aimee_db2_put_u32(payload + 4, status->recorded_dimension);
+      aimee_db2_put_u32(payload + 8, status->running_dimension);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_clear_maintenance_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_reembed_clear_maintenance_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_clear_maintenance_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if ((header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_CONFLICT) ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_reembed_clear_maintenance_t decoded = {{
+       .was_in_progress = aimee_db2_get_u32(payload),
+       .recorded_dimension = aimee_db2_get_u32(payload + 4),
+       .running_dimension = aimee_db2_get_u32(payload + 8),
+   }};
+   if (!aimee_db2_reembed_clear_maintenance_valid(&decoded) ||
+       (header.result == AIMEE_DB2_RESULT_CONFLICT &&
+        (decoded.recorded_dimension == 0u ||
+         decoded.recorded_dimension == decoded.running_dimension)))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_embedder_serving_id_request_encode(uint8_t *output,
+                                                               size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_embedder_serving_id_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_embedder_serving_id_reply_encode(
+    uint32_t result, const char *serving_id, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   size_t serving_id_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!serving_id)
+         return -1;
+      while (serving_id_len <= AIMEE_DB2_EMBEDDER_SERVING_ID_MAX && serving_id[serving_id_len])
+         ++serving_id_len;
+      if (serving_id_len > AIMEE_DB2_EMBEDDER_SERVING_ID_MAX ||
+          capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + serving_id_len)
+         return -1;
+      payload_len = 4u + (uint32_t)serving_id_len;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || serving_id ||
+            capacity < AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, (uint32_t)serving_id_len);
+      memcpy(payload + 4, serving_id, serving_id_len);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_embedder_serving_id_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result, char *serving_id,
+    size_t serving_id_capacity)
+{{
+   if (result)
+      *result = 0u;
+   if (serving_id && serving_id_capacity)
+      serving_id[0] = '\\0';
+   if (!result || !serving_id || serving_id_capacity == 0u)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_len = aimee_db2_get_u32(payload);
+   if (decoded_len > AIMEE_DB2_EMBEDDER_SERVING_ID_MAX ||
+       header.payload_len != 4u + decoded_len || serving_id_capacity <= decoded_len ||
+       memchr(payload + 4, '\\0', decoded_len) != NULL)
+      return -1;
+   memcpy(serving_id, payload + 4, decoded_len);
+   serving_id[decoded_len] = '\\0';
+   *result = header.result;
+   return 0;
+}}
+
+static inline int aimee_db2_dimension_reset_valid(const aimee_db2_dimension_reset_t *status)
+{{
+   return status && status->recorded_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX &&
+          status->target_dimension >= AIMEE_DB2_REEMBED_DIMENSION_MIN &&
+          status->target_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX &&
+          status->tables_discovered <= AIMEE_DB2_DIMENSION_RESET_TABLES_MAX &&
+          status->tables_dropped <= status->tables_discovered &&
+          status->curator_requeued >= -1 && status->evidence_requeued >= -1;
+}}
+
+static inline int aimee_db2_dimension_reset_request_encode(
+    uint32_t target_dimension, uint32_t force, uint32_t dry_run, uint8_t *output,
+    size_t capacity)
+{{
+   if (target_dimension < AIMEE_DB2_REEMBED_DIMENSION_MIN ||
+       target_dimension > AIMEE_DB2_REEMBED_DIMENSION_MAX || force > 1u || dry_run > 1u ||
+       !output || capacity < AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DIMENSION_RESET, 0u, 12u,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, target_dimension);
+   aimee_db2_put_u32(payload + 4, force);
+   aimee_db2_put_u32(payload + 8, dry_run);
+   return 0;
+}}
+
+static inline int aimee_db2_dimension_reset_request_decode(
+    const uint8_t *input, size_t input_len, uint32_t *target_dimension, uint32_t *force,
+    uint32_t *dry_run)
+{{
+   if (target_dimension)
+      *target_dimension = 0u;
+   if (force)
+      *force = 0u;
+   if (dry_run)
+      *dry_run = 0u;
+   aimee_db2_request_header_t header = {{0}};
+   if (!target_dimension || !force || !dry_run ||
+       aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DIMENSION_RESET || header.flags != 0u ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_target = aimee_db2_get_u32(payload);
+   uint32_t decoded_force = aimee_db2_get_u32(payload + 4);
+   uint32_t decoded_dry_run = aimee_db2_get_u32(payload + 8);
+   if (decoded_target < AIMEE_DB2_REEMBED_DIMENSION_MIN ||
+       decoded_target > AIMEE_DB2_REEMBED_DIMENSION_MAX || decoded_force > 1u ||
+       decoded_dry_run > 1u)
+      return -1;
+   *target_dimension = decoded_target;
+   *force = decoded_force;
+   *dry_run = decoded_dry_run;
+   return 0;
+}}
+
+static inline int aimee_db2_dimension_reset_reply_encode(
+    uint32_t result, const aimee_db2_dimension_reset_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK || result == AIMEE_DB2_RESULT_CONFLICT ||
+       result == AIMEE_DB2_RESULT_DENIED)
+   {{
+      if (!aimee_db2_dimension_reset_valid(status) ||
+          capacity < AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN)
+         return -1;
+      payload_len = 32u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_DIMENSION_RESET_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DIMENSION_RESET, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->recorded_dimension);
+      aimee_db2_put_u32(payload + 4, status->target_dimension);
+      aimee_db2_put_u32(payload + 8, status->tables_discovered);
+      aimee_db2_put_u32(payload + 12, status->tables_dropped);
+      aimee_db2_put_u64(payload + 16, status->rows_cleared);
+      aimee_db2_put_u32(payload + 24, (uint32_t)status->curator_requeued);
+      aimee_db2_put_u32(payload + 28, (uint32_t)status->evidence_requeued);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_dimension_reset_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_dimension_reset_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_dimension_reset_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_DIMENSION_RESET)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if ((header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_CONFLICT &&
+        header.result != AIMEE_DB2_RESULT_DENIED) ||
+       header.payload_len != 32u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_dimension_reset_t decoded = {{
+       .recorded_dimension = aimee_db2_get_u32(payload),
+       .target_dimension = aimee_db2_get_u32(payload + 4),
+       .tables_discovered = aimee_db2_get_u32(payload + 8),
+       .tables_dropped = aimee_db2_get_u32(payload + 12),
+       .rows_cleared = aimee_db2_get_u64(payload + 16),
+       .curator_requeued = (int32_t)aimee_db2_get_u32(payload + 24),
+       .evidence_requeued = (int32_t)aimee_db2_get_u32(payload + 28),
+   }};
+   if (!aimee_db2_dimension_reset_valid(&decoded))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
 }}
 
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
@@ -470,6 +6393,7 @@ def client_header_bytes() -> bytes:
 #include <stdint.h>
 
 #include <aimee/core/event_bus/module_client.h>
+#include <aimee/db2/module_api.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -486,6 +6410,153 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        int *schema_ok, int *have_pg_trgm, int *kb_tables_ok,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_embedding_dimension_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, uint32_t *dimension,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_level3_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_level2_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_orphaned_l0_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_total_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_session_l2_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *source_session, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_key_exists_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *key, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_find_id_by_key_kind_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *key, const char *kind, uint32_t *found, uint64_t *id,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_key_exists_in_tier_pair_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *key, const char *tier_a, const char *tier_b, uint32_t *exists,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_effectiveness_update_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, uint32_t has_value, double value, uint32_t *domain_result,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_retention_enforce_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *deleted_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_effectiveness_demote_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *demoted_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_effectiveness_stats_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_effectiveness_stats_t *stats, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_l2_memory_ids_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_health_record_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t promotions, uint32_t demotions, uint32_t expirations,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_health_retention_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *snapshots_deleted, uint32_t *contradictions_deleted,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_health_counters_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_health_counters_t *counters, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_stats_counts_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_memory_stats_t *stats, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_expire_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *level0_deleted, uint32_t *stale_level1_deleted,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_demote_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *demoted_count, uint32_t *cascaded_count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_promote_stable_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *promoted_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_reclassify_directives_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t require_approval, uint32_t *reclassified_count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_record_l4_approval_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *approver, const char *note,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_pool_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_pool_status_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_embedding_refusals_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_embedding_refusals_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_postgres_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_postgres_status_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_reembed_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_reembed_status_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_reembed_clear_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_reembed_clear_maintenance_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t force, uint32_t *domain_result, aimee_db2_reembed_clear_maintenance_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_embedder_serving_id_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, char *serving_id, size_t serving_id_capacity,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_dimension_reset_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t target_dimension, uint32_t force, uint32_t dry_run, uint32_t *domain_result,
+       aimee_db2_dimension_reset_t *status, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
 
 #ifdef __cplusplus
 }
@@ -531,6 +6602,870 @@ aimee_db2_health_call(aimee_db2_call_fn call, void *call_context, uint64_t trace
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_embedding_dimension_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint32_t *domain_result,
+                                   uint32_t *dimension, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (dimension)
+      *dimension = 0u;
+   if (!call || !domain_result || !dimension)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_embedding_dimension_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EMBEDDING_DIMENSION, AIMEE_DB2_STAGE_EMBEDDING_DIMENSION,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_embedding_dimension_reply_decode(response, response_len, domain_result,
+                                                  dimension) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_level3_count_call(aimee_db2_call_fn call, void *call_context,
+                                                       uint64_t trace_id, uint64_t deadline_ns,
+                                                       uint32_t *count,
+                                                       aimee_module_cancelled_fn cancelled,
+                                                       void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_level3_count_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LEVEL3_COUNT, AIMEE_DB2_STAGE_LEVEL3_COUNT, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_level3_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_level2_count_call(aimee_db2_call_fn call, void *call_context,
+                                                       uint64_t trace_id, uint64_t deadline_ns,
+                                                       uint32_t *count,
+                                                       aimee_module_cancelled_fn cancelled,
+                                                       void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LEVEL2_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_LEVEL2_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_level2_count_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LEVEL2_COUNT, AIMEE_DB2_STAGE_LEVEL2_COUNT, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_level2_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_orphaned_l0_count_call(aimee_db2_call_fn call,
+                                                            void *call_context, uint64_t trace_id,
+                                                            uint64_t deadline_ns, uint32_t *count,
+                                                            aimee_module_cancelled_fn cancelled,
+                                                            void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ORPHANED_L0_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_orphaned_l0_count_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ORPHANED_L0_COUNT, AIMEE_DB2_STAGE_ORPHANED_L0_COUNT,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_orphaned_l0_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_total_count_call(aimee_db2_call_fn call, void *call_context,
+                                                      uint64_t trace_id, uint64_t deadline_ns,
+                                                      uint64_t *count,
+                                                      aimee_module_cancelled_fn cancelled,
+                                                      void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_TOTAL_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_TOTAL_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_total_count_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_TOTAL_COUNT, AIMEE_DB2_STAGE_TOTAL_COUNT, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_total_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_session_l2_count_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, const char *source_session, uint32_t *count,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !source_session || !count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_session_l2_count_request_encode(source_session, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SESSION_L2_COUNT, AIMEE_DB2_STAGE_SESSION_L2_COUNT,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_session_l2_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_key_exists_call(aimee_db2_call_fn call, void *call_context,
+                                                     uint64_t trace_id, uint64_t deadline_ns,
+                                                     const char *key, uint32_t *exists,
+                                                     aimee_module_cancelled_fn cancelled,
+                                                     void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !key || !exists)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KEY_EXISTS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_key_exists_request_encode(key, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_KEY_EXISTS, AIMEE_DB2_STAGE_KEY_EXISTS, trace_id, deadline_ns,
+       request, request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_key_exists_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_find_id_by_key_kind_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *key, const char *kind,
+                                   uint32_t *found, uint64_t *id,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (found)
+      *found = 0u;
+   if (id)
+      *id = 0u;
+   if (!call || !key || !kind || !found || !id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_find_id_by_key_kind_request_encode(key, kind, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND, AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_find_id_by_key_kind_reply_decode(response, response_len, found, id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_key_exists_in_tier_pair_call(aimee_db2_call_fn call, void *call_context,
+                                       uint64_t trace_id, uint64_t deadline_ns, const char *key,
+                                       const char *tier_a, const char *tier_b, uint32_t *exists,
+                                       aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !key || !tier_a || !tier_b || !exists)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_key_exists_in_tier_pair_request_encode(key, tier_a, tier_b, request,
+                                                        sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR,
+            AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_key_exists_in_tier_pair_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_effectiveness_update_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                    uint64_t deadline_ns, uint64_t memory_id, uint32_t has_value,
+                                    double value, uint32_t *domain_result,
+                                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (!call || !domain_result)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_effectiveness_update_request_encode(memory_id, has_value, value, request,
+                                                     sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE,
+            AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_effectiveness_update_reply_decode(response, response_len, domain_result) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_retention_enforce_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                 uint64_t deadline_ns, uint32_t *deleted_count,
+                                 aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (deleted_count)
+      *deleted_count = 0u;
+   if (!call || !deleted_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RETENTION_ENFORCE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_retention_enforce_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RETENTION_ENFORCE, AIMEE_DB2_STAGE_RETENTION_ENFORCE,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_retention_enforce_reply_decode(response, response_len, deleted_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_effectiveness_demote_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                    uint64_t deadline_ns, uint32_t *demoted_count,
+                                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (!call || !demoted_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EFFECTIVENESS_DEMOTE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_effectiveness_demote_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE,
+            AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_effectiveness_demote_reply_decode(response, response_len, demoted_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_effectiveness_stats_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, aimee_db2_effectiveness_stats_t *stats,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!call || !stats)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_effectiveness_stats_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EFFECTIVENESS_STATS, AIMEE_DB2_STAGE_EFFECTIVENESS_STATS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_effectiveness_stats_reply_decode(response, response_len, stats) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_l2_memory_ids_call(aimee_db2_call_fn call, void *call_context,
+                                                        uint64_t trace_id, uint64_t deadline_ns,
+                                                        uint64_t *memory_ids, uint32_t capacity,
+                                                        uint32_t *count,
+                                                        aimee_module_cancelled_fn cancelled,
+                                                        void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_l2_memory_ids_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_L2_MEMORY_IDS, AIMEE_DB2_STAGE_L2_MEMORY_IDS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_l2_memory_ids_reply_decode(response, response_len, memory_ids, capacity, count) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_health_record_call(aimee_db2_call_fn call, void *call_context,
+                                                        uint64_t trace_id, uint64_t deadline_ns,
+                                                        uint32_t promotions, uint32_t demotions,
+                                                        uint32_t expirations,
+                                                        aimee_module_cancelled_fn cancelled,
+                                                        void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_record_request_encode(promotions, demotions, expirations, request,
+                                              sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_RECORD, AIMEE_DB2_STAGE_HEALTH_RECORD, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_record_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_health_retention_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, uint32_t *snapshots_deleted,
+                                uint32_t *contradictions_deleted,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (snapshots_deleted)
+      *snapshots_deleted = 0u;
+   if (contradictions_deleted)
+      *contradictions_deleted = 0u;
+   if (!call || !snapshots_deleted || !contradictions_deleted)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_retention_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_RETENTION, AIMEE_DB2_STAGE_HEALTH_RETENTION,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_retention_reply_decode(response, response_len, snapshots_deleted,
+                                               contradictions_deleted) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_health_counters_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                               uint64_t deadline_ns, aimee_db2_health_counters_t *counters,
+                               aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (counters)
+      memset(counters, 0, sizeof(*counters));
+   if (!call || !counters)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_counters_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_COUNTERS, AIMEE_DB2_STAGE_HEALTH_COUNTERS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_counters_reply_decode(response, response_len, counters) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_stats_counts_call(aimee_db2_call_fn call, void *call_context,
+                                                       uint64_t trace_id, uint64_t deadline_ns,
+                                                       aimee_db2_memory_stats_t *stats,
+                                                       aimee_module_cancelled_fn cancelled,
+                                                       void *cancel_context)
+{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!call || !stats)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_STATS_COUNTS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_stats_counts_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_STATS_COUNTS, AIMEE_DB2_STAGE_STATS_COUNTS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_stats_counts_reply_decode(response, response_len, stats) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_expire_call(aimee_db2_call_fn call, void *call_context,
+                                                 uint64_t trace_id, uint64_t deadline_ns,
+                                                 uint32_t *level0_deleted,
+                                                 uint32_t *stale_level1_deleted,
+                                                 aimee_module_cancelled_fn cancelled,
+                                                 void *cancel_context)
+{
+   if (level0_deleted)
+      *level0_deleted = 0u;
+   if (stale_level1_deleted)
+      *stale_level1_deleted = 0u;
+   if (!call || !level0_deleted || !stale_level1_deleted)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EXPIRE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EXPIRE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_expire_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_EXPIRE, AIMEE_DB2_STAGE_EXPIRE, trace_id, deadline_ns, request,
+       sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_expire_reply_decode(response, response_len, level0_deleted,
+                                     stale_level1_deleted) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_demote_call(aimee_db2_call_fn call, void *call_context,
+                                                 uint64_t trace_id, uint64_t deadline_ns,
+                                                 uint32_t *demoted_count, uint32_t *cascaded_count,
+                                                 aimee_module_cancelled_fn cancelled,
+                                                 void *cancel_context)
+{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (cascaded_count)
+      *cascaded_count = 0u;
+   if (!call || !demoted_count || !cascaded_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DEMOTE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DEMOTE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_demote_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_DEMOTE, AIMEE_DB2_STAGE_DEMOTE, trace_id, deadline_ns, request,
+       sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_demote_reply_decode(response, response_len, demoted_count, cascaded_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_promote_stable_call(aimee_db2_call_fn call, void *call_context,
+                                                         uint64_t trace_id, uint64_t deadline_ns,
+                                                         uint32_t *promoted_count,
+                                                         aimee_module_cancelled_fn cancelled,
+                                                         void *cancel_context)
+{
+   if (promoted_count)
+      *promoted_count = 0u;
+   if (!call || !promoted_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_promote_stable_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROMOTE_STABLE, AIMEE_DB2_STAGE_PROMOTE_STABLE, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_promote_stable_reply_decode(response, response_len, promoted_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_reclassify_directives_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, uint32_t require_approval,
+                                     uint32_t *reclassified_count,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (reclassified_count)
+      *reclassified_count = 0u;
+   if (!call || !reclassified_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_reclassify_directives_request_encode(require_approval, request, sizeof(request)) !=
+       0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES,
+            AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reclassify_directives_reply_decode(response, response_len, reclassified_count) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_record_l4_approval_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t memory_id, const char *approver,
+                                  const char *note, aimee_module_cancelled_fn cancelled,
+                                  void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_record_l4_approval_request_encode(memory_id, approver, note, request,
+                                                   sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RECORD_L4_APPROVAL, AIMEE_DB2_STAGE_RECORD_L4_APPROVAL,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_record_l4_approval_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
+                                                      uint64_t trace_id, uint64_t deadline_ns,
+                                                      uint32_t *domain_result,
+                                                      aimee_db2_pool_status_t *status,
+                                                      aimee_module_cancelled_fn cancelled,
+                                                      void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_pool_status_t){0};
+   if (!call || !domain_result || !status)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_POOL_STATUS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_POOL_STATUS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_pool_status_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_POOL_STATUS, AIMEE_DB2_STAGE_POOL_STATUS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_pool_status_reply_decode(response, response_len, domain_result, status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_embedding_refusals_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint32_t *domain_result,
+                                  aimee_db2_embedding_refusals_t *status,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_embedding_refusals_t){0};
+   if (!call || !domain_result || !status)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_embedding_refusals_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EMBEDDING_REFUSALS, AIMEE_DB2_STAGE_EMBEDDING_REFUSALS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_embedding_refusals_reply_decode(response, response_len, domain_result, status) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_postgres_status_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                               uint64_t deadline_ns, uint32_t *domain_result,
+                               aimee_db2_postgres_status_t *status,
+                               aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_postgres_status_t){0};
+   if (!call || !domain_result || !status)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_postgres_status_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_POSTGRES_STATUS, AIMEE_DB2_STAGE_POSTGRES_STATUS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_postgres_status_reply_decode(response, response_len, domain_result, status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_reembed_status_call(aimee_db2_call_fn call, void *call_context,
+                                                         uint64_t trace_id, uint64_t deadline_ns,
+                                                         uint32_t *domain_result,
+                                                         aimee_db2_reembed_status_t *status,
+                                                         aimee_module_cancelled_fn cancelled,
+                                                         void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_status_t){0};
+   if (!call || !domain_result || !status)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_reembed_status_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_REEMBED_STATUS, AIMEE_DB2_STAGE_REEMBED_STATUS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reembed_status_reply_decode(response, response_len, domain_result, status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_reembed_clear_call(aimee_db2_call_fn call, void *call_context,
+                                                        uint64_t trace_id, uint64_t deadline_ns,
+                                                        uint32_t *domain_result,
+                                                        aimee_module_cancelled_fn cancelled,
+                                                        void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (!call || !domain_result)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_reembed_clear_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_REEMBED_CLEAR, AIMEE_DB2_STAGE_REEMBED_CLEAR, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reembed_clear_reply_decode(response, response_len, domain_result) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_reembed_clear_maintenance_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t force, uint32_t *domain_result, aimee_db2_reembed_clear_maintenance_t *status,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_clear_maintenance_t){0};
+   if (!call || !domain_result || !status || force > 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_reembed_clear_maintenance_request_encode(force, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR, AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reembed_clear_maintenance_reply_decode(response, response_len, domain_result,
+                                                        status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_embedder_serving_id_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint32_t *domain_result, char *serving_id,
+                                   size_t serving_id_capacity, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (serving_id && serving_id_capacity)
+      serving_id[0] = '\\0';
+   if (!call || !domain_result || !serving_id ||
+       serving_id_capacity < AIMEE_DB2_EMBEDDER_SERVING_ID_MAX + 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_embedder_serving_id_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID, AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_embedder_serving_id_reply_decode(response, response_len, domain_result, serving_id,
+                                                  serving_id_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_dimension_reset_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t target_dimension, uint32_t force, uint32_t dry_run, uint32_t *domain_result,
+    aimee_db2_dimension_reset_t *status, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_dimension_reset_t){0};
+   if (!call || !domain_result || !status || target_dimension < AIMEE_DB2_REEMBED_DIMENSION_MIN ||
+       target_dimension > AIMEE_DB2_REEMBED_DIMENSION_MAX || force > 1u || dry_run > 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_dimension_reset_request_encode(target_dimension, force, dry_run, request,
+                                                sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DIMENSION_RESET, AIMEE_DB2_STAGE_DIMENSION_RESET,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_dimension_reset_reply_decode(response, response_len, domain_result, status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
 '''
     return text.encode("utf-8")
 
@@ -542,8 +7477,39 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
 
     fingerprint = catalog_fingerprint(catalog)
     families = catalog["families"]
-    operation = catalog["operations"][0]
-    flags = operation["reply"]["flags"]
+    health = catalog["operations"][0]
+    embedding_dimension = catalog["operations"][1]
+    pool_status = catalog["operations"][2]
+    embedding_refusals = catalog["operations"][3]
+    postgres_status = catalog["operations"][4]
+    reembed_status = catalog["operations"][5]
+    reembed_clear = catalog["operations"][6]
+    reembed_clear_maintenance = catalog["operations"][7]
+    embedder_serving_id = catalog["operations"][8]
+    dimension_reset = catalog["operations"][9]
+    level3_count = catalog["operations"][10]
+    level2_count = catalog["operations"][11]
+    orphaned_l0_count = catalog["operations"][12]
+    total_count = catalog["operations"][13]
+    session_l2_count = catalog["operations"][14]
+    key_exists = catalog["operations"][15]
+    find_id_by_key_kind = catalog["operations"][16]
+    key_exists_in_tier_pair = catalog["operations"][17]
+    effectiveness_update = catalog["operations"][18]
+    retention_enforce = catalog["operations"][19]
+    effectiveness_demote = catalog["operations"][20]
+    effectiveness_stats = catalog["operations"][21]
+    l2_memory_ids = catalog["operations"][22]
+    health_record = catalog["operations"][23]
+    health_retention = catalog["operations"][24]
+    health_counters = catalog["operations"][25]
+    stats_counts = catalog["operations"][26]
+    expire = catalog["operations"][27]
+    demote = catalog["operations"][28]
+    promote_stable = catalog["operations"][29]
+    reclassify_directives = catalog["operations"][30]
+    record_l4_approval = catalog["operations"][31]
+    flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
         for index, name in enumerate(catalog["result_codes"])
@@ -569,6 +7535,7 @@ package db2
 import (
 \t"encoding/binary"
 \t"errors"
+\t"math"
 )
 
 const ContractSHA256 = "{fingerprint}"
@@ -582,17 +7549,2363 @@ const WireVersion uint32 = {catalog['wire_version']}
 
 const EventHealth = EventLifecycle
 const StageHealth = FamilyLifecycle
-const OperationHealth uint32 = {operation['id']}
+const OperationHealth uint32 = {health['id']}
+const EventEmbeddingDimension = EventLifecycle
+const StageEmbeddingDimension = FamilyLifecycle
+const OperationEmbeddingDimension uint32 = {embedding_dimension['id']}
+const EmbeddingDimensionMin uint32 = {embedding_dimension['reply']['field']['minimum']}
+const EmbeddingDimensionMax uint32 = {embedding_dimension['reply']['field']['maximum']}
+const EventPoolStatus = EventLifecycle
+const StagePoolStatus = FamilyLifecycle
+const OperationPoolStatus uint32 = {pool_status['id']}
+const PoolSizeMax uint32 = 256
+const EventEmbeddingRefusals = EventLifecycle
+const StageEmbeddingRefusals = FamilyLifecycle
+const OperationEmbeddingRefusals uint32 = {embedding_refusals['id']}
+const EmbeddingOfferedMax uint32 = 2147483647
+const EventPostgresStatus = EventLifecycle
+const StagePostgresStatus = FamilyLifecycle
+const OperationPostgresStatus uint32 = {postgres_status['id']}
+const PostgresAvailableActive uint32 = 1 << 0
+const PostgresAvailableMax uint32 = 1 << 1
+const PostgresAvailableRole uint32 = 1 << 2
+const PostgresAvailableLag uint32 = 1 << 3
+const PostgresAvailableAll uint32 = 0xf
+const PostgresCountMax uint32 = 2147483647
+const EventReembedStatus = EventLifecycle
+const StageReembedStatus = FamilyLifecycle
+const OperationReembedStatus uint32 = {reembed_status['id']}
+const ReembedDimensionMin uint32 = 1
+const ReembedDimensionMax uint32 = 4000
+const EventReembedClear = EventLifecycle
+const StageReembedClear = FamilyLifecycle
+const OperationReembedClear uint32 = {reembed_clear['id']}
+const EventReembedClearMaintenance = EventLifecycle
+const StageReembedClearMaintenance = FamilyLifecycle
+const OperationReembedClearMaintenance uint32 = {reembed_clear_maintenance['id']}
+const EventEmbedderServingID = EventLifecycle
+const StageEmbedderServingID = FamilyLifecycle
+const OperationEmbedderServingID uint32 = {embedder_serving_id['id']}
+const EmbedderServingIDMax = 159
+const EventDimensionReset = EventLifecycle
+const StageDimensionReset = FamilyLifecycle
+const OperationDimensionReset uint32 = {dimension_reset['id']}
+const DimensionResetTablesMax uint32 = 16
+const EventLevel3Count = EventMemory
+const StageLevel3Count = FamilyMemory
+const OperationLevel3Count uint32 = {level3_count['id']}
+const Level3CountMax uint32 = {level3_count['reply']['field']['maximum']}
+const EventLevel2Count = EventMemory
+const StageLevel2Count = FamilyMemory
+const OperationLevel2Count uint32 = {level2_count['id']}
+const Level2CountMax uint32 = {level2_count['reply']['field']['maximum']}
+const EventOrphanedL0Count = EventMemory
+const StageOrphanedL0Count = FamilyMemory
+const OperationOrphanedL0Count uint32 = {orphaned_l0_count['id']}
+const OrphanedL0CountMax uint32 = {orphaned_l0_count['reply']['field']['maximum']}
+const EventTotalCount = EventMemory
+const StageTotalCount = FamilyMemory
+const OperationTotalCount uint32 = {total_count['id']}
+const TotalCountMax uint64 = {total_count['reply']['field']['maximum']}
+const EventSessionL2Count = EventMemory
+const StageSessionL2Count = FamilyMemory
+const OperationSessionL2Count uint32 = {session_l2_count['id']}
+const SessionL2CountSessionMax = {session_l2_count['request']['field']['maximum_bytes']}
+const SessionL2CountMax uint32 = {session_l2_count['reply']['field']['maximum']}
+const EventKeyExists = EventMemory
+const StageKeyExists = FamilyMemory
+const OperationKeyExists uint32 = {key_exists['id']}
+const KeyExistsKeyMax = {key_exists['request']['field']['maximum_bytes']}
+const KeyExistsMax uint32 = {key_exists['reply']['field']['maximum']}
+const EventFindIDByKeyKind = EventMemory
+const StageFindIDByKeyKind = FamilyMemory
+const OperationFindIDByKeyKind uint32 = {find_id_by_key_kind['id']}
+const FindIDByKeyKindKeyMax = {find_id_by_key_kind['request']['fields'][0]['maximum_bytes']}
+const FindIDByKeyKindKindMax = {find_id_by_key_kind['request']['fields'][1]['maximum_bytes']}
+const FindIDByKeyKindFoundMax uint32 = {find_id_by_key_kind['reply']['fields'][0]['maximum']}
+const FindIDByKeyKindIDMax uint64 = {find_id_by_key_kind['reply']['fields'][1]['maximum']}
+const EventKeyExistsInTierPair = EventMemory
+const StageKeyExistsInTierPair = FamilyMemory
+const OperationKeyExistsInTierPair uint32 = {key_exists_in_tier_pair['id']}
+const KeyExistsInTierPairKeyMax = {key_exists_in_tier_pair['request']['fields'][0]['maximum_bytes']}
+const KeyExistsInTierPairTierAMax = {key_exists_in_tier_pair['request']['fields'][1]['maximum_bytes']}
+const KeyExistsInTierPairTierBMax = {key_exists_in_tier_pair['request']['fields'][2]['maximum_bytes']}
+const KeyExistsInTierPairMax uint32 = {key_exists_in_tier_pair['reply']['field']['maximum']}
+const EventEffectivenessUpdate = EventMemory
+const StageEffectivenessUpdate = FamilyMemory
+const OperationEffectivenessUpdate uint32 = {effectiveness_update['id']}
+const EffectivenessUpdateMemoryIDMax uint64 = {effectiveness_update['request']['fields'][0]['maximum']}
+const EffectivenessUpdateHasValueMax uint32 = {effectiveness_update['request']['fields'][1]['maximum']}
+const EventRetentionEnforce = EventMemory
+const StageRetentionEnforce = FamilyMemory
+const OperationRetentionEnforce uint32 = {retention_enforce['id']}
+const RetentionRestricted = "{retention_enforce['request']['policy'][0]['sensitivity']}"
+const RetentionRestrictedDays uint32 = {retention_enforce['request']['policy'][0]['retention_days']}
+const RetentionSensitive = "{retention_enforce['request']['policy'][1]['sensitivity']}"
+const RetentionSensitiveDays uint32 = {retention_enforce['request']['policy'][1]['retention_days']}
+const RetentionEnforceMax uint32 = {retention_enforce['reply']['field']['maximum']}
+const EventEffectivenessDemote = EventMemory
+const StageEffectivenessDemote = FamilyMemory
+const OperationEffectivenessDemote uint32 = {effectiveness_demote['id']}
+const EffectivenessDemoteThresholdBits uint64 = {effectiveness_demote['request']['policy']['threshold_binary64_bits']}
+const EffectivenessDemoteMax uint32 = {effectiveness_demote['reply']['field']['maximum']}
+const EventEffectivenessStats = EventMemory
+const StageEffectivenessStats = FamilyMemory
+const OperationEffectivenessStats uint32 = {effectiveness_stats['id']}
+const EffectivenessStatsLowThresholdBits uint64 = {effectiveness_stats['request']['policy']['low_threshold_binary64_bits']}
+const EffectivenessStatsAvgMin = {_binary64_literal(effectiveness_stats['reply']['fields'][0]['minimum_binary64_bits'])}
+const EffectivenessStatsAvgMax = {_binary64_literal(effectiveness_stats['reply']['fields'][0]['maximum_binary64_bits'])}
+const EffectivenessStatsLowMax uint32 = {effectiveness_stats['reply']['fields'][1]['maximum']}
+const EffectivenessStatsHighMax uint32 = {effectiveness_stats['reply']['fields'][2]['maximum']}
+const EventL2MemoryIDs = EventMemory
+const StageL2MemoryIDs = FamilyMemory
+const OperationL2MemoryIDs uint32 = {l2_memory_ids['id']}
+const L2MemoryIDsMax uint32 = {l2_memory_ids['reply']['field']['maximum_items']}
+const L2MemoryIDMin uint64 = {l2_memory_ids['reply']['field']['item_minimum']}
+const L2MemoryIDMax uint64 = {l2_memory_ids['reply']['field']['item_maximum']}
+const EventHealthRecord = EventMemory
+const StageHealthRecord = FamilyMemory
+const OperationHealthRecord uint32 = {health_record['id']}
+const HealthRecordConflictWindowDays uint32 = {health_record['request']['policy']['conflict_window_days']}
+const HealthRecordCounterMax uint32 = {health_record['request']['fields'][0]['maximum']}
+const EventHealthRetention = EventMemory
+const StageHealthRetention = FamilyMemory
+const OperationHealthRetention uint32 = {health_retention['id']}
+const HealthRetentionSnapshotDays uint32 = {health_retention['request']['policy']['snapshot_retention_days']}
+const HealthRetentionContradictionDays uint32 = {health_retention['request']['policy']['contradiction_retention_days']}
+const HealthRetentionMax uint32 = {health_retention['reply']['fields'][0]['maximum']}
+const EventHealthCounters = EventMemory
+const StageHealthCounters = FamilyMemory
+const OperationHealthCounters uint32 = {health_counters['id']}
+const HealthCountersPromoteUseCount uint32 = {health_counters['request']['policy']['promote_use_count']}
+const HealthCountersPromoteConfidenceBits uint64 = {health_counters['request']['policy']['promote_confidence_binary64_bits']}
+const HealthCountersFields = {len(HEALTH_COUNTERS)}
+const HealthCountersMax uint32 = {health_counters['reply']['fields'][0]['maximum']}
+const EventStatsCounts = EventMemory
+const StageStatsCounts = FamilyMemory
+const OperationStatsCounts uint32 = {stats_counts['id']}
+const StatsCountsTiers = {len(MEMORY_TIERS)}
+const StatsCountsKinds = {len(MEMORY_KINDS)}
+const StatsCountsMax uint32 = {stats_counts['reply']['fields'][2]['maximum']}
+const EventExpire = EventMemory
+const StageExpire = FamilyMemory
+const OperationExpire uint32 = {expire['id']}
+const ExpireStaleTier = "{expire['request']['policy']['stale_l1_tier']}"
+const ExpireKindsMax uint32 = {expire['request']['policy']['maximum_kinds']}
+const ExpireMax uint32 = {expire['reply']['fields'][0]['maximum']}
+const EventDemote = EventMemory
+const StageDemote = FamilyMemory
+const OperationDemote uint32 = {demote['id']}
+const DemoteTier = "{demote['request']['policy']['demote_tier']}"
+const DemoteKindsMax uint32 = {demote['request']['policy']['maximum_kinds']}
+const DemoteMax uint32 = {demote['reply']['fields'][0]['maximum']}
+const EventPromoteStable = EventMemory
+const StagePromoteStable = FamilyMemory
+const OperationPromoteStable uint32 = {promote_stable['id']}
+const PromoteStableSourceTier = "{promote_stable['request']['policy']['source_tier']}"
+const PromoteStableTargetTier = "{promote_stable['request']['policy']['target_tier']}"
+const PromoteStableConfidenceBits uint64 = {promote_stable['request']['policy']['minimum_confidence_binary64_bits']}
+const PromoteStableUseCount uint32 = {promote_stable['request']['policy']['minimum_use_count']}
+const PromoteStableDays uint32 = {promote_stable['request']['policy']['stable_days']}
+const PromoteStableMax uint32 = {promote_stable['reply']['field']['maximum']}
+const EventReclassifyDirectives = EventMemory
+const StageReclassifyDirectives = FamilyMemory
+const OperationReclassifyDirectives uint32 = {reclassify_directives['id']}
+const ReclassifyDirectivesSourceTier = "{reclassify_directives['request']['policy']['source_tier']}"
+const ReclassifyDirectivesTargetTier = "{reclassify_directives['request']['policy']['target_tier']}"
+const ReclassifyDirectivesGatedKind = "{reclassify_directives['request']['policy']['gated_kind']}"
+const ReclassifyDirectivesGateMax uint32 = {reclassify_directives['request']['field']['maximum']}
+const ReclassifyDirectivesMax uint32 = {reclassify_directives['reply']['field']['maximum']}
+const EventRecordL4Approval = EventMemory
+const StageRecordL4Approval = FamilyMemory
+const OperationRecordL4Approval uint32 = {record_l4_approval['id']}
+const RecordL4ApprovalTier = "{record_l4_approval['request']['policy']['target_tier']}"
+const RecordL4ApprovalMemoryIDMax uint64 = {record_l4_approval['request']['fields'][0]['maximum']}
+const RecordL4ApprovalApproverMax = {record_l4_approval['request']['fields'][1]['maximum_bytes']}
+const RecordL4ApprovalNoteMax = {record_l4_approval['request']['fields'][2]['maximum_bytes']}
 
-const healthRequestMagic uint32 = 0x{operation['request']['magic']:08x}
-const healthResponseMagic uint32 = 0x{operation['reply']['magic']:08x}
-const healthRequestLen = {operation['request']['encoded_size']}
-const healthResponseLen = {operation['reply']['encoded_size']}
+const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
+const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
+const envelopeReplyMagic uint32 = 0x{ENVELOPE_REPLY_MAGIC:08x}
+
+const healthRequestMagic uint32 = 0x{health['request']['magic']:08x}
+const healthResponseMagic uint32 = 0x{health['reply']['magic']:08x}
+const healthRequestLen = {health['request']['encoded_size']}
+const healthResponseLen = {health['reply']['encoded_size']}
 
 {flag_lines}
 const healthFlagAll uint32 = 0x{all_flags:x}
 
 var ErrMalformedHealth = errors.New("db2: malformed lifecycle health frame")
+var ErrMalformedEnvelope = errors.New("db2: malformed operation envelope")
+
+// RequestHeader is the fixed-width prefix for every post-bootstrap DB2
+// operation request. Payload contains the exact declared operation body.
+type RequestHeader struct {{
+	Operation  uint32
+	Flags      uint32
+	PayloadLen uint32
+}}
+
+// ReplyHeader is the fixed-width prefix for every post-bootstrap DB2 operation
+// reply. Result is one of the closed Result* values above.
+type ReplyHeader struct {{
+	Operation  uint32
+	Result     uint32
+	PayloadLen uint32
+}}
+
+func encodeEnvelopeHeader(magic, operation, code, payloadLen uint32) ([]byte, error) {{
+	if operation == 0 || magic == envelopeReplyMagic && code > ResultInvalidState {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header := make([]byte, EnvelopeHeaderLen)
+	binary.LittleEndian.PutUint32(header[0:4], magic)
+	binary.LittleEndian.PutUint16(header[4:6], uint16(WireVersion))
+	binary.LittleEndian.PutUint16(header[6:8], uint16(EnvelopeHeaderLen))
+	binary.LittleEndian.PutUint32(header[8:12], operation)
+	binary.LittleEndian.PutUint32(header[12:16], code)
+	binary.LittleEndian.PutUint32(header[16:20], payloadLen)
+	return header, nil
+}}
+
+func decodeEnvelopeHeader(frame []byte, magic uint32, reply bool) (uint32, uint32, uint32, error) {{
+	if len(frame) < EnvelopeHeaderLen ||
+		binary.LittleEndian.Uint32(frame[0:4]) != magic ||
+		binary.LittleEndian.Uint16(frame[4:6]) != uint16(WireVersion) ||
+		binary.LittleEndian.Uint16(frame[6:8]) != uint16(EnvelopeHeaderLen) ||
+		binary.LittleEndian.Uint32(frame[8:12]) == 0 ||
+		binary.LittleEndian.Uint32(frame[20:24]) != 0 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	operation := binary.LittleEndian.Uint32(frame[8:12])
+	code := binary.LittleEndian.Uint32(frame[12:16])
+	payloadLen := binary.LittleEndian.Uint32(frame[16:20])
+	if uint64(payloadLen) != uint64(len(frame)-EnvelopeHeaderLen) ||
+		reply && code > ResultInvalidState {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	return operation, code, payloadLen, nil
+}}
+
+// EncodeRequestHeader emits the header to which the caller appends payloadLen
+// canonical payload bytes.
+func EncodeRequestHeader(operation, flags, payloadLen uint32) ([]byte, error) {{
+	return encodeEnvelopeHeader(envelopeRequestMagic, operation, flags, payloadLen)
+}}
+
+// DecodeRequestHeader validates a complete header-plus-payload frame.
+func DecodeRequestHeader(frame []byte) (RequestHeader, error) {{
+	operation, flags, payloadLen, err := decodeEnvelopeHeader(frame, envelopeRequestMagic, false)
+	if err != nil {{
+		return RequestHeader{{}}, err
+	}}
+	return RequestHeader{{Operation: operation, Flags: flags, PayloadLen: payloadLen}}, nil
+}}
+
+// EncodeReplyHeader emits the header to which the provider appends payloadLen
+// canonical payload bytes.
+func EncodeReplyHeader(operation, result, payloadLen uint32) ([]byte, error) {{
+	return encodeEnvelopeHeader(envelopeReplyMagic, operation, result, payloadLen)
+}}
+
+// DecodeReplyHeader validates a complete header-plus-payload frame and the
+// closed result-code domain.
+func DecodeReplyHeader(frame []byte) (ReplyHeader, error) {{
+	operation, result, payloadLen, err := decodeEnvelopeHeader(frame, envelopeReplyMagic, true)
+	if err != nil {{
+		return ReplyHeader{{}}, err
+	}}
+	return ReplyHeader{{Operation: operation, Result: result, PayloadLen: payloadLen}}, nil
+}}
+
+// EncodeEmbeddingDimensionRequest emits the empty request envelope for the
+// effective DB2 pgvector schema width.
+func EncodeEmbeddingDimensionRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEmbeddingDimension, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeEmbeddingDimensionRequest validates the exact operation envelope.
+func DecodeEmbeddingDimensionRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbeddingDimension ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeEmbeddingDimensionReply emits either a bounded u32 success payload or
+// an empty invalid-state result.
+func EncodeEmbeddingDimensionReply(result, dimension uint32) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if dimension < EmbeddingDimensionMin || dimension > EmbeddingDimensionMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 4
+	}} else if result != ResultInvalidState || dimension != 0 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEmbeddingDimension, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], dimension)
+	return reply, nil
+}}
+
+// DecodeEmbeddingDimensionReply validates the operation, closed result subset,
+// payload shape, and dimension domain before exposing either field.
+func DecodeEmbeddingDimensionReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbeddingDimension {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, 0, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	dimension := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if dimension < EmbeddingDimensionMin || dimension > EmbeddingDimensionMax {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return header.Result, dimension, nil
+}}
+
+// EncodeLevel3CountRequest emits the empty request envelope for the global L3 count.
+func EncodeLevel3CountRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationLevel3Count, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeLevel3CountRequest validates the exact memory-family operation envelope.
+func DecodeLevel3CountRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLevel3Count ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeLevel3CountReply emits one bounded u32 success payload.
+func EncodeLevel3CountReply(count uint32) ([]byte, error) {{
+	if count > Level3CountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationLevel3Count, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}}
+
+// DecodeLevel3CountReply validates the operation and bounded count.
+func DecodeLevel3CountReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationLevel3Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > Level3CountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return count, nil
+}}
+
+// EncodeLevel2CountRequest emits the empty request envelope for the global L2 count.
+func EncodeLevel2CountRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationLevel2Count, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeLevel2CountRequest validates the exact memory-family operation envelope.
+func DecodeLevel2CountRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLevel2Count ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeLevel2CountReply emits one bounded u32 success payload.
+func EncodeLevel2CountReply(count uint32) ([]byte, error) {{
+	if count > Level2CountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationLevel2Count, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}}
+
+// DecodeLevel2CountReply validates the operation and bounded count.
+func DecodeLevel2CountReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationLevel2Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > Level2CountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return count, nil
+}}
+
+// EncodeOrphanedL0CountRequest emits the empty request envelope for the orphaned L0 count.
+func EncodeOrphanedL0CountRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationOrphanedL0Count, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeOrphanedL0CountRequest validates the exact memory-family operation envelope.
+func DecodeOrphanedL0CountRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationOrphanedL0Count ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeOrphanedL0CountReply emits one bounded u32 success payload.
+func EncodeOrphanedL0CountReply(count uint32) ([]byte, error) {{
+	if count > OrphanedL0CountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationOrphanedL0Count, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}}
+
+// DecodeOrphanedL0CountReply validates the operation and bounded count.
+func DecodeOrphanedL0CountReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationOrphanedL0Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > OrphanedL0CountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return count, nil
+}}
+
+// EncodeTotalCountRequest emits the empty request envelope for the global memory count.
+func EncodeTotalCountRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationTotalCount, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeTotalCountRequest validates the exact memory-family operation envelope.
+func DecodeTotalCountRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTotalCount ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeTotalCountReply emits one bounded u64 success payload.
+func EncodeTotalCountReply(count uint64) ([]byte, error) {{
+	if count > TotalCountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationTotalCount, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}}
+
+// DecodeTotalCountReply validates the operation and bounded count.
+func DecodeTotalCountReply(reply []byte) (uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTotalCount || header.Result != ResultOK ||
+		header.PayloadLen != 8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
+	if count > TotalCountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return count, nil
+}}
+
+// EncodeSessionL2CountRequest emits one non-empty bounded session identifier.
+func EncodeSessionL2CountRequest(sourceSession string) ([]byte, error) {{
+	if len(sourceSession) == 0 || len(sourceSession) > SessionL2CountSessionMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for index := 0; index < len(sourceSession); index++ {{
+		if sourceSession[index] == 0 {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	header, err := EncodeRequestHeader(OperationSessionL2Count, 0, uint32(4+len(sourceSession)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4+len(sourceSession))...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(sourceSession)))
+	copy(request[EnvelopeHeaderLen+4:], sourceSession)
+	return request, nil
+}}
+
+// DecodeSessionL2CountRequest validates and returns the bounded session identifier.
+func DecodeSessionL2CountRequest(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSessionL2Count || header.Flags != 0 ||
+		header.PayloadLen < 5 {{
+		return "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen == 0 || decodedLen > SessionL2CountSessionMax ||
+		header.PayloadLen != 4+decodedLen {{
+		return "", ErrMalformedEnvelope
+	}}
+	sourceSession := string(payload[4:])
+	for index := 0; index < len(sourceSession); index++ {{
+		if sourceSession[index] == 0 {{
+			return "", ErrMalformedEnvelope
+		}}
+	}}
+	return sourceSession, nil
+}}
+
+// EncodeSessionL2CountReply emits one bounded u32 success payload.
+func EncodeSessionL2CountReply(count uint32) ([]byte, error) {{
+	if count > SessionL2CountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationSessionL2Count, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}}
+
+// DecodeSessionL2CountReply validates the operation and bounded count.
+func DecodeSessionL2CountReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSessionL2Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > SessionL2CountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return count, nil
+}}
+
+// EncodeKeyExistsRequest emits one non-empty bounded canonical memory key.
+func EncodeKeyExistsRequest(key string) ([]byte, error) {{
+	if len(key) == 0 || len(key) > KeyExistsKeyMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for index := 0; index < len(key); index++ {{
+		if key[index] == 0 {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	header, err := EncodeRequestHeader(OperationKeyExists, 0, uint32(4+len(key)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4+len(key))...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(key)))
+	copy(request[EnvelopeHeaderLen+4:], key)
+	return request, nil
+}}
+
+// DecodeKeyExistsRequest validates and returns the bounded canonical memory key.
+func DecodeKeyExistsRequest(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKeyExists || header.Flags != 0 ||
+		header.PayloadLen < 5 {{
+		return "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen == 0 || decodedLen > KeyExistsKeyMax || header.PayloadLen != 4+decodedLen {{
+		return "", ErrMalformedEnvelope
+	}}
+	key := string(payload[4:])
+	for index := 0; index < len(key); index++ {{
+		if key[index] == 0 {{
+			return "", ErrMalformedEnvelope
+		}}
+	}}
+	return key, nil
+}}
+
+// EncodeKeyExistsReply emits one boolean u32 success payload.
+func EncodeKeyExistsReply(exists uint32) ([]byte, error) {{
+	if exists > KeyExistsMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationKeyExists, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}}
+
+// DecodeKeyExistsReply validates the operation and boolean value.
+func DecodeKeyExistsReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationKeyExists || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	exists := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if exists > KeyExistsMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return exists, nil
+}}
+
+// EncodeFindIDByKeyKindRequest emits bounded canonical key and kind fields.
+func EncodeFindIDByKeyKindRequest(key, kind string) ([]byte, error) {{
+	if len(key) == 0 || len(key) > FindIDByKeyKindKeyMax ||
+		len(kind) == 0 || len(kind) > FindIDByKeyKindKindMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for index := 0; index < len(key); index++ {{
+		if key[index] == 0 {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	for index := 0; index < len(kind); index++ {{
+		if kind[index] == 0 {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	payloadLen := 8 + len(key) + len(kind)
+	header, err := EncodeRequestHeader(OperationFindIDByKeyKind, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(key)))
+	copy(payload[4:], key)
+	binary.LittleEndian.PutUint32(payload[4+len(key):], uint32(len(kind)))
+	copy(payload[8+len(key):], kind)
+	return request, nil
+}}
+
+// DecodeFindIDByKeyKindRequest validates and returns the canonical key and kind.
+func DecodeFindIDByKeyKindRequest(request []byte) (string, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFindIDByKeyKind || header.Flags != 0 ||
+		header.PayloadLen < 10 {{
+		return "", "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	keyLen := binary.LittleEndian.Uint32(payload[:4])
+	if keyLen == 0 || keyLen > FindIDByKeyKindKeyMax ||
+		uint64(8)+uint64(keyLen)+1 > uint64(header.PayloadLen) {{
+		return "", "", ErrMalformedEnvelope
+	}}
+	kindOffset := 4 + int(keyLen)
+	kindLen := binary.LittleEndian.Uint32(payload[kindOffset : kindOffset+4])
+	if kindLen == 0 || kindLen > FindIDByKeyKindKindMax ||
+		uint64(header.PayloadLen) != 8+uint64(keyLen)+uint64(kindLen) {{
+		return "", "", ErrMalformedEnvelope
+	}}
+	key := string(payload[4:kindOffset])
+	kind := string(payload[kindOffset+4:])
+	for index := 0; index < len(key); index++ {{
+		if key[index] == 0 {{
+			return "", "", ErrMalformedEnvelope
+		}}
+	}}
+	for index := 0; index < len(kind); index++ {{
+		if kind[index] == 0 {{
+			return "", "", ErrMalformedEnvelope
+		}}
+	}}
+	return key, kind, nil
+}}
+
+// EncodeFindIDByKeyKindReply emits consistent found state and identifier fields.
+func EncodeFindIDByKeyKindReply(found uint32, id uint64) ([]byte, error) {{
+	if found > FindIDByKeyKindFoundMax || id > FindIDByKeyKindIDMax ||
+		found == 0 && id != 0 || found == 1 && id == 0 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationFindIDByKeyKind, ResultOK, 12)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 12)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], found)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen+4:], id)
+	return reply, nil
+}}
+
+// DecodeFindIDByKeyKindReply validates the operation and consistent lookup result.
+func DecodeFindIDByKeyKindReply(reply []byte) (uint32, uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationFindIDByKeyKind ||
+		header.Result != ResultOK || header.PayloadLen != 12 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	found := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	id := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen+4:])
+	if found > FindIDByKeyKindFoundMax || id > FindIDByKeyKindIDMax ||
+		found == 0 && id != 0 || found == 1 && id == 0 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return found, id, nil
+}}
+
+// EncodeKeyExistsInTierPairRequest emits a bounded canonical key and tier pair.
+func EncodeKeyExistsInTierPairRequest(key, tierA, tierB string) ([]byte, error) {{
+	if len(key) == 0 || len(key) > KeyExistsInTierPairKeyMax ||
+		len(tierA) == 0 || len(tierA) > KeyExistsInTierPairTierAMax ||
+		len(tierB) == 0 || len(tierB) > KeyExistsInTierPairTierBMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for _, value := range []string{{key, tierA, tierB}} {{
+		for index := 0; index < len(value); index++ {{
+			if value[index] == 0 {{
+				return nil, ErrMalformedEnvelope
+			}}
+		}}
+	}}
+	payloadLen := 12 + len(key) + len(tierA) + len(tierB)
+	header, err := EncodeRequestHeader(OperationKeyExistsInTierPair, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(key)))
+	copy(payload[4:], key)
+	tierAOffset := 4 + len(key)
+	binary.LittleEndian.PutUint32(payload[tierAOffset:], uint32(len(tierA)))
+	copy(payload[tierAOffset+4:], tierA)
+	tierBOffset := tierAOffset + 4 + len(tierA)
+	binary.LittleEndian.PutUint32(payload[tierBOffset:], uint32(len(tierB)))
+	copy(payload[tierBOffset+4:], tierB)
+	return request, nil
+}}
+
+// DecodeKeyExistsInTierPairRequest validates and returns the canonical key and tier pair.
+func DecodeKeyExistsInTierPairRequest(request []byte) (string, string, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKeyExistsInTierPair || header.Flags != 0 ||
+		header.PayloadLen < 15 {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	keyLen := binary.LittleEndian.Uint32(payload[:4])
+	if keyLen == 0 || keyLen > KeyExistsInTierPairKeyMax ||
+		uint64(12)+uint64(keyLen)+2 > uint64(header.PayloadLen) {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	tierAOffset := 4 + int(keyLen)
+	tierALen := binary.LittleEndian.Uint32(payload[tierAOffset : tierAOffset+4])
+	if tierALen == 0 || tierALen > KeyExistsInTierPairTierAMax ||
+		uint64(12)+uint64(keyLen)+uint64(tierALen)+1 > uint64(header.PayloadLen) {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	tierBOffset := tierAOffset + 4 + int(tierALen)
+	tierBLen := binary.LittleEndian.Uint32(payload[tierBOffset : tierBOffset+4])
+	if tierBLen == 0 || tierBLen > KeyExistsInTierPairTierBMax ||
+		uint64(header.PayloadLen) != 12+uint64(keyLen)+uint64(tierALen)+uint64(tierBLen) {{
+		return "", "", "", ErrMalformedEnvelope
+	}}
+	key := string(payload[4:tierAOffset])
+	tierA := string(payload[tierAOffset+4 : tierBOffset])
+	tierB := string(payload[tierBOffset+4:])
+	for _, value := range []string{{key, tierA, tierB}} {{
+		for index := 0; index < len(value); index++ {{
+			if value[index] == 0 {{
+				return "", "", "", ErrMalformedEnvelope
+			}}
+		}}
+	}}
+	return key, tierA, tierB, nil
+}}
+
+// EncodeKeyExistsInTierPairReply emits one boolean u32 success payload.
+func EncodeKeyExistsInTierPairReply(exists uint32) ([]byte, error) {{
+	if exists > KeyExistsInTierPairMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationKeyExistsInTierPair, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}}
+
+// DecodeKeyExistsInTierPairReply validates the operation and boolean value.
+func DecodeKeyExistsInTierPairReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationKeyExistsInTierPair ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	exists := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if exists > KeyExistsInTierPairMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return exists, nil
+}}
+
+// EncodeEffectivenessUpdateRequest emits a canonical nullable binary64 update.
+func EncodeEffectivenessUpdateRequest(memoryID uint64, hasValue uint32, value float64) ([]byte, error) {{
+	valueBits := math.Float64bits(value)
+	if memoryID == 0 || memoryID > EffectivenessUpdateMemoryIDMax ||
+		hasValue > EffectivenessUpdateHasValueMax || hasValue == 0 && valueBits != 0 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationEffectivenessUpdate, 0, 20)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 20)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], hasValue)
+	binary.LittleEndian.PutUint64(payload[12:], valueBits)
+	return request, nil
+}}
+
+// DecodeEffectivenessUpdateRequest validates and returns the nullable binary64 update.
+func DecodeEffectivenessUpdateRequest(request []byte) (uint64, uint32, float64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessUpdate || header.Flags != 0 ||
+		header.PayloadLen != 20 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	hasValue := binary.LittleEndian.Uint32(payload[8:])
+	valueBits := binary.LittleEndian.Uint64(payload[12:])
+	if memoryID == 0 || memoryID > EffectivenessUpdateMemoryIDMax ||
+		hasValue > EffectivenessUpdateHasValueMax || hasValue == 0 && valueBits != 0 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	return memoryID, hasValue, math.Float64frombits(valueBits), nil
+}}
+
+// EncodeEffectivenessUpdateReply emits a closed success or invalid-state result.
+func EncodeEffectivenessUpdateReply(result uint32) ([]byte, error) {{
+	if result != ResultOK && result != ResultInvalidState {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return EncodeReplyHeader(OperationEffectivenessUpdate, result, 0)
+}}
+
+// DecodeEffectivenessUpdateReply validates the closed result.
+func DecodeEffectivenessUpdateReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessUpdate || header.PayloadLen != 0 ||
+		header.Result != ResultOK && header.Result != ResultInvalidState {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return header.Result, nil
+}}
+
+// EncodeRetentionEnforceRequest emits the empty request for the fixed retention policy.
+func EncodeRetentionEnforceRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationRetentionEnforce, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeRetentionEnforceRequest validates the exact empty operation envelope.
+func DecodeRetentionEnforceRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRetentionEnforce || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeRetentionEnforceReply emits the bounded total number of deleted rows.
+func EncodeRetentionEnforceReply(deletedCount uint32) ([]byte, error) {{
+	if deletedCount > RetentionEnforceMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationRetentionEnforce, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedCount)
+	return reply, nil
+}}
+
+// DecodeRetentionEnforceReply validates the operation and bounded deletion count.
+func DecodeRetentionEnforceReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRetentionEnforce ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	deletedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedCount > RetentionEnforceMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return deletedCount, nil
+}}
+
+// EncodeEffectivenessDemoteRequest emits the empty request for the fixed threshold policy.
+func EncodeEffectivenessDemoteRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEffectivenessDemote, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeEffectivenessDemoteRequest validates the exact empty operation envelope.
+func DecodeEffectivenessDemoteRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessDemote || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeEffectivenessDemoteReply emits the bounded number of demoted rows.
+func EncodeEffectivenessDemoteReply(demotedCount uint32) ([]byte, error) {{
+	if demotedCount > EffectivenessDemoteMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEffectivenessDemote, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], demotedCount)
+	return reply, nil
+}}
+
+// DecodeEffectivenessDemoteReply validates the operation and bounded demotion count.
+func DecodeEffectivenessDemoteReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessDemote ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	demotedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if demotedCount > EffectivenessDemoteMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return demotedCount, nil
+}}
+
+// EffectivenessStats is the bounded aggregate effectiveness summary over the memory corpus.
+type EffectivenessStats struct {{
+	AvgEffectiveness      float64
+	LowEffectivenessCount uint32
+	HighImpactCount       uint32
+}}
+
+// hasNUL reports whether a wire string carries an embedded NUL. The C backend
+// binds these as C strings, so a NUL would silently truncate the stored value.
+func hasNUL(value string) bool {{
+	for index := 0; index < len(value); index++ {{
+		if value[index] == 0 {{
+			return true
+		}}
+	}}
+	return false
+}}
+
+// EncodeRecordL4ApprovalRequest emits the memory, the approver, and the note.
+func EncodeRecordL4ApprovalRequest(memoryID uint64, approver, note string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > RecordL4ApprovalMemoryIDMax ||
+		len(approver) == 0 || len(approver) > RecordL4ApprovalApproverMax ||
+		len(note) > RecordL4ApprovalNoteMax ||
+		hasNUL(approver) || hasNUL(note) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 16 + len(approver) + len(note)
+	header, err := EncodeRequestHeader(OperationRecordL4Approval, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(approver)))
+	copy(payload[12:], approver)
+	binary.LittleEndian.PutUint32(payload[12+len(approver):], uint32(len(note)))
+	copy(payload[16+len(approver):], note)
+	return request, nil
+}}
+
+// DecodeRecordL4ApprovalRequest validates the operation and every bounded field.
+func DecodeRecordL4ApprovalRequest(request []byte) (uint64, string, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRecordL4Approval || header.Flags != 0 ||
+		header.PayloadLen < 16 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	approverLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > RecordL4ApprovalMemoryIDMax || approverLen == 0 ||
+		approverLen > uint32(RecordL4ApprovalApproverMax) ||
+		header.PayloadLen < 16+approverLen {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	noteLen := binary.LittleEndian.Uint32(payload[12+approverLen:])
+	if noteLen > uint32(RecordL4ApprovalNoteMax) ||
+		header.PayloadLen != 16+approverLen+noteLen {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	approver := string(payload[12 : 12+approverLen])
+	note := string(payload[16+approverLen : 16+approverLen+noteLen])
+	if hasNUL(approver) || hasNUL(note) {{
+		return 0, "", "", ErrMalformedEnvelope
+	}}
+	return memoryID, approver, note, nil
+}}
+
+// EncodeRecordL4ApprovalReply emits the payload-free acknowledgement.
+func EncodeRecordL4ApprovalReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationRecordL4Approval, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeRecordL4ApprovalReply validates the payload-free acknowledgement.
+func DecodeRecordL4ApprovalReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRecordL4Approval || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeReclassifyDirectivesRequest emits the approval gate, the operation's only input.
+func EncodeReclassifyDirectivesRequest(requireApproval uint32) ([]byte, error) {{
+	if requireApproval > ReclassifyDirectivesGateMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationReclassifyDirectives, 0, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], requireApproval)
+	return request, nil
+}}
+
+// DecodeReclassifyDirectivesRequest validates the operation and the bounded gate.
+func DecodeReclassifyDirectivesRequest(request []byte) (uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReclassifyDirectives || header.Flags != 0 ||
+		header.PayloadLen != 4 || len(request) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	requireApproval := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if requireApproval > ReclassifyDirectivesGateMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return requireApproval, nil
+}}
+
+// EncodeReclassifyDirectivesReply emits the bounded number of reclassified rows.
+func EncodeReclassifyDirectivesReply(reclassifiedCount uint32) ([]byte, error) {{
+	if reclassifiedCount > ReclassifyDirectivesMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReclassifyDirectives, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], reclassifiedCount)
+	return reply, nil
+}}
+
+// DecodeReclassifyDirectivesReply validates the operation and bounded count.
+func DecodeReclassifyDirectivesReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReclassifyDirectives ||
+		header.Result != ResultOK || header.PayloadLen != 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	reclassifiedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if reclassifiedCount > ReclassifyDirectivesMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return reclassifiedCount, nil
+}}
+
+// EncodePromoteStableRequest emits the empty request for the fixed stability policy.
+func EncodePromoteStableRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationPromoteStable, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodePromoteStableRequest validates the exact empty operation envelope.
+func DecodePromoteStableRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPromoteStable || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodePromoteStableReply emits the bounded number of promoted rows.
+func EncodePromoteStableReply(promotedCount uint32) ([]byte, error) {{
+	if promotedCount > PromoteStableMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationPromoteStable, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], promotedCount)
+	return reply, nil
+}}
+
+// DecodePromoteStableReply validates the operation and bounded promotion count.
+func DecodePromoteStableReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPromoteStable || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	promotedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if promotedCount > PromoteStableMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return promotedCount, nil
+}}
+
+// EncodeDemoteRequest emits the empty request for the fixed demotion policy.
+func EncodeDemoteRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationDemote, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeDemoteRequest validates the exact empty operation envelope.
+func DecodeDemoteRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemote || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeDemoteReply emits the demotion count and its cascade count.
+func EncodeDemoteReply(demotedCount, cascadedCount uint32) ([]byte, error) {{
+	// The cascade only runs when something was demoted.
+	if demotedCount > DemoteMax || cascadedCount > DemoteMax ||
+		(demotedCount == 0 && cascadedCount != 0) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationDemote, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, demotedCount)
+	binary.LittleEndian.PutUint32(payload[4:], cascadedCount)
+	return reply, nil
+}}
+
+// DecodeDemoteReply validates the operation, both bounded counts, and the cascade invariant.
+func DecodeDemoteReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDemote || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	demoted := binary.LittleEndian.Uint32(payload)
+	cascaded := binary.LittleEndian.Uint32(payload[4:])
+	if demoted > DemoteMax || cascaded > DemoteMax || (demoted == 0 && cascaded != 0) {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return demoted, cascaded, nil
+}}
+
+// EncodeExpireRequest emits the empty request for the fixed expiry policy.
+func EncodeExpireRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationExpire, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeExpireRequest validates the exact empty operation envelope.
+func DecodeExpireRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationExpire || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeExpireReply emits both bounded deletion counts.
+func EncodeExpireReply(level0Deleted, staleLevel1Deleted uint32) ([]byte, error) {{
+	if level0Deleted > ExpireMax || staleLevel1Deleted > ExpireMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationExpire, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, level0Deleted)
+	binary.LittleEndian.PutUint32(payload[4:], staleLevel1Deleted)
+	return reply, nil
+}}
+
+// DecodeExpireReply validates the operation and both bounded counts.
+func DecodeExpireReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationExpire || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	level0 := binary.LittleEndian.Uint32(payload)
+	stale := binary.LittleEndian.Uint32(payload[4:])
+	if level0 > ExpireMax || stale > ExpireMax {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return level0, stale, nil
+}}
+
+// MemoryStats is the corpus breakdown by tier and kind, plus the totals.
+type MemoryStats struct {{
+	TierCounts [StatsCountsTiers]uint32
+	KindCounts [StatsCountsKinds]uint32
+	Total      uint32
+	Conflicts  uint32
+}}
+
+// EncodeStatsCountsRequest emits the empty request envelope.
+func EncodeStatsCountsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationStatsCounts, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeStatsCountsRequest validates the exact empty operation envelope.
+func DecodeStatsCountsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationStatsCounts || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeStatsCountsReply emits every bounded bucket in the contract's order.
+func EncodeStatsCountsReply(stats MemoryStats) ([]byte, error) {{
+	for _, value := range stats.TierCounts {{
+		if value > StatsCountsMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	for _, value := range stats.KindCounts {{
+		if value > StatsCountsMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	if stats.Total > StatsCountsMax || stats.Conflicts > StatsCountsMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 4 * (StatsCountsTiers + StatsCountsKinds + 2)
+	header, err := EncodeReplyHeader(OperationStatsCounts, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	offset := 0
+	for _, value := range stats.TierCounts {{
+		binary.LittleEndian.PutUint32(payload[offset:], value)
+		offset += 4
+	}}
+	for _, value := range stats.KindCounts {{
+		binary.LittleEndian.PutUint32(payload[offset:], value)
+		offset += 4
+	}}
+	binary.LittleEndian.PutUint32(payload[offset:], stats.Total)
+	binary.LittleEndian.PutUint32(payload[offset+4:], stats.Conflicts)
+	return reply, nil
+}}
+
+// DecodeStatsCountsReply validates the operation and every bounded bucket.
+func DecodeStatsCountsReply(reply []byte) (MemoryStats, error) {{
+	payloadLen := 4 * (StatsCountsTiers + StatsCountsKinds + 2)
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationStatsCounts || header.Result != ResultOK ||
+		header.PayloadLen != uint32(payloadLen) ||
+		len(reply) != int(EnvelopeHeaderLen)+payloadLen {{
+		return MemoryStats{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	var stats MemoryStats
+	offset := 0
+	for index := range stats.TierCounts {{
+		stats.TierCounts[index] = binary.LittleEndian.Uint32(payload[offset:])
+		if stats.TierCounts[index] > StatsCountsMax {{
+			return MemoryStats{{}}, ErrMalformedEnvelope
+		}}
+		offset += 4
+	}}
+	for index := range stats.KindCounts {{
+		stats.KindCounts[index] = binary.LittleEndian.Uint32(payload[offset:])
+		if stats.KindCounts[index] > StatsCountsMax {{
+			return MemoryStats{{}}, ErrMalformedEnvelope
+		}}
+		offset += 4
+	}}
+	stats.Total = binary.LittleEndian.Uint32(payload[offset:])
+	stats.Conflicts = binary.LittleEndian.Uint32(payload[offset+4:])
+	if stats.Total > StatsCountsMax || stats.Conflicts > StatsCountsMax {{
+		return MemoryStats{{}}, ErrMalformedEnvelope
+	}}
+	return stats, nil
+}}
+
+// HealthCounters is the rolling health-window aggregate the host derives its rates from.
+type HealthCounters struct {{
+	Cycles              uint32
+	TotalContradictions uint32
+	TotalPromotions     uint32
+	TotalDemotions      uint32
+	TotalExpirations    uint32
+	NewMemories         uint32
+	L1Eligible          uint32
+	L2Total             uint32
+	L2Stale30Days       uint32
+}}
+
+func (c HealthCounters) values() [HealthCountersFields]uint32 {{
+	return [HealthCountersFields]uint32{{
+		c.Cycles, c.TotalContradictions, c.TotalPromotions, c.TotalDemotions,
+		c.TotalExpirations, c.NewMemories, c.L1Eligible, c.L2Total, c.L2Stale30Days,
+	}}
+}}
+
+// EncodeHealthCountersRequest emits the empty request for the fixed promotion policy.
+func EncodeHealthCountersRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationHealthCounters, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeHealthCountersRequest validates the exact empty operation envelope.
+func DecodeHealthCountersRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthCounters || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeHealthCountersReply emits every bounded counter in the contract's order.
+func EncodeHealthCountersReply(counters HealthCounters) ([]byte, error) {{
+	values := counters.values()
+	for _, value := range values {{
+		if value > HealthCountersMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	payloadLen := 4 * HealthCountersFields
+	header, err := EncodeReplyHeader(OperationHealthCounters, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	for index, value := range values {{
+		binary.LittleEndian.PutUint32(payload[index*4:], value)
+	}}
+	return reply, nil
+}}
+
+// DecodeHealthCountersReply validates the operation and every bounded counter.
+func DecodeHealthCountersReply(reply []byte) (HealthCounters, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthCounters || header.Result != ResultOK ||
+		header.PayloadLen != uint32(4*HealthCountersFields) ||
+		len(reply) != int(EnvelopeHeaderLen)+4*HealthCountersFields {{
+		return HealthCounters{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	var values [HealthCountersFields]uint32
+	for index := range values {{
+		values[index] = binary.LittleEndian.Uint32(payload[index*4:])
+		if values[index] > HealthCountersMax {{
+			return HealthCounters{{}}, ErrMalformedEnvelope
+		}}
+	}}
+	return HealthCounters{{
+		Cycles: values[0], TotalContradictions: values[1], TotalPromotions: values[2],
+		TotalDemotions: values[3], TotalExpirations: values[4], NewMemories: values[5],
+		L1Eligible: values[6], L2Total: values[7], L2Stale30Days: values[8],
+	}}, nil
+}}
+
+// EncodeHealthRetentionRequest emits the empty request for the complete fixed policy.
+func EncodeHealthRetentionRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationHealthRetention, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeHealthRetentionRequest validates the exact empty operation envelope.
+func DecodeHealthRetentionRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthRetention || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeHealthRetentionReply emits both bounded deletion counts.
+func EncodeHealthRetentionReply(snapshotsDeleted, contradictionsDeleted uint32) ([]byte, error) {{
+	if snapshotsDeleted > HealthRetentionMax || contradictionsDeleted > HealthRetentionMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationHealthRetention, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, snapshotsDeleted)
+	binary.LittleEndian.PutUint32(payload[4:], contradictionsDeleted)
+	return reply, nil
+}}
+
+// DecodeHealthRetentionReply validates the operation and both bounded counts.
+func DecodeHealthRetentionReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthRetention || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	snapshots := binary.LittleEndian.Uint32(payload)
+	contradictions := binary.LittleEndian.Uint32(payload[4:])
+	if snapshots > HealthRetentionMax || contradictions > HealthRetentionMax {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return snapshots, contradictions, nil
+}}
+
+// EncodeHealthRecordRequest emits the three bounded health-cycle counters.
+func EncodeHealthRecordRequest(promotions, demotions, expirations uint32) ([]byte, error) {{
+	if promotions > HealthRecordCounterMax || demotions > HealthRecordCounterMax ||
+		expirations > HealthRecordCounterMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationHealthRecord, 0, 12)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 12)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, promotions)
+	binary.LittleEndian.PutUint32(payload[4:], demotions)
+	binary.LittleEndian.PutUint32(payload[8:], expirations)
+	return request, nil
+}}
+
+// DecodeHealthRecordRequest validates the operation and the three bounded counters.
+func DecodeHealthRecordRequest(request []byte) (uint32, uint32, uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthRecord || header.Flags != 0 ||
+		header.PayloadLen != 12 || len(request) != int(EnvelopeHeaderLen)+12 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	promotions := binary.LittleEndian.Uint32(payload)
+	demotions := binary.LittleEndian.Uint32(payload[4:])
+	expirations := binary.LittleEndian.Uint32(payload[8:])
+	if promotions > HealthRecordCounterMax || demotions > HealthRecordCounterMax ||
+		expirations > HealthRecordCounterMax {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	return promotions, demotions, expirations, nil
+}}
+
+// EncodeHealthRecordReply emits the payload-free acknowledgement.
+func EncodeHealthRecordReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationHealthRecord, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeHealthRecordReply validates the payload-free acknowledgement.
+func DecodeHealthRecordReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthRecord || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeL2MemoryIDsRequest emits the empty request for the fixed identifier bound.
+func EncodeL2MemoryIDsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationL2MemoryIDs, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeL2MemoryIDsRequest validates the exact empty operation envelope.
+func DecodeL2MemoryIDsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationL2MemoryIDs || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	if len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeL2MemoryIDsReply emits the counted, bounded L2 identifier list.
+func EncodeL2MemoryIDsReply(memoryIDs []uint64) ([]byte, error) {{
+	if uint32(len(memoryIDs)) > L2MemoryIDsMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for _, id := range memoryIDs {{
+		if id < L2MemoryIDMin || id > L2MemoryIDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationL2MemoryIDs, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {{
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}}
+	return reply, nil
+}}
+
+// DecodeL2MemoryIDsReply validates the operation and every bounded identifier.
+func DecodeL2MemoryIDsReply(reply []byte) ([]uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationL2MemoryIDs || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > L2MemoryIDsMax || header.PayloadLen != 4+count*8 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {{
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < L2MemoryIDMin || id > L2MemoryIDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+		memoryIDs[index] = id
+	}}
+	return memoryIDs, nil
+}}
+
+// EncodeEffectivenessStatsRequest emits the empty request for the fixed low-threshold policy.
+func EncodeEffectivenessStatsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEffectivenessStats, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeEffectivenessStatsRequest validates the exact empty operation envelope.
+func DecodeEffectivenessStatsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessStats || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	if len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeEffectivenessStatsReply emits the bounded average and the two bounded counts.
+func EncodeEffectivenessStatsReply(stats EffectivenessStats) ([]byte, error) {{
+	if !(stats.AvgEffectiveness >= EffectivenessStatsAvgMin) ||
+		!(stats.AvgEffectiveness <= EffectivenessStatsAvgMax) ||
+		stats.LowEffectivenessCount > EffectivenessStatsLowMax ||
+		stats.HighImpactCount > EffectivenessStatsHighMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEffectivenessStats, ResultOK, 16)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 16)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, math.Float64bits(stats.AvgEffectiveness))
+	binary.LittleEndian.PutUint32(payload[8:], stats.LowEffectivenessCount)
+	binary.LittleEndian.PutUint32(payload[12:], stats.HighImpactCount)
+	return reply, nil
+}}
+
+// DecodeEffectivenessStatsReply validates the operation and the bounded summary fields.
+func DecodeEffectivenessStatsReply(reply []byte) (EffectivenessStats, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessStats ||
+		header.Result != ResultOK || header.PayloadLen != 16 {{
+		return EffectivenessStats{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	stats := EffectivenessStats{{
+		AvgEffectiveness:      math.Float64frombits(binary.LittleEndian.Uint64(payload)),
+		LowEffectivenessCount: binary.LittleEndian.Uint32(payload[8:]),
+		HighImpactCount:       binary.LittleEndian.Uint32(payload[12:]),
+	}}
+	if !(stats.AvgEffectiveness >= EffectivenessStatsAvgMin) ||
+		!(stats.AvgEffectiveness <= EffectivenessStatsAvgMax) ||
+		stats.LowEffectivenessCount > EffectivenessStatsLowMax ||
+		stats.HighImpactCount > EffectivenessStatsHighMax {{
+		return EffectivenessStats{{}}, ErrMalformedEnvelope
+	}}
+	return stats, nil
+}}
+
+// PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.
+type PoolStatus struct {{
+	Size          uint32
+	InUse         uint32
+	Waiters       uint32
+	LeaseGrants   uint64
+	LeaseTimeouts uint64
+	Stuck         uint64
+	Poisoned      uint64
+}}
+
+func EncodePoolStatusRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationPoolStatus, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodePoolStatusRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPoolStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodePoolStatusReply(result uint32, status PoolStatus) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 44
+	}} else if result != ResultInvalidState || status != (PoolStatus{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationPoolStatus, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.Size)
+	binary.LittleEndian.PutUint32(payload[4:8], status.InUse)
+	binary.LittleEndian.PutUint32(payload[8:12], status.Waiters)
+	binary.LittleEndian.PutUint64(payload[12:20], status.LeaseGrants)
+	binary.LittleEndian.PutUint64(payload[20:28], status.LeaseTimeouts)
+	binary.LittleEndian.PutUint64(payload[28:36], status.Stuck)
+	binary.LittleEndian.PutUint64(payload[36:44], status.Poisoned)
+	return reply, nil
+}}
+
+func DecodePoolStatusReply(reply []byte) (uint32, PoolStatus, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPoolStatus {{
+		return 0, PoolStatus{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, PoolStatus{{}}, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 44 {{
+		return 0, PoolStatus{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	status := PoolStatus{{
+		Size:          binary.LittleEndian.Uint32(payload[0:4]),
+		InUse:         binary.LittleEndian.Uint32(payload[4:8]),
+		Waiters:       binary.LittleEndian.Uint32(payload[8:12]),
+		LeaseGrants:   binary.LittleEndian.Uint64(payload[12:20]),
+		LeaseTimeouts: binary.LittleEndian.Uint64(payload[20:28]),
+		Stuck:         binary.LittleEndian.Uint64(payload[28:36]),
+		Poisoned:      binary.LittleEndian.Uint64(payload[36:44]),
+	}}
+	if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {{
+		return 0, PoolStatus{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
+
+type EmbeddingRefusals struct {{
+	RefusedCount uint64
+	LastOffered  uint32
+}}
+
+func EncodeEmbeddingRefusalsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEmbeddingRefusals, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodeEmbeddingRefusalsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbeddingRefusals || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodeEmbeddingRefusalsReply(result uint32, status EmbeddingRefusals) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if status.LastOffered > EmbeddingOfferedMax ||
+			(status.RefusedCount == 0) != (status.LastOffered == 0) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 12
+	}} else if result != ResultInvalidState || status != (EmbeddingRefusals{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEmbeddingRefusals, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:EnvelopeHeaderLen+8], status.RefusedCount)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen+8:], status.LastOffered)
+	return reply, nil
+}}
+
+func DecodeEmbeddingRefusalsReply(reply []byte) (uint32, EmbeddingRefusals, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbeddingRefusals {{
+		return 0, EmbeddingRefusals{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, EmbeddingRefusals{{}}, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 12 {{
+		return 0, EmbeddingRefusals{{}}, ErrMalformedEnvelope
+	}}
+	status := EmbeddingRefusals{{
+		RefusedCount: binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen : EnvelopeHeaderLen+8]),
+		LastOffered:  binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen+8:]),
+	}}
+	if status.LastOffered > EmbeddingOfferedMax ||
+		(status.RefusedCount == 0) != (status.LastOffered == 0) {{
+		return 0, EmbeddingRefusals{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
+
+type PostgresStatus struct {{
+	Available         uint32
+	ActiveConnections uint32
+	MaxConnections    uint32
+	IsReplica         uint32
+	ReplicaLagBytes   uint64
+}}
+
+func validPostgresStatus(status PostgresStatus) bool {{
+	if status.Available & ^PostgresAvailableAll != 0 || status.ActiveConnections > PostgresCountMax ||
+		status.MaxConnections > PostgresCountMax {{
+		return false
+	}}
+	if status.Available&PostgresAvailableActive == 0 && status.ActiveConnections != 0 {{
+		return false
+	}}
+	if status.Available&PostgresAvailableMax == 0 && status.MaxConnections != 0 {{
+		return false
+	}}
+	if status.Available&PostgresAvailableRole == 0 {{
+		if status.IsReplica != 0 {{
+			return false
+		}}
+	}} else if status.IsReplica > 1 {{
+		return false
+	}}
+	if status.Available&PostgresAvailableLag == 0 {{
+		return status.ReplicaLagBytes == 0
+	}}
+	return status.Available&PostgresAvailableRole != 0 && status.IsReplica == 1
+}}
+
+func EncodePostgresStatusRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationPostgresStatus, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodePostgresStatusRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPostgresStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodePostgresStatusReply(result uint32, status PostgresStatus) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if !validPostgresStatus(status) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 24
+	}} else if result != ResultInvalidState || status != (PostgresStatus{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationPostgresStatus, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.Available)
+	binary.LittleEndian.PutUint32(payload[4:8], status.ActiveConnections)
+	binary.LittleEndian.PutUint32(payload[8:12], status.MaxConnections)
+	binary.LittleEndian.PutUint32(payload[12:16], status.IsReplica)
+	binary.LittleEndian.PutUint64(payload[16:24], status.ReplicaLagBytes)
+	return reply, nil
+}}
+
+func DecodePostgresStatusReply(reply []byte) (uint32, PostgresStatus, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPostgresStatus {{
+		return 0, PostgresStatus{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, PostgresStatus{{}}, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 24 {{
+		return 0, PostgresStatus{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	status := PostgresStatus{{
+		Available:         binary.LittleEndian.Uint32(payload[0:4]),
+		ActiveConnections: binary.LittleEndian.Uint32(payload[4:8]),
+		MaxConnections:    binary.LittleEndian.Uint32(payload[8:12]),
+		IsReplica:         binary.LittleEndian.Uint32(payload[12:16]),
+		ReplicaLagBytes:   binary.LittleEndian.Uint64(payload[16:24]),
+	}}
+	if !validPostgresStatus(status) {{
+		return 0, PostgresStatus{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
+
+type ReembedStatus struct {{
+	TargetDimension uint32
+	StartedEpoch    uint64
+}}
+
+func validReembedStatus(status ReembedStatus) bool {{
+	return status.TargetDimension >= ReembedDimensionMin &&
+		status.TargetDimension <= ReembedDimensionMax && status.StartedEpoch > 0
+}}
+
+func EncodeReembedStatusRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationReembedStatus, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodeReembedStatusRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodeReembedStatusReply(result uint32, status ReembedStatus) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if !validReembedStatus(status) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 12
+	}} else if (result != ResultNotFound && result != ResultInvalidState) ||
+		status != (ReembedStatus{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReembedStatus, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:EnvelopeHeaderLen+4], status.TargetDimension)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen+4:], status.StartedEpoch)
+	return reply, nil
+}}
+
+func DecodeReembedStatusReply(reply []byte) (uint32, ReembedStatus, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedStatus {{
+		return 0, ReembedStatus{{}}, ErrMalformedEnvelope
+	}}
+	if (header.Result == ResultNotFound || header.Result == ResultInvalidState) &&
+		header.PayloadLen == 0 {{
+		return header.Result, ReembedStatus{{}}, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 12 {{
+		return 0, ReembedStatus{{}}, ErrMalformedEnvelope
+	}}
+	status := ReembedStatus{{
+		TargetDimension: binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen : EnvelopeHeaderLen+4]),
+		StartedEpoch:    binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen+4:]),
+	}}
+	if !validReembedStatus(status) {{
+		return 0, ReembedStatus{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
+
+func EncodeReembedClearRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationReembedClear, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodeReembedClearRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedClear || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodeReembedClearReply(result uint32) ([]byte, error) {{
+	if result != ResultOK && result != ResultInvalidState {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReembedClear, result, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+func DecodeReembedClearReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedClear || header.PayloadLen != 0 ||
+		(header.Result != ResultOK && header.Result != ResultInvalidState) {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return header.Result, nil
+}}
+
+type ReembedClearMaintenance struct {{
+	WasInProgress     uint32
+	RecordedDimension uint32
+	RunningDimension  uint32
+}}
+
+func validReembedClearMaintenance(status ReembedClearMaintenance) bool {{
+	return status.WasInProgress <= 1 && status.RecordedDimension <= ReembedDimensionMax &&
+		status.RunningDimension >= ReembedDimensionMin &&
+		status.RunningDimension <= ReembedDimensionMax
+}}
+
+func EncodeReembedClearMaintenanceRequest(force uint32) ([]byte, error) {{
+	if force > 1 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationReembedClearMaintenance, 0, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], force)
+	return request, nil
+}}
+
+func DecodeReembedClearMaintenanceRequest(request []byte) (uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedClearMaintenance || header.Flags != 0 ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	force := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if force > 1 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return force, nil
+}}
+
+func EncodeReembedClearMaintenanceReply(result uint32,
+	status ReembedClearMaintenance) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK || result == ResultConflict {{
+		if !validReembedClearMaintenance(status) || result == ResultConflict &&
+			(status.RecordedDimension == 0 || status.RecordedDimension == status.RunningDimension) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 12
+	}} else if result != ResultInvalidState || status != (ReembedClearMaintenance{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReembedClearMaintenance, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.WasInProgress)
+	binary.LittleEndian.PutUint32(payload[4:8], status.RecordedDimension)
+	binary.LittleEndian.PutUint32(payload[8:12], status.RunningDimension)
+	return reply, nil
+}}
+
+func DecodeReembedClearMaintenanceReply(reply []byte) (uint32, ReembedClearMaintenance, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedClearMaintenance {{
+		return 0, ReembedClearMaintenance{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, ReembedClearMaintenance{{}}, nil
+	}}
+	if (header.Result != ResultOK && header.Result != ResultConflict) || header.PayloadLen != 12 {{
+		return 0, ReembedClearMaintenance{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	status := ReembedClearMaintenance{{
+		WasInProgress:     binary.LittleEndian.Uint32(payload[0:4]),
+		RecordedDimension: binary.LittleEndian.Uint32(payload[4:8]),
+		RunningDimension:  binary.LittleEndian.Uint32(payload[8:12]),
+	}}
+	if !validReembedClearMaintenance(status) || header.Result == ResultConflict &&
+		(status.RecordedDimension == 0 || status.RecordedDimension == status.RunningDimension) {{
+		return 0, ReembedClearMaintenance{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
+
+func validEmbedderServingID(servingID string) bool {{
+	if len(servingID) > EmbedderServingIDMax {{
+		return false
+	}}
+	for index := 0; index < len(servingID); index++ {{
+		if servingID[index] == 0 {{
+			return false
+		}}
+	}}
+	return true
+}}
+
+func EncodeEmbedderServingIDRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEmbedderServingID, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodeEmbedderServingIDRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbedderServingID || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodeEmbedderServingIDReply(result uint32, servingID string) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if !validEmbedderServingID(servingID) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = uint32(4 + len(servingID))
+	}} else if result != ResultInvalidState || servingID != "" {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEmbedderServingID, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], uint32(len(servingID)))
+	copy(reply[EnvelopeHeaderLen+4:], servingID)
+	return reply, nil
+}}
+
+func DecodeEmbedderServingIDReply(reply []byte) (uint32, string, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbedderServingID {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, "", nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen < 4 {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen > EmbedderServingIDMax || header.PayloadLen != 4+decodedLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	servingID := string(payload[4:])
+	if !validEmbedderServingID(servingID) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return header.Result, servingID, nil
+}}
+
+type DimensionReset struct {{
+	RecordedDimension uint32
+	TargetDimension   uint32
+	TablesDiscovered  uint32
+	TablesDropped     uint32
+	RowsCleared       uint64
+	CuratorRequeued   int32
+	EvidenceRequeued  int32
+}}
+
+func validDimensionReset(status DimensionReset) bool {{
+	return status.RecordedDimension <= ReembedDimensionMax &&
+		status.TargetDimension >= ReembedDimensionMin &&
+		status.TargetDimension <= ReembedDimensionMax &&
+		status.TablesDiscovered <= DimensionResetTablesMax &&
+		status.TablesDropped <= status.TablesDiscovered &&
+		status.CuratorRequeued >= -1 && status.EvidenceRequeued >= -1
+}}
+
+func EncodeDimensionResetRequest(targetDimension, force, dryRun uint32) ([]byte, error) {{
+	if targetDimension < ReembedDimensionMin || targetDimension > ReembedDimensionMax ||
+		force > 1 || dryRun > 1 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationDimensionReset, 0, 12)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 12)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], targetDimension)
+	binary.LittleEndian.PutUint32(payload[4:8], force)
+	binary.LittleEndian.PutUint32(payload[8:12], dryRun)
+	return request, nil
+}}
+
+func DecodeDimensionResetRequest(request []byte) (uint32, uint32, uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDimensionReset || header.Flags != 0 ||
+		header.PayloadLen != 12 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	targetDimension := binary.LittleEndian.Uint32(payload[0:4])
+	force := binary.LittleEndian.Uint32(payload[4:8])
+	dryRun := binary.LittleEndian.Uint32(payload[8:12])
+	if targetDimension < ReembedDimensionMin || targetDimension > ReembedDimensionMax ||
+		force > 1 || dryRun > 1 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	return targetDimension, force, dryRun, nil
+}}
+
+func EncodeDimensionResetReply(result uint32, status DimensionReset) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK || result == ResultConflict || result == ResultDenied {{
+		if !validDimensionReset(status) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 32
+	}} else if result != ResultInvalidState || status != (DimensionReset{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationDimensionReset, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.RecordedDimension)
+	binary.LittleEndian.PutUint32(payload[4:8], status.TargetDimension)
+	binary.LittleEndian.PutUint32(payload[8:12], status.TablesDiscovered)
+	binary.LittleEndian.PutUint32(payload[12:16], status.TablesDropped)
+	binary.LittleEndian.PutUint64(payload[16:24], status.RowsCleared)
+	binary.LittleEndian.PutUint32(payload[24:28], uint32(status.CuratorRequeued))
+	binary.LittleEndian.PutUint32(payload[28:32], uint32(status.EvidenceRequeued))
+	return reply, nil
+}}
+
+func DecodeDimensionResetReply(reply []byte) (uint32, DimensionReset, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDimensionReset {{
+		return 0, DimensionReset{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, DimensionReset{{}}, nil
+	}}
+	if (header.Result != ResultOK && header.Result != ResultConflict &&
+		header.Result != ResultDenied) || header.PayloadLen != 32 {{
+		return 0, DimensionReset{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	status := DimensionReset{{
+		RecordedDimension: binary.LittleEndian.Uint32(payload[0:4]),
+		TargetDimension:   binary.LittleEndian.Uint32(payload[4:8]),
+		TablesDiscovered:  binary.LittleEndian.Uint32(payload[8:12]),
+		TablesDropped:     binary.LittleEndian.Uint32(payload[12:16]),
+		RowsCleared:       binary.LittleEndian.Uint64(payload[16:24]),
+		CuratorRequeued:   int32(binary.LittleEndian.Uint32(payload[24:28])),
+		EvidenceRequeued:  int32(binary.LittleEndian.Uint32(payload[28:32])),
+	}}
+	if !validDimensionReset(status) {{
+		return 0, DimensionReset{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally
 // contains no DSN, SQL, provider identity, or implementation-specific detail.

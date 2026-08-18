@@ -72,6 +72,7 @@
     "wm"
    ],
    "retired_sources": [
+    "clarify.c",
     "conv_context.c",
     "payload_rewrite_state.c",
     "user_memory.c",
@@ -2585,6 +2586,715 @@
    "reply": {
     "fields": [],
     "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 37,
+   "name": "clarify_start",
+   "c_name": "db1_clarify_start",
+   "c_params": [
+    "description",
+    "out"
+   ],
+   "c_returns": "member",
+   "c_member": "id",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "description",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "clarify_session_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "description",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "int"
+     },
+     {
+      "name": "score",
+      "type": "float"
+     },
+     {
+      "name": "qa",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "dimension",
+        "type": "text"
+       },
+       {
+        "name": "question",
+        "type": "text"
+       },
+       {
+        "name": "answer",
+        "type": "text"
+       },
+       {
+        "name": "answered",
+        "type": "int"
+       },
+       {
+        "name": "seq",
+        "type": "int"
+       }
+      ]
+     },
+     {
+      "name": "qa_count",
+      "type": "int"
+     },
+     {
+      "name": "spec",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 38,
+   "name": "clarify_get",
+   "c_name": "db1_clarify_get",
+   "c_params": [
+    "id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "clarify_session_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "description",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "int"
+     },
+     {
+      "name": "score",
+      "type": "float"
+     },
+     {
+      "name": "qa",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "dimension",
+        "type": "text"
+       },
+       {
+        "name": "question",
+        "type": "text"
+       },
+       {
+        "name": "answer",
+        "type": "text"
+       },
+       {
+        "name": "answered",
+        "type": "int"
+       },
+       {
+        "name": "seq",
+        "type": "int"
+       }
+      ]
+     },
+     {
+      "name": "qa_count",
+      "type": "int"
+     },
+     {
+      "name": "spec",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 39,
+   "name": "clarify_answer",
+   "c_name": "db1_clarify_answer",
+   "c_params": [
+    "id",
+    "answer",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "answer",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "clarify_session_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "description",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "int"
+     },
+     {
+      "name": "score",
+      "type": "float"
+     },
+     {
+      "name": "qa",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "dimension",
+        "type": "text"
+       },
+       {
+        "name": "question",
+        "type": "text"
+       },
+       {
+        "name": "answer",
+        "type": "text"
+       },
+       {
+        "name": "answered",
+        "type": "int"
+       },
+       {
+        "name": "seq",
+        "type": "int"
+       }
+      ]
+     },
+     {
+      "name": "qa_count",
+      "type": "int"
+     },
+     {
+      "name": "spec",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 40,
+   "name": "clarify_score",
+   "c_name": "db1_clarify_score",
+   "c_params": [
+    "s"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "clarify_session_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "description",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "status",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "score",
+      "type": "float",
+      "required": false
+     },
+     {
+      "name": "qa",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "dimension",
+        "type": "text"
+       },
+       {
+        "name": "question",
+        "type": "text"
+       },
+       {
+        "name": "answer",
+        "type": "text"
+       },
+       {
+        "name": "answered",
+        "type": "int"
+       },
+       {
+        "name": "seq",
+        "type": "int"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "qa_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "spec",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "updated_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "score",
+      "type": "float"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 41,
+   "name": "clarify_weakest_dim",
+   "c_name": "db1_clarify_weakest_dim",
+   "c_params": [
+    "s",
+    "dim_out",
+    "len"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "clarify_session_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "description",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "status",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "score",
+      "type": "float",
+      "required": false
+     },
+     {
+      "name": "qa",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "dimension",
+        "type": "text"
+       },
+       {
+        "name": "question",
+        "type": "text"
+       },
+       {
+        "name": "answer",
+        "type": "text"
+       },
+       {
+        "name": "answered",
+        "type": "int"
+       },
+       {
+        "name": "seq",
+        "type": "int"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "qa_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "spec",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "updated_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "dimension",
+      "type": "text",
+      "width": "CLARIFY_DIM_NAME_LEN"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 42,
+   "name": "clarify_next_question",
+   "c_name": "db1_clarify_next_question",
+   "c_params": [
+    "s",
+    "q_out",
+    "q_len",
+    "dim_out",
+    "dim_len"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "struct": "clarify_session_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "description",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "status",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "score",
+      "type": "float",
+      "required": false
+     },
+     {
+      "name": "qa",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "dimension",
+        "type": "text"
+       },
+       {
+        "name": "question",
+        "type": "text"
+       },
+       {
+        "name": "answer",
+        "type": "text"
+       },
+       {
+        "name": "answered",
+        "type": "int"
+       },
+       {
+        "name": "seq",
+        "type": "int"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "qa_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "spec",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "updated_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "question",
+      "type": "text",
+      "width": "CLARIFY_TEXT_LEN"
+     },
+     {
+      "name": "dimension",
+      "type": "text",
+      "width": "CLARIFY_DIM_NAME_LEN"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 43,
+   "name": "clarify_crystallize",
+   "c_name": "db1_clarify_crystallize",
+   "c_params": [
+    "s"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "struct": "clarify_session_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "description",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "status",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "score",
+      "type": "float",
+      "required": false
+     },
+     {
+      "name": "qa",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "dimension",
+        "type": "text"
+       },
+       {
+        "name": "question",
+        "type": "text"
+       },
+       {
+        "name": "answer",
+        "type": "text"
+       },
+       {
+        "name": "answered",
+        "type": "int"
+       },
+       {
+        "name": "seq",
+        "type": "int"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "qa_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "spec",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "updated_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "spec",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
    }
   },
   {

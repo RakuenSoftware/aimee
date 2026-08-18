@@ -12,6 +12,7 @@
 #include "modules/kb-synthesis/kb_curator_notify.h"
 #include "modules/vault/vault_crypto.h"
 #include "modules/vault/vault_internal.h"
+#include "modules/vault/vault_kek_check.h"
 #include "modules/vault/vault_server_key.h"
 #include "modules/vault/vault_service.h"
 #include "modules/db2/c/db2.h"
@@ -28,6 +29,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void register_crypto_provider(void)
+{
+   const db2_vault_crypto_provider_t provider = {
+       .aad_build_v2 = vault_aad_build_v2,
+       .aad_build_v1_safe = vault_aad_build_v1_safe,
+       .random = vault_crypto_random,
+       .dek_wrap = vault_dek_wrap,
+       .dek_unwrap = vault_dek_unwrap,
+       .secret_encrypt = vault_secret_encrypt,
+       .secret_decrypt = vault_secret_decrypt,
+       .kek_check_wrap = vault_kek_check_wrap,
+       .kek_check_verify = vault_kek_check_verify,
+   };
+   aimee_db2_register_vault_crypto_provider(&provider);
+}
 
 /* This live fixture links the full KB route closure so it can exercise the
  * real mTLS listener and egress route. Curator workers are unrelated to that
@@ -212,6 +229,7 @@ int main(void)
    const unsigned char plaintext[] =
        "{\"access_key_id\":\"AKIDEXAMPLE\",\"secret_access_key\":\"secret\"}";
 
+   register_crypto_provider();
    assert(db2_init(url) == 0);
    vault_store_set_backend(&vault_pg_backend);
    int64_t epoch = 0;

@@ -32,6 +32,8 @@ static int fails = 0;
 
 int main(int argc, char **argv)
 {
+   aimee_db2_register_token_record_validators(kb_mgmt_token_authority_record_valid,
+                                              kb_identity_token_authority_record_valid);
    const char *conninfo = argc > 1 ? argv[1] : "";
    db2_management_token_authority_ctx_t ctx;
    memset(&ctx, 0, sizeof(ctx));

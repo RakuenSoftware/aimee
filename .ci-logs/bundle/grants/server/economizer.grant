@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=27
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-economizer
+publish=
+subscribe=
+request=
+serve=11009,11010,11011,11012,11013,11014,11015

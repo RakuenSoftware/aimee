@@ -10,7 +10,12 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from typing import NoReturn
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+from generate_c_embedded_header import GenerationError, generate
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,9 +23,9 @@ BUILD_MANIFEST = "c-build.json"
 MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 MODULE_KEYS = {
-    "id", "binary", "main", "sources", "include_roots", "pkg_config",
-    "system_libraries",
+    "id", "binary", "main", "sources", "include_roots", "pkg_config", "system_libraries",
 }
+MODULE_OPTIONAL_KEYS = {"compile_definitions", "generated_headers", "header_dependencies"}
 CORE_EVENT_BUS_SOURCES = [
     "src/core/event_bus/bus_attach.c",
     "src/core/event_bus/bus_client.c",
@@ -90,6 +95,49 @@ def string_array(value: object, label: str, *, paths: bool = False,
     return value
 
 
+def generated_headers(value: object, label: str) -> list[dict[str, object]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        fail(f"{label} must be an array")
+    result: list[dict[str, object]] = []
+    previous_output = ""
+    for index, header in enumerate(value):
+        item_label = f"{label}[{index}]"
+        if not isinstance(header, dict) or set(header) != {"entries", "output"}:
+            fail(f"{item_label} must contain only entries and output")
+        output = header["output"]
+        pure_output = PurePosixPath(output) if isinstance(output, str) else None
+        if (not isinstance(output, str) or "\\" in output or output <= previous_output or
+                pure_output is None or pure_output.name != output or pure_output.suffix != ".h"):
+            fail(f"{label} outputs must be sorted unique .h basenames")
+        previous_output = output
+        entries = header["entries"]
+        if not isinstance(entries, list) or not entries:
+            fail(f"{item_label}.entries must be a nonempty array")
+        parsed: list[dict[str, str]] = []
+        previous_entry: tuple[str, str] | None = None
+        seen_symbols: set[str] = set()
+        for entry_index, entry in enumerate(entries):
+            entry_label = f"{item_label}.entries[{entry_index}]"
+            if not isinstance(entry, dict) or set(entry) != {"source", "symbol"}:
+                fail(f"{entry_label} must contain only source and symbol")
+            source, symbol = entry["source"], entry["symbol"]
+            source = safe_relative(source, f"{entry_label}.source")
+            if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", symbol):
+                fail(f"{entry_label}.symbol is not a safe C identifier")
+            key = (symbol, source)
+            if previous_entry is not None and key <= previous_entry:
+                fail(f"{item_label}.entries must be sorted and unique")
+            if symbol in seen_symbols:
+                fail(f"{item_label}.entry symbols must be unique")
+            previous_entry = key
+            seen_symbols.add(symbol)
+            parsed.append({"source": source, "symbol": symbol})
+        result.append({"output": output, "entries": parsed})
+    return result
+
+
 def load_builds(bundle: Path) -> list[dict[str, object]]:
     try:
         value = strict_json((bundle / BUILD_MANIFEST).read_bytes())
@@ -103,7 +151,8 @@ def load_builds(bundle: Path) -> list[dict[str, object]]:
     previous = ""
     result: list[dict[str, object]] = []
     for index, module in enumerate(modules):
-        if not isinstance(module, dict) or set(module) != MODULE_KEYS:
+        if (not isinstance(module, dict) or not MODULE_KEYS <= set(module) or
+                not set(module) <= MODULE_KEYS | MODULE_OPTIONAL_KEYS):
             fail(f"module {index}: keys differ from C build v1")
         identifier = module["id"]
         if (not isinstance(identifier, str) or not MODULE_ID.fullmatch(identifier) or
@@ -121,6 +170,18 @@ def load_builds(bundle: Path) -> list[dict[str, object]]:
             fail(f"{identifier}: sources must all be C translation units")
         string_array(module["include_roots"], f"{identifier}.include_roots", paths=True,
                      nonempty=True)
+        definitions = string_array(module.get("compile_definitions", []),
+                                   f"{identifier}.compile_definitions")
+        if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item)
+               for item in definitions):
+            fail(f"{identifier}.compile_definitions contains an unsafe C identifier")
+        generated_headers(module.get("generated_headers"), f"{identifier}.generated_headers")
+        dependencies = string_array(
+            module.get("header_dependencies", []),
+            f"{identifier}.header_dependencies", paths=True,
+        )
+        if any(PurePosixPath(dependency).suffix != ".h" for dependency in dependencies):
+            fail(f"{identifier}: header_dependencies must all be header files")
         string_array(module["pkg_config"], f"{identifier}.pkg_config")
         libraries = string_array(module["system_libraries"],
                                  f"{identifier}.system_libraries")
@@ -177,22 +238,57 @@ def pkg_config_flags(executable: str, packages: list[str]) -> tuple[list[str], l
     return results[0], results[1]
 
 
+def materialize_generated_headers(module: dict[str, object], root: Path,
+                                  destination: Path) -> Path | None:
+    identifier = module["id"]
+    assert isinstance(identifier, str)
+    specifications = generated_headers(
+        module.get("generated_headers"), f"{identifier}.generated_headers"
+    )
+    if not specifications:
+        return None
+    destination.mkdir(parents=True, exist_ok=True)
+    for header in specifications:
+        output = header["output"]
+        entries = header["entries"]
+        assert isinstance(output, str) and isinstance(entries, list)
+        inputs = [
+            (str(entry["symbol"]), real_file(root, str(entry["source"]),
+                                             f"{identifier}.generated_headers"))
+            for entry in entries
+        ]
+        try:
+            generate(destination / output, inputs)
+        except GenerationError as exc:
+            fail(f"{identifier}: cannot generate {output}: {exc}")
+    return destination
+
+
 def compiler_command(module: dict[str, object], root: Path, bundle: Path, output: Path,
-                     cc: str, pkg_config: str) -> list[str]:
+                     cc: str, pkg_config: str,
+                     generated_include: Path | None = None) -> list[str]:
     identifier = module["id"]
     assert isinstance(identifier, str)
     sources = module["sources"]
     include_roots = module["include_roots"]
+    definitions = module.get("compile_definitions", [])
     packages = module["pkg_config"]
     libraries = module["system_libraries"]
     assert all(isinstance(value, list) for value in (
-        sources, include_roots, packages, libraries
+        sources, include_roots, definitions, packages, libraries
     ))
     main = real_file(bundle, module["main"], f"{identifier}.main")
     owned_sources = [real_file(root, item, f"{identifier}.sources") for item in sources]
+    for dependency in module.get("header_dependencies", []):
+        real_file(root, dependency, f"{identifier}.header_dependencies")
     core_sources = [real_file(root, item, "event-bus source")
                     for item in CORE_EVENT_BUS_SOURCES]
     include_paths = [real_directory(root, "src/core/event_bus/include", "event-bus include")]
+    if module.get("generated_headers"):
+        if generated_include is None:
+            fail(f"{identifier}: generated header directory was not materialized")
+        include_paths.append(real_directory(generated_include.parent, generated_include.name,
+                                            f"{identifier}.generated_headers"))
     include_paths.extend(
         real_directory(root, item, f"{identifier}.include_roots")
         for item in include_roots
@@ -214,9 +310,11 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     # sections db1 has to satisfy every symbol its 62 sources mention, which
     # drags in another module's config.c and the yaml parser behind it.
     return [
-        cc, "-std=c11", "-D_GNU_SOURCE=", "-O2", "-Wall", "-Wextra", "-Werror",
-        "-Wno-format-truncation", "-ffunction-sections", "-fdata-sections",
-        *(f"-I{path}" for path in include_paths), *cflags, str(main),
+        cc, "-std=c11", "-D_GNU_SOURCE=", "-Os", "-Wall", "-Wextra", "-Werror",
+        "-Wno-unused-parameter", "-Wno-format-truncation", "-Wno-unused-result",
+        "-ffunction-sections", "-fdata-sections",
+        *(f"-I{path}" for path in include_paths), *(f"-D{item}" for item in definitions),
+        *cflags, str(main),
         *(str(path) for path in owned_sources), *(str(path) for path in core_sources),
         *pkg_libraries, *system_flags, "-Wl,--gc-sections", "-o", str(binary),
     ]
@@ -261,11 +359,15 @@ def build(bundle: Path, output: Path, root: Path, cc: str, pkg_config: str,
         modules = [module for module in modules if module["id"] in placed]
     output.mkdir(parents=True, exist_ok=True)
     for module in modules:
-        command = compiler_command(module, root, bundle, output, cc, pkg_config)
-        try:
-            subprocess.run(command, check=True)
-        except (OSError, subprocess.CalledProcessError) as exc:
-            fail(f"{module['id']}: compiler failed: {exc}")
+        with tempfile.TemporaryDirectory(prefix=f"aimee-{module['id']}-generated-") as temporary:
+            generated = materialize_generated_headers(module, root, Path(temporary))
+            command = compiler_command(
+                module, root, bundle, output, cc, pkg_config, generated
+            )
+            try:
+                subprocess.run(command, check=True)
+            except (OSError, subprocess.CalledProcessError) as exc:
+                fail(f"{module['id']}: compiler failed: {exc}")
         binary = output / str(module["binary"])
         if not binary.is_file() or binary.is_symlink():
             fail(f"{module['id']}: compiler did not create {binary}")
