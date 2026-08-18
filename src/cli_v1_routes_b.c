@@ -3,6 +3,7 @@
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
+#include "cli_argspec.h"
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
 #include "cli_client.h"
@@ -1406,44 +1407,9 @@ typedef cJSON *(*marshal_method_fn)(const char *method, int argc, char **argv);
  * exact tables are consulted before the prefix fallbacks so an exact method
  * (e.g. agent.episodes) is never shadowed by a prefix (agent.*). */
 static const char *const MARSHAL_NO_ARGS[] = {
-    "api.disable",
-    "api.status",
-    "audit.checkpoint",
-    "audit.seal",
-    "audit.snapshot",
-    "audit.verify",
-    "aux.config_show",
-    "calibration.readiness",
-    "cert.list",
-    "config.deploy_env",
-    "config.show",
-    "cron.list",
-    "delegate.backend_list",
-    "delegate.sandbox_list",
-    "demotion.check",
-    "doctor.forensics",
-    "economizer.stats",
-    "episode.list",
-    "hud.status",
-    "identity.show",
-    "kb.curator",
-    "kb.health",
-    "kb.ingest.status",
-    "mcp.audit",
-    "memory.stats",
-    "catalog.refresh",
-    "notes.list",
-    "provider.get",
-    "ranker.export_view",
-    "ranker.fit",
-    "rules.generate",
-    "rules.list",
-    "server.health",
-    "toolset.list",
-    "vault.list",
-    "vault.lock",
-    "workers",
-    "workspace.list",
+/* Rows live in server/cli_marshal_defs_data.h: the server serves them, and
+ * this compiled-in copy is the last resort when it cannot be asked. */
+#include "server/cli_marshal_defs_data.h"
 };
 
 static const struct
@@ -1484,6 +1450,7 @@ static const struct
     {"identity.diff", marshal_identity_diff},
     {"identity.snapshot", marshal_identity_snapshot},
     {"index.blast_radius", marshal_index_blast_radius},
+    {"index.ast_grep", marshal_index_ast_grep},
     {"index.deps", marshal_index_deps},
     {"index.find", marshal_index_find},
     {"index.find_callers", marshal_index_find_callers},
@@ -1506,6 +1473,7 @@ static const struct
     {"kb.status", marshal_kb_status},
     {"kb.update", marshal_kb_update},
     {"mcp.recheck", marshal_mcp_recheck},
+    {"tool.call", marshal_tool_call},
     {"memory.embed", marshal_memory_embed},
     {"memory.archive", marshal_memory_archive},
     {"memory.benchmark", marshal_memory_benchmark},
@@ -1592,6 +1560,15 @@ int marshal_request_take_reported(void)
    int reported = g_marshal_reported;
    g_marshal_reported = 0;
    return reported;
+}
+
+/* Read the flag WITHOUT clearing it. marshal_request itself has to distinguish
+ * "a served spec already told the operator what was missing" from "the spec was
+ * uninterpretable", and taking the flag here would swallow the message the
+ * forwarder is about to check for. */
+int marshal_request_peek_reported(void)
+{
+   return g_marshal_reported;
 }
 
 cJSON *marshal_request(const char *method, int argc, char **argv)
@@ -1702,6 +1679,24 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       cJSON_AddStringToObject(req, "name", argv[0]);
       return req;
    }
+   /* What the SERVER says the body should be, before this build's own list.
+    *
+    * Without this, serving routes/catalogue/dispatch still left a new no-arg
+    * command unusable: the client could find it and address it, then refused to
+    * send anything because it had no row saying the body is empty. A client
+    * preferring its own list here would reintroduce exactly that. */
+   if (cli_v1_manifest_method_takes_no_args(method))
+      return marshal_no_args(method);
+
+   /* And what the server says the ARGUMENTS are, before this build's own
+    * marshallers — see cli_argspec_try_served for why that is both the point
+    * and safe. */
+   {
+      cJSON *served = NULL;
+      if (cli_argspec_try_served(method, argc, argv, &served))
+         return served;
+   }
+
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
       if (strcmp(method, MARSHAL_NO_ARGS[i]) == 0)

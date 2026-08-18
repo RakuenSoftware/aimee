@@ -1678,6 +1678,21 @@ else
     pass "windows client never starts a local aimee-server"
 fi
 
+# 2c. And the same rule everywhere else. The two checks above name two files,
+#     which is the very argument 2b makes against naming one platform: a guard
+#     bound to a path enforces the rule at that path. AIMEE_NO_AUTOSTART is now
+#     a dead name -- nothing reads it, because there is no autostart to
+#     suppress -- so any C source mentioning it again means the behaviour came
+#     back somewhere new. Tests are excluded: a harness may legitimately assert
+#     the name is absent.
+AUTOSTART_HITS=$(grep -rnE 'AIMEE_NO_AUTOSTART' --include='*.c' --include='*.h' . \
+        | grep -vE '/tests/' | grep -vE ':[0-9]+: *(\*|/\*|//)' || true)
+if [ -n "$AUTOSTART_HITS" ]; then
+    fail "AIMEE_NO_AUTOSTART is read again, so something starts a local server: $AUTOSTART_HITS"
+else
+    pass "no source suppresses an autostart, because there is none to suppress"
+fi
+
 if grep -nE 'cli_existing_server_for_method' -A12 windows/cli_client.c | grep -qE 'cli_default_socket_path'; then
     fail "windows/cli_client.c still DISCOVERS a co-located server via the well-known socket; only an explicit AIMEE_SOCK is allowed"
 else

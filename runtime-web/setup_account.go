@@ -209,7 +209,29 @@ func writeReplacementMarker(marker, newUsername string) (func(), error) {
 	return rollback, nil
 }
 
-func (s *server) setupAccountStatus() map[string]any {
+// retireOnly reports whether `caller` may only RETIRE the pending bootstrap
+// login rather than replace it with a new account.
+//
+// The replacement flow assumes the operator is signed in AS the generated login
+// and is trading it for a real one. An operator who instead created their
+// account some other way is signed in as that account, and can never satisfy
+// that assumption: the generated password lived in bootstrap-credentials, which
+// this endpoint deletes on success and which newer images never write at all.
+// Observed on the testing appliance — real logins existed, no replacement marker
+// did, and the wizard asked forever for a step nobody could complete.
+//
+// Worse than the nagging: adminUsername() falls back to the pending bootstrap
+// user, so the appliance administrator was an account nobody could authenticate
+// as, and every policy mutation 403'd for the humans who actually run the box.
+//
+// So an established managed account may close the generated login instead. That
+// only ever REMOVES a way in — the caller already has one — and it is the same
+// act the replacement flow performs, minus creating an account.
+func (s *server) retireOnly(caller, bootstrapUsername string) bool {
+	return caller != "" && caller != bootstrapUsername && s.accounts.Exists(caller)
+}
+
+func (s *server) setupAccountStatus(caller string) map[string]any {
 	if username, ok := readReplacementUsername(s.setupAccountMarker()); ok {
 		return map[string]any{"complete": true, "required": false, "username": username}
 	}
@@ -218,7 +240,12 @@ func (s *server) setupAccountStatus() map[string]any {
 		_, username, _ := readBootstrapUser(s.setupAccountBootstrapUser())
 		return map[string]any{"complete": true, "required": false, "username": username}
 	}
-	return map[string]any{"complete": false, "required": true, "username": bootstrapUsername}
+	return map[string]any{
+		"complete": false, "required": true, "username": bootstrapUsername,
+		// The wizard renders either a create-account form or a retire-this-login
+		// confirmation from this, so it never offers an action POST will refuse.
+		"retire_only": s.retireOnly(caller, bootstrapUsername),
+	}
 }
 
 // GET reports whether the temporary generated/legacy login still needs replacement.
@@ -235,7 +262,7 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(s.setupAccountStatus())
+		_ = json.NewEncoder(w).Encode(s.setupAccountStatus(currentUser(r)))
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -261,6 +288,14 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if currentUser(r) != bootstrapUsername {
+		// Not the bootstrap session. An established managed account may still
+		// close the generated login — see retireOnly — but only that, and only
+		// when it says so explicitly, so a stray POST cannot retire a login by
+		// accident.
+		if s.retireOnly(currentUser(r), bootstrapUsername) {
+			s.retireBootstrapLogin(w, r, bootstrapUsername)
+			return
+		}
 		writeJSONError(w, http.StatusForbidden, "sign in with the bootstrap account to replace it")
 		return
 	}
@@ -359,6 +394,55 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	cleanupUser = false
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"complete": true, "required": false, "username": req.Username,
+	})
+}
+
+// retireBootstrapLogin closes the generated login on behalf of an operator who
+// is already signed in as a real managed account. It creates nothing: the
+// caller's own login is untouched and their session stays valid, so unlike the
+// replacement flow there is no account or session to roll back — only the
+// marker, if locking then fails.
+//
+// The caller becomes the appliance administrator, because adminUsername() reads
+// this marker. That is the point: before this, the administrator was the
+// generated account, which is exactly the lockout adminUsername's own comment
+// describes. Whoever runs setup claims it, and root can rewrite the marker to
+// hand it elsewhere.
+func (s *server) retireBootstrapLogin(w http.ResponseWriter, r *http.Request, bootstrapUsername string) {
+	var req struct {
+		// Explicit, so an unrelated POST body can never retire a login as a
+		// side effect of some other intent.
+		RetireBootstrap bool `json:"retire_bootstrap"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !req.RetireBootstrap {
+		writeJSONError(w, http.StatusForbidden, "sign in with the bootstrap account to replace it")
+		return
+	}
+	caller := currentUser(r)
+	rollback, err := writeReplacementMarker(s.setupAccountMarker(), caller)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "could not commit replacement account state")
+		return
+	}
+	if err := s.sessions.DeleteSessionsForUser(bootstrapUsername); err != nil {
+		rollback()
+		writeJSONError(w, http.StatusInternalServerError, "could not invalidate bootstrap sessions")
+		return
+	}
+	if err := s.accounts.Lock(bootstrapUsername); err != nil {
+		rollback()
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.Remove(s.setupAccountCredentials()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "setup account: could not remove retired bootstrap credentials: %v\n", err)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"complete": true, "required": false, "username": caller, "retired": bootstrapUsername,
 	})
 }
 

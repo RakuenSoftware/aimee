@@ -40,6 +40,10 @@
     {"curator", "synthesize", "curator.synthesize", NULL, NULL, 0},
     {"curator", "contradictions", "curator.contradictions", NULL, NULL, 0},
     {"index", "blast-radius", "index.blast_radius", NULL, NULL, 0},
+    /* Structural search is the same server capability exposed by MCP. Keeping
+     * this as mcp.call avoids a second implementation while making CLI the
+     * preferred, chainable surface. */
+    {"index", "ast-grep", "index.ast_grep", "mcp.call", NULL, 60000},
     {"index", "structure", "index.structure", NULL, NULL, 0},
     {"index", "span", "index.span", NULL, NULL, 0},
     {"index", "investigate", "index.investigate", NULL, NULL, 0},
@@ -209,6 +213,9 @@
     {"agent", "probe", "model.probe", NULL, NULL, 300000},
     {"mcp", "audit", "mcp.audit", NULL, "items", 0},
     {"mcp", "recheck", "mcp.recheck", NULL, "items", 300000},
+    /* Universal CLI projection of the MCP dispatch table. Every MCP tool is
+     * callable through this route, even before it receives an ergonomic alias. */
+    {"tool", "call", "tool.call", "mcp.call", NULL, 300000},
     {"audit", "trace", "evidence.trace_retrieval_event", NULL, NULL, 0},
     {"audit", "provenance", "evidence.provenance_retrieval_event", NULL, NULL, 0},
     {"audit", "fidelity", "evidence.fidelity_retrieval_event", NULL, NULL, 0},

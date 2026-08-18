@@ -28,6 +28,13 @@ mkdir -p "$AIMEE_HOME"
 SOCKET="$AIMEE_HOME/aimee.sock"
 export AIMEE_SOCK="$SOCKET"
 HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
+# The client reaches a server ONLY through an explicitly configured endpoint —
+# it no longer finds a co-located one by probing the filesystem, because a stray
+# local server quietly answering for the wrong host is worse than an outage.
+# This harness deliberately runs both halves on one box, so it has to say so.
+# Without this every client assertion below fails as "aimee-server unavailable"
+# while the server it started is running perfectly well two lines away.
+export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 
 PASS=0
 FAIL=0
@@ -229,12 +236,71 @@ except subprocess.TimeoutExpired:
 PY
 }
 
+# Start aimee-server and WAIT for it to bind, rather than guessing.
+#
+# This was `... >/dev/null 2>&1 & sleep 1`, three times. Both halves were wrong,
+# and test_init_migrate_service.sh had already found and fixed exactly this:
+# "On a loaded CI runner startup regularly takes several seconds, and the 1s
+# guess made this the run's flakiest test." It was left unfixed here, and the
+# first CI run of this harness failed 14 checks off one early probe -- the
+# server had not finished binding, so "server started" failed and every request
+# after it cascaded.
+#
+# The discarded output was the other half. A server that fails to start says why
+# on stderr; sending that to /dev/null left CI reporting "FAIL: server started"
+# and nothing else, which is unactionable. Keep the log and print its tail when
+# the socket never appears.
+#
+# A unix-socket server binds and listens as its last init step, so
+# socket-present means ready to serve. Polling also returns as soon as it is up,
+# which is faster than the sleep it replaces on a machine that is not loaded.
+start_server() {
+    local log="$HOME/aimee-server.$$.log"
+    "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
+    SERVER_PID=$!
+    local i
+    for i in $(seq 1 300); do
+        [ -S "$HTTP_SOCK" ] && return 0
+        # A dead process will never bind; fail fast rather than waiting out the
+        # full window for a server that has already exited.
+        kill -0 "$SERVER_PID" 2>/dev/null || break
+        sleep 0.1
+    done
+    echo "server did not bind $HTTP_SOCK within 30s; its own output was:"
+    sed 's/^/    /' "$log" 2>/dev/null | tail -20
+    return 1
+}
+
+# Set once the summary has printed. Until then an exit is an ABORT, not a
+# result: `set -e` means any unguarded command that fails takes the whole run
+# with it, skipping every remaining check AND the summary. In CI that looked
+# like a job which built for four minutes, ran the harness, and printed nothing
+# at all — no FAIL line, no count, nothing to read. Say so instead.
+REACHED_SUMMARY=0
+ABORT_LINE=""
+ABORT_CMD=""
+# Record WHERE, not just that. "ABORTED after 21 checks" is a number to go
+# hunting with; bash already knows the line and the command, so ask it.
+trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
+
 cleanup() {
+    local rc=$?
+    if [ "$REACHED_SUMMARY" -ne 1 ]; then
+        echo ""
+        echo "integration: ABORTED after $((PASS + FAIL)) checks (exit $rc)."
+        echo "  The harness exited before its summary — under 'set -e' an unguarded"
+        echo "  command failed, so the checks below this point never ran."
+        if [ -n "$ABORT_LINE" ]; then
+            echo "  It failed at line $ABORT_LINE: $ABORT_CMD"
+        fi
+    fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
     fi
-    rm -rf "$HOME"
+    # Same rule as the TCP teardown: removing a temp dir must never change the
+    # verdict. This one already waits for its server, which is why it never bit.
+    rm -rf "$HOME" || true
 }
 trap cleanup EXIT
 
@@ -243,28 +309,34 @@ trap cleanup EXIT
 # ============================================================
 
 # ============================================================
-# 1. Auto-start (no server running)
+# 1. No server reachable
 # ============================================================
+# This used to be "auto-start", and asserted that a command failed *because
+# autostart was disabled*. There is no autostart now: the client starts no
+# server, ever, so an unreachable server is simply an outage.
 
 check_output "no server: version works" "aimee" $AIMEE version
 
-# Disable auto-start for all server tests (they manage the server explicitly)
-export AIMEE_NO_AUTOSTART=1
-
-# Pure clients do not run command handlers locally.
-check_output "no server: DB command fails without autostart" "server unavailable" $AIMEE memory list
+# A pure client runs no command handler locally, so this must fail rather than
+# answer from local state. It now fails one step earlier than it used to -- the
+# client cannot even learn that `memory list` exists without the server -- which
+# is the point: the command table lives server-side.
+check_output "no server: a command fails, naming the unreachable server" \
+    "cannot reach aimee-server" $AIMEE memory list
 
 # ============================================================
 # 2. Server lifecycle
 # ============================================================
 
-$AIMEE_SERVER --foreground >/dev/null 2>&1 &
-SERVER_PID=$!
-sleep 1
+# NOT `check "server started" start_server`: check() runs its command with
+# >/dev/null 2>&1, which would swallow the very diagnosis start_server exists to
+# print. Run it first, then assert on the result. (Found by planting a server
+# that refuses to start: the 14 cascading failures reproduced perfectly and the
+# reason was still invisible.)
+start_server && SERVER_STARTED=1 || SERVER_STARTED=0
+check "server started" test "$SERVER_STARTED" = 1
 
-check "server started" test -S "$HTTP_SOCK"
-
-RESP=$(srv_req '{"method":"server.info"}')
+RESP=$(srv_req '{"method":"server.info"}') || true
 check_output "server.info status" '"status":"ok"' echo "$RESP"
 check_output "server.info version" '"server_version"' echo "$RESP"
 check_output "server.info method list" '"methods"' echo "$RESP"
@@ -288,7 +360,7 @@ check_output "api enable persisted the port" "8910" $AIMEE api status
 check_output "api disable turns the listener off" "disabled" $AIMEE api disable
 check_output "no-arg path remains local help" 'Server is started automatically' $AIMEE --json
 
-RESP=$(srv_req '{"method":"server.health"}')
+RESP=$(srv_req '{"method":"server.health"}') || true
 check_output "server.health status" '"status":"ok"' echo "$RESP"
 check_output "server.health uptime" '"uptime"' echo "$RESP"
 
@@ -297,7 +369,7 @@ check_output "server.health uptime" '"uptime"' echo "$RESP"
 # well-formed dispatch response over its first-class /v1 route.
 if [ -S "$HTTP_SOCK" ]; then
     PASS=$((PASS + 1)) # /v1 HTTP socket bound
-    HTTP_PROV=$(http_rpc '{"method":"provider.list"}')
+    HTTP_PROV=$(http_rpc '{"method":"provider.list"}') || true
     if [ -n "$HTTP_PROV" ] && python3 -c "import json,sys; json.loads(sys.argv[1])" "$HTTP_PROV" \
         2>/dev/null; then
         PASS=$((PASS + 1)) # provider.list over /v1/provider/list returned valid JSON
@@ -315,17 +387,25 @@ fi
 # bytes whether reached over the always-on Unix socket or the optional localhost
 # TCP listener (gated by aimee.api.{http_port,bearer_token}). Use an isolated
 # second server so the main harness server (UDS-only) is undisturbed.
-TCP_HOME=$(mktemp -d /tmp/aimee-tcp-XXXXXX)
+TCP_HOME=$(mktemp -d /tmp/aimee-tcp-XXXXXX) || true
 mkdir -p "$TCP_HOME/.config/aimee"
 TCP_PORT=18897
 TCP_BEARER="integ-tcp-bearer"
 printf 'aimee:\n  api:\n    http_port: %s\n    bearer_token: %s\n' \
     "$TCP_PORT" "$TCP_BEARER" >"$TCP_HOME/.config/aimee/aimee.yaml"
 env -u AIMEE_PROFILE HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
-    AIMEE_DISABLE_AUTOSTART=1 "$AIMEE_SERVER" --foreground >/dev/null 2>&1 &
+    "$AIMEE_SERVER" --foreground >"$TCP_HOME/server.log" 2>&1 &
 TCP_SRV_PID=$!
-sleep 2
-UDS_BODY=$(HTTP_SOCK="$TCP_HOME/.config/aimee/aimee-http.sock" http_rpc '{"method":"provider.list"}')
+# Wait for the bind rather than guessing at it, for the same reason as
+# start_server above: on a loaded runner two seconds is not reliably enough, and
+# a probe that fires early fails the assertions of a server that was about to
+# work. This one has its own HOME so it cannot share start_server.
+for _ in $(seq 1 300); do
+    [ -S "$TCP_HOME/.config/aimee/aimee-http.sock" ] && break
+    kill -0 "$TCP_SRV_PID" 2>/dev/null || break
+    sleep 0.1
+done
+UDS_BODY=$(HTTP_SOCK="$TCP_HOME/.config/aimee/aimee-http.sock" http_rpc '{"method":"provider.list"}') || true
 TCP_BODY=$(python3 -c "
 import socket, sys
 body = '{\"method\":\"provider.list\"}'
@@ -356,8 +436,21 @@ else
     echo "  tcp: $TCP_BODY"
     FAIL=$((FAIL + 1))
 fi
+# Kill the TCP server and WAIT for it, before removing the home it is writing
+# to. Without the wait, `rm -rf` raced a live server recreating files as the
+# walk deleted them, and failed with
+
+#     rm: cannot remove '/tmp/aimee-tcp-XXXXXX': Directory not empty
+
+# which under `set -e` took the entire run with it -- every check after this
+# point, on every CI run of this harness. That line was in the log from the
+# first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
-rm -rf "$TCP_HOME"
+wait "$TCP_SRV_PID" 2>/dev/null || true
+# `|| true` regardless: teardown of a temporary directory must never decide
+# whether the suite continues. Even with the wait, anything else holding a file
+# open here would abort a run that has nothing left to do but report.
+rm -rf "$TCP_HOME" || true
 
 # Rebuild only the thin client with a new build ID. The existing server should
 # remain usable because compatibility is gated by major version, not build ID.
@@ -376,34 +469,32 @@ check "server survives same-major build drift" kill -0 "$SERVER_PID_BEFORE"
 # recover a known foreground server so the rest of the test stays meaningful.
 if ! kill -0 "$SERVER_PID_BEFORE" 2>/dev/null; then
     pkill -f "aimee-server.*$SOCKET" 2>/dev/null || true
-    $AIMEE_SERVER --foreground >/dev/null 2>&1 &
-    SERVER_PID=$!
-    sleep 1
+    start_server || true
 fi
 
 check_output "local version long flag" "aimee" $AIMEE --version
 check "index overview route" $AIMEE index overview
 
-RESP=$(mcp_framed_req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"integration-test","version":"1"}}}')
+RESP=$(mcp_framed_req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"integration-test","version":"1"}}}') || true
 check_output "mcp initialize over stdio framing" '"protocolVersion":"2024-11-05"' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"search-and-summarize","arguments":{"query":"mcp"}}}')
+RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"search-and-summarize","arguments":{"query":"mcp"}}}') || true
 check_output "mcp prompts/get" '"messages"' echo "$RESP"
 check_output "mcp prompts/get text" 'search_memory' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":3,"method":"resources/templates/list","params":{}}')
+RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":3,"method":"resources/templates/list","params":{}}') || true
 check_output "mcp resources/templates/list" '"resourceTemplates"' echo "$RESP"
 check_output "mcp resources/templates/list tier template" 'aimee://memories/{tier}' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"aimee://config"}}')
+RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"aimee://config"}}') || true
 check_output "mcp resources/read config" '"mimeType":"application/json"' echo "$RESP"
 check_output "mcp resources/read config text" '\"protocolVersion\":\"2024-11-05\"' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}')
+RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}') || true
 check_output "mcp git_status tool call" '"content"' echo "$RESP"
 check_output "mcp git_status result text" 'branch:' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_help","arguments":{}}}')
+RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_help","arguments":{}}}') || true
 check_output "mcp get_help tool call" '"content"' echo "$RESP"
 check_output "mcp get_help topic index" 'Aimee delegate reference' echo "$RESP"
 
@@ -420,11 +511,11 @@ check_output "mcp get_help topic index" 'Aimee delegate reference' echo "$RESP"
 # and the Docker deploy matrix. Keep the local transport checks useful on hosts
 # without Postgres instead of reporting an expected dependency absence as a
 # server regression.
-RESP=$(srv_req '{"method":"memory.list","limit":1}')
+RESP=$(srv_req '{"method":"memory.list","limit":1}') || true
 if echo "$RESP" | grep -qF '"status":"ok"'; then
     KB_AVAILABLE=1
     PASS=$((PASS + 1))
-    RESP=$(srv_req '{"method":"rules.list"}')
+    RESP=$(srv_req '{"method":"rules.list"}') || true
     check_output "local /v1: rules.list ok" '"status":"ok"' echo "$RESP"
 else
     KB_AVAILABLE=0
@@ -434,7 +525,7 @@ fi
 
 # A write/control method is reachable over the trusted local socket — it must NOT
 # come back capability-denied ("not permitted over /v1").
-RESP=$(srv_req '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo hi\"}","session_id":"t","cwd":"/tmp","timeout_ms":1000}')
+RESP=$(srv_req '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo hi\"}","session_id":"t","cwd":"/tmp","timeout_ms":1000}') || true
 if echo "$RESP" | grep -q "not permitted over /v1"; then
     echo "FAIL: local /v1: tool.execute unexpectedly capability-gated"
     echo "  resp: $RESP"
@@ -447,54 +538,81 @@ fi
 # 4. Session management
 # ============================================================
 
-RESP=$(srv_auth_req '{"method":"session.create","client_type":"test"}')
-check_output "session.create" '"status":"ok"' echo "$RESP"
-SID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])" 2>/dev/null)
+# Sessions are persisted through the DB1 sessions stage, which the db1/db2
+# event-bus conversion has moved OUT of this process: db1_client/sessions.c
+# calls obs_bus_module_available() first and answers "failed to create session"
+# with nothing serving the stage. This harness starts aimee-server alone —
+# module processes are launched by the container's module-supervisor, not by the
+# server — so the stage is absent here by construction, exactly like aimee-kb
+# above. That composition is covered where it belongs: unit-test-db1-module-bus
+# execs the real module binary against a live bus ("a failure to start the
+# module is a failure of this test, never a skip"), and the Docker E2E matrix
+# runs the supervised stack.
+#
+# Probe once and skip rather than reporting an absent dependency as a server
+# regression. If the stage ever does answer here, these run as ordinary checks
+# with no edit — the probe is the switch, not a hardcoded expectation.
+RESP=$(srv_auth_req '{"method":"session.create","client_type":"test"}') || true
+if echo "$RESP" | grep -qF '"status":"ok"'; then
+    DB1_SESSIONS_AVAILABLE=1
+    PASS=$((PASS + 1))
+else
+    DB1_SESSIONS_AVAILABLE=0
+    echo "SKIP: session management (the DB1 sessions stage is not reachable from this process)"
+    SKIP=$((SKIP + 12))
+fi
 
-RESP=$(srv_auth_req '{"method":"session.list"}')
+if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
+# `|| true`: under `set -e` a failed extraction aborts the entire run at the
+# assignment, which is how one broken response silently swallowed every check
+# after it. An empty SID fails its own assertions instead, visibly.
+SID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])" 2>/dev/null || true)
+
+RESP=$(srv_auth_req '{"method":"session.list"}') || true
 check_output "session.list has session" "$SID" echo "$RESP"
 
-RESP=$(srv_auth_req "{\"method\":\"session.get\",\"session_id\":\"$SID\"}")
+RESP=$(srv_auth_req "{\"method\":\"session.get\",\"session_id\":\"$SID\"}") || true
 check_output "session.get" '"client_type":"test"' echo "$RESP"
 
-RESP=$($AIMEE session list 2>&1)
+RESP=$($AIMEE session list 2>&1) || true
 check_output "client session list via server" "$SID" echo "$RESP"
 
-RESP=$($AIMEE session show "$SID" 2>&1)
+RESP=$($AIMEE session show "$SID" 2>&1) || true
 check_output "client session show via server" "client:      test" echo "$RESP"
 
-RESP=$($AIMEE --json session list --limit 1 2>&1)
+RESP=$($AIMEE --json session list --limit 1 2>&1) || true
 check_output "client session list json" "$SID" echo "$RESP"
 
-RESP=$(srv_auth_req '{"method":"session.create","client_type":"test-close"}')
+RESP=$(srv_auth_req '{"method":"session.create","client_type":"test-close"}') || true
 check_output "session.create for client close" '"status":"ok"' echo "$RESP"
-CLOSE_SID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])" 2>/dev/null)
+CLOSE_SID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])" 2>/dev/null || true)
 
-RESP=$($AIMEE session close "$CLOSE_SID" 2>&1)
+RESP=$($AIMEE session close "$CLOSE_SID" 2>&1) || true
 check_output "client session close via server" "$CLOSE_SID" echo "$RESP"
 
-RESP=$(srv_auth_req "{\"method\":\"session.get\",\"session_id\":\"$CLOSE_SID\"}")
+RESP=$(srv_auth_req "{\"method\":\"session.get\",\"session_id\":\"$CLOSE_SID\"}") || true
 check_output "client session close removed session" "session not found" echo "$RESP"
 
-RESP=$(srv_auth_req "{\"method\":\"session.close\",\"session_id\":\"$SID\"}")
+RESP=$(srv_auth_req "{\"method\":\"session.close\",\"session_id\":\"$SID\"}") || true
 check_output "session.close" '"status":"ok"' echo "$RESP"
 
-RESP=$(srv_auth_req '{"method":"session.list"}')
+RESP=$(srv_auth_req '{"method":"session.list"}') || true
 check_output "session.list empty after close" '"sessions":[]' echo "$RESP"
+fi  # DB1_SESSIONS_AVAILABLE
 
 # ============================================================
 # 5. Memory via server
 # ============================================================
 
 if [ "$KB_AVAILABLE" -eq 1 ]; then
-    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}')
+    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"
-    MEM_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null)
+    MEM_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
 
-    RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}')
+    RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}') || true
     check_output "memory.list has stored entry" "integ-test" echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
     check_output "memory.get by ID" "integration test value" echo "$RESP"
 
     # `memory get --as-of` crosses client -> aimee-server -> aimee-kb, and it was
@@ -504,11 +622,11 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     # it passed, because each end was checked against a hand-written payload that
     # already contained the field. Only the real wire shows the gap, so assert it
     # here: the verdict must come back, and must NOT appear when nobody asked.
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}") || true
     check_output "memory.get --as-of echoes the timestamp" '"as_of"' echo "$RESP"
     check_output "memory.get --as-of returns an event-time verdict" '"valid_at"' echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
     if echo "$RESP" | grep -q '"valid_at"'; then
         check_output "memory.get without --as-of emits no verdict" "no valid_at" echo "found valid_at"
     else
@@ -525,7 +643,7 @@ fi
 
 HOOK_PAYLOAD='{"tool_name":"Read","tool_input":"{\"file_path\":\"main.c\"}"}'
 set +e
-RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
+RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
 HOOK_RC=$?
 set -e
 if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
@@ -534,11 +652,9 @@ if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
         cd "$REPO_ROOT/src"
         make ../aimee-server >/dev/null 2>&1
     )
-    $AIMEE_SERVER --foreground >/dev/null 2>&1 &
-    SERVER_PID=$!
-    sleep 1
+    start_server || true
     set +e
-    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
+    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
     HOOK_RC=$?
     set -e
 fi
@@ -563,10 +679,10 @@ check_output "unknown command fails before generic forwarding" "unknown command 
 # tool.execute runs on the compute pool, reached over its first-class local route
 # POST /v1/tools/execute (the `arguments` field is a JSON-encoded string, as the
 # dispatch expects).
-RESP=$(http_rpc '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo integ-ok\"}","session_id":"t","cwd":"/tmp","timeout_ms":5000}')
+RESP=$(http_rpc '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo integ-ok\"}","session_id":"t","cwd":"/tmp","timeout_ms":5000}') || true
 check_output "tool.execute bash" "integ-ok" echo "$RESP"
 
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}')
+RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute read_file" '"status":"ok"' echo "$RESP"
 
 # ============================================================
@@ -581,6 +697,32 @@ mkdir -p "$MIRROR_CASE"
 # snapshot, reconstruction, and MCP tool path (SHA-1 is covered by unit tests).
 git init --bare --object-format=sha256 "$MIRROR_REMOTE" >/dev/null
 git init --object-format=sha256 -b feature.locked "$MIRROR_CLIENT" >/dev/null
+# This whole section deliberately drives SHA-256 object ids through the wire,
+# the snapshot, the reconstruction and the MCP Git path (SHA-1 is covered by
+# unit tests). It therefore needs a git that honours --object-format=sha256.
+#
+# This probe is a PRECONDITION guard, not the fix for anything observed. I added
+# it believing CI's git had produced SHA-1: the snapshot there carried a 40-hex
+# head with no branch or upstream, and five assertions failed about it. That was
+# wrong. The probe has never fired in CI, and the section passes there -- the
+# 40-hex head came from reading a DIFFERENT workspace's snapshot, which the
+# selection below used to make arbitrarily. That was diagnosed independently on
+# `testing` (89aa491, "address the mirror workspace's own snapshot, not the
+# first one found"), which is the addressing this now uses.
+#
+# It stays because the precondition is real: this section drives SHA-256 ids
+# deliberately, and a runner that cannot provide one should say so once rather
+# than fail five assertions about a mirror that was never the problem.
+MIRROR_OBJFMT=$(git -C "$MIRROR_CLIENT" rev-parse --show-object-format 2>/dev/null) || true
+if [ "$MIRROR_OBJFMT" = "sha256" ]; then
+    MIRROR_SHA256=1
+else
+    MIRROR_SHA256=0
+    echo "SKIP: mirror-sync end to end (git created a '$MIRROR_OBJFMT' repository despite --object-format=sha256)"
+    SKIP=$((SKIP + 22))
+fi
+
+if [ "$MIRROR_SHA256" -eq 1 ]; then
 git -C "$MIRROR_CLIENT" config user.name "Aimee Integration"
 git -C "$MIRROR_CLIENT" config user.email "aimee-integration@example.invalid"
 printf 'base\n' >"$MIRROR_CLIENT/file.txt"
@@ -588,7 +730,7 @@ git -C "$MIRROR_CLIENT" add file.txt
 git -C "$MIRROR_CLIENT" commit -m base >/dev/null
 git -C "$MIRROR_CLIENT" remote add origin "$MIRROR_REMOTE"
 git -C "$MIRROR_CLIENT" push -u origin feature.locked >/dev/null
-MIRROR_HEAD=$(git -C "$MIRROR_CLIENT" rev-parse HEAD)
+MIRROR_HEAD=$(git -C "$MIRROR_CLIENT" rev-parse HEAD) || true
 printf 'client edit\n' >>"$MIRROR_CLIENT/file.txt"
 git -C "$MIRROR_CLIENT" diff --binary HEAD >"$MIRROR_CASE/client.diff"
 
@@ -598,7 +740,7 @@ print(json.dumps({"method": "workspace.add", "root": sys.argv[1], "provider": "m
                   "remote": sys.argv[2], "head": sys.argv[3], "scan": False}))
 PY
 )
-RESP=$(http_rpc "$ADD_REQ")
+RESP=$(http_rpc "$ADD_REQ") || true
 check_output "mirror workspace registered" '"status":"ok"' echo "$RESP"
 
 # Deliberately split a small patch into multiple requests. The durable transfer
@@ -620,20 +762,42 @@ for transfer in ("0123456789abcdef0123456789abcdef",
                              "branch": "feature.locked", "upstream": "origin/feature.locked"}))
 PY
 )
-RESP=$(http_rpc "${MIRROR_REQS[0]}")
+RESP=$(http_rpc "${MIRROR_REQS[0]}") || true
 check_output "mirror-sync begin persisted" '"order":1' echo "$RESP"
-RESP=$(http_rpc "${MIRROR_REQS[1]}")
+RESP=$(http_rpc "${MIRROR_REQS[1]}") || true
 check_output "mirror-sync continuation persisted" '"seq":1' echo "$RESP"
-RESP=$(http_rpc "${MIRROR_REQS[2]}")
+RESP=$(http_rpc "${MIRROR_REQS[2]}") || true
 check_output "mirror-sync final published" '"generation":1' echo "$RESP"
-RESP=$(http_rpc "${MIRROR_REQS[3]}")
+RESP=$(http_rpc "${MIRROR_REQS[3]}") || true
 check_output "identical mirror-sync begin advances order" '"order":2' echo "$RESP"
-RESP=$(http_rpc "${MIRROR_REQS[4]}")
+RESP=$(http_rpc "${MIRROR_REQS[4]}") || true
 check_output "identical mirror-sync continuation persisted" '"seq":1' echo "$RESP"
-RESP=$(http_rpc "${MIRROR_REQS[5]}")
+RESP=$(http_rpc "${MIRROR_REQS[5]}") || true
 check_output "identical mirror-sync reuses generation" '"generation":1' echo "$RESP"
 
-SNAPSHOT=$(find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -print -quit)
+# Address the mirror workspace by its own snapshot, not by whichever one find
+# happens to walk into first. Every check below derives from $SNAPSHOT -- its
+# directory, its generation, its work-N-* checkouts -- so picking a different
+# workspace's file does not fail here, it fails five checks later with content
+# that looks like a mirror bug. The server keys the directory on
+# fnv1a_hex8(root) (workspace_mirror.c), so the harness can name it exactly.
+MIRROR_HASH=$(python3 - "$MIRROR_CLIENT" <<'HASH'
+import sys
+h = 2166136261
+for byte in sys.argv[1].encode():
+    h = ((h ^ byte) * 16777619) & 0xFFFFFFFF
+print("%08x" % h)
+HASH
+)
+SNAPSHOT="$AIMEE_HOME/workspaces/$MIRROR_HASH/client.snapshot"
+if [ ! -s "$SNAPSHOT" ]; then
+    # Show what WAS published. Without this the five checks below explain the
+    # absence one confusing assertion at a time -- which is how this bug
+    # presented in the first place, as a mirror that looked broken.
+    echo "  no snapshot at $SNAPSHOT; published snapshots were:"
+    find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -exec sh -c \
+        'echo "    $1: $(cat "$1")"' _ {} \; 2>/dev/null
+fi
 check "mirror snapshot metadata published" test -s "$SNAPSHOT"
 check_output "mirror snapshot records valid .locked ref" \
     'feature.locked origin/feature.locked 2' cat "$SNAPSHOT"
@@ -645,11 +809,11 @@ print(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                                                                "path": sys.argv[1]}}}))
 PY
 )
-RESP=$(mcp_initialized_req "$GIT_REQ")
+RESP=$(mcp_initialized_req "$GIT_REQ") || true
 check_output "MCP Git resolves reconstructed .locked branch" 'feature.locked' echo "$RESP"
 check_output "MCP Git sees synchronized client edit" 'file.txt' echo "$RESP"
 
-MIRROR_WORK=$(find "$(dirname "$SNAPSHOT")" -maxdepth 1 -type d -name 'work-1-*' -print -quit)
+MIRROR_WORK=$(find "$(dirname "$SNAPSHOT")" -maxdepth 1 -type d -name 'work-1-*' -print -quit) || true
 check_output "reconstructed worktree keeps branch" 'feature.locked' \
     git -C "$MIRROR_WORK" branch --show-current
 check_output "reconstructed worktree keeps dirty patch" 'file.txt' git -C "$MIRROR_WORK" status --short
@@ -671,16 +835,18 @@ print(json.dumps({"method": "workspace.mirror-sync", "args": [sys.argv[1]],
                   "upstream": "origin/feature.locked"}))
 PY
 )
-RESP=$(http_rpc "$EMPTY_REQ")
+RESP=$(http_rpc "$EMPTY_REQ") || true
 check_output "clean mirror-sync publishes a new generation" '"generation":2' echo "$RESP"
 
-RESP=$(mcp_initialized_req "$GIT_REQ")
+RESP=$(mcp_initialized_req "$GIT_REQ") || true
 check_output "first MCP Git call accepts clean snapshot" 'feature.locked' echo "$RESP"
 MIRROR_CLEAN_WORK=$(find "$(dirname "$SNAPSHOT")" -maxdepth 1 -type d -name 'work-2-*' \
     -print -quit)
 check "clean snapshot worktree materialized on first call" test -n "$MIRROR_CLEAN_WORK"
 check "clean snapshot worktree remains clean" test -z \
     "$(git -C "$MIRROR_CLEAN_WORK" status --porcelain)"
+
+fi  # MIRROR_SHA256
 
 # ============================================================
 # 10. Server shutdown
@@ -696,11 +862,12 @@ check "socket removed after shutdown" test ! -S "$HTTP_SOCK"
 # Results
 # ============================================================
 
-TOTAL=$((PASS + FAIL))
+REACHED_SUMMARY=1
+TOTAL=$((PASS + FAIL)) || true
 echo ""
 echo "integration: $PASS/$TOTAL passed"
 if [ "$SKIP" -gt 0 ]; then
-    echo "SKIPPED ($SKIP knowledge-service checks; covered by full-stack E2E)"
+    echo "SKIPPED ($SKIP checks whose service is not configured here; covered by full-stack E2E)"
 fi
 if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failures)"
