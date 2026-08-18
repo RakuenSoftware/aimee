@@ -109,6 +109,10 @@ def marshal_coverage():
         for body in MARSHAL_FN_RE.findall(text):        # hand-written cases
             exact |= set(EXACT_RE.findall(body))
             prefixes |= set(PREFIX_RE.findall(body))
+    # The no-arg methods moved to the server so they can be SERVED: a client that
+    # cannot marshal refuses to send, so a new no-arg command was findable and
+    # addressable and still unusable. src/cli_v1_routes_b.c only #includes them now.
+    exact |= set(NO_ARGS_ITEM_RE.findall(NO_ARG_ROWS.read_text(encoding="utf-8")))
     return exact, prefixes
 
 
@@ -172,6 +176,7 @@ RPC_TABLE_RE = re.compile(r"\}\s*cli_command_routes\[\]\s*=\s*\{(.*?)\n\};", re.
 # The rows themselves live with the server now (they are served to the client);
 # src/cli_v1_routes.c only #includes them.
 DISPATCH_ROWS = ROOT / "src" / "server" / "cli_dispatch_defs_data.h"
+NO_ARG_ROWS = ROOT / "src" / "server" / "cli_marshal_defs_data.h"
 RPC_ROW_RE = re.compile(
     r'\{"[a-z0-9_-]+",\s*(?:NULL|"[a-z0-9 _-]*")\s*,\s*"([a-z0-9_.]+)"\s*,'
     r'\s*(NULL|"[a-z0-9_.]+")')
