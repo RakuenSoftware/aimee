@@ -24,6 +24,18 @@ export PATH="$REPO_ROOT:$PATH"
 export HOME=$(mktemp -d /tmp/aimee-integ-XXXXXX)
 export AIMEE_HOME="$HOME/.config/aimee"
 unset AIMEE_PROFILE
+# One session id for the whole run. Every `aimee mcp-serve` this harness spawns
+# derives its session from AIMEE_SESSION_ID, falling back to its PPID -- and the
+# helpers spawn each request from a separate python process, so without this
+# every single MCP request minted a NEW session and materialized its own
+# `git worktree add` of this entire repository. Eight full checkouts per run,
+# where a real host has one session and one worktree.
+#
+# That is not just waste. The git tool call is the first request that has to
+# reach aimee-server, and on a slow CI disk its checkout ran past the 30s
+# mcp-serve request timeout, failing as "aimee-server unavailable after
+# retries" while the checks either side of it reached that same server fine.
+export AIMEE_SESSION_ID="integ$$"
 mkdir -p "$AIMEE_HOME"
 SOCKET="$AIMEE_HOME/aimee.sock"
 export AIMEE_SOCK="$SOCKET"
@@ -266,6 +278,9 @@ try:
     p.wait(timeout=2)
 except subprocess.TimeoutExpired:
     p.kill()
+err = p.stderr.read().decode("utf-8", "replace").strip()
+if err:
+    sys.stderr.write("mcp-serve stderr:\n" + err + "\n")
 PY
 }
 
@@ -315,6 +330,9 @@ try:
     p.wait(timeout=2)
 except subprocess.TimeoutExpired:
     p.kill()
+err = p.stderr.read().decode("utf-8", "replace").strip()
+if err:
+    sys.stderr.write("mcp-serve stderr:\n" + err + "\n")
 PY
 }
 

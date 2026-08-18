@@ -125,6 +125,70 @@ static void test_persistent_keeps_alive(void)
    CHECK(strstr(js, sid) != NULL);
 }
 
+/* The wedge, and the way out of it.
+ *
+ * A turn is released by whoever acquired it. When that party stops existing
+ * nothing releases it, and turn_in_flight is a bare flag — so the session
+ * declined every later submit with presence_busy permanently, and the only
+ * cure was restarting the server. These pin the age signal that makes the
+ * abandonment visible, and the reclaim that undoes it. */
+static void test_turn_reclaim(void)
+{
+   const char *sid = "sess-reclaim";
+   char aA[64] = "", aB[64] = "";
+   CHECK_EQ_INT(presence_attach(sid, "u", "cli", NULL, PRESENCE_EV_ALL, 0, aA, sizeof(aA)), 1);
+   CHECK_EQ_INT(presence_attach(sid, "u", "webchat", NULL, PRESENCE_EV_ALL, 0, aB, sizeof(aB)), 1);
+
+   /* No turn in flight reads as an absence, not as age zero: a caller must be
+    * able to tell "nothing is running" from "something started this second". */
+   CHECK_EQ_INT((int)presence_turn_inflight_age(sid, NULL, 0), -1);
+
+   char turn[64] = "", stuck[64] = "";
+   CHECK_EQ_INT(presence_turn_acquire(sid, aA, 0, turn, sizeof(turn), NULL, 0, NULL),
+                PRESENCE_TURN_ACQUIRED);
+
+   /* In flight: a non-negative age, and the live turn id reported with it, so
+    * the caller reclaims the turn it measured rather than "whatever is running
+    * now" — which by then may be someone else's healthy turn. */
+   CHECK(presence_turn_inflight_age(sid, stuck, sizeof(stuck)) >= 0);
+   CHECK(strcmp(stuck, turn) == 0);
+
+   /* A stale id reclaims nothing. This is the race guard: between deciding a
+    * turn was abandoned and acting on it, the real holder may have finished
+    * and a new turn begun. */
+   CHECK_EQ_INT(presence_turn_reclaim(sid, "turn-does-not-exist"), 0);
+   CHECK_EQ_INT(presence_turn_is_live(sid, turn), 1);
+   CHECK_EQ_INT(presence_turn_reclaim(sid, ""), 0);
+   CHECK_EQ_INT(presence_turn_reclaim(sid, NULL), 0);
+   CHECK_EQ_INT(presence_turn_is_live(sid, turn), 1);
+
+   /* B is stuck behind it — the reported symptom. */
+   char infl[64] = "";
+   CHECK_EQ_INT(presence_turn_acquire(sid, aB, 0, NULL, 0, infl, sizeof(infl), NULL),
+                PRESENCE_TURN_BUSY);
+   CHECK(strcmp(infl, turn) == 0);
+
+   /* Reclaiming it frees the session, and B — who never held it — can run. */
+   CHECK_EQ_INT(presence_turn_reclaim(sid, turn), 1);
+   CHECK_EQ_INT(presence_turn_is_live(sid, turn), 0);
+   CHECK_EQ_INT((int)presence_turn_inflight_age(sid, NULL, 0), -1);
+
+   char turnB[64] = "";
+   CHECK_EQ_INT(presence_turn_acquire(sid, aB, 0, turnB, sizeof(turnB), NULL, 0, NULL),
+                PRESENCE_TURN_ACQUIRED);
+   CHECK(strcmp(turnB, turn) != 0);
+
+   /* Reclaiming twice does nothing the second time: two callers may both decide
+    * the same turn is abandoned, and the loser must not go on to kill the
+    * winner's fresh turn. */
+   CHECK_EQ_INT(presence_turn_reclaim(sid, turn), 0);
+   CHECK_EQ_INT(presence_turn_is_live(sid, turnB), 1);
+
+   CHECK_EQ_INT(presence_turn_release(sid, turnB), 1);
+   presence_detach(sid, aA);
+   presence_detach(sid, aB);
+}
+
 static void test_turn_arbitration(void)
 {
    const char *sid = "sess-turn";
@@ -477,6 +541,7 @@ int main(void)
    test_attach_owner_and_count();
    test_persistent_keeps_alive();
    test_turn_arbitration();
+   test_turn_reclaim();
    test_workspace_leases();
    test_event_ring();
    test_outbound_routing();
