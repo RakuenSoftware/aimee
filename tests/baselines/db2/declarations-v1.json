@@ -12465,9 +12465,15 @@
           "line": 132
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON note-creation wrapper is caller presentation code; a typed learning mutation bounds note fields and returns an explicit identifier and result."
+      },
       "signature": "cJSON * db2_kb_service_note_create_json ( const char * title , const char * content , const char * tags , const char * author )",
       "signature_sha256": "b38f3d397de14bdd287340a701dad79c0a8d60ef73e6b0d66c505fa0a2c96b50",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_note_create_json"
     },
     {
@@ -12480,9 +12486,15 @@
           "line": 134
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON note-list builder stays local; a typed learning operation returns a bounded tag-filtered record set."
+      },
       "signature": "cJSON * db2_kb_service_note_list_json ( const char * tag , int max_rows )",
       "signature_sha256": "2c89cc530cb9681adc5124398340087bad21d1f369804094d48f0f0970a3bba6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_note_list_json"
     },
     {
@@ -12495,9 +12507,15 @@
           "line": 135
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON note-search response cannot define the wire shape; DB2 returns bounded typed matches for caller-owned serialization."
+      },
       "signature": "cJSON * db2_kb_service_note_search_json ( const char * query , int max_rows )",
       "signature_sha256": "028f72a8235cbf9036e726fdd788b188250b72d32fb8370cca196586413aa61a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_note_search_json"
     },
     {
@@ -12557,9 +12575,15 @@
           "line": 181
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON decay report is presentation-only; one typed learning maintenance operation owns decay and returns bounded aggregate evidence."
+      },
       "signature": "cJSON * db2_kb_service_rules_decay_json ( void )",
       "signature_sha256": "83366f3f71f8923c3a1d9d6fc71e1747a7bc34e671b9288a409d146ffdc84a67",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_rules_decay_json"
     },
     {
@@ -12573,9 +12597,15 @@
           "line": 196
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON delete facade is not transported; a typed learning mutation owns rule deletion and returns its closed result."
+      },
       "signature": "cJSON * db2_kb_service_rules_delete_json ( int id )",
       "signature_sha256": "b5021f4b539762962f9f0c6872512401c0ccad6a357e3934f305d5bef2436fe5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_rules_delete_json"
     },
     {
@@ -12589,9 +12619,15 @@
           "line": 138
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON filesystem-export wrapper is process-local orchestration; a bounded export operation owns the path policy and returns typed counts."
+      },
       "signature": "cJSON * db2_kb_service_rules_export_jsonl_json ( const char * path )",
       "signature_sha256": "4921ab9a81c55160daaa08dc389dea453c2a5ed0f66b0ffa9fe4f01d9ec227d3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_rules_export_jsonl_json"
     },
     {
@@ -12605,9 +12641,15 @@
           "line": 137
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON generation report remains local presentation; a typed learning operation performs generation and returns bounded counts."
+      },
       "signature": "cJSON * db2_kb_service_rules_generate_json ( void )",
       "signature_sha256": "8b0640219050b8c6d74f3842a3a78bbb66b0d57f56c891783a61d86a660f7afd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_rules_generate_json"
     },
     {
@@ -12621,9 +12663,15 @@
           "line": 139
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON insert wrapper is caller serialization; a typed mutation validates bounded polarity, title, description, and weight before persistence."
+      },
       "signature": "cJSON * db2_kb_service_rules_insert_json ( const char * polarity , const char * title , const char * description , int weight )",
       "signature_sha256": "4eeda856f76fc5b68218f74968b9f086d4c2cf7864d5ba44e0c049125acbd167",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_rules_insert_json"
     },
     {
@@ -12637,9 +12685,15 @@
           "line": 136
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON rule-list builder cannot cross the stable bus; DB2 returns a bounded typed rule record set."
+      },
       "signature": "cJSON * db2_kb_service_rules_list_json ( int max_rules )",
       "signature_sha256": "8ba5fec0ae99428df568bed4227411090b8ab782ed13c3a710e90f8d7aa3e4da",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_rules_list_json"
     },
     {
@@ -12653,9 +12707,15 @@
           "line": 197
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON directive-type update is a legacy facade; a typed learning mutation validates the closed type and returns structured status."
+      },
       "signature": "cJSON * db2_kb_service_rules_update_directive_type_json ( int id , const char * directive_type )",
       "signature_sha256": "dc347c5af39ca3c5cb31a0c586a89b7ae0b050efa51b38a938f2ac6c8deb0cd9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_rules_update_directive_type_json"
     },
     {
@@ -24906,15 +24966,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "99c339b5874c3bb7e8580393afa086c582c0d46025154bef3b26c72f53ccc16e",
+  "fingerprint": "5d1f031272044efe397ea278e958b25c408c0072796e97cc28c81cd5ca3e20c4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 811,
+    "audit_pending": 801,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 147
+    "reviewed": 157
   }
 }
