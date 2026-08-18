@@ -268,6 +268,62 @@
       "reason": "The cJSON list builder cannot be the stable wire shape; DB2 returns a bounded typed anti-pattern record set for caller serialization."
     },
     {
+      "symbol": "db2_kb_service_collab_rules_approve_json",
+      "signature_sha256": "cbaa581288601a57c58ff8d5d3c9820e84c6508129d06097cd84fa51bf1de7c3",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON approval wrapper is caller presentation code; a typed learning mutation owns the rule transition and returns a closed result."
+    },
+    {
+      "symbol": "db2_kb_service_collab_rules_inject_json",
+      "signature_sha256": "fdc69adb607c0316ddd7bae396af94de77f0b6c1d2e1c8caca069c49579bdd77",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON injection facade cannot be a stable contract; a bounded typed operation returns active collaboration rules newer than the supplied epoch."
+    },
+    {
+      "symbol": "db2_kb_service_collab_rules_list_active_json",
+      "signature_sha256": "556b085b9e971254a6ecb8de631ad537eecddb13a3bc4ae0832b63d4c98b86db",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The active-rule cJSON builder remains local serialization; DB2 returns a bounded typed rule set over the learning family."
+    },
+    {
+      "symbol": "db2_kb_service_collab_rules_list_json",
+      "signature_sha256": "87d50b6545e4aa319fd21036d212fc5750dde1311d7583962ae5a2e026ef5d3f",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The all-rules cJSON builder is not transported; a bounded typed list operation returns rule records for caller-owned presentation."
+    },
+    {
+      "symbol": "db2_kb_service_collab_rules_propose_json",
+      "signature_sha256": "5f911e25e1a9e71e76ac1c44bf4105e6eca405fb5e86203b1b6c0b6094818084",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON proposal facade is retired at the process boundary; a typed mutation bounds text, rationale, and proposer before DB2 persists the rule."
+    },
+    {
+      "symbol": "db2_kb_service_collab_rules_reject_json",
+      "signature_sha256": "2ad20ffeb3970f42320358fe336946a02e242a8757afe7d62b05d4f9e236c42c",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON rejection wrapper stays outside the wire contract; DB2 owns the typed state transition and returns its closed result."
+    },
+    {
+      "symbol": "db2_kb_service_collab_rules_retire_json",
+      "signature_sha256": "8585e43848d8161257be7754b38a2e3fa80d7d8544eb9bf69644e4a88fbc741c",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON retirement facade is caller-specific serialization; a typed learning mutation performs the rule transition atomically."
+    },
+    {
       "symbol": "db2_kb_service_learning_get_json",
       "signature_sha256": "9dd27e1e2c8bababa5057a656f302898147c6479f34aeb98d7bda861877292c2",
       "disposition": "private-db2",

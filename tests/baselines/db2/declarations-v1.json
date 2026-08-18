@@ -10593,9 +10593,15 @@
           "line": 151
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON approval wrapper is caller presentation code; a typed learning mutation owns the rule transition and returns a closed result."
+      },
       "signature": "cJSON * db2_kb_service_collab_rules_approve_json ( int rule_id )",
       "signature_sha256": "cbaa581288601a57c58ff8d5d3c9820e84c6508129d06097cd84fa51bf1de7c3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collab_rules_approve_json"
     },
     {
@@ -10609,9 +10615,15 @@
           "line": 154
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON injection facade cannot be a stable contract; a bounded typed operation returns active collaboration rules newer than the supplied epoch."
+      },
       "signature": "cJSON * db2_kb_service_collab_rules_inject_json ( int agent_last_epoch )",
       "signature_sha256": "fdc69adb607c0316ddd7bae396af94de77f0b6c1d2e1c8caca069c49579bdd77",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collab_rules_inject_json"
     },
     {
@@ -10625,9 +10637,15 @@
           "line": 150
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The active-rule cJSON builder remains local serialization; DB2 returns a bounded typed rule set over the learning family."
+      },
       "signature": "cJSON * db2_kb_service_collab_rules_list_active_json ( void )",
       "signature_sha256": "556b085b9e971254a6ecb8de631ad537eecddb13a3bc4ae0832b63d4c98b86db",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collab_rules_list_active_json"
     },
     {
@@ -10641,9 +10659,15 @@
           "line": 149
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The all-rules cJSON builder is not transported; a bounded typed list operation returns rule records for caller-owned presentation."
+      },
       "signature": "cJSON * db2_kb_service_collab_rules_list_json ( void )",
       "signature_sha256": "87d50b6545e4aa319fd21036d212fc5750dde1311d7583962ae5a2e026ef5d3f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collab_rules_list_json"
     },
     {
@@ -10657,9 +10681,15 @@
           "line": 147
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON proposal facade is retired at the process boundary; a typed mutation bounds text, rationale, and proposer before DB2 persists the rule."
+      },
       "signature": "cJSON * db2_kb_service_collab_rules_propose_json ( const char * text , const char * reason , const char * proposed_by )",
       "signature_sha256": "5f911e25e1a9e71e76ac1c44bf4105e6eca405fb5e86203b1b6c0b6094818084",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collab_rules_propose_json"
     },
     {
@@ -10673,9 +10703,15 @@
           "line": 152
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON rejection wrapper stays outside the wire contract; DB2 owns the typed state transition and returns its closed result."
+      },
       "signature": "cJSON * db2_kb_service_collab_rules_reject_json ( int rule_id )",
       "signature_sha256": "2ad20ffeb3970f42320358fe336946a02e242a8757afe7d62b05d4f9e236c42c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collab_rules_reject_json"
     },
     {
@@ -10689,9 +10725,15 @@
           "line": 153
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON retirement facade is caller-specific serialization; a typed learning mutation performs the rule transition atomically."
+      },
       "signature": "cJSON * db2_kb_service_collab_rules_retire_json ( int rule_id )",
       "signature_sha256": "8585e43848d8161257be7754b38a2e3fa80d7d8544eb9bf69644e4a88fbc741c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collab_rules_retire_json"
     },
     {
@@ -24822,15 +24864,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e1dec79052ecad98b7b08e31dfc1dfa9c1963714fd4904cc883a29c4b1a5ff14",
+  "fingerprint": "9ca80528c5c2f8d84c661dd87e85c4e3e685a0a2046f9b922fdbc0b5395beb12",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 825,
+    "audit_pending": 818,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 133
+    "reviewed": 140
   }
 }
