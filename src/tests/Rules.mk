@@ -285,6 +285,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-webapi \
                $(TESTPREFIX)/unit-test-cli-profile \
                $(TESTPREFIX)/unit-test-cmd-profile \
+               $(TESTPREFIX)/unit-test-index-investigate-status \
                $(TESTPREFIX)/unit-test-kb-client-index \
                $(TESTPREFIX)/unit-test-kb-client-index-remote \
                $(TESTPREFIX)/unit-test-kb-client-docs \
@@ -2043,6 +2044,12 @@ $(TESTPREFIX)/unit-test-kb-client-index-remote: $(OBJDIR)/tests/test_kb_client_i
 	                                 $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o \
 	                                 $(OBJDIR)/modules/kb_client/kb_client_index_parse.o \
 	                                 $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-index-investigate-status: $(OBJDIR)/tests/test_index_investigate_status.o \
+	                                  $(OBJDIR)/server/server_state_index.o \
+	                                  $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o \
+	                                  $(OBJDIR)/tests/support/log_stub.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-client-docs: $(OBJDIR)/tests/test_kb_client_docs.o \
