@@ -98,6 +98,9 @@
     {"api", "Inspect the public /v1 HTTP API (aimee.api.*)", AIMEE_CMD_TIER_ADVANCED, 0,
      "  status           Show the loopback /v1 listener config and emit VS Code /\n"
      "                   OpenAI-compatible model-provider setup snippets\n"},
+    {"launch", "Launch any client in an isolated Aimee session", AIMEE_CMD_TIER_CORE, 0,
+     "  -- <client> [args...]  Bind one session id and worktree, then exec the client\n"
+     "                         (Codex, Claude, OpenCode, or any executable)\n"},
     {"session-start", "SessionStart hook entry point", AIMEE_CMD_TIER_CORE, 1, NULL},
     {"delegate", "Delegate a task to a sub-agent", AIMEE_CMD_TIER_CORE, 0,
      "  <role> \"prompt\"   Run a delegate in <role>: code, review, explain,\n"

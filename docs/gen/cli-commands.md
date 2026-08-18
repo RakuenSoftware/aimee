@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 68
+Total commands: 69
 
 ## Core commands
 
@@ -101,6 +101,17 @@ Subcommands:
   grant show       Show one subject's grant (--server, --team, --subject)
   grant list       List grants (--server, --team, [--include-revoked])
   grant revoke     Revoke one subject's grant (--server, --team, --subject)
+```
+
+### `aimee launch`
+
+Launch any client in an isolated Aimee session.
+
+Subcommands:
+
+```
+  -- <client> [args...]  Bind one session id and worktree, then exec the client
+                         (Codex, Claude, OpenCode, or any executable)
 ```
 
 ### `aimee manuscript`
