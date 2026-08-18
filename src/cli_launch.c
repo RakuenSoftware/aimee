@@ -15,8 +15,15 @@
 #if defined(_WIN32) || defined(_WIN64)
 #include <direct.h>
 #include <process.h>
-#define launch_chdir  _chdir
-#define launch_execvp _execvp
+#define launch_chdir _chdir
+/* _execvp takes a const-qualified vector where POSIX execvp does not, so the
+ * one call site cannot spell both. Cast here rather than at the call, which
+ * keeps that line one shape on both platforms -- and keeps the POSIX spelling
+ * exactly `execvp`, which is what the unit test interposes on. */
+static int launch_execvp(const char *file, char *const argv[])
+{
+   return (int)_execvp(file, (const char *const *)argv);
+}
 #else
 #include <unistd.h>
 #define launch_chdir  chdir
