@@ -2,11 +2,11 @@
 
 ## Purpose and non-goals
 
-`db2` is the KB-local process boundary for the shared PostgreSQL knowledge store. The first
-increment registers a separately buildable C process and freezes its lifecycle-health wire format
-while the existing implementation remains authoritative in the KB process. It does not activate a
-second store owner, send SQL over the bus, or claim that the C implementation has already been
-carved out of the KB link.
+`db2` is the KB-local process boundary for the shared PostgreSQL knowledge store. Its
+disabled-by-default C process now compiles the complete descriptor-owned DB2 implementation and
+freezes the lifecycle-health wire format while the same implementation remains authoritative in the
+KB process. It does not activate a second store owner or send SQL over the bus; replay and the atomic
+consumer cutover still precede activation.
 
 ## Public contracts
 
@@ -16,10 +16,36 @@ client, the shared `server-go/db2` Go caller contract, and fingerprinted positiv
 vectors. Both clients accept a narrow bus-call interface rather than depending on a daemon global,
 so C, Go, `aimee-kb`, and parity harnesses exercise the same bytes and contract fingerprint. The Go
 package is caller-side only during phase one: it does not read the DB2 DSN, open PostgreSQL, serve a
-stage, or become a second DB2 owner. The fixed eight-byte request carries only magic and wire version. The
-fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence; unknown flags and
-non-zero reserved bytes fail closed. Until the descriptor includes the complete DB2 C closure, an
-exported standalone process returns typed `capability_absent` instead of reporting false readiness.
+stage, or become a second DB2 owner. The frozen bootstrap health operation keeps its fixed eight-byte
+request and sixteen-byte response. Every later catalog operation uses the generated 24-byte
+request/reply envelope: distinct magic, a 16-bit version and header length, operation discriminator,
+request flags or a closed reply result, exact payload length, and zero reserved bytes. Shared C/Go
+positive and negative vectors pin that additive envelope without changing a health byte. The first
+envelope-backed operation, `lifecycle.embedding_dimension`, returns the effective PostgreSQL/
+pgvector schema width as a bounded `u32`, or the closed `invalid_state` result when no valid width is
+available. The exported process binds every operation to strong production DB2 accessors; explicit
+injected backends are confined to tests.
+
+The next lifecycle operation, `pool_status`, returns a single mutex-protected snapshot of the
+PostgreSQL pool: bounded size/occupancy, waiters, lease grants/timeouts, stuck leases, and poisoned
+connections. Signed or relationally impossible backend values become `invalid_state` rather than
+wrapping onto the wire.
+
+`embedding_refusals` preserves the schema-dimension refusal evidence used by lifecycle health. It
+returns the cumulative refused-offer count and last refused positive dimension in one response. The
+only valid states are both zero or both positive, and the offered dimension is bounded by `INT_MAX`;
+otherwise the process returns `invalid_state`.
+
+`postgres_status` carries the best-effort PostgreSQL diagnostics used by `aimee doctor`: active and
+maximum connections, recovery role, and standby WAL replay lag. A four-bit availability mask keeps
+missing probes distinct from zero, requires unavailable values to remain zero, and permits lag only
+for a known replica. A dead probe connection returns `invalid_state`.
+
+`reembed_status` reads the canonical DB2 maintenance marker that blocks vector search during a
+schema-width rebuild. It returns a bounded target dimension and positive start epoch, `not_found`
+when maintenance is inactive, or `invalid_state` for an unreadable or malformed marker.
+`reembed_clear` is its idempotent, zero-payload companion mutation: DB2 deletes that marker after
+reconciliation, returning `invalid_state` if the single statement fails.
 
 ## Dependencies and consumers
 
@@ -60,7 +86,9 @@ gone, and the declaration ledger proves that `db2_health_probe` has no productio
 
 ## Surfaces
 
-The only current surface is `AIMEE_DB2_EVENT_HEALTH` on the KB-local Unix-domain module bus. There
+The current surface is the lifecycle event on the KB-local Unix-domain module bus. It serves the
+frozen health operation plus the envelope-backed embedding-dimension, pool-status, and
+embedding-refusal, PostgreSQL-status, re-embedding-status, and re-embedding-clear operations. There
 is no HTTP listener, network service, generic query operation, raw SQL payload, or provider-secret
 field. The catalog reserves the eight family identities and event kinds `11521` through `11528`, but
 only lifecycle is active and granted. Later operations must be typed, bounded catalog entries.
@@ -69,13 +97,18 @@ only lifecycle is active and granted. Later operations must be typed, bounded ca
 Declaration audit:
 
 `declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
-generated ledger accounts for all 1,351 non-static function declarations in all 137 DB2 headers,
+generated ledger accounts for all 1,397 non-static function declarations in all 137 DB2 headers,
 records identical duplicate declarations by location, and fails on conflicting signatures. The
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
-confused. At this checkpoint 166 declarations are unconsumed implementation details, 273 are used
+confused. Every catalog operation names its exact C backend symbols; generation fails unless each
+symbol has a signature-bound `wire-operation` review with the same family and DB3 placement, and
+also fails if a wire review has no catalog operation. At this checkpoint 153 declarations are
+unconsumed implementation details, 286 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
 explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
-and 850 production-consumed declarations remain
+the embedding-dimension, pool-status, embedding-refusal, PostgreSQL-status, re-embedding-status, and
+re-embedding-clear backends are reviewed wire operations, and 888
+production-consumed declarations remain
 without a reviewed disposition.
 
 The separate `vector-portability.json` audit covers all 76 declared `pgvec_*` symbols, including
@@ -380,11 +413,57 @@ because the Go module declines them without touching its breaker. DB2 independen
 absent provider, invalid dimensions, and non-finite components. This moves total debt from 177 to
 176, injected-contract debt from 38 to 37, and outbound source-boundary includes from 167 to 166.
 
-The remaining 37 non-system rows are sibling-contract migration debt. Session identity, briefing
-rendering, executable lifecycle, configuration, memory, and other host calls must close through
-their reviewed process contracts before activation; they are not portable-support candidates. Rows
-may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide
-host coupling inside support copies.
+The twenty-eighth reduction replaces DB2 tenant setup's direct canonical identity-key call with a
+startup-installed identity-owner contract. The callback receives only the principal fields the key
+derivation consumes; DB2 pins the principal-kind ABI and independently revalidates the returned
+owner, issuer-scoped OIDC, normalized certificate, or bounded host-account grammar before opening a
+transaction or setting tenant GUCs. Missing, failed, unterminated, or noncanonical answers remain
+unauthenticated failures. This moves total debt from 176 to 175 and injected-contract debt from 37
+to 36 without copying identity canonicalization into DB2.
+
+The twenty-ninth reduction replaces the two direct authority-record validation calls with one
+paired, startup-installed host contract. Production installs the canonical management and identity
+validators before serving token requests, while DB2 rejects an absent callback and every return
+other than exact success. Focused boundary tests cover missing, failed, and invalid positive and
+negative verdicts without weakening the existing exhaustive record and signing tests. This moves
+total debt from 175 to 173 and injected-contract debt from 36 to 34.
+
+The thirtieth reduction replaces DB2's parse/compare/free chain for retained computed-style
+snapshots with one startup-installed CSS-owner contract. The provider returns only per-snapshot
+validity, availability, equivalence, and a diff count; DB2 independently rejects missing providers,
+provider errors, nonbinary flags, negative counts, and inconsistent verdicts before updating the
+migration unit. This moves total debt from 173 to 169 and injected-contract debt from 34 to 30.
+
+The thirty-first reduction moves CSS stylesheet parsing, release, and static class-token extraction
+behind one startup-installed CSS-owner contract. DB2 independently bounds the nested rule and
+declaration counts, validates every fixed field and binary flag, and accepts only bounded, unique,
+terminated static class tokens. Missing providers or malformed output skip the derived graph write
+instead of mutating it. This moves total debt from 169 to 166 and injected-contract debt from 30 to
+27.
+
+The thirty-second reduction moves DB2's nine credential-record cryptographic calls behind one
+startup-installed vault-owner vtable. The boundary covers canonical v1/v2 AAD, random generation,
+DEK wrap/unwrap, authenticated secret encryption/decryption, and KEK-check wrap/verify. DB2 accepts
+only exact success, bounds every variable length, validates AAD output length, and cleanses secret
+outputs on absence or failure. This moves total debt from 166 to 157 and injected-contract debt from
+27 to 18.
+
+The thirty-third reduction replaces DB2's mutation-budget lookup and canonical reseal
+operation-ID/receipt helpers with one startup-installed vault-owner contract. DB2 bounds each
+deadline by its local monotonic per-call window, independently validates lowercase operation IDs
+against decoded bytes, and cleanses failed receipt/digest output. This moves total debt from 157 to
+151 and injected-contract debt from 18 to 12.
+
+The thirty-fourth reduction moves DB2's 12 witness hashing, canonical encoding, framing, signing,
+and verification calls behind one startup-installed vault-owner vtable. DB2 independently bounds
+wire and Merkle inputs, validates every provider verdict and encoded length, and cleanses hashes,
+signatures, identities, and partial frames after absence or failure. This moves total debt from 151
+to 139 and injected-contract debt from 12 to zero.
+
+The remaining 139 unresolved rows are declared system links. The standalone C closure therefore
+has zero packaging, injection, promotion, private-implementation, or dead-code debt. This completes
+the S2 C closure gate; it does not activate the process owner or complete the S4/S6 ownership and Go
+provider transitions.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the
@@ -400,33 +479,67 @@ callbacks, and composite transactions still require an explicit provider-neutral
 
 ## Data and migrations
 
-This increment performs no reads, writes, schema changes, or migrations in `aimee-module-db2`.
-The existing C DB2 owner retains those responsibilities until its complete source and dependency
-closure is packaged and replay-tested behind this process boundary.
+When explicitly launched, `aimee-module-db2` opens PostgreSQL through the existing `db2_init`
+lifecycle and applies or validates the unchanged DB2 schema. It remains disabled by default, so the
+existing in-process owner retains deployed responsibility until replay passes and S4 transfers the
+DSN, startup order, callers, and link ownership atomically.
 
 ## Security and privacy
 
 The wire contains capability bits only. DSNs, SQL, row contents, identities, and driver errors do
 not cross the bus. Runtime admission continues to pin the executable path, UID, principal class,
-principal reference, and event-kind grant. The `AIMEE_DB2_URL` secret remains with the current owner
-until the activation image transfers it exclusively to the module process.
+principal reference, and event-kind grant. The process reads `AIMEE_DB2_URL` during initialization,
+never echoes it or a libpq diagnostic, and refuses bus attachment on missing or failed initialization.
+Before opening PostgreSQL it also applies the existing `EMBEDDER_DIMS` contract: a valid value is an
+operator pin, while an unset or malformed value uses the one declared config default. This preserves
+the in-process dimension precedence without linking the config implementation into DB2.
 
 ## Supported journeys
 
-Build tooling exports and compiles `aimee-module-db2` from its descriptor. A test backend can prove
-the complete health encode-handler-decode path. A production bundle without the still-unmigrated C
-closure returns `capability_absent`, making partial packaging visible and non-authoritative.
+Build tooling exports and compiles `aimee-module-db2` from all 138 descriptor-owned DB2 translation
+units plus its reviewed support closure. The generated main opens the real backend before attaching;
+the health handler then reports the real schema, extension, and KB-table evidence. Test injection
+continues to cover every response and failure shape without providing a production fallback.
+The descriptor declares both canonical DB2 SQL inputs for deterministic text embedding. Runtime
+bundles generate `schema_data.h` in a temporary build directory, and standalone exports emit the
+equivalent CMake rule and copy those exact inputs; neither path requires or modifies a source-tree
+generated header. The same descriptor declares the 55 non-owned compatibility headers required by
+the retained C implementation. Export validation requires sorted, normalized, real `.h` inputs,
+copies them without claiming DB2 ownership, includes them in the repository source digest, and
+rejects module-local entries that belong in `private_headers` or `public_headers`. A clean isolated
+export now compiles and links the same 138 translation units without reaching back into the
+monorepo.
+
+The `db2-replay` target starts that packaged executable as principal 29 against a fresh pgvector
+PostgreSQL database and an executable-bound bus grant. It compares the returned health bytes with
+the generated reference codec, repeats the request through the typed client, verifies all schema,
+`pg_trgm`, and KB-table evidence bits, terminates the process cleanly, and leaves the recorded
+embedding dimension and representative schema tables for a separate database-effect assertion.
+The replay also rejects an expired deadline, deterministically cancels a request only after it has
+entered the bus, proves a later live health call drains any stale terminal reply, and reads the
+effective dimension through the generated envelope client from the real initialized process. It also
+requires that process to return its configured 16-slot pool and a bounded occupancy snapshot through
+the generated client. The required
+CI job runs this target and is part of the stable `unit-tests` aggregate. These are the first live
+S3 replay groups; the remaining operation families and fault fixtures still gate S3 completion and
+activation.
 
 ## Tests and failure behavior
 
-Focused C tests cover every response flag combination, malformed magic/version/length, unknown
+Focused C tests cover every response flag combination, both embedding-dimension result shapes,
+pool counter widths and occupancy relations, and
+dimension bounds, malformed magic/version/length, unknown
 flags, reserved bytes, wrong stage, undersized output, cancellation, missing callbacks, backend
 failure, typed-client transport/protocol failures, and successful encode-handler-decode. A dedicated
 integration test crosses the real authenticated event bus from the generated client through the
 module runtime into the C handler and verifies non-zero evidence. Runtime-bundle tests compile the
-descriptor-owned C
-process. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
-generated artifact. Boundary tests prohibit any direct import from `src/modules/db2/c` into private
+descriptor-owned C process from a clean tree with no `src/schema_data.h`. Generator tests pin
+UTF-8/C escaping, reproducibility, output location, path containment, ordering, duplicate symbols,
+and symlink rejection; an exported miniature CMake project exercises the same rule where CMake is
+available. Export tests pin compatibility-header path safety, ownership separation,
+materialization, manifest admission, and missing-file failure. Catalog tests mutate every closed
+field, process/descriptor binding, resource limit, and generated artifact. Boundary tests prohibit
+any direct import from `src/modules/db2/c` into private
 `src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
 comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
 limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
@@ -448,9 +561,16 @@ fork safety, descriptor closure, and sanitizer-clean execution.
 
 ## Operational diagnostics
 
-Before activation this process is a packaging and contract probe only. `capability_absent` means the
-standalone runtime has not yet acquired the complete DB2 backend; it is not a database-health
-verdict. Existing KB health remains unchanged.
+Before activation this real process remains disabled by default. `aimee_db2_module_init` in
+`src/modules/db2/module_init.c` is the only startup path, and it has exactly two refusal modes.
+An unset or empty `AIMEE_DB2_URL` prints `db2: AIMEE_DB2_URL is unset; refusing to serve`; a failing
+`db2_init` prints `db2: database initialization failed; refusing to serve`. The second message is
+deliberately opaque because the DSN can carry a password, so no libpq diagnostic is echoed. Read the
+database server log, not this process, to learn why the connection failed. Neither path partially
+initializes: both return `-1` before any handler is registered, so a refusing module serves nothing
+rather than serving degraded results. Once attached, the `AIMEE_DB2_EVENT_HEALTH` lifecycle response
+is the strong DB2/KB health verdict. Existing deployed KB health remains unchanged until the S4
+ownership cutover.
 
 ## Compatibility
 

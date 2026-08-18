@@ -79,8 +79,8 @@ def main() -> int:
             if not isinstance(item.get("commit"), str) or not COMMIT.fullmatch(item["commit"]):
                 return fail(f"{module_id}: commit is not an exact SHA-1")
             descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
-            owned = exporter.module_owned_files(module_id, descriptor)
-            expected_digest = exporter.digest_files([ROOT / path for path in owned])
+            repository_files = exporter.module_repository_files(module_id, descriptor)
+            expected_digest = exporter.digest_files([ROOT / path for path in repository_files])
             if item.get("source_sha256") != expected_digest:
                 return fail(f"{module_id}: vendored mirror differs from its repository pin")
     except (OSError, UnicodeError, json.JSONDecodeError, exporter.ExportError) as exc:

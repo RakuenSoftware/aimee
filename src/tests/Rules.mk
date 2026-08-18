@@ -405,7 +405,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-gateway-policy \
                $(TESTPREFIX)/unit-test-gateway-pipeline \
                $(TESTPREFIX)/unit-test-gw-stage-registry \
-               $(TESTPREFIX)/unit-test-gw-response-registry \
+               $(TESTPREFIX)/unit-test-gw-response-registry $(TESTPREFIX)/unit-test-response-completion-stage \
                $(TESTPREFIX)/unit-test-response-governance-stage \
                $(TESTPREFIX)/unit-test-gw-orchestration-seam \
                $(TESTPREFIX)/unit-test-gw-orch-delegates \
@@ -795,6 +795,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db2-module-init \
                 $(TESTPREFIX)/unit-test-db2-cert-serial-support \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-cochange-support \
@@ -2643,6 +2644,8 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision: \
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
     $(OBJDIR)/tests/test_kb_mgmt_token_authority.o \
+    $(OBJDIR)/modules/db2/c/management_token_authority.o \
+    $(OBJDIR)/modules/db2/c/db_postgres.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
@@ -2650,6 +2653,8 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
 
 $(TESTPREFIX)/unit-test-kb-identity-token-authority: \
     $(OBJDIR)/tests/test_kb_identity_token_authority.o \
+    $(OBJDIR)/modules/db2/c/management_token_authority.o \
+    $(OBJDIR)/modules/db2/c/db_postgres.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_identity_token.o $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/server/oauth_pkce.o \
@@ -3359,6 +3364,17 @@ $(TESTPREFIX)/unit-test-db2-module-contract: \
 unit-test-db2-module-contract: $(TESTPREFIX)/unit-test-db2-module-contract
 	$<
 
+$(OBJDIR)/tests/test_db2_module_init.o: C_FLAGS += -Imodules/db2
+$(OBJDIR)/modules/db2/module_init.o: C_FLAGS += -Imodules/db2 -Imodules/db2/c \
+                                                   -Imodules/config -Iheaders
+$(TESTPREFIX)/unit-test-db2-module-init: $(OBJDIR)/tests/test_db2_module_init.o \
+                                        $(OBJDIR)/modules/db2/module_init.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-db2-module-init
+unit-test-db2-module-init: $(TESTPREFIX)/unit-test-db2-module-init
+	$<
+
 $(OBJDIR)/tests/test_bus_db2_module.o: C_FLAGS += -Icore/event_bus/include \
                                                    -Imodules/db2 \
                                                    -Imodules/db2/include
@@ -3387,6 +3403,31 @@ $(TESTPREFIX)/unit-test-bus-db2-module: \
 .PHONY: unit-test-bus-db2-module
 unit-test-bus-db2-module: $(TESTPREFIX)/unit-test-bus-db2-module
 	$<
+
+$(OBJDIR)/tests/test_bus_db2_process.o: C_FLAGS += -Icore/event_bus/include \
+                                                    -Imodules/db2/include
+$(TESTPREFIX)/unit-test-bus-db2-process: \
+                                        $(OBJDIR)/tests/test_bus_db2_process.o \
+                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(OBJDIR)/core/event_bus/module_client.o \
+                                        $(OBJDIR)/core/event_bus/module_protocol.o \
+                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                        $(OBJDIR)/core/event_bus/bus_client.o \
+                                        $(OBJDIR)/core/event_bus/bus_attach.o \
+                                        $(OBJDIR)/core/event_bus/bus_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_route.o \
+                                        $(OBJDIR)/core/event_bus/bus_region.o \
+                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_ring.o \
+                                        $(OBJDIR)/core/event_bus/bus_arena.o \
+                                        $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: db2-replay
+db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay
+	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
+	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
 
 $(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
 $(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
@@ -4161,7 +4202,7 @@ $(TESTPREFIX)/unit-test-kb-client-cache: $(OBJDIR)/tests/test_kb_client_cache.o 
                                          $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-openai-runs-store: $(OBJDIR)/tests/test_openai_runs_store.o \
+$(TESTPREFIX)/unit-test-openai-runs-store: $(OBJDIR)/tests/test_openai_runs_store.o $(OBJDIR)/modules/governance/gw_stage_completion.o \
                                            $(OBJDIR)/server/openai_runs_store.o \
                                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4408,7 +4449,7 @@ $(TESTPREFIX)/unit-test-sse-parser: $(OBJDIR)/tests/test_sse_parser.o $(OBJDIR)/
 $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingress.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o
+$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # P2c (response-side tool policing) integration test: same source as
@@ -4417,7 +4458,7 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(
 # response. The shape tests stub the request-side policy helpers so they
 # don't have to deal with guardrails dependencies; this test exercises the
 # full wiring end-to-end.
-$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o
+$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # P2c streaming integration test: linked against the REAL modules/gateway/gateway_policy.o
@@ -4425,7 +4466,7 @@ $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_
 # Same minimal-link pattern as the buffered P2c test above; the SSE replay
 # helper + police function exercise the buffered-fetch + replay flow when
 # `gateway_prevent_subagents` is ON.
-$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o
+$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
@@ -5152,6 +5193,41 @@ $(OBJDIR)/aimee-module-db1: $(DB1_MODULE_INPUTS)
 	@rm -rf $(OBJDIR)/module-bundle
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/module-bundle --output $(abspath $(OBJDIR)) --placement server >/dev/null
+
+# DB2 is granted but not started by default in the KB image. This target proves
+# that its complete descriptor-owned source set still produces the executable
+# the grant names. The descriptor generates schema_data.h in the bundle build
+# directory, so this proof does not depend on a prior monolithic build.
+$(OBJDIR)/aimee-module-db2:
+	@rm -rf $(OBJDIR)/db2-module-bundle
+	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null
+	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-module-bundle --output $(abspath $(OBJDIR)) --placement kb >/dev/null
+
+# Replay cataloged inactive-family operations against the exact exported DB2
+# source closure without adding their grants to the production process contract.
+$(OBJDIR)/aimee-module-db2-replay: tests/support/db2_module_replay_main.c
+	@rm -rf $(OBJDIR)/db2-replay-bundle $(OBJDIR)/db2-replay-output
+	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-replay-bundle >/dev/null
+	@cp $< $(OBJDIR)/db2-replay-bundle/src/aimee-module-db2.c
+	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-replay-bundle --output $(abspath $(OBJDIR))/db2-replay-output --placement kb >/dev/null
+	@cp $(OBJDIR)/db2-replay-output/aimee-module-db2 $@
+
+.PHONY: check-db2-module-runtime
+check-db2-module-runtime: $(OBJDIR)/aimee-module-db2
+	@log="$$(mktemp)"; trap 'rm -f "$$log"' EXIT; \
+	if env -u AIMEE_DB2_URL $(abspath $<) /tmp/aimee-db2-no-bus.sock > /dev/null 2>"$$log"; then \
+	  echo "DB2 module attached without AIMEE_DB2_URL" >&2; exit 1; \
+	fi; \
+	grep -q '^db2: AIMEE_DB2_URL is unset; refusing to serve$$' "$$log"; \
+	if AIMEE_DB2_URL='postgresql://db2:sentinel-secret@127.0.0.1:1/aimee?connect_timeout=1' \
+	     $(abspath $<) /tmp/aimee-db2-no-bus.sock > /dev/null 2>"$$log"; then \
+	  echo "DB2 module attached after failed initialization" >&2; exit 1; \
+	fi; \
+	grep -q '^db2: database initialization failed; refusing to serve$$' "$$log"; \
+	if grep -q 'sentinel-secret' "$$log"; then \
+	  echo "DB2 module leaked its DSN" >&2; exit 1; \
+	fi; \
+	echo "DB2 module runtime: complete link and fail-closed initialization ok"
 
 $(TESTPREFIX)/unit-test-db1-agent-work-client: \
                                        $(OBJDIR)/tests/test_db1_agent_work_client.o \
@@ -6030,12 +6106,12 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-openai-shape: $(OBJDIR)/tests/test_openai_shape.o \
+$(TESTPREFIX)/unit-test-openai-shape: $(OBJDIR)/tests/test_openai_shape.o $(OBJDIR)/modules/governance/gw_stage_completion.o \
                            $(OBJDIR)/server/openai_shape.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-openai-chat-policed: $(OBJDIR)/tests/test_openai_chat_policed.o \
+$(TESTPREFIX)/unit-test-openai-chat-policed: $(OBJDIR)/tests/test_openai_chat_policed.o $(OBJDIR)/modules/governance/gw_stage_completion.o \
                            $(OBJDIR)/server/openai_shape.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
@@ -6051,7 +6127,7 @@ $(TESTPREFIX)/unit-test-command-registry: $(OBJDIR)/tests/test_command_registry.
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-openai-responses-store: $(OBJDIR)/tests/test_openai_responses_store.o \
+$(TESTPREFIX)/unit-test-openai-responses-store: $(OBJDIR)/tests/test_openai_responses_store.o $(OBJDIR)/modules/governance/gw_stage_completion.o \
                            $(OBJDIR)/server/openai_responses_store.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
@@ -8505,3 +8581,7 @@ $(TESTPREFIX)/compaction-retention-probe: $(OBJDIR)/tests/retention_probe.o \
 
 .PHONY: compaction-retention-probe
 compaction-retention-probe: $(TESTPREFIX)/compaction-retention-probe
+
+# Bounded model-neutral completion intervention over the response seam.
+$(TESTPREFIX)/unit-test-response-completion-stage: $(OBJDIR)/tests/test_response_completion_stage.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

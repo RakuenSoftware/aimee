@@ -56,7 +56,7 @@ typedef enum
  * audit ledger (the one with a real predecessor); for rewrap/open it is 0 and
  * `source_pred_hash` must be all-zero. `is_first_in_shard` is 1 only for
  * shard_seq==1, where `witness_pred_hash` must equal the genesis sentinel. */
-typedef struct
+typedef struct vault_witness_record
 {
    vault_witness_source_t source;
    uint64_t seal_epoch;

@@ -243,18 +243,43 @@ int db2_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded
    void *conn = db2_conn();
    if (!conn)
       return -2;
+   char err[256] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -2;
+   /* The decision and delete are one DB2 action. PostgreSQL must also exclude
+    * concurrent kb_meta writers between the dimension read and marker delete;
+    * the single-process sqlite shim needs no table lock and does not implement
+    * PostgreSQL's LOCK TABLE syntax. */
+   if (!aimee_pg_is_shim() &&
+       aimee_pg_exec(conn, "LOCK TABLE kb_meta IN SHARE ROW EXCLUSIVE MODE", err, sizeof(err)) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -2;
+   }
    if (was_in_progress)
       *was_in_progress = db2_reembed_in_progress_get(NULL, NULL) == 1;
    int rec = 0;
-   (void)db2_embedding_dim_read(conn, &rec); /* rec stays 0 when none recorded */
+   if (db2_embedding_dim_read(conn, &rec) == DB2_DIM_ERROR)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -2;
+   }
    int run = db2_embedding_dim();
    if (recorded)
       *recorded = rec;
    if (running)
       *running = run;
    if (rec > 0 && rec != run && !force)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1; /* inconsistent: require force to clear into a mid-transition store */
-   return db2_reembed_in_progress_clear() == 0 ? 0 : -2;
+   }
+   if (db2_reembed_in_progress_clear() != 0 || aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -2;
+   }
+   return 0;
 }
 
 int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_plan_t *out)

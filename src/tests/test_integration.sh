@@ -148,8 +148,40 @@ check() {
         PASS=$((PASS + 1))
     else
         echo "FAIL: $desc"
+        dump_server_log
         FAIL=$((FAIL + 1))
     fi
+}
+
+# What the server was doing when a check failed. Bounded, and only for the
+# first few failures: enough to diagnose, not enough to bury the summary.
+# Without this a server-side stall is invisible -- the client reports only that
+# it gave up, which reads as "the server is down" even while the checks either
+# side of it are served fine.
+SERVER_LOG=""
+SERVER_LOG_DUMPS=0
+dump_server_log() {
+    [ "$SERVER_LOG_DUMPS" -lt 3 ] || return 0
+    SERVER_LOG_DUMPS=$((SERVER_LOG_DUMPS + 1))
+    # Say which case this is rather than going quiet. A silent helper here would
+    # repeat, in miniature, the bug it exists to fix: the reader cannot tell
+    # "the server said nothing" from "nobody looked".
+    # Two different files, and the useful one is not the obvious one. The
+    # redirect on start_server captures only what the server writes to
+    # stdout/stderr, which for a healthy boot is nothing; the request log --
+    # every route, its status and its timing -- goes to AIMEE_HOME/server.log.
+    # Prefer that, and fall back to the capture so a server that dies before it
+    # can open its log still gets to say why.
+    local shown=0
+    local f
+    for f in "$AIMEE_HOME/server.log" "$SERVER_LOG"; do
+        [ -n "$f" ] && [ -s "$f" ] || continue
+        echo "  aimee-server log (last 20 lines of $f):"
+        tail -20 "$f" 2>/dev/null | sed 's/^/    /'
+        shown=1
+        break
+    done
+    [ "$shown" -eq 1 ] || echo "  aimee-server log: nothing recorded in $AIMEE_HOME/server.log or ${SERVER_LOG:-(no capture path)}"
 }
 
 check_output() {
@@ -162,6 +194,7 @@ check_output() {
         PASS=$((PASS + 1))
     else
         echo "FAIL: $desc (expected '$expected', got '$(echo "$output" | head -1)')"
+        dump_server_log
         FAIL=$((FAIL + 1))
     fi
 }
@@ -355,7 +388,11 @@ PY
 # socket-present means ready to serve. Polling also returns as soon as it is up,
 # which is faster than the sleep it replaces on a machine that is not loaded.
 start_server() {
-    local log="$HOME/aimee-server.$$.log"
+    # Global, not local: a failing CHECK needs this as much as a failing bind.
+    # A server that answers slowly, or not at all, says why here and nowhere
+    # else, and every check that reads only the client's side has to guess.
+    SERVER_LOG="$HOME/aimee-server.$$.log"
+    local log="$SERVER_LOG"
     "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
     local i
@@ -549,6 +586,10 @@ fi
 # point, on every CI run of this harness. That line was in the log from the
 # first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
+# Reap before removing its HOME. kill only requests exit, so without this the
+# server can still be writing under $TCP_HOME while rm -rf walks it, and rm
+# fails with ENOTEMPTY when a directory gains entries between unlinking its
+# children and removing it. Under 'set -e' that aborts the whole harness.
 wait "$TCP_SRV_PID" 2>/dev/null || true
 # `|| true` regardless: teardown of a temporary directory must never decide
 # whether the suite continues. Even with the wait, anything else holding a file

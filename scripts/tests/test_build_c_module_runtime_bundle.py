@@ -17,6 +17,7 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILDER = REPO_ROOT / "scripts/build_c_module_runtime_bundle.py"
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("build_c_module_runtime_bundle", BUILDER)
 assert SPEC and SPEC.loader
 builder = importlib.util.module_from_spec(SPEC)
@@ -59,6 +60,10 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                     "src/modules/db2/module_adapter.c",
                 ],
                 "include_roots": ["src/modules/db2/include"],
+                "compile_definitions": [
+                    "AIMEE_DB1_DISABLED",
+                    "AIMEE_DISABLE_DB2_SQLITE_SHIM",
+                ],
                 "pkg_config": ["libpq"],
                 "system_libraries": [
                     "OpenSSL::Crypto",
@@ -119,7 +124,10 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             for source in expected_sources:
                 self.assertEqual(arguments.count(str(source)), 1)
             for flag in ("-I/pkg/include", "-L/pkg/lib", "-lpq", "-lcrypto",
-                         "-pthread", "-lz", "-lm", "-lzstd"):
+                         "-pthread", "-lz", "-lm", "-lzstd", "-DAIMEE_DB1_DISABLED",
+                         "-DAIMEE_DISABLE_DB2_SQLITE_SHIM", "-Os",
+                         "-Wno-unused-parameter", "-Wno-format-truncation",
+                         "-Wno-unused-result"):
                 self.assertIn(flag, arguments)
         finally:
             temporary.cleanup()
@@ -128,10 +136,18 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         mutations = (
             (lambda value: value["modules"][0].__setitem__("main", "../main.c"),
              "safe relative path"),
+            (lambda value: value["modules"][0]["compile_definitions"].append("BAD=1"),
+             "unsafe token"),
             (lambda value: (
                 value["modules"][0]["system_libraries"].append("Unknown::Target"),
                 value["modules"][0]["system_libraries"].sort(),
             ), "unsupported imported target"),
+            (lambda value: value["modules"][0].__setitem__("generated_headers", "bad"),
+             "generated_headers must be an array"),
+            (lambda value: value["modules"][0].__setitem__("generated_headers", [{
+                "output": "schema.h",
+                "entries": [{"source": "../schema.sql", "symbol": "SCHEMA_SQL"}],
+            }]), "safe relative path"),
             (lambda value: value["modules"].append(dict(value["modules"][0])),
              "sorted, and unique"),
         )
@@ -148,6 +164,74 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                     builder.load_builds(bundle)
             finally:
                 temporary.cleanup()
+
+    def test_v1_manifest_without_compile_definitions_remains_valid(self) -> None:
+        temporary, _root, bundle, _output = self.fixture()
+        try:
+            path = bundle / builder.BUILD_MANIFEST
+            value = json.loads(path.read_text(encoding="utf-8"))
+            del value["modules"][0]["compile_definitions"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            module = builder.load_builds(bundle)[0]
+            self.assertNotIn("compile_definitions", module)
+        finally:
+            temporary.cleanup()
+
+    def test_generated_header_is_materialized_outside_source_tree(self) -> None:
+        temporary, root, bundle, output = self.fixture()
+        try:
+            schema = root / "src/modules/db2/c/schema.sql"
+            schema.write_text("select 'db2';\n", encoding="utf-8")
+            path = bundle / builder.BUILD_MANIFEST
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["modules"][0]["generated_headers"] = [{
+                "entries": [{
+                    "source": "src/modules/db2/c/schema.sql",
+                    "symbol": "AIMEE_DB2_SCHEMA_SQL",
+                }],
+                "output": "schema_data.h",
+            }]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            module = builder.load_builds(bundle)[0]
+            generated = Path(temporary.name) / "generated"
+            self.assertEqual(
+                builder.materialize_generated_headers(module, root, generated), generated
+            )
+            header = generated / "schema_data.h"
+            self.assertIn(
+                'AIMEE_DB2_SCHEMA_SQL __attribute__((unused)) = "select \'db2\';\\n";',
+                header.read_text(encoding="utf-8"),
+            )
+            command = builder.compiler_command(
+                module, root, bundle, output, "cc", "pkg-config", generated
+            )
+            self.assertIn(f"-I{generated}", command)
+            self.assertNotIn(str(schema), command)
+            self.assertFalse((root / "src/schema_data.h").exists())
+        finally:
+            temporary.cleanup()
+
+    def test_declared_header_dependency_must_be_a_real_header(self) -> None:
+        temporary, root, bundle, output = self.fixture()
+        try:
+            path = bundle / builder.BUILD_MANIFEST
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["modules"][0]["header_dependencies"] = ["src/headers/aimee.h"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            module = builder.load_builds(bundle)[0]
+            with self.assertRaisesRegex(builder.BuildError, "missing or escapes"):
+                builder.compiler_command(
+                    module, root, bundle, output, "cc", "pkg-config"
+                )
+            dependency = root / "src/headers/aimee.h"
+            dependency.parent.mkdir(parents=True)
+            dependency.write_text("#pragma once\n", encoding="utf-8")
+            command = builder.compiler_command(
+                module, root, bundle, output, "cc", "pkg-config"
+            )
+            self.assertNotIn(str(dependency), command)
+        finally:
+            temporary.cleanup()
 
     def test_missing_owned_source_and_symlink_include_fail_closed(self) -> None:
         temporary, root, bundle, output = self.fixture()

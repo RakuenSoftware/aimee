@@ -404,6 +404,8 @@ int db2_memory_stats_counts(memory_stats_t *out)
                out->kind_counts[7] = c;
             else if (strcmp(k, KIND_WORKFLOW) == 0)
                out->kind_counts[8] = c;
+            else if (strcmp(k, KIND_OPINION) == 0)
+               out->kind_counts[9] = c;
          }
          aimee_pg_finalize(st);
       }

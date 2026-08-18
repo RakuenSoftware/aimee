@@ -18,14 +18,21 @@ repository preserves its descriptor-owned sources, headers, tests, and docs,
 and builds a separate Linux process against only the host-free event-bus client
 target. Its generated grant is executable/UID/principal-bound and starts with no
 event capabilities; capabilities are added only with the corresponding stable
-event schema.
+event schema. A C module may also declare non-owned `header_dependencies` needed
+by a transitional standalone build. Those inputs must be sorted, normalized,
+real header files outside the module's own tree; the exporter copies them at
+canonical paths without adding them to `owned_files`, records the complete
+materialized set as `repository_files`, and includes that set in the source
+digest.
 
 Container builds use the same descriptor contract through a two-step runtime
 bundle. `export_c_repositories.py --runtime-bundle <directory>` writes generated
 process mains, grants, placement lists, and `c-build.json`. Then
 `build_c_module_runtime_bundle.py` compiles each C process from its generated
 main, every descriptor-owned C source, the canonical event-bus client sources,
-and its declared include roots, pkg-config packages, and system libraries. The
+and its declared include roots, header dependencies, pkg-config packages, and
+system libraries. Header dependencies are admitted as build inputs but never
+passed to the compiler as translation units. The
 manifest is data rather than a shell fragment: paths and dependency tokens are
 validated before they become compiler arguments, and no module source is
 concatenated into the generated main.

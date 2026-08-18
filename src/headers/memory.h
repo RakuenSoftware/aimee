@@ -65,8 +65,8 @@ typedef struct
 typedef struct
 {
    int tier_counts[6];          /* L0, L1, L2, L3, L4, L5 */
-   int kind_counts[KIND_COUNT]; /* fact, pref, decision, episode, task, scratch, procedure, policy
-                                 */
+   int kind_counts[KIND_COUNT]; /* fact, pref, decision, episode, task, scratch, procedure,
+                                 * policy, workflow, opinion */
    int total;
    int conflicts;
    double pagerank_last_ms;
