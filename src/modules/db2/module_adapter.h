@@ -25,6 +25,12 @@ typedef struct
    int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
                               int *low_effectiveness, int *high_impact);
    int (*list_l2_memory_ids)(int64_t *out, int max);
+   /* health_record composes these three: DB2 owns the corpus total and the
+    * fixed conflict window, so only the cycle counters cross the bus. */
+   int (*count_memories)(void);
+   int (*count_recent_conflicts)(int days);
+   void (*health_record)(int total_memories, int contradictions_detected, int promotions,
+                         int demotions, int expirations);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

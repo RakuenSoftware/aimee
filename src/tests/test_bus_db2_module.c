@@ -45,6 +45,10 @@ typedef struct
    int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
                               int *low_effectiveness, int *high_impact);
    int (*list_l2_memory_ids)(int64_t *out, int max);
+   int (*count_memories)(void);
+   int (*count_recent_conflicts)(int days);
+   void (*health_record)(int total_memories, int contradictions_detected, int promotions,
+                         int demotions, int expirations);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -93,6 +97,10 @@ static int retention_delete_calls;
 static int demote_effectiveness_calls;
 static int effectiveness_stats_calls;
 static int list_l2_memory_ids_calls;
+static int health_record_calls;
+static int health_record_total;
+static int health_record_contradictions;
+static int health_record_promotions;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -357,6 +365,49 @@ int db2_memory_health_list_l2_memory_ids(int64_t *out, int max)
 static int list_l2_memory_ids(int64_t *out, int max)
 {
    return list_l2_memory_ids_impl(out, max);
+}
+
+int db2_memory_health_count_memories(void)
+{
+   return 512;
+}
+
+static int count_memories(void)
+{
+   return 512;
+}
+
+int db2_memory_health_count_recent_conflicts(int days)
+{
+   return days == AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS ? 6 : -1;
+}
+
+static int count_recent_conflicts(int days)
+{
+   return days == AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS ? 6 : -1;
+}
+
+static void health_record_impl(int total_memories, int contradictions_detected, int promotions,
+                               int demotions, int expirations)
+{
+   health_record_calls++;
+   health_record_total = total_memories;
+   health_record_contradictions = contradictions_detected;
+   health_record_promotions = promotions;
+   (void)demotions;
+   (void)expirations;
+}
+
+void db2_memory_health_record(int total_memories, int contradictions_detected, int promotions,
+                              int demotions, int expirations)
+{
+   health_record_impl(total_memories, contradictions_detected, promotions, demotions, expirations);
+}
+
+static void health_record(int total_memories, int contradictions_detected, int promotions,
+                          int demotions, int expirations)
+{
+   health_record_impl(total_memories, contradictions_detected, promotions, demotions, expirations);
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -627,6 +678,9 @@ int main(void)
        .demote_effectiveness = demote_effectiveness,
        .effectiveness_stats = effectiveness_stats,
        .list_l2_memory_ids = list_l2_memory_ids,
+       .count_memories = count_memories,
+       .count_recent_conflicts = count_recent_conflicts,
+       .health_record = health_record,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -746,6 +800,11 @@ int main(void)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(l2_count == 3 && l2_ids[0] == 7 && l2_ids[1] == 19 && l2_ids[2] == 4242 &&
           list_l2_memory_ids_calls == 1);
+
+   assert(aimee_db2_health_record_call(call_client, &client, 7033, 0, 4u, 2u, 9u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(health_record_calls == 1 && health_record_total == 512 &&
+          health_record_contradictions == 6 && health_record_promotions == 4);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

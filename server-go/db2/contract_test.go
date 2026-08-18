@@ -35,19 +35,23 @@ type wireBaseline struct {
 	Operations []struct {
 		Name    string `json:"name"`
 		Request struct {
-			Positive         string `json:"positive"`
-			SourceSession    string `json:"source_session"`
-			Key              string `json:"key"`
-			Kind             string `json:"kind"`
-			TierA            string `json:"tier_a"`
-			TierB            string `json:"tier_b"`
-			MemoryID         uint64 `json:"memory_id"`
-			HasValue         uint32 `json:"has_value"`
-			ValueBits        uint64 `json:"value_bits"`
-			ThresholdBits    uint64 `json:"threshold_bits"`
-			LowThresholdBits uint64 `json:"low_threshold_bits"`
-			MaximumIDs       uint32 `json:"maximum_ids"`
-			Negative         []struct {
+			Positive           string `json:"positive"`
+			SourceSession      string `json:"source_session"`
+			Key                string `json:"key"`
+			Kind               string `json:"kind"`
+			TierA              string `json:"tier_a"`
+			TierB              string `json:"tier_b"`
+			MemoryID           uint64 `json:"memory_id"`
+			HasValue           uint32 `json:"has_value"`
+			ValueBits          uint64 `json:"value_bits"`
+			ThresholdBits      uint64 `json:"threshold_bits"`
+			LowThresholdBits   uint64 `json:"low_threshold_bits"`
+			MaximumIDs         uint32 `json:"maximum_ids"`
+			Promotions         uint32 `json:"promotions"`
+			Demotions          uint32 `json:"demotions"`
+			Expirations        uint32 `json:"expirations"`
+			ConflictWindowDays uint32 `json:"conflict_window_days"`
+			Negative           []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
 			} `json:"negative"`
@@ -182,7 +186,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 23 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 24 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -204,7 +208,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[19].Name != "retention_enforce" ||
 		baseline.Operations[20].Name != "effectiveness_demote" ||
 		baseline.Operations[21].Name != "effectiveness_stats" ||
-		baseline.Operations[22].Name != "l2_memory_ids" {
+		baseline.Operations[22].Name != "l2_memory_ids" ||
+		baseline.Operations[23].Name != "health_record" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -680,6 +685,53 @@ func TestL2MemoryIDsMatchesEverySharedCVector(t *testing.T) {
 	}
 	if _, err := EncodeL2MemoryIDsReply([]uint64{0}); !errors.Is(err, ErrMalformedEnvelope) {
 		t.Fatalf("zero identifier encoded: %v", err)
+	}
+}
+
+func TestHealthRecordMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[23]
+	if operation.Request.ConflictWindowDays != HealthRecordConflictWindowDays {
+		t.Fatalf("conflict window = %d, generated = %d",
+			operation.Request.ConflictWindowDays, HealthRecordConflictWindowDays)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeHealthRecordRequest(operation.Request.Promotions,
+		operation.Request.Demotions, operation.Request.Expirations)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	promotions, demotions, expirations, err := DecodeHealthRecordRequest(wantRequest)
+	if err != nil || promotions != operation.Request.Promotions ||
+		demotions != operation.Request.Demotions ||
+		expirations != operation.Request.Expirations {
+		t.Fatalf("decode = (%d, %d, %d, %v)", promotions, demotions, expirations, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, _, err := DecodeHealthRecordRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for range operation.Reply.Positive {
+		reply, err := EncodeHealthRecordReply()
+		if err != nil || string(reply) != string(decodeHex(t, operation.Reply.Positive[0].Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", reply, err)
+		}
+		if err := DecodeHealthRecordReply(reply); err != nil {
+			t.Fatalf("decode reply: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeHealthRecordReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	// Each counter is bounded independently.
+	for index := range 3 {
+		counters := []uint32{0, 0, 0}
+		counters[index] = HealthRecordCounterMax + 1
+		if _, err := EncodeHealthRecordRequest(counters[0], counters[1], counters[2]); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("counter %d past its bound encoded: %v", index, err)
+		}
 	}
 }
 

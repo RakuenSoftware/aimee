@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "efb26df88453b88c31e0be9d92ff9075961cbd14c175fa72d3aca914dd0759d0"
+const ContractSHA256 = "6b013d14a79d9b095794933c4275e757921467c2ab4bea3c5965fa5b077f277a"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -153,6 +153,11 @@ const OperationL2MemoryIDs uint32 = 13
 const L2MemoryIDsMax uint32 = 2048
 const L2MemoryIDMin uint64 = 1
 const L2MemoryIDMax uint64 = 9223372036854775807
+const EventHealthRecord = EventMemory
+const StageHealthRecord = FamilyMemory
+const OperationHealthRecord uint32 = 14
+const HealthRecordConflictWindowDays uint32 = 1
+const HealthRecordCounterMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -990,6 +995,61 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// EncodeHealthRecordRequest emits the three bounded health-cycle counters.
+func EncodeHealthRecordRequest(promotions, demotions, expirations uint32) ([]byte, error) {
+	if promotions > HealthRecordCounterMax || demotions > HealthRecordCounterMax ||
+		expirations > HealthRecordCounterMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationHealthRecord, 0, 12)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 12)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, promotions)
+	binary.LittleEndian.PutUint32(payload[4:], demotions)
+	binary.LittleEndian.PutUint32(payload[8:], expirations)
+	return request, nil
+}
+
+// DecodeHealthRecordRequest validates the operation and the three bounded counters.
+func DecodeHealthRecordRequest(request []byte) (uint32, uint32, uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthRecord || header.Flags != 0 ||
+		header.PayloadLen != 12 || len(request) != int(EnvelopeHeaderLen)+12 {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	promotions := binary.LittleEndian.Uint32(payload)
+	demotions := binary.LittleEndian.Uint32(payload[4:])
+	expirations := binary.LittleEndian.Uint32(payload[8:])
+	if promotions > HealthRecordCounterMax || demotions > HealthRecordCounterMax ||
+		expirations > HealthRecordCounterMax {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	return promotions, demotions, expirations, nil
+}
+
+// EncodeHealthRecordReply emits the payload-free acknowledgement.
+func EncodeHealthRecordReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationHealthRecord, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeHealthRecordReply validates the payload-free acknowledgement.
+func DecodeHealthRecordReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthRecord || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 // EncodeL2MemoryIDsRequest emits the empty request for the fixed identifier bound.

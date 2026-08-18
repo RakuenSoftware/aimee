@@ -397,6 +397,29 @@ class ContractTests(unittest.TestCase):
              "identifier_zero", "identifier_above_maximum", "short", "long"],
         )
 
+    def test_health_record_vectors_cover_the_three_cycle_counters(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][23]
+        self.assertEqual(operation["name"], "health_record")
+        self.assertEqual(operation["request"]["conflict_window_days"], 1)
+        self.assertEqual(
+            [operation["request"][name]
+             for name in ("promotions", "demotions", "expirations")],
+            [4, 2, 9],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "promotions_too_large", "demotions_too_large",
+             "expirations_too_large", "short", "long"],
+        )
+        self.assertEqual(
+            [row["result"] for row in operation["reply"]["positive"]], [0],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "unexpected_payload", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -847,6 +870,33 @@ class ContractTests(unittest.TestCase):
             (lambda value: value["operations"][22]["reply"].__setitem__(
                 "encoded_size_max_ok", 16413), "l2-memory-ids-reply"),
             (lambda value: value["operations"][22].__setitem__("transaction", "single-statement"),
+             "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_health_record_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][23].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][23].__setitem__("results", ["ok", "conflict"]),
+             "operation-results"),
+            (lambda value: value["operations"][23]["request"]["policy"].__setitem__(
+                "conflict_window_days", 7), "health-record-request"),
+            (lambda value: value["operations"][23]["request"]["fields"][0].__setitem__(
+                "maximum", 0xffffffff), "health-record-request"),
+            (lambda value: value["operations"][23]["request"]["fields"].pop(),
+             "health-record-request"),
+            (lambda value: value["operations"][23]["reply"].__setitem__("encoded_size_ok", 28),
+             "health-record-reply"),
+            # A health-cycle insert is the one operation that is not replay-safe.
+            (lambda value: value["operations"][23].__setitem__("idempotency", "safe"),
+             "operation-semantics"),
+            (lambda value: value["operations"][23].__setitem__("transaction", "none"),
+             "operation-semantics"),
+            # ...and no other operation may claim that exemption.
+            (lambda value: value["operations"][22].__setitem__("idempotency", "unsafe"),
              "operation-semantics"),
         )
         for mutate, rule in cases:

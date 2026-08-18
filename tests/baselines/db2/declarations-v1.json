@@ -16553,9 +16553,15 @@
           "line": 14
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them."
+      },
       "signature": "void db2_memory_health_record ( int total_memories , int contradictions_detected , int promotions , int demotions , int expirations )",
       "signature_sha256": "1721479092870132f590c9472bd062ad44b298ca88a30abd0f100b5564daf726",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_record"
     },
     {
@@ -25704,15 +25710,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "dc1f196baa1e5400ef18e8a1ff49532b88c41b33b7bf0de7da4a0be96b064ea8",
+  "fingerprint": "75b4efa5b373129e00e943bb9335476b2cfe89abc0c0aa8300aaebeca99011e0",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 678,
+    "audit_pending": 677,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 280
+    "reviewed": 281
   }
 }

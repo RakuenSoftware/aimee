@@ -261,6 +261,9 @@ int main(int argc, char **argv)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(l2_count == 0);
 
+   assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

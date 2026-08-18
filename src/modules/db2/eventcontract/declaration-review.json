@@ -1500,6 +1500,14 @@
       "reason": "Pruning old contradiction rows is one private half of the complete memory health-retention action and must run with health-snapshot pruning inside DB2."
     },
     {
+      "symbol": "db2_memory_health_record",
+      "signature_sha256": "1721479092870132f590c9472bd062ad44b298ca88a30abd0f100b5564daf726",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them."
+    },
+    {
       "symbol": "db2_memory_health_set_effectiveness",
       "signature_sha256": "4bf8c5f279d8ad36105f1bd8a928a0200acf561a29c8e9d136e666250a60aec8",
       "disposition": "wire-operation",

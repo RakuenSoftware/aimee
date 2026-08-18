@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "efb26df88453b88c31e0be9d92ff9075961cbd14c175fa72d3aca914dd0759d0"
+#define AIMEE_DB2_CONTRACT_SHA256 "6b013d14a79d9b095794933c4275e757921467c2ab4bea3c5965fa5b077f277a"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -225,6 +225,14 @@
 #define AIMEE_DB2_L2_MEMORY_IDS_MAX                       2048u
 #define AIMEE_DB2_L2_MEMORY_ID_MIN                        1u
 #define AIMEE_DB2_L2_MEMORY_ID_MAX                        9223372036854775807ull
+#define AIMEE_DB2_EVENT_HEALTH_RECORD                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HEALTH_RECORD                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HEALTH_RECORD                 14u
+#define AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN               36u
+#define AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN              24u
+#define AIMEE_DB2_HEALTH_RECORD_ERROR_LEN                 24u
+#define AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS      1
+#define AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX               2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1418,6 +1426,76 @@ static inline int aimee_db2_l2_memory_ids_reply_decode(const uint8_t *input, siz
    }
    *count = decoded;
    return 0;
+}
+
+static inline int aimee_db2_health_record_request_encode(uint32_t promotions, uint32_t demotions,
+                                                         uint32_t expirations, uint8_t *output,
+                                                         size_t capacity)
+{
+   if (!output || promotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       demotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       expirations > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       capacity < AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_RECORD, 0u, 12u, output,
+                                       capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, promotions);
+   aimee_db2_put_u32(payload + 4u, demotions);
+   aimee_db2_put_u32(payload + 8u, expirations);
+   return 0;
+}
+
+static inline int aimee_db2_health_record_request_decode(const uint8_t *input, size_t input_len,
+                                                         uint32_t *promotions,
+                                                         uint32_t *demotions,
+                                                         uint32_t *expirations)
+{
+   if (promotions)
+      *promotions = 0u;
+   if (demotions)
+      *demotions = 0u;
+   if (expirations)
+      *expirations = 0u;
+   if (!promotions || !demotions || !expirations)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_RECORD || header.flags != 0u ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_promotions = aimee_db2_get_u32(payload);
+   uint32_t decoded_demotions = aimee_db2_get_u32(payload + 4u);
+   uint32_t decoded_expirations = aimee_db2_get_u32(payload + 8u);
+   if (decoded_promotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       decoded_demotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       decoded_expirations > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX)
+      return -1;
+   *promotions = decoded_promotions;
+   *demotions = decoded_demotions;
+   *expirations = decoded_expirations;
+   return 0;
+}
+
+static inline int aimee_db2_health_record_reply_encode(uint8_t *output, size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_RECORD, AIMEE_DB2_RESULT_OK, 0u,
+                                        output, capacity);
+}
+
+static inline int aimee_db2_health_record_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_RECORD &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }
 
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)

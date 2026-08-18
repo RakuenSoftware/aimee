@@ -205,13 +205,17 @@ def validate_catalog(value: object) -> dict[str, object]:
         order.append(position)
         expected_transaction = ("single-statement" if name in ("reembed_clear",
                                                                 "effectiveness_update",
-                                                                "effectiveness_demote") else
+                                                                "effectiveness_demote",
+                                                                "health_record") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
+        # A health-cycle snapshot appends a row per call, so replaying it is not
+        # observationally neutral the way every other operation here is.
+        expected_idempotency = "unsafe" if name == "health_record" else "safe"
         if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
-                operation["idempotency"] != "safe":
+                operation["idempotency"] != expected_idempotency:
             fail("operation-semantics",
-                 f"{name} must be unscoped, {expected_transaction}, and safe")
+                 f"{name} must be unscoped, {expected_transaction}, and {expected_idempotency}")
         if operation["db3_placement"] != "retained-db2":
             fail("db3-placement", f"{name} must remain in DB2")
         _string(operation["db3_reason"], f"{name}.db3_reason", 256)
@@ -880,18 +884,50 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
                 fail("l2-memory-ids-reply",
                      "reply must be a counted identifier list bounded by the request policy")
+        elif key == ("memory", 14) and name == "health_record" and \
+                operation["wire_format"] == "db2-envelope-u32-triple-v1":
+            # The corpus total and the conflict count stay private-db2: the handler
+            # composes them behind this operation rather than naming them on the wire.
+            if operation["c_symbols"] != ["db2_memory_health_record"]:
+                fail("operation-c-symbols",
+                     "health_record C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health_record results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "policy", "fields"},
+                            "health_record.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("health-record-request", "request must contain exactly three counters")
+            counters = [_keys(field, {"name", "type", "minimum", "maximum"},
+                              f"health_record.request.fields[{index}]")
+                        for index, field in enumerate(request_fields)]
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 12 or
+                    request["policy"] != {"conflict_window_days": 1} or
+                    counters != [{"name": counter, "type": "u32", "minimum": 0,
+                                  "maximum": 0x7fffffff}
+                                 for counter in ("promotions", "demotions", "expirations")]):
+                fail("health-record-request",
+                     "request must carry the three bounded counters and the fixed conflict window")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "health_record.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("health-record-reply", "reply must acknowledge the cycle without a payload")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 23 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 24 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
             "level3_count", "level2_count", "orphaned_l0_count", "total_count",
             "session_l2_count", "key_exists", "find_id_by_key_kind",
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
-            "effectiveness_demote", "effectiveness_stats", "l2_memory_ids"]:
+            "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
+            "health_record"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-three supported operations exactly once")
+             "the partial generator requires the twenty-four supported operations exactly once")
     return catalog
 
 
@@ -1038,6 +1074,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_demote = catalog["operations"][20]
     effectiveness_stats = catalog["operations"][21]
     l2_memory_ids = catalog["operations"][22]
+    health_record = catalog["operations"][23]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1288,6 +1325,13 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     l2_memory_ids_empty = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(l2_memory_ids["id"]), 0, _put_u32(0),
+    )
+    health_record_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(health_record["id"]), 0,
+        _put_u32(4) + _put_u32(2) + _put_u32(9),
+    )
+    health_record_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(health_record["id"]), 0, b"",
     )
 
     value = {
@@ -2370,6 +2414,48 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (l2_memory_ids_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": health_record["family"],
+            "id": health_record["id"],
+            "name": health_record["name"],
+            "request": {
+                "positive": health_record_request.hex(),
+                "promotions": 4,
+                "demotions": 2,
+                "expirations": 9,
+                "conflict_window_days":
+                    health_record["request"]["policy"]["conflict_window_days"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(health_record_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(health_record_request, 16, 8).hex()},
+                    {"mutation": "promotions_too_large", "hex":
+                     mutate_u32(health_record_request, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "demotions_too_large", "hex":
+                     mutate_u32(health_record_request, ENVELOPE_HEADER_LEN + 4, 0x80000000).hex()},
+                    {"mutation": "expirations_too_large", "hex":
+                     mutate_u32(health_record_request, ENVELOPE_HEADER_LEN + 8, 0x80000000).hex()},
+                    {"mutation": "short", "hex": health_record_request[:-1].hex()},
+                    {"mutation": "long", "hex": (health_record_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": health_record_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(health_record_ok, 8, 13).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(health_record_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(health_record["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": health_record_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (health_record_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2405,6 +2491,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_demote = catalog["operations"][20]
     effectiveness_stats = catalog["operations"][21]
     l2_memory_ids = catalog["operations"][22]
+    health_record = catalog["operations"][23]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -2717,6 +2804,19 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{l2_memory_ids['reply']['field']['item_minimum']}u"),
         ("AIMEE_DB2_L2_MEMORY_ID_MAX",
          f"{l2_memory_ids['reply']['field']['item_maximum']}ull"),
+        ("AIMEE_DB2_EVENT_HEALTH_RECORD", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HEALTH_RECORD", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HEALTH_RECORD", f"{health_record['id']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN",
+         f"{health_record['request']['encoded_size']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN",
+         f"{health_record['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_ERROR_LEN",
+         f"{health_record['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS",
+         f"{health_record['request']['policy']['conflict_window_days']}"),
+        ("AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX",
+         f"{health_record['request']['fields'][0]['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -3938,6 +4038,76 @@ static inline int aimee_db2_l2_memory_ids_reply_decode(const uint8_t *input, siz
    return 0;
 }}
 
+static inline int aimee_db2_health_record_request_encode(uint32_t promotions, uint32_t demotions,
+                                                         uint32_t expirations, uint8_t *output,
+                                                         size_t capacity)
+{{
+   if (!output || promotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       demotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       expirations > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       capacity < AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_RECORD, 0u, 12u, output,
+                                       capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, promotions);
+   aimee_db2_put_u32(payload + 4u, demotions);
+   aimee_db2_put_u32(payload + 8u, expirations);
+   return 0;
+}}
+
+static inline int aimee_db2_health_record_request_decode(const uint8_t *input, size_t input_len,
+                                                         uint32_t *promotions,
+                                                         uint32_t *demotions,
+                                                         uint32_t *expirations)
+{{
+   if (promotions)
+      *promotions = 0u;
+   if (demotions)
+      *demotions = 0u;
+   if (expirations)
+      *expirations = 0u;
+   if (!promotions || !demotions || !expirations)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_RECORD || header.flags != 0u ||
+       header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_promotions = aimee_db2_get_u32(payload);
+   uint32_t decoded_demotions = aimee_db2_get_u32(payload + 4u);
+   uint32_t decoded_expirations = aimee_db2_get_u32(payload + 8u);
+   if (decoded_promotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       decoded_demotions > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX ||
+       decoded_expirations > AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX)
+      return -1;
+   *promotions = decoded_promotions;
+   *demotions = decoded_demotions;
+   *expirations = decoded_expirations;
+   return 0;
+}}
+
+static inline int aimee_db2_health_record_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_RECORD, AIMEE_DB2_RESULT_OK, 0u,
+                                        output, capacity);
+}}
+
+static inline int aimee_db2_health_record_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_RECORD &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -4854,6 +5024,11 @@ extern "C"
        uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_health_record_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t promotions, uint32_t demotions, uint32_t expirations,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -5324,6 +5499,33 @@ aimee_module_call_result_t aimee_db2_l2_memory_ids_call(aimee_db2_call_fn call, 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_health_record_call(aimee_db2_call_fn call, void *call_context,
+                                                        uint64_t trace_id, uint64_t deadline_ns,
+                                                        uint32_t promotions, uint32_t demotions,
+                                                        uint32_t expirations,
+                                                        aimee_module_cancelled_fn cancelled,
+                                                        void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_record_request_encode(promotions, demotions, expirations, request,
+                                              sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_RECORD, AIMEE_DB2_STAGE_HEALTH_RECORD, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_record_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -5586,6 +5788,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_demote = catalog["operations"][20]
     effectiveness_stats = catalog["operations"][21]
     l2_memory_ids = catalog["operations"][22]
+    health_record = catalog["operations"][23]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -5740,6 +5943,11 @@ const OperationL2MemoryIDs uint32 = {l2_memory_ids['id']}
 const L2MemoryIDsMax uint32 = {l2_memory_ids['reply']['field']['maximum_items']}
 const L2MemoryIDMin uint64 = {l2_memory_ids['reply']['field']['item_minimum']}
 const L2MemoryIDMax uint64 = {l2_memory_ids['reply']['field']['item_maximum']}
+const EventHealthRecord = EventMemory
+const StageHealthRecord = FamilyMemory
+const OperationHealthRecord uint32 = {health_record['id']}
+const HealthRecordConflictWindowDays uint32 = {health_record['request']['policy']['conflict_window_days']}
+const HealthRecordCounterMax uint32 = {health_record['request']['fields'][0]['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -6575,6 +6783,61 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// EncodeHealthRecordRequest emits the three bounded health-cycle counters.
+func EncodeHealthRecordRequest(promotions, demotions, expirations uint32) ([]byte, error) {{
+	if promotions > HealthRecordCounterMax || demotions > HealthRecordCounterMax ||
+		expirations > HealthRecordCounterMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationHealthRecord, 0, 12)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 12)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, promotions)
+	binary.LittleEndian.PutUint32(payload[4:], demotions)
+	binary.LittleEndian.PutUint32(payload[8:], expirations)
+	return request, nil
+}}
+
+// DecodeHealthRecordRequest validates the operation and the three bounded counters.
+func DecodeHealthRecordRequest(request []byte) (uint32, uint32, uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthRecord || header.Flags != 0 ||
+		header.PayloadLen != 12 || len(request) != int(EnvelopeHeaderLen)+12 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	promotions := binary.LittleEndian.Uint32(payload)
+	demotions := binary.LittleEndian.Uint32(payload[4:])
+	expirations := binary.LittleEndian.Uint32(payload[8:])
+	if promotions > HealthRecordCounterMax || demotions > HealthRecordCounterMax ||
+		expirations > HealthRecordCounterMax {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	return promotions, demotions, expirations, nil
+}}
+
+// EncodeHealthRecordReply emits the payload-free acknowledgement.
+func EncodeHealthRecordReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationHealthRecord, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeHealthRecordReply validates the payload-free acknowledgement.
+func DecodeHealthRecordReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthRecord || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
 }}
 
 // EncodeL2MemoryIDsRequest emits the empty request for the fixed identifier bound.

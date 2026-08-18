@@ -129,6 +129,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .demote_effectiveness = db2_memory_health_demote_low_effectiveness,
        .effectiveness_stats = db2_memory_health_effectiveness_stats,
        .list_l2_memory_ids = db2_memory_health_list_l2_memory_ids,
+       .count_memories = db2_memory_health_count_memories,
+       .count_recent_conflicts = db2_memory_health_count_recent_conflicts,
+       .health_record = db2_memory_health_record,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -417,6 +420,29 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_l2_memory_ids_reply_encode(memory_ids, (uint32_t)listed, response_body,
                                                   response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint32_t promotions = 0u, demotions = 0u, expirations = 0u;
+      if (aimee_db2_health_record_request_decode(request_body, request_len, &promotions, &demotions,
+                                                 &expirations) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->count_memories || !backend->count_recent_conflicts ||
+             !backend->health_record)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int total_memories = backend->count_memories();
+         int contradictions =
+             backend->count_recent_conflicts(AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (total_memories < 0 || contradictions < 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         backend->health_record(total_memories, contradictions, (int)promotions, (int)demotions,
+                                (int)expirations);
+         if (aimee_db2_health_record_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
