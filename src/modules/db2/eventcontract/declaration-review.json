@@ -724,6 +724,22 @@
       "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
     },
     {
+      "symbol": "db2_memory_provenance_delete",
+      "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Provenance cleanup is an internal compatibility step of the complete memory.delete operation; it must commit with canonical row, vector, relation, and derived-state deletion rather than cross the bus independently."
+    },
+    {
+      "symbol": "db2_memory_provenance_insert",
+      "signature_sha256": "7967d5f15c77b186c19625be958017cf1de5c7c2cab13ced0dfcd9d9fa1e23fa",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Provenance append is private bookkeeping inside complete insert, merge, consolidate, and supersede operations; no generic caller-controlled provenance mutation crosses the bus."
+    },
+    {
       "symbol": "db2_memory_row_insert_ex",
       "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
       "disposition": "private-db2",

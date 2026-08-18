@@ -17062,9 +17062,15 @@
           "line": 699
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Provenance cleanup is an internal compatibility step of the complete memory.delete operation; it must commit with canonical row, vector, relation, and derived-state deletion rather than cross the bus independently."
+      },
       "signature": "void db2_memory_provenance_delete ( int64_t memory_id )",
       "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_provenance_delete"
     },
     {
@@ -17077,9 +17083,15 @@
           "line": 38
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Provenance append is private bookkeeping inside complete insert, merge, consolidate, and supersede operations; no generic caller-controlled provenance mutation crosses the bus."
+      },
       "signature": "void db2_memory_provenance_insert ( int64_t memory_id , const char * session_id , const char * action , const char * details )",
       "signature_sha256": "7967d5f15c77b186c19625be958017cf1de5c7c2cab13ced0dfcd9d9fa1e23fa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_provenance_insert"
     },
     {
@@ -25080,15 +25092,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "dc7fe360962012803016438b6628433ee39ef0098bc8b864cd0fbec988dc2300",
+  "fingerprint": "b8e430cfae53911a69f2ca1f8f7934a8d8641f202d90f84dbc50b6975b6d4640",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 782,
+    "audit_pending": 780,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 176
+    "reviewed": 178
   }
 }
