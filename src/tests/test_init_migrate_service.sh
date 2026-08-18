@@ -119,7 +119,6 @@ esac
 EOF
 chmod +x "$SERVICE_SERVER" "$SERVICE_BIN_DIR/aimee-kb"
 
-export AIMEE_NO_AUTOSTART=1
 
 "$SERVICE_SERVER" --foreground >/dev/null 2>&1 &
 SERVER_PID=$!

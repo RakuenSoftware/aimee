@@ -7,6 +7,8 @@
 #include "server_http_internal.h"
 #include "cli_command_defs.h"  /* the command catalogue served in the CLI manifest */
 #include "cli_dispatch_defs.h" /* cmd/verb -> method rows, served alongside it */
+#include "cli_marshal_defs.h"  /* which methods need no request body */
+#include "cli_argspec_defs.h"  /* how words after the command become fields */
 #include "server_http.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -1231,6 +1233,25 @@ int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
    cJSON *dispatch = cli_dispatch_defs_to_json();
    if (dispatch)
       cJSON_AddItemToObject(root, "dispatch", dispatch);
+   /* The last link: a client that knows a command exists, how to address it and
+    * how to reach it still refuses to send anything unless it knows what body
+    * to build. "Takes no arguments" is the part of that which is pure data;
+    * the argument specs are the part that describes how words become fields.
+    * Both are `marshal` rows — one list, distinguished by whether `args` is
+    * the string "none" or an object — so a client reads one thing rather than
+    * learning where to look for each kind. */
+   cJSON *marshal = cli_marshal_defs_to_json();
+   if (marshal)
+   {
+      cJSON *specs = cli_argspec_defs_to_json();
+      /* Detached one at a time rather than moved wholesale: cJSON has no
+       * splice, and re-parenting the array's children by hand is how lists get
+       * silently truncated. */
+      while (specs && cJSON_GetArraySize(specs) > 0)
+         cJSON_AddItemToArray(marshal, cJSON_DetachItemFromArray(specs, 0));
+      cJSON_Delete(specs);
+      cJSON_AddItemToObject(root, "marshal", marshal);
+   }
 
    char *s = cJSON_PrintUnformatted(root);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
