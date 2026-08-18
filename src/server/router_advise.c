@@ -89,7 +89,8 @@ static void *classify_thread(void *arg)
          char payload[512];
          wfe_router_advisory_payload(&d, WFE_PREFILTER_DEFER, 1 /* sampled */, ms, payload,
                                      sizeof payload);
-         ie_record(a->session_id, IE_GUARDRAIL_DECISION, "router-s1", payload, "classifier");
+         db1_interaction_event_record(a->session_id, ie_event_type_name(IE_GUARDRAIL_DECISION),
+                                      "router-s1", payload, "classifier");
          free(res.response);
       }
    }
@@ -126,7 +127,8 @@ static wfe_prefilter_outcome_t router_advise_log(const char *corr_id, const char
    char payload[512];
    wfe_router_advisory_payload(&d, pf, 0 /* not sampled */, -1.0 /* classifier not run inline */,
                                payload, sizeof payload);
-   ie_record(corr_id, IE_GUARDRAIL_DECISION, "router-s1", payload, "advisory");
+   db1_interaction_event_record(corr_id, ie_event_type_name(IE_GUARDRAIL_DECISION), "router-s1",
+                                payload, "advisory");
 
    /* S2: if the enforcement dial is on AND the routed workflow is enforced, log
     * the advisory enforce decision. The dial is env-gated and default-OFF (unset
@@ -142,7 +144,8 @@ static wfe_prefilter_outcome_t router_advise_log(const char *corr_id, const char
          char ep[256];
          snprintf(ep, sizeof ep, "{\"workflow\":\"%s\",\"enforced\":1,\"stage\":\"%s\"}",
                   d.workflow_id, wfe_enforce_stage_name(estage));
-         ie_record(corr_id, IE_GUARDRAIL_DECISION, "enforce-s2", ep, "advisory");
+         db1_interaction_event_record(corr_id, ie_event_type_name(IE_GUARDRAIL_DECISION),
+                                      "enforce-s2", ep, "advisory");
       }
    }
    return pf;

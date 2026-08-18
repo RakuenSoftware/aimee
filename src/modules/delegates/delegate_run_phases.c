@@ -113,8 +113,9 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
       cJSON_AddStringToObject(payload, "provider", event_agent ? event_agent->provider : "");
       cJSON_AddStringToObject(payload, "model", event_agent ? event_agent->model : "");
       char *payload_json = cJSON_PrintUnformatted(payload);
-      (void)ie_record(sid, IE_DELEGATE_EXIT, "system", payload_json ? payload_json : "{}",
-                      rc == 0 ? "ok" : "error");
+      (void)db1_interaction_event_record(sid, ie_event_type_name(IE_DELEGATE_EXIT), "system",
+                                         payload_json ? payload_json : "{}",
+                                         rc == 0 ? "ok" : "error");
       free(payload_json);
       cJSON_Delete(payload);
    }

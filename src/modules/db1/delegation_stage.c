@@ -254,7 +254,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_preempt(field[0]);
+      int produced = db1_delegation_spawn_preempt(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -314,7 +314,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_is_stopped(field[0]);
+      int produced = db1_delegation_spawn_is_stopped(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -334,7 +334,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_is_cancelled(field[0]);
+      int produced = db1_delegation_spawn_is_cancelled(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -354,7 +354,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_is_active(field[0]);
+      int produced = db1_delegation_spawn_is_active(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -374,7 +374,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_count_total(field[0]);
+      int produced = db1_delegation_spawn_count_total(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -414,7 +414,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_count_descendants(field[0]);
+      int produced = db1_delegation_spawn_count_descendants(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -499,7 +499,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_cancel_by_id(parsed0);
+      int produced = db1_delegation_spawn_cancel_by_id(parsed0);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -525,7 +525,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_cancel_recursive(parsed0);
+      int produced = db1_delegation_spawn_cancel_recursive(parsed0);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -540,7 +540,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegation_spawn_cancel_stale();
+      int produced = db1_delegation_spawn_cancel_stale();
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -676,7 +676,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_delegate_reservation_forget_if_matches(field[0], parsed1);
+      int produced = db1_delegate_reservation_forget_if_matches(field[0], parsed1);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -751,7 +751,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_agent_job_create(field[0], field[1], field[2], field[3]);
+      int produced = db1_agent_job_create(field[0], field[1], field[2], field[3]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -937,7 +937,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_agent_job_is_cancelled(parsed0);
+      int produced = db1_agent_job_is_cancelled(parsed0);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1108,7 +1108,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_agent_job_heartbeat_is_stale(field[0], parsed1);
+      int produced = db1_agent_job_heartbeat_is_stale(field[0], parsed1);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1307,7 +1307,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_agent_job_cancel_by_id(parsed0, field[1]);
+      int produced = db1_agent_job_cancel_by_id(parsed0, field[1]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1344,7 +1344,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_agent_job_cancel_unassigned(parsed0, field[1], parsed2);
+      int produced = db1_agent_job_cancel_unassigned(parsed0, field[1], parsed2);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1359,7 +1359,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_agent_job_cancel_nonterminal_on_restart(field[0]);
+      int produced = db1_agent_job_cancel_nonterminal_on_restart(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1385,7 +1385,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_agent_job_cancel_stale(parsed0, field[1]);
+      int produced = db1_agent_job_cancel_stale(parsed0, field[1]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];

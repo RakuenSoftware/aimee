@@ -3,6 +3,7 @@
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
+#include "cli_argspec.h"
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
 #include "cli_client.h"
@@ -1561,6 +1562,15 @@ int marshal_request_take_reported(void)
    return reported;
 }
 
+/* Read the flag WITHOUT clearing it. marshal_request itself has to distinguish
+ * "a served spec already told the operator what was missing" from "the spec was
+ * uninterpretable", and taking the flag here would swallow the message the
+ * forwarder is about to check for. */
+int marshal_request_peek_reported(void)
+{
+   return g_marshal_reported;
+}
+
 cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    /* Cleared on entry so a previous command's flag cannot suppress this one's message. */
@@ -1677,6 +1687,15 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
     * preferring its own list here would reintroduce exactly that. */
    if (cli_v1_manifest_method_takes_no_args(method))
       return marshal_no_args(method);
+
+   /* And what the server says the ARGUMENTS are, before this build's own
+    * marshallers — see cli_argspec_try_served for why that is both the point
+    * and safe. */
+   {
+      cJSON *served = NULL;
+      if (cli_argspec_try_served(method, argc, argv, &served))
+         return served;
+   }
 
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
