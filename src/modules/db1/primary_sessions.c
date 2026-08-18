@@ -1,6 +1,10 @@
 /* db1/primary_sessions.c: durable primary-agent conversation transcripts. */
 
 #include "primary_sessions.h"
+
+/* db1_primary_session_row_clear and db1_primary_session_rows_free live in
+   src/primary_session_release.c. They free what the caller was handed, and
+   since the row crosses the module boundary that allocation is the client's. */
 #include "db1_internal.h"
 
 #include <sqlite3.h>
@@ -128,7 +132,13 @@ static int alloc_rows_from_stmt(sqlite3_stmt *stmt, db1_primary_session_row_t **
    {
       if (fill_primary_row(stmt, &rows[count]) != 0)
       {
-         db1_primary_session_rows_free(rows, count);
+         /* Freed here rather than through db1_primary_session_rows_free: that
+            one gives back what a CALLER was handed, which after the migration
+            is memory the client allocated. This is the module giving back its
+            own, and the two are not the same allocation. */
+         for (int done = 0; done < count; done++)
+            free(rows[done].messages_json);
+         free(rows);
          return -1;
       }
       count++;
@@ -213,19 +223,4 @@ int db1_primary_session_get_latest(const char *session_id, db1_primary_session_r
    return rc;
 }
 
-void db1_primary_session_row_clear(db1_primary_session_row_t *row)
-{
-   if (!row)
-      return;
-   free(row->messages_json);
-   memset(row, 0, sizeof(*row));
-}
 
-void db1_primary_session_rows_free(db1_primary_session_row_t *rows, int count)
-{
-   if (!rows)
-      return;
-   for (int i = 0; i < count; i++)
-      free(rows[i].messages_json);
-   free(rows);
-}

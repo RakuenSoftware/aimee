@@ -103,7 +103,12 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/delegate_reservation.o \
                     $(OBJDIR)/modules/db1/delegation_checkpoint.o \
                     $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o \
-                    $(OBJDIR)/modules/db1/delegate_learning.o $(OBJDIR)/delegate_exit_classify.o
+                    $(OBJDIR)/modules/db1/delegate_learning.o \
+                    $(OBJDIR)/modules/db1/server_sessions.o \
+                    $(OBJDIR)/modules/db1/primary_sessions.o $(OBJDIR)/primary_session_release.o \
+                    $(OBJDIR)/modules/db1/session_paths.o \
+                    $(OBJDIR)/modules/db1/webchat_claude_sessions.o \
+                    $(OBJDIR)/modules/db1/webchat_live.o $(OBJDIR)/delegate_exit_classify.o
 
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/user_memory_merge.o \
                             $(OBJDIR)/modules/config/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/config/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
@@ -1860,14 +1865,14 @@ $(TESTPREFIX)/unit-test-primary-session-adapter: $(OBJDIR)/tests/test_primary_se
                                $(OBJDIR)/server/agent_request_shaping.o \
                                $(OBJDIR)/server/context_engine.o \
                                $(OBJDIR)/tests/support/mock_agent_http.o \
-                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o \
+                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o $(OBJDIR)/primary_session_release.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-session-search-tool: $(OBJDIR)/tests/test_session_search_tool.o \
                                $(OBJDIR)/server/session_search_tool.o \
-                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o \
+                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/primary_sessions.o $(OBJDIR)/primary_session_release.o \
                                $(OBJDIR)/modules/db1/server_sessions.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -5062,6 +5067,7 @@ $(TESTPREFIX)/unit-test-db1-module-bus: \
                                        $(OBJDIR)/tests/test_db1_module_bus.o \
                                        $(DB1_CLIENT_OBJS) \
                                        $(OBJDIR)/agent_job_release.o \
+                                       $(OBJDIR)/primary_session_release.o \
                                        $(OBS_BUS_LINK_OBJS) \
                                        $(OBJDIR)/core/event_bus/bus_client.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -5133,6 +5139,12 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/util.o \
                                        $(OBJDIR)/modules/db1/agent_work_stage.o \
                                        $(OBJDIR)/modules/db1/delegation_stage.o \
+                                       $(OBJDIR)/modules/db1/sessions_stage.o \
+                                       $(OBJDIR)/modules/db1/server_sessions.o \
+                                       $(OBJDIR)/modules/db1/primary_sessions.o \
+                                       $(OBJDIR)/modules/db1/session_paths.o \
+                                       $(OBJDIR)/modules/db1/webchat_claude_sessions.o \
+                                       $(OBJDIR)/modules/db1/webchat_live.o \
                                        $(OBJDIR)/modules/db1/cognify_jobs.o \
                                        $(OBJDIR)/modules/db1/conv_context.o \
                                        $(OBJDIR)/modules/db1/agent_log.o \
@@ -5952,7 +5964,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
                            $(OBJDIR)/modules/roundtable/roundtable_pipeline_capture.o \
                            $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
-                           $(DB1_OBJS) \
+                           $(DB1_OBJS) $(DB1_MIGRATED_OBJS) \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
