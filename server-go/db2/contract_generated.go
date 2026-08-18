@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "fcab868fd9dbcf0b7b946eac072cc7a9d38fce44db1ed0851ebfe240afd0d2bd"
+const ContractSHA256 = "96b5f2e19c00c02bacf73244163dbd26e18e8fb44f50387fb79afbcdef3464eb"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -61,6 +61,11 @@ const PostgresAvailableRole uint32 = 1 << 2
 const PostgresAvailableLag uint32 = 1 << 3
 const PostgresAvailableAll uint32 = 0xf
 const PostgresCountMax uint32 = 2147483647
+const EventReembedStatus = EventLifecycle
+const StageReembedStatus = FamilyLifecycle
+const OperationReembedStatus uint32 = 6
+const ReembedDimensionMin uint32 = 1
+const ReembedDimensionMax uint32 = 4000
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -472,6 +477,79 @@ func DecodePostgresStatusReply(reply []byte) (uint32, PostgresStatus, error) {
 	}
 	if !validPostgresStatus(status) {
 		return 0, PostgresStatus{}, ErrMalformedEnvelope
+	}
+	return header.Result, status, nil
+}
+
+type ReembedStatus struct {
+	TargetDimension uint32
+	StartedEpoch    uint64
+}
+
+func validReembedStatus(status ReembedStatus) bool {
+	return status.TargetDimension >= ReembedDimensionMin &&
+		status.TargetDimension <= ReembedDimensionMax && status.StartedEpoch > 0
+}
+
+func EncodeReembedStatusRequest() []byte {
+	header, err := EncodeRequestHeader(OperationReembedStatus, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+func DecodeReembedStatusRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+func EncodeReembedStatusReply(result uint32, status ReembedStatus) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK {
+		if !validReembedStatus(status) {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = 12
+	} else if (result != ResultNotFound && result != ResultInvalidState) ||
+		status != (ReembedStatus{}) {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationReembedStatus, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:EnvelopeHeaderLen+4], status.TargetDimension)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen+4:], status.StartedEpoch)
+	return reply, nil
+}
+
+func DecodeReembedStatusReply(reply []byte) (uint32, ReembedStatus, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedStatus {
+		return 0, ReembedStatus{}, ErrMalformedEnvelope
+	}
+	if (header.Result == ResultNotFound || header.Result == ResultInvalidState) &&
+		header.PayloadLen == 0 {
+		return header.Result, ReembedStatus{}, nil
+	}
+	if header.Result != ResultOK || header.PayloadLen != 12 {
+		return 0, ReembedStatus{}, ErrMalformedEnvelope
+	}
+	status := ReembedStatus{
+		TargetDimension: binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen : EnvelopeHeaderLen+4]),
+		StartedEpoch:    binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen+4:]),
+	}
+	if !validReembedStatus(status) {
+		return 0, ReembedStatus{}, ErrMalformedEnvelope
 	}
 	return header.Result, status, nil
 }

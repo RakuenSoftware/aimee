@@ -340,13 +340,36 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != expected_fields):
                 fail("postgres-status-reply",
                      "reply must contain the canonical bounded PostgreSQL status")
+        elif key == ("lifecycle", 6) and name == "reembed_status" and \
+                operation["wire_format"] == "db2-envelope-reembed-status-v1":
+            if operation["c_symbols"] != ["db2_reembed_in_progress_get"]:
+                fail("operation-c-symbols",
+                     "reembed_status C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "not_found", "invalid_state"]:
+                fail("operation-results",
+                     "reembed_status results must equal ['ok', 'not_found', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "reembed_status.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "reembed_status.reply")
+            expected_fields = [
+                {"name": "target_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
+                {"name": "started_epoch", "type": "u64", "minimum": 1},
+            ]
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("reembed-status-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 12 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != expected_fields):
+                fail("reembed-status-reply",
+                     "reply must contain the canonical bounded maintenance marker")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 5 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 6 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
-            "postgres_status"]:
+            "postgres_status", "reembed_status"]:
         fail("unsupported-operation",
-             "the partial generator requires the five supported lifecycle operations exactly once")
+             "the partial generator requires the six supported lifecycle operations exactly once")
     return catalog
 
 
@@ -464,6 +487,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     pool_status = catalog["operations"][2]
     embedding_refusals = catalog["operations"][3]
     postgres_status = catalog["operations"][4]
+    reembed_status = catalog["operations"][5]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -535,6 +559,19 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     postgres_invalid = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(postgres_status["id"]), 5, b"",
+    )
+    reembed_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reembed_status["id"]), 0, b"",
+    )
+    reembed_payload = _put_u32(384) + _put_u64(1700000000)
+    reembed_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_status["id"]), 0, reembed_payload,
+    )
+    reembed_absent = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_status["id"]), 1, b"",
+    )
+    reembed_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reembed_status["id"]), 5, b"",
     )
 
     value = {
@@ -792,6 +829,50 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (postgres_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": reembed_status["family"],
+            "id": reembed_status["id"],
+            "name": reembed_status["name"],
+            "request": {
+                "positive": reembed_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(reembed_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(reembed_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": reembed_request[:-1].hex()},
+                    {"mutation": "long", "hex": (reembed_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "target_dimension": 384, "started_epoch": 1700000000,
+                     "hex": reembed_ok.hex()},
+                    {"result": 1, "target_dimension": 0, "started_epoch": 0,
+                     "hex": reembed_absent.hex()},
+                    {"result": 5, "target_dimension": 0, "started_epoch": 0,
+                     "hex": reembed_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(reembed_ok, 8, 5).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(reembed_ok, 12, 2).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reembed_status["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(reembed_ok, 12, 1).hex()},
+                    {"mutation": "zero_dimension", "hex":
+                     mutate_u32(reembed_ok, ENVELOPE_HEADER_LEN, 0).hex()},
+                    {"mutation": "dimension_too_large", "hex":
+                     mutate_u32(reembed_ok, ENVELOPE_HEADER_LEN, 4001).hex()},
+                    {"mutation": "zero_epoch", "hex":
+                     (reembed_ok[:ENVELOPE_HEADER_LEN + 4] + _put_u64(0)).hex()},
+                    {"mutation": "short", "hex": reembed_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (reembed_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -809,6 +890,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     pool_status = catalog["operations"][2]
     embedding_refusals = catalog["operations"][3]
     postgres_status = catalog["operations"][4]
+    reembed_status = catalog["operations"][5]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -880,6 +962,17 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_POSTGRES_AVAILABLE_LAG", "0x8u"),
         ("AIMEE_DB2_POSTGRES_AVAILABLE_ALL", "0xfu"),
         ("AIMEE_DB2_POSTGRES_COUNT_MAX", "2147483647u"),
+        ("AIMEE_DB2_EVENT_REEMBED_STATUS", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_REEMBED_STATUS", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_REEMBED_STATUS", f"{reembed_status['id']}u"),
+        ("AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN",
+         f"{reembed_status['request']['encoded_size']}u"),
+        ("AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN",
+         f"{reembed_status['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_REEMBED_STATUS_ERROR_LEN",
+         f"{reembed_status['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_REEMBED_DIMENSION_MIN", "1u"),
+        ("AIMEE_DB2_REEMBED_DIMENSION_MAX", "4000u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -954,6 +1047,12 @@ typedef struct
    uint32_t is_replica;
    uint64_t replica_lag_bytes;
 }} aimee_db2_postgres_status_t;
+
+typedef struct
+{{
+   uint32_t target_dimension;
+   uint64_t started_epoch;
+}} aimee_db2_reembed_status_t;
 
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {{
@@ -1436,6 +1535,96 @@ static inline int aimee_db2_postgres_status_reply_decode(
    return 0;
 }}
 
+static inline int aimee_db2_reembed_status_valid(const aimee_db2_reembed_status_t *status)
+{{
+   return status && status->target_dimension >= AIMEE_DB2_REEMBED_DIMENSION_MIN &&
+          status->target_dimension <= AIMEE_DB2_REEMBED_DIMENSION_MAX && status->started_epoch > 0u;
+}}
+
+static inline int aimee_db2_reembed_status_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REEMBED_STATUS, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_reembed_status_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REEMBED_STATUS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_reembed_status_reply_encode(
+    uint32_t result, const aimee_db2_reembed_status_t *status, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!aimee_db2_reembed_status_valid(status) ||
+          capacity < AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }}
+   else if ((result != AIMEE_DB2_RESULT_NOT_FOUND &&
+             result != AIMEE_DB2_RESULT_INVALID_STATE) ||
+            status || capacity < AIMEE_DB2_REEMBED_STATUS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REEMBED_STATUS, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->target_dimension);
+      aimee_db2_put_u64(payload + 4, status->started_epoch);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_reembed_status_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result, aimee_db2_reembed_status_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_status_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_REEMBED_STATUS)
+      return -1;
+   if ((header.result == AIMEE_DB2_RESULT_NOT_FOUND ||
+        header.result == AIMEE_DB2_RESULT_INVALID_STATE) &&
+       header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_reembed_status_t decoded = {{
+       .target_dimension = aimee_db2_get_u32(payload),
+       .started_epoch = aimee_db2_get_u64(payload + 4),
+   }};
+   if (!aimee_db2_reembed_status_valid(&decoded))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
 {{
    if (!output || capacity < AIMEE_DB2_REQUEST_LEN)
@@ -1541,6 +1730,11 @@ extern "C"
    aimee_module_call_result_t aimee_db2_postgres_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_postgres_status_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_reembed_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_reembed_status_t *status,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #ifdef __cplusplus
@@ -1705,6 +1899,35 @@ aimee_db2_postgres_status_call(aimee_db2_call_fn call, void *call_context, uint6
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_reembed_status_call(aimee_db2_call_fn call, void *call_context,
+                                                         uint64_t trace_id, uint64_t deadline_ns,
+                                                         uint32_t *domain_result,
+                                                         aimee_db2_reembed_status_t *status,
+                                                         aimee_module_cancelled_fn cancelled,
+                                                         void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_reembed_status_t){0};
+   if (!call || !domain_result || !status)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_reembed_status_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_REEMBED_STATUS, AIMEE_DB2_STAGE_REEMBED_STATUS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reembed_status_reply_decode(response, response_len, domain_result, status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
 '''
     return text.encode("utf-8")
 
@@ -1721,6 +1944,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     pool_status = catalog["operations"][2]
     embedding_refusals = catalog["operations"][3]
     postgres_status = catalog["operations"][4]
+    reembed_status = catalog["operations"][5]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -1783,6 +2007,11 @@ const PostgresAvailableRole uint32 = 1 << 2
 const PostgresAvailableLag uint32 = 1 << 3
 const PostgresAvailableAll uint32 = 0xf
 const PostgresCountMax uint32 = 2147483647
+const EventReembedStatus = EventLifecycle
+const StageReembedStatus = FamilyLifecycle
+const OperationReembedStatus uint32 = {reembed_status['id']}
+const ReembedDimensionMin uint32 = 1
+const ReembedDimensionMax uint32 = 4000
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -2192,6 +2421,79 @@ func DecodePostgresStatusReply(reply []byte) (uint32, PostgresStatus, error) {{
 	}}
 	if !validPostgresStatus(status) {{
 		return 0, PostgresStatus{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
+
+type ReembedStatus struct {{
+	TargetDimension uint32
+	StartedEpoch    uint64
+}}
+
+func validReembedStatus(status ReembedStatus) bool {{
+	return status.TargetDimension >= ReembedDimensionMin &&
+		status.TargetDimension <= ReembedDimensionMax && status.StartedEpoch > 0
+}}
+
+func EncodeReembedStatusRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationReembedStatus, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodeReembedStatusRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReembedStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodeReembedStatusReply(result uint32, status ReembedStatus) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if !validReembedStatus(status) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 12
+	}} else if (result != ResultNotFound && result != ResultInvalidState) ||
+		status != (ReembedStatus{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReembedStatus, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:EnvelopeHeaderLen+4], status.TargetDimension)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen+4:], status.StartedEpoch)
+	return reply, nil
+}}
+
+func DecodeReembedStatusReply(reply []byte) (uint32, ReembedStatus, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReembedStatus {{
+		return 0, ReembedStatus{{}}, ErrMalformedEnvelope
+	}}
+	if (header.Result == ResultNotFound || header.Result == ResultInvalidState) &&
+		header.PayloadLen == 0 {{
+		return header.Result, ReembedStatus{{}}, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 12 {{
+		return 0, ReembedStatus{{}}, ErrMalformedEnvelope
+	}}
+	status := ReembedStatus{{
+		TargetDimension: binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen : EnvelopeHeaderLen+4]),
+		StartedEpoch:    binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen+4:]),
+	}}
+	if !validReembedStatus(status) {{
+		return 0, ReembedStatus{{}}, ErrMalformedEnvelope
 	}}
 	return header.Result, status, nil
 }}

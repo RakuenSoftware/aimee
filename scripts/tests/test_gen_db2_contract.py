@@ -71,6 +71,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn(b"aimee_db2_pool_status_call", client_header)
         self.assertIn(b"aimee_db2_embedding_refusals_call", client_header)
         self.assertIn(b"aimee_db2_postgres_status_call", client_header)
+        self.assertIn(b"aimee_db2_reembed_status_call", client_header)
         self.assertIn(b"AIMEE_MODULE_CALL_PROTOCOL", client_source)
         self.assertIn(fingerprint.encode(), go_contract)
         self.assertIn(b"func DecodeHealthResponse", go_contract)
@@ -80,6 +81,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn(b"func DecodePoolStatusReply", go_contract)
         self.assertIn(b"func DecodeEmbeddingRefusalsReply", go_contract)
         self.assertIn(b"func DecodePostgresStatusReply", go_contract)
+        self.assertIn(b"func DecodeReembedStatusReply", go_contract)
         self.assertIn(b"ErrMalformedHealth", go_contract)
         self.assertIn(b"ResultOK", go_contract)
         self.assertIn(b"HealthFlagPGTrgm", go_contract)
@@ -207,6 +209,22 @@ class ContractTests(unittest.TestCase):
              "long"],
         )
 
+    def test_reembed_status_vectors_cover_result_domain(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][5]
+        self.assertEqual(operation["name"], "reembed_status")
+        self.assertEqual(
+            [(row["result"], row["target_dimension"], row["started_epoch"])
+             for row in operation["reply"]["positive"]],
+            [(0, 384, 1700000000), (1, 0, 0), (5, 0, 0)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "error_with_payload", "zero_dimension", "dimension_too_large", "zero_epoch",
+             "short", "long"],
+        )
+
     def test_root_and_version_mutations(self) -> None:
         cases = (
             (lambda value: value.__setitem__("extra", 1), "keys"),
@@ -276,7 +294,7 @@ class ContractTests(unittest.TestCase):
         self.assert_rule(
             lambda value: value["operations"].append({
                 **copy.deepcopy(value["operations"][0]),
-                "id": 6,
+                "id": 7,
                 "name": "health_second",
                 "c_symbols": ["db2_health_second"],
             }),
@@ -357,6 +375,19 @@ class ContractTests(unittest.TestCase):
              "operation-results"),
             (lambda value: value["operations"][4]["reply"].__setitem__("encoded_size_ok", 47),
              "postgres-status-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_reembed_status_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][5].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][5].__setitem__("results", ["ok"]),
+             "operation-results"),
+            (lambda value: value["operations"][5]["reply"].__setitem__("encoded_size_ok", 35),
+             "reembed-status-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

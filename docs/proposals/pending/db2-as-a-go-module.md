@@ -661,8 +661,10 @@ the DB2-owned count and last offered dimension that make a rejected schema-width
 lifecycle health, returning only the valid zero/zero or positive/positive states. `postgres_status`
 carries best-effort active/max connection, recovery-role, and replica-lag evidence.
 It uses explicit availability bits, canonicalizes unavailable values to zero, and keeps PostgreSQL
-operational evidence in DB2. These operations do not claim the remaining catalog handlers, tenant,
-concurrency, ambiguity, or durability replay groups.
+operational evidence in DB2. `reembed_status` preserves the canonical maintenance marker as a
+bounded target dimension and start epoch, with explicit absent and malformed results. These
+operations do not claim the remaining catalog handlers, tenant, concurrency, ambiguity, or
+durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
 standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is

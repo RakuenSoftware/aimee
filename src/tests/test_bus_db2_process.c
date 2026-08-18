@@ -210,6 +210,13 @@ int main(int argc, char **argv)
    assert(postgres.active_connections > 0 && postgres.max_connections > 0);
    assert(postgres.is_replica == 0 && postgres.replica_lag_bytes == 0);
 
+   aimee_db2_reembed_status_t reembed = {0};
+   domain_result = 9;
+   assert(aimee_db2_reembed_status_call(call_client, &client, 9014, 0, &domain_result, &reembed,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_NOT_FOUND && reembed.target_dimension == 0 &&
+          reembed.started_epoch == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

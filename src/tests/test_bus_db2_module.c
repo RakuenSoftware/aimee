@@ -32,6 +32,7 @@ typedef struct
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
+   int (*reembed_status)(aimee_db2_reembed_status_t *status);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -155,6 +156,21 @@ static int postgres_status(aimee_db2_postgres_status_t *status)
 {
    *status = (aimee_db2_postgres_status_t){15, 12, 100, 1, 1048576};
    return 0;
+}
+
+int db2_reembed_in_progress_get(int *target, long *started)
+{
+   if (target)
+      *target = 384;
+   if (started)
+      *started = 1700000000;
+   return 1;
+}
+
+static int reembed_status(aimee_db2_reembed_status_t *status)
+{
+   *status = (aimee_db2_reembed_status_t){384, 1700000000};
+   return 1;
 }
 
 static void *run_process(void *argument)
@@ -291,6 +307,7 @@ int main(void)
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
+       .reembed_status = reembed_status,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -353,6 +370,13 @@ int main(void)
    assert(domain_result == AIMEE_DB2_RESULT_OK && postgres.available == 15 &&
           postgres.active_connections == 12 && postgres.max_connections == 100 &&
           postgres.is_replica == 1 && postgres.replica_lag_bytes == 1048576);
+
+   aimee_db2_reembed_status_t reembed = {0};
+   domain_result = 9;
+   assert(aimee_db2_reembed_status_call(call_client, &client, 7014, 0, &domain_result, &reembed,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && reembed.target_dimension == 384 &&
+          reembed.started_epoch == 1700000000);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

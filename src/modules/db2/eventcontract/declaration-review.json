@@ -60,6 +60,14 @@
       "reason": "The typed lifecycle.pool_status operation replaces the production health caller; PostgreSQL pool occupancy and counters remain DB2 process authority."
     },
     {
+      "symbol": "db2_reembed_in_progress_get",
+      "signature_sha256": "17a832783014426beb5af95272cd8ce8caa750209eb4b351632f173d0c5698a7",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.reembed_status operation replaces direct reads of the canonical maintenance marker while retaining DB2 schema and rebuild authority."
+    },
+    {
       "symbol": "pgvec_code_delete_project",
       "signature_sha256": "45c29c809f61b8e5477df2aeed71c164879447e1dabdc6ff27509b799384da9a",
       "disposition": "private-db2",

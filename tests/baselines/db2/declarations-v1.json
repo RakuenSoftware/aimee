@@ -18800,9 +18800,15 @@
           "line": 140
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.reembed_status operation replaces direct reads of the canonical maintenance marker while retaining DB2 schema and rebuild authority."
+      },
       "signature": "int db2_reembed_in_progress_get ( int * target_dim , long * started_epoch )",
       "signature_sha256": "17a832783014426beb5af95272cd8ce8caa750209eb4b351632f173d0c5698a7",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_reembed_in_progress_get"
     },
     {
@@ -24432,15 +24438,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d4af9e3d6871a787c1d649b36aca9ae355c308d485c84e020e740abfc04f36c4",
+  "fingerprint": "e5369aa9e8da25d01dc4506ed0ab237afaba8dc87a0a97b4c57f654109ceca1b",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 890,
+    "audit_pending": 889,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 68
+    "reviewed": 69
   }
 }

@@ -213,6 +213,28 @@
           {"name": "replica_lag_bytes", "type": "u64", "minimum": 0}
         ]
       }
+    },
+    {
+      "family": "lifecycle",
+      "id": 6,
+      "name": "reembed_status",
+      "wire_format": "db2-envelope-reembed-status-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "not_found", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The canonical re-embedding maintenance marker coordinates DB2 schema width and authoritative corpus rebuilds.",
+      "c_symbols": ["db2_reembed_in_progress_get"],
+      "request": {"encoded_size": 24, "payload": "none"},
+      "reply": {
+        "encoded_size_ok": 36,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "target_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
+          {"name": "started_epoch", "type": "u64", "minimum": 1}
+        ]
+      }
     }
   ]
 }
