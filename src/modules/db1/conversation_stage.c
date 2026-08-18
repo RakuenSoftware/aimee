@@ -80,6 +80,21 @@ static int parse_int64(const char *text, int64_t *out)
    return 0;
 }
 
+/* The same, for a value the catalog declared as a double. A cost parsed as an
+   integer is a different number, and one that still looks like a price. */
+static int parse_double(const char *text, double *out)
+{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   double value = strtod(text, &end);
+   if (errno != 0 || !end || *end != '\0')
+      return 1;
+   *out = value;
+   return 0;
+}
+
 /* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
    with no values, a read with one, a row with a value per member. */
 static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
@@ -1747,8 +1762,8 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t parsed4;
-      if (parse_int64(field[4], &parsed4) != 0)
+      double parsed4;
+      if (parse_double(field[4], &parsed4) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;

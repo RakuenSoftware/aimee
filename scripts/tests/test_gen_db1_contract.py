@@ -282,7 +282,8 @@ class CatalogTests(unittest.TestCase):
         contract.run(REPO_ROOT)
 
     def test_generation_is_deterministic(self) -> None:
-        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG))
+        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG),
+                                            REPO_ROOT)
         self.assertEqual(contract.header_bytes(catalog), contract.header_bytes(catalog))
 
     def test_writing_the_header_is_idempotent(self) -> None:
@@ -341,7 +342,8 @@ class CatalogTests(unittest.TestCase):
             tmp.cleanup()
 
     def test_a_reserved_family_emits_nothing(self) -> None:
-        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG))
+        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG),
+                                            REPO_ROOT)
         header = contract.header_bytes(catalog)
         families = catalog["families"]
         for name, family in families.items():
@@ -817,6 +819,241 @@ class CatalogTests(unittest.TestCase):
                                  f"{path.name} still sizes a numeric slot at 24")
         finally:
             tmp.cleanup()
+
+    def shaped_catalog(self, root: Path) -> dict:
+        """A family carrying the three shapes coord_jobs needed to migrate."""
+        catalog = self.catalog(root)
+        reserved = self.reserved(catalog)
+        reserved["active"] = True
+        self.route(root, reserved)
+        catalog["operations"] += [
+            {"family": reserved["name"], "id": 1, "name": "probe_claim",
+             "c_name": "db1_probe_claim", "c_params": ["probe_id", "out"],
+             "c_returns": "member", "c_member": "id",
+             "wire_format": "db1-fields-v2", "scope": "global", "transaction": "single",
+             "idempotency": "unsafe", "results": ["ok", "missing", "failed"],
+             "request": {"fields": [{"name": "probe_id", "type": "int", "required": True}]},
+             "reply": {"struct": "db1_probe_t",
+                       "fields": [{"name": "id", "type": "int"},
+                                  {"name": "label", "type": "text"}],
+                       "max_bytes": 256}},
+            {"family": reserved["name"], "id": 2, "name": "probe_dispatch",
+             "c_name": "db1_probe_dispatch",
+             "c_params": ["probe_id", "role_out", "role_cap", "note_out", "note_cap"],
+             "wire_format": "db1-fields-v2", "scope": "global", "transaction": "none",
+             "idempotency": "safe", "results": ["ok", "invalid", "failed"],
+             "request": {"fields": [{"name": "probe_id", "type": "int", "required": True}]},
+             "reply": {"scalars": True,
+                       "fields": [{"name": "role", "type": "text", "width": "DB1_PROBE_ROLE_LEN"},
+                                  {"name": "note", "type": "text", "width": "DB1_PROBE_NOTE_LEN"}],
+                       "max_bytes": 1024}},
+            {"family": reserved["name"], "id": 3, "name": "probe_conflicts",
+             "c_name": "db1_probe_conflicts", "c_params": ["probe_id"],
+             "c_returns": "found",
+             "wire_format": "db1-fields-v2", "scope": "global", "transaction": "none",
+             "idempotency": "safe", "results": ["ok", "missing", "failed"],
+             "request": {"fields": [{"name": "probe_id", "type": "int", "required": True}]},
+             "reply": {"fields": [], "max_bytes": 0}}]
+        self.write(root, catalog)
+        path = root / contract.PROCESS_CONTRACTS
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for component in document["components"]:
+            if component["id"] == "db1":
+                component["stages"].append({
+                    "id": reserved["id"],
+                    "name": "db1-" + reserved["name"].replace("_", "-"),
+                    "event_kind": reserved["event_kind"]})
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        return reserved["name"]
+
+    def test_a_returned_member_is_the_rows_own_value(self) -> None:
+        # A claim hands back the row AND its id. The id is not a status, so the
+        # stage must not read a positive return as a failure -- which is what
+        # the row-shaped default does, and it swallowed every claim until the
+        # end-to-end fixture caught it.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.shaped_catalog(root)
+            contract.run(root, write=True)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            self.assertIn("return out->id;", client)
+            claim = stage[stage.index("PROBE_CLAIM:"):]
+            claim = claim[:claim.index("break;")]
+            self.assertIn("found = 1;", claim)
+        finally:
+            tmp.cleanup()
+
+    def test_a_text_scalar_outlives_the_case_that_produced_it(self) -> None:
+        # The reply is written after the switch closes, so a buffer declared in
+        # the case block is read after its scope ends. One allocation per call,
+        # freed once, sized by the widths the contract declares.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.shaped_catalog(root)
+            contract.run(root, write=True)
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            self.assertIn("calloc(1u, DB1_PROBE_ROLE_LEN + DB1_PROBE_NOTE_LEN)", stage)
+            self.assertIn("char *scalar1 = scalar_owned + DB1_PROBE_ROLE_LEN;", stage)
+            self.assertIn("free(scalar_owned);", stage)
+            self.assertNotIn("char scalar0[DB1_PROBE_ROLE_LEN];", stage)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            self.assertIn("char *const values[] = {role_out, note_out};", client)
+            self.assertIn("const size_t caps[] = {role_cap, note_cap};", client)
+        finally:
+            tmp.cleanup()
+
+    def test_a_text_scalar_must_declare_how_wide_it_is(self) -> None:
+        # The stage cannot see the caller's buffer, so silence here would mean
+        # picking a width -- and picking one silently truncates.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            self.shaped_catalog(root)
+            catalog = json.loads((root / contract.CATALOG).read_text(encoding="utf-8"))
+            for operation in catalog["operations"]:
+                if operation["name"] == "probe_dispatch":
+                    del operation["reply"]["fields"][0]["width"]
+            self.write(root, catalog)
+            with self.assertRaises(contract.ContractError):
+                contract.run(root, write=False)
+        finally:
+            tmp.cleanup()
+
+    def test_a_yes_no_answer_keeps_all_three_answers(self) -> None:
+        # Nothing comes back but the status. Folding "no" into "failed" would
+        # report an empty result as an outage; forgetting the stage's flag
+        # answers yes to every question, which is worse.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.shaped_catalog(root)
+            contract.run(root, write=True)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            body = client[client.index("int db1_probe_conflicts("):]
+            body = body[:body.index("\n}")]
+            self.assertIn("AIMEE_DB1_STATUS_MISSING", body)
+            self.assertIn("return 0;", body)
+            self.assertIn("? 1 : -1;", body)
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            case = stage[stage.index("PROBE_CONFLICTS:"):]
+            case = case[:case.index("break;")]
+            self.assertIn("found = 1;", case)
+        finally:
+            tmp.cleanup()
+
+    def array_catalog(self, root: Path) -> str:
+        """A family whose row carries `char member[N][W]`."""
+        catalog = self.catalog(root)
+        reserved = self.reserved(catalog)
+        reserved["active"] = True
+        self.route(root, reserved)
+        row = [{"name": "id", "type": "text"},
+               {"name": "tags", "type": "text", "repeat": 4},
+               {"name": "tag_count", "type": "int"}]
+        catalog["operations"].append({
+            "family": reserved["name"], "id": 1, "name": "probe_tagged_get",
+            "c_name": "db1_probe_tagged_get", "c_params": ["probe_id", "out"],
+            "wire_format": "db1-fields-v2", "scope": "global", "transaction": "none",
+            "idempotency": "safe", "results": ["ok", "invalid", "failed"],
+            "request": {"fields": [{"name": "probe_id", "type": "text", "required": True}]},
+            "reply": {"struct": "db1_probe_tagged_t", "out": "out",
+                      "fields": row, "max_bytes": 1024}})
+        self.write(root, catalog)
+        path = root / contract.PROCESS_CONTRACTS
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for component in document["components"]:
+            if component["id"] == "db1":
+                component["stages"].append({
+                    "id": reserved["id"],
+                    "name": "db1-" + reserved["name"].replace("_", "-"),
+                    "event_kind": reserved["event_kind"]})
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        return reserved["name"]
+
+    def test_an_array_member_crosses_as_its_elements(self) -> None:
+        # A struct member does not have variable arity: the array is always N
+        # wide and an unused slot is an empty string, not an absent field. The
+        # element spelling is what makes this the whole capability -- C already
+        # writes `out->tags[2]`, so every emitter carries it unchanged.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.array_catalog(root)
+            contract.run(root, write=True)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            for index in range(4):
+                self.assertIn(f"out->tags[{index}]", client)
+            # Six cells: id, four tags, the count. A count of five would mean
+            # the array crossed as one value and the row would be misread.
+            self.assertIn("caps, 6, NULL)", client)
+            self.assertIn("row_slots[5] = row_text[0];", stage)
+        finally:
+            tmp.cleanup()
+
+    def test_only_a_struct_member_may_repeat(self) -> None:
+        # A repeating ARGUMENT is the repeated shape, which carries its own
+        # count at the end of the frame. Letting a bare argument say `repeat`
+        # would silently make its arity fixed.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            self.array_catalog(root)
+            catalog = json.loads((root / contract.CATALOG).read_text(encoding="utf-8"))
+            for operation in catalog["operations"]:
+                if operation["name"] == "probe_tagged_get":
+                    operation["request"]["fields"].append(
+                        {"name": "terms", "type": "text", "required": True, "repeat": 3})
+            self.write(root, catalog)
+            with self.assertRaises(contract.ContractError):
+                contract.run(root, write=False)
+        finally:
+            tmp.cleanup()
+
+    def test_a_void_domain_gets_a_void_client(self) -> None:
+        # A heartbeat answers nothing. Inventing a status for it would be a
+        # value no caller checks and no domain produced -- and the stage cannot
+        # assign one either, because there is nothing to assign from.
+        client = (REPO_ROOT / contract.CLIENT_DIR / "delegation.c").read_text()
+        stage = (REPO_ROOT / contract.SOURCE_DIR / "delegation_stage.c").read_text()
+        body = client[client.index("void db1_agent_job_heartbeat(int job_id)"):]
+        body = body[:body.index("\n}")]
+        self.assertIn("(void)call_stage(", body)
+        self.assertNotIn("return write_result", body)
+        case = stage[stage.index("AGENT_JOB_HEARTBEAT:"):]
+        case = case[:case.index("break;")]
+        self.assertIn("      db1_agent_job_heartbeat(parsed0);", case)
+        self.assertNotIn("rc = db1_agent_job_heartbeat", case)
+
+    def test_an_allocated_member_is_allocated_and_released_on_both_sides(self) -> None:
+        # The caller frees the row with the call it always used, so the client
+        # has to be the one that allocated it. A failure part-way through must
+        # not leave the caller holding memory it was never told about.
+        client = (REPO_ROOT / contract.CLIENT_DIR / "delegation.c").read_text()
+        stage = (REPO_ROOT / contract.SOURCE_DIR / "delegation_stage.c").read_text()
+        body = client[client.index("int db1_agent_job_get(int job_id,"):]
+        body = body[:body.index("\n}")]
+        self.assertIn("out->prompt = malloc(", body)
+        self.assertIn("free(out->prompt);", body)
+        self.assertIn("realloc(out->prompt", body)
+        # The stage releases what the DOMAIN allocated, after write_reply has
+        # read it -- which is why the release is in the tail, not the case.
+        self.assertIn("free(member_owned[slot]);", stage)
+        self.assertIn("? row_db1_agent_job_t.prompt : \"\";", stage)
+
+    def test_a_read_carries_its_own_return_when_it_says_so(self) -> None:
+        # classify_stale always fills the buffer and separately answers whether
+        # that state counts as stale. Deriving the answer from "did any text
+        # arrive" says yes every time.
+        client = (REPO_ROOT / contract.CLIENT_DIR / "delegation.c").read_text()
+        body = client[client.index("int db1_agent_job_classify_stale("):]
+        body = body[:body.index("\n}")]
+        self.assertIn("caps, 2, NULL)", body)
+        self.assertIn("strtol(slot_rc, NULL, 10)", body)
+        self.assertNotIn("read_result(", body)
 
 
 if __name__ == "__main__":

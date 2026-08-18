@@ -96,7 +96,14 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/agent_log.o \
                     $(OBJDIR)/modules/db1/windows.o \
                     $(OBJDIR)/modules/db1/db1_trigger.o \
-                    $(OBJDIR)/modules/db1/user_memory.o
+                    $(OBJDIR)/modules/db1/user_memory.o \
+                    $(OBJDIR)/modules/db1/coord_jobs.o \
+                    $(OBJDIR)/modules/db1/db1_cron_jobs.o \
+                    $(OBJDIR)/modules/db1/delegations.o \
+                    $(OBJDIR)/modules/db1/delegate_reservation.o \
+                    $(OBJDIR)/modules/db1/delegation_checkpoint.o \
+                    $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o \
+                    $(OBJDIR)/modules/db1/delegate_learning.o $(OBJDIR)/delegate_exit_classify.o
 
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/user_memory_merge.o \
                             $(OBJDIR)/modules/config/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/config/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
@@ -147,7 +154,7 @@ TEST_MCP_CLIENT_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
                        $(OBJDIR)/cJSON.o \
                        $(PLATFORM_BASIC_OBJS)
 
-TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
+TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
                  $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/posix/memory.o \
                  $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_effective.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
                  $(OBJDIR)/workflow_learn.o \
@@ -2068,7 +2075,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/tests/support/toolset_stub.o \
                                $(OBJDIR)/tests/support/agent_source_authority_stub.o \
                                $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
-                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/modules/db1/delegations.o $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/modules/db1/session_paths.o $(OBJDIR)/modules/db1/cost_fold.o $(OBJDIR)/modules/db1/token_audit.o $(OBJDIR)/modules/delegates/delegate_credentials.o $(OBJDIR)/modules/delegates/delegate_credential_retry.o $(OBJDIR)/modules/db1/delegate_learning.o $(OBJDIR)/modules/db1/interaction_events.o \
+                               $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/modules/db1/delegations.o $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/modules/db1/session_paths.o $(OBJDIR)/modules/db1/cost_fold.o $(OBJDIR)/modules/db1/token_audit.o $(OBJDIR)/modules/delegates/delegate_credentials.o $(OBJDIR)/modules/delegates/delegate_credential_retry.o $(OBJDIR)/modules/db1/delegate_learning.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/modules/db1/interaction_events.o \
                                $(OBJDIR)/modules/db1/execution_plans.o $(OBJDIR)/modules/db1/coord_jobs.o \
 		                               $(OBJDIR)/modules/delegates/delegate_launch.o $(OBJDIR)/modules/delegates/delegate_source_authority.o $(OBJDIR)/modules/delegates/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \
 		                               $(OBJDIR)/modules/delegates/gw_orch_delegates.o $(OBJDIR)/pipeline/gw_orchestration_seam.o \
@@ -2113,7 +2120,7 @@ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_hand
 $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o \
                                $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                                $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
-                               $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/modules/db1/execution_plans.o \
+                               $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/modules/db1/execution_plans.o \
                                $(OBJDIR)/modules/db1/coord_jobs.o $(OBJDIR)/modules/delegates/delegate_role.o \
                                $(OBJDIR)/role_templates.o \
                                $(OBJDIR)/json_fluent.o \
@@ -4969,13 +4976,13 @@ $(TESTPREFIX)/unit-test-db1-write-retry: \
 $(TESTPREFIX)/unit-test-db1-agent-job-heartbeat: \
                                        $(OBJDIR)/tests/test_db1_agent_job_heartbeat.o \
                                        $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
-                                       $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/modules/db1/agent_log.o
+                                       $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/modules/db1/agent_log.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-db1-agent-job-cancel-unassigned: \
                                        $(OBJDIR)/tests/test_db1_agent_job_cancel_unassigned.o \
                                        $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
-                                       $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/modules/db1/agent_log.o
+                                       $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/modules/db1/agent_log.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
 $(TESTPREFIX)/unit-test-db1-delegate-reservation: \
@@ -4989,7 +4996,7 @@ $(TESTPREFIX)/unit-test-server-delegate-monitor: \
                                        $(OBJDIR)/server/server_delegate_monitor.o \
                                        $(OBJDIR)/server/agent_admission.o \
                                        $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
-                                       $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/log.o \
+                                       $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/log.o \
                                        $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                                        $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5054,6 +5061,7 @@ $(TESTPREFIX)/unit-test-db1-git-ownership-client: \
 $(TESTPREFIX)/unit-test-db1-module-bus: \
                                        $(OBJDIR)/tests/test_db1_module_bus.o \
                                        $(DB1_CLIENT_OBJS) \
+                                       $(OBJDIR)/agent_job_release.o \
                                        $(OBS_BUS_LINK_OBJS) \
                                        $(OBJDIR)/core/event_bus/bus_client.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -5081,7 +5089,22 @@ unit-test-db1-module-bus: $(TESTPREFIX)/unit-test-db1-module-bus $(OBJDIR)/aimee
 # The module binary is produced by the bundle exporter, not this Makefile: the
 # process contract owns which sources a module compiles, and duplicating that
 # list here would let the two drift.
-$(OBJDIR)/aimee-module-db1:
+#
+# The prerequisites are deliberately a wildcard rather than the descriptor's
+# source list, for the same reason: naming the sources here is the duplication
+# the comment above refuses. A wildcard rebuilds more often than strictly
+# needed and never less, which is the safe direction. With no prerequisites at
+# all -- as this rule stood -- the binary was built once and never again, so
+# every later run of the fixture tested a stale module and reported PASS for
+# code that was not in it.
+DB1_MODULE_INPUTS = $(wildcard modules/db1/*.c) $(wildcard modules/db1/*.h) \
+                    modules/db1/module.yaml \
+                    modules/db1/eventcontract/operations.json \
+                    vendor/cJSON.c \
+                    ../scripts/export_c_repositories.py \
+                    ../scripts/build_c_module_runtime_bundle.py
+
+$(OBJDIR)/aimee-module-db1: $(DB1_MODULE_INPUTS)
 	@rm -rf $(OBJDIR)/module-bundle
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/module-bundle --output $(abspath $(OBJDIR)) --placement server >/dev/null
@@ -5109,12 +5132,20 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/payload_rewrite_state.o \
                                        $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/util.o \
                                        $(OBJDIR)/modules/db1/agent_work_stage.o \
+                                       $(OBJDIR)/modules/db1/delegation_stage.o \
                                        $(OBJDIR)/modules/db1/cognify_jobs.o \
                                        $(OBJDIR)/modules/db1/conv_context.o \
                                        $(OBJDIR)/modules/db1/agent_log.o \
                                        $(OBJDIR)/modules/db1/windows.o \
                                        $(OBJDIR)/modules/db1/db1_trigger.o \
                                        $(OBJDIR)/modules/db1/user_memory.o \
+                                       $(OBJDIR)/modules/db1/coord_jobs.o \
+                                       $(OBJDIR)/modules/db1/db1_cron_jobs.o \
+                                       $(OBJDIR)/modules/db1/delegations.o \
+                                       $(OBJDIR)/modules/db1/delegate_reservation.o \
+                                       $(OBJDIR)/modules/db1/delegation_checkpoint.o \
+                                       $(OBJDIR)/modules/db1/agent_jobs.o $(OBJDIR)/agent_job_release.o \
+                                       $(OBJDIR)/modules/db1/delegate_learning.o $(OBJDIR)/delegate_exit_classify.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/core/event_bus/module_runtime.o \
                                        $(OBJDIR)/core/event_bus/module_protocol.o \

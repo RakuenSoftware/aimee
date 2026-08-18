@@ -669,6 +669,11 @@
           "id": 4,
           "name": "db1-agent-work",
           "event_kind": 11780
+        },
+        {
+          "id": 5,
+          "name": "db1-delegation",
+          "event_kind": 11781
         }
       ]
     }
