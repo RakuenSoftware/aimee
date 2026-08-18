@@ -298,7 +298,9 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
     fi
-    rm -rf "$HOME"
+    # Same rule as the TCP teardown: removing a temp dir must never change the
+    # verdict. This one already waits for its server, which is why it never bit.
+    rm -rf "$HOME" || true
 }
 trap cleanup EXIT
 
@@ -434,8 +436,21 @@ else
     echo "  tcp: $TCP_BODY"
     FAIL=$((FAIL + 1))
 fi
+# Kill the TCP server and WAIT for it, before removing the home it is writing
+# to. Without the wait, `rm -rf` raced a live server recreating files as the
+# walk deleted them, and failed with
+
+#     rm: cannot remove '/tmp/aimee-tcp-XXXXXX': Directory not empty
+
+# which under `set -e` took the entire run with it -- every check after this
+# point, on every CI run of this harness. That line was in the log from the
+# first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
-rm -rf "$TCP_HOME"
+wait "$TCP_SRV_PID" 2>/dev/null || true
+# `|| true` regardless: teardown of a temporary directory must never decide
+# whether the suite continues. Even with the wait, anything else holding a file
+# open here would abort a run that has nothing left to do but report.
+rm -rf "$TCP_HOME" || true
 
 # Rebuild only the thin client with a new build ID. The existing server should
 # remain usable because compatibility is gated by major version, not build ID.
