@@ -164,13 +164,13 @@ def unreachable_methods():
 # that: handler, capability entry, dispatch row, marshaller and printer all present,
 # and no row in g_v1_routes[].
 #
-# rpc_routes[] rows are (cmd, subcommand, method, server_method, ...). When
+# cli_command_routes[] rows are (cmd, subcommand, method, server_method, ...). When
 # server_method is set THAT is what gets routed, not method -- `aimee memory archive`
 # dispatches memory.archive but routes memory.user_capture, and `aimee git verify`
 # routes mcp.call. Resolving the wrong one here would report four working commands as
-# broken. Parse only the rpc_routes[] table, so unrelated brace-lists elsewhere in the
+# broken. Parse only the cli_command_routes[] table, so unrelated brace-lists elsewhere in the
 # file (bool flag names, response keys) cannot masquerade as dispatch rows.
-RPC_TABLE_RE = re.compile(r"\}\s*rpc_routes\[\]\s*=\s*\{(.*?)\n\};", re.S)
+RPC_TABLE_RE = re.compile(r"\}\s*cli_command_routes\[\]\s*=\s*\{(.*?)\n\};", re.S)
 RPC_ROW_RE = re.compile(
     r'\{"[a-z0-9_-]+",\s*(?:NULL|"[a-z0-9 _-]*")\s*,\s*"([a-z0-9_.]+)"\s*,'
     r'\s*(NULL|"[a-z0-9_.]+")')
@@ -195,7 +195,7 @@ def dispatchable_without_route():
     src = Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")
     table = RPC_TABLE_RE.search(src)
     if not table:
-        raise SystemExit("check-cli-v1-routes: rpc_routes[] table not found in "
+        raise SystemExit("check-cli-v1-routes: cli_command_routes[] table not found in "
                          "src/cli_v1_routes.c; this check cannot run")
     effective = set()
     for method, server_method in RPC_ROW_RE.findall(table.group(1)):

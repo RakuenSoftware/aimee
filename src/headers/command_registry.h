@@ -8,7 +8,7 @@
  * WHAT THIS REPLACES, and why it exists. Capability surface used to be declared
  * four independent times, by hand, in four files:
  *
- *   cli_v1_routes.c      rpc_routes[]         190 entries  (CLI group+verb -> RPC)
+ *   cli_v1_routes.c      cli_command_routes[] 216 entries  (CLI group+verb -> method)
  *   server_mcp_call_table.c mcp_tool_table[]   77 entries  (MCP dispatch)
  *   mcp_tool_profile.c   MCP_CORE_TOOLS[]      19 entries  (what tools/list shows)
  *   acp_server.c         its own handling

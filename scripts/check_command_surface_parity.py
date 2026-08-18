@@ -34,9 +34,9 @@ def read(p):
 
 
 def cli_routes():
-    """rpc_routes[] entries: {"group", "verb", "group.verb", ...}."""
+    """cli_command_routes[] entries: {"group", "verb", "group.verb", ...}."""
     s = read(CLI)
-    start = s.find("} rpc_routes[] = {")
+    start = s.find("} cli_command_routes[] = {")
     if start == -1:
         return {}
     body = s[start:s.find("\n};", start)]
@@ -108,7 +108,7 @@ def main():
     core = mcp_core()
     guide = guidance_names(core)
 
-    print(f"CLI routes (rpc_routes[]):        {len(cli)}")
+    print(f"CLI routes (cli_command_routes[]):        {len(cli)}")
     print(f"MCP dispatch (mcp_tool_table[]):  {len(disp)}")
     print(f"MCP shown (MCP_CORE_TOOLS[]):     {len(core)}")
     print()
