@@ -238,7 +238,21 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Raised from 5. This job spends almost all of its time in two
+    # subprocess-heavy suites -- test_validate_module_descriptors (46 tests,
+    # each re-running the validator over the tree; 52s locally) and
+    # test_gen_db1_contract (65s locally) -- which together are ~2 minutes on a
+    # developer machine and roughly double that on a runner.
+    #
+    # It last passed at 4m47s against a 5m cap: thirteen seconds of headroom.
+    # The next runs were killed at 5m15s and 5m16s, on `testing` as well as on
+    # PR branches, so the gate was failing repo-wide on nothing but its own
+    # clock. Its siblings here are at 187s, 68s and 25s against the same cap, so
+    # 5 minutes is not wrong in general -- only for this job.
+    #
+    # 12 puts today's 316s at ~44%, which is the ratio proposal-ordering already
+    # runs at (963s of 30m). Still bounded, so a real hang is still caught.
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
