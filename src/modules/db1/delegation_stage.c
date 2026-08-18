@@ -789,6 +789,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_update(parsed0, field[1], parsed2, field[3]);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_COMPLETE:
@@ -864,6 +865,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_set_agent(parsed0, field[1]);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT:
@@ -885,6 +887,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_heartbeat(parsed0);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT_EXT:
@@ -917,6 +920,7 @@ aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_job_heartbeat_ext(parsed0, field[1], parsed2);
+      rc = 0;
       break;
    }
    case AIMEE_DB1_OP_AGENT_JOB_IS_CANCELLED:

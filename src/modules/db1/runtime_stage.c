@@ -1321,6 +1321,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_context_cache_put(field[0], field[1]);
+      rc = 0;
       break;
    case AIMEE_DB1_OP_CONTEXT_CACHE_INVALIDATE:
       if (count != 0u)
@@ -1329,6 +1330,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_context_cache_invalidate();
+      rc = 0;
       break;
    case AIMEE_DB1_OP_CONTEXT_SNAPSHOT_INSERT:
    {
@@ -1600,6 +1602,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_agent_cache_put(field[0], field[1], field[2]);
+      rc = 0;
       break;
    case AIMEE_DB1_OP_WEB_PAGE_GET:
    {
@@ -1658,6 +1661,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_web_page_drop(field[0]);
+      rc = 0;
       break;
    case AIMEE_DB1_OP_WEB_PAGE_CANONICAL_URL:
       if (count != 1u)

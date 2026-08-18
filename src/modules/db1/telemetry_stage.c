@@ -286,6 +286,7 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       db1_token_audit_ensure_idem_index();
+      rc = 0;
       break;
    case AIMEE_DB1_OP_TOKEN_AUDIT_COST_FOR_DELEGATION:
    {

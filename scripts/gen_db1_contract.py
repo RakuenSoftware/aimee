@@ -56,13 +56,13 @@ SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
-PAYLOADS = ("none", "state", "text", "int", "int64", "double", "struct")
+PAYLOADS = ("none", "state", "text", "int", "int64", "double", "float", "struct")
 # A request carries a double for the same reason a reply does: a cost is a
 # number, and rounding it to an integer at the boundary would bill differently
 # on each side of it. The conversion is the one the reply already uses.
-FIELD_TYPES = ("text", "int", "int64", "double")
+FIELD_TYPES = ("text", "int", "int64", "double", "float")
 # Members that travel as decimal text and convert back on arrival.
-NUMERIC = ("int", "int64", "double")
+NUMERIC = ("int", "int64", "double", "float")
 
 
 # Widest decimal text a member can become, with room for the NUL. A %.17g
@@ -82,6 +82,10 @@ def numeric_format(kind: str) -> tuple[str, str]:
         return "%lld", "(long long)"
     if kind == "double":
         return "%.17g", "(double)"
+    if kind == "float":
+        # %.9g is the shortest form that reads back as the same IEEE-754
+        # single, the way %.17g is for a double.
+        return "%.9g", "(double)"
     return "%d", ""
 
 
@@ -95,6 +99,8 @@ def numeric_parse(kind: str, cell: str) -> str:
     """
     if kind == "int64":
         return f"(int64_t)strtoll({cell}, NULL, 10)"
+    if kind == "float":
+        return f"(float)strtod({cell}, NULL)"
     if kind == "double":
         return f"strtod({cell}, NULL)"
     return f"(int)strtol({cell}, NULL, 10)"
@@ -132,8 +138,9 @@ def load_json(path: Path) -> object:
         fail("parse", f"cannot parse {path}: {exc}")
 
 
-# A field name, or one element of an expanded array member.
-ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?")
+# A field name, or one element of an expanded array or nested member: "qa[3]",
+# "hypothesis.content", "qa[3].answer" -- the way C spells each of them.
+ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?(\.[a-z][a-z0-9_]*)?")
 
 
 def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -151,10 +158,21 @@ def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
         # the way C spells them. Same trick as the array: every emitter that
         # writes row.{name} keeps working because "outer.inner" IS that.
         nested = field.get("fields")
+        if nested is not None and "repeat" in field:
+            for index in range(int(field["repeat"])):
+                for member in nested:
+                    inner = dict(member)
+                    inner["name"] = f"{field['name']}[{index}].{member['name']}"
+                    if "required" in field:
+                        inner.setdefault("required", field["required"])
+                    grown.append(inner)
+            continue
         if nested is not None and "repeat" not in field:
             for member in nested:
                 inner = dict(member)
                 inner["name"] = f"{field['name']}.{member['name']}"
+                if "required" in field:
+                    inner.setdefault("required", field["required"])
                 grown.append(inner)
             continue
         repeat = field.get("repeat")
@@ -427,10 +445,13 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
         fields = []
         for position, entry_field in enumerate(raw_fields):
             repeated_member = isinstance(entry_field, dict) and "repeat" in entry_field
-            declared = keys(entry_field,
-                            {"name", "type", "required", "repeat"} if repeated_member
-                            else {"name", "type", "required"},
-                            f"{name}.request.fields[{position}]")
+            nested_member = isinstance(entry_field, dict) and "fields" in entry_field
+            allowed = {"name", "type", "required"}
+            if repeated_member:
+                allowed = allowed | {"repeat"}
+            if nested_member:
+                allowed = allowed | {"fields"}
+            declared = keys(entry_field, allowed, f"{name}.request.fields[{position}]")
             if repeated_member:
                 # Only a struct has members wide enough to need this. A bare
                 # argument that repeats is the `repeated` shape, which carries
@@ -439,10 +460,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                     fail("field-repeat",
                          f"{name} field {declared['name']!r} repeats, which only a struct "
                          f"member does; a repeating argument is the repeated shape")
-                if str(declared["type"]) != "text":
+                if str(declared["type"]) not in ("text", "struct"):
                     fail("field-repeat",
-                         f"{name} field {declared['name']!r} repeats, so it carries text: "
-                         f"a repeated number has no caller yet and no test")
+                         f"{name} field {declared['name']!r} repeats, so it carries text or "
+                         f"rows: a repeated number has no caller yet and no test")
                 integer(declared["repeat"], f"{name}.request.fields[{position}].repeat", 2, 64)
             if type(declared["required"]) is not bool:
                 fail("field-required",
@@ -451,7 +472,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             if position == 0 and not declared["required"] and operation["scope"] != "global":
                 fail("field-required",
                      f"{name} is scoped, so its first field cannot be optional")
-            if declared["type"] not in FIELD_TYPES:
+            # A member that carries rows says "struct" and declares them; every
+            # other field is one of the closed payload types.
+            if declared["type"] not in FIELD_TYPES and not (nested_member and
+                                                            str(declared["type"]) == "struct"):
                 fail("field-type",
                      f"{name} field {declared['name']!r} type must be one of {list(FIELD_TYPES)}")
             fields.append(str(declared["name"]))
@@ -686,7 +710,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                     fail("field-nested",
                          f"{name} nested member {declared['name']!r} declares no members")
             repeated_member = isinstance(declared, dict) and "repeat" in declared
-            allowed_field = ({"name", "type", "fields"} if nested_member
+            allowed_field = ({"name", "type", "fields", "repeat"}
+                             if nested_member and "repeat" in declared
+                             else {"name", "type", "fields"} if nested_member
                              else {"name", "type", "width"}
                              if scalar_reply and isinstance(declared, dict) and "width" in declared
                              else {"name", "type", "repeat"} if repeated_member
@@ -717,9 +743,16 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                     fail("field-repeat",
                          f"{name} reply field {declared['name']!r} repeats, which only a "
                          f"struct member does")
-                if str(declared["type"]) != "text":
+                # An array of strings, or an array of rows when it says what a
+                # row is. Anything else repeating is a number nobody has needed.
+                if str(declared["type"]) not in ("text", "struct"):
                     fail("field-repeat",
-                         f"{name} reply field {declared['name']!r} repeats, so it carries text")
+                         f"{name} reply field {declared['name']!r} repeats, so it carries text "
+                         f"or rows")
+                if str(declared["type"]) == "struct" and "fields" not in declared:
+                    fail("field-repeat",
+                         f"{name} reply field {declared['name']!r} repeats rows, so it says "
+                         f"what a row is")
                 integer(declared["repeat"], f"{name}.reply.fields[{position}].repeat", 2, 64)
             shape = keys(declared, allowed_field, f"{name}.reply.fields[{position}]")
             if nested_member:
@@ -776,10 +809,13 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                      f"{name} carries its return beside a read, so its reply declares "
                      f"exactly one text value: the buffer the caller passed")
         if operation.get("c_returns") == "void":
-            if reply_fields:
+            # Nothing comes back as a RETURN. Out-parameters are a different
+            # question: db1_clarify_weakest_dim fills a buffer and answers
+            # nothing about whether it did, which is the contract it has.
+            if reply_fields and "scalars" not in reply:
                 fail("c-returns",
-                     f"{name} returns nothing, so its reply carries nothing: a value "
-                     f"nobody can receive is a value nobody checks")
+                     f"{name} returns nothing, so anything it carries is an out-parameter: "
+                     f"say scalars, or carry nothing")
             if declared_return(root, str(operation["c_name"])) != "void":
                 fail("c-returns",
                      f"{name} declares c_returns void, but its header does not")
@@ -809,6 +845,7 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # A cost is returned as a double, and rounding it at the boundary
             # would bill differently on each side of it.
             wanted = (("double",) if spelled == "double"
+                      else ("float",) if spelled == "float"
                       else ("int", "int64") if spelled == "int" else ("int64",))
             if len(reply_fields) != 1 or str(reply_fields[0]["type"]) not in wanted:
                 fail("c-returns",
@@ -1523,13 +1560,15 @@ static int read_result(int status, const char *value_out)
         returns_text = operation.get("c_returns") == "text"
         returns_id = operation.get("c_returns") == "int64"
         returns_text_with_scalars = returns_text and bool(scalars)
+        struct_inputs = (int(request["struct_from"]) + 1 if "struct_from" in request
+                         else 1) if in_struct else 0
         if returns_text_with_scalars:
-            split = len(fields)
+            split = struct_inputs or len(fields)
             inputs, outputs = names[:split], names[split:]
         elif returns_text or returns_id:
             inputs, outputs = list(names), []
         elif scalars:
-            split = len(fields)
+            split = struct_inputs or len(fields)
             inputs, outputs = names[:split], names[split:]
         elif listed:
             # The rows parameter can sit anywhere in the signature -- some
@@ -1627,7 +1666,7 @@ static int read_result(int status, const char *value_out)
                     # it: long long and int64_t are the same width and not the
                     # same type, and declaring one where the header says the
                     # other is a conflicting declaration.
-                    ctype = {"int": "int", "int64": "int64_t", "double": "double"}[kind]
+                    ctype = {"int": "int", "int64": "int64_t", "double": "double", "float": "float"}[kind]
                     out_spelled = declared_parameters(
                         root, str(operation.get("c_name", ""))).get(outputs[position])
                     params.append(out_spelled or f"{ctype} *{outputs[position]}")
@@ -1794,7 +1833,7 @@ static int read_result(int status, const char *value_out)
             body.append("      return -1;")
             spelled = declared_return(root, str(operation["c_name"])).strip()
             body.append(f"   return ({spelled})" +
-                        ("strtod(slot0, NULL);" if spelled == "double"
+                        ("strtod(slot0, NULL);" if spelled in ("double", "float")
                          else "strtoll(slot0, NULL, 10);"))
         elif returns_text_with_scalars:
             cap = int(reply["fields"][0].get("alloc", reply["max_bytes"]))
@@ -1873,10 +1912,15 @@ static int read_result(int status, const char *value_out)
             body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         f"{len(scalar_members)}, NULL);")
             found = operation.get("c_returns") == "found"
+            voided = operation.get("c_returns") == "void"
             body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
             body.append("   {")
             body += [f"      free(held{i});" for i, _ in handed]
-            if found:
+            if voided:
+                # The caller cannot be told, so it is left with the buffer it
+                # arrived with rather than a half-written one.
+                body.append("      return;")
+            elif found:
                 # Nothing there and broken are different answers, and a caller
                 # polling for a live turn treats them differently.
                 body.append("      return wire_status == (int)AIMEE_DB1_STATUS_MISSING "
@@ -1890,7 +1934,8 @@ static int read_result(int status, const char *value_out)
                 body.append(f"   char *shrunk{index} = realloc(held{index}, "
                             f"strlen(held{index}) + 1u);")
                 body.append(f"   *{out_name} = shrunk{index} ? shrunk{index} : held{index};")
-            body.append("   return 1;" if found else "   return 0;")
+            if not voided:
+                body.append("   return 1;" if found else "   return 0;")
         elif returns_text:
             cap = int(reply["max_bytes"])
             # Allocated at the declared maximum because the size is not known
@@ -2112,11 +2157,11 @@ static int read_result(int status, const char *value_out)
                     body.append(f"      memset({target}, 0, sizeof *{target});")
                 body.append("      return -1;")
                 body.append("   }")
+            # Every numeric member, not a list of the kinds that existed when
+            # this was written: a kind missing from that list is a member the
+            # caller silently gets zero for.
             for index, (member, kind) in enumerate(members):
-                if kind == "int":
-                    body.append(f"   {target}->{member} = "
-                                f"{numeric_parse(kind, f'slot{index}')};")
-                elif kind in ("int64", "double"):
+                if kind in NUMERIC:
                     body.append(f"   {target}->{member} = "
                                 f"{numeric_parse(kind, f'slot{index}')};")
             for member in allocated:
@@ -2488,9 +2533,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             for position, kind in enumerate(types[:lead]):
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
-                            else "parse_double" if kind == "double" else "parse_int64")
+                            else "parse_double" if kind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind == "double" else "int64_t")
+                             else "double" if kind in ("double", "float") else "int64_t")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2505,9 +2551,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     continue
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
-                            else "parse_double" if kind == "double" else "parse_int64")
+                            else "parse_double" if kind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind == "double" else "int64_t")
+                             else "double" if kind in ("double", "float") else "int64_t")
                     parse.append(f"      {ctype} member_{position} = 0;\n"
                                  f"      if ({conv}(field[{position}], &member_{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2528,9 +2575,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             for position, kind in enumerate(types):
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
-                            else "parse_double" if kind == "double" else "parse_int64")
+                            else "parse_double" if kind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind == "double" else "int64_t")
+                             else "double" if kind in ("double", "float") else "int64_t")
                     args.append(f"parsed{position}")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
@@ -2548,13 +2596,13 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         returns_text = operation.get("c_returns") == "text"
         if returns_id:
             returned = declared_return(root, str(operation["c_name"])).strip()
-            if returned == "double":
+            if returned in ("double", "float"):
                 # A double has no negative failure value to test: the domain
                 # reports trouble by answering zero, which is what it always
                 # did, so the call happening is the success.
                 tail.append("      rc = 0;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%.17g", '
-                            "(double)produced);\n")
+                            "(double)produced);\n")  # a float widens losslessly
             else:
                 tail.append("      rc = (produced >= 0) ? 0 : -1;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
@@ -2600,7 +2648,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     width = str(scalar_fields[index]["width"])
                     args += [f"scalar{index}", f"(size_t){width}"]
                 else:
-                    ctype = {"int": "int", "int64": "int64_t", "double": "double"}[kind]
+                    ctype = {"int": "int", "int64": "int64_t", "double": "double", "float": "float"}[kind]
                     spelled_out = declared_parameters(
                         root, str(operation.get("c_name", ""))).get(
                             str(operation["c_params"][len(request["fields"]) + index])
@@ -2849,9 +2897,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 mname, mkind = str(member["name"]), str(member["type"])
                 if mkind in NUMERIC:
                     conv = ("parse_int" if mkind == "int"
-                            else "parse_double" if mkind == "double" else "parse_int64")
+                            else "parse_double" if mkind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if mkind == "int"
-                             else "double" if mkind == "double" else "int64_t")
+                             else "double" if mkind in ("double", "float") else "int64_t")
                     parse.append(f"         {ctype} member_{index} = 0;\n")
                     parse.append(f"         if ({conv}({cell}, &member_{index}) != 0)\n"
                                  f"         {{\n            free(scratch);\n"
@@ -2896,7 +2945,11 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                    # A void domain has no rc to take. It reports failure the
                    # only way it ever did -- by not having happened -- so the
                    # stage answers OK for a request it accepted and delivered.
+                   # rc starts at -1, so saying so is not optional: without it
+                   # every void call replies FAILED, which a void client
+                   # discards and a void call WITH an out-parameter does not.
                    else f"      {operation['c_name']}({', '.join(args)});\n"
+                        f"      rc = 0;\n"
                    if operation.get("c_returns") == "void"
                    else f"      rc = {operation['c_name']}({', '.join(args)});\n")
                 + "".join(tail)

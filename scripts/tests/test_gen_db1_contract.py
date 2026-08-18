@@ -511,7 +511,10 @@ class CatalogTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             catalog = self.catalog(root)
-            catalog["operations"][0]["request"]["fields"][0]["type"] = "float"
+            # "blob" rather than "float": float joined the set when clarify's
+            # score needed it, and a test that pins the set has to name
+            # something still outside it or it stops testing anything.
+            catalog["operations"][0]["request"]["fields"][0]["type"] = "blob"
             self.write(root, catalog)
             self.assertRule(root, "field-type")
         finally:
@@ -813,10 +816,15 @@ class CatalogTests(unittest.TestCase):
             root = Path(tmp.name)
             self.double_catalog(root)
             contract.run(root, write=True)
+            # A DECLARATION of width 24, not the characters "[24]": a family
+            # with two dozen fields indexes field[24] in the ordinary course of
+            # things, and matching that says nothing about slot widths.
+            declared = re.compile(r"char\s+\(?\*?\w+\)?\s*\[\s*24\s*\]")
             for path in list((root / contract.SOURCE_DIR).glob("*_stage.c")) + \
                     list((root / contract.CLIENT_DIR).glob("*.c")):
-                self.assertNotIn("[24]", path.read_text(),
-                                 f"{path.name} still sizes a numeric slot at 24")
+                found = declared.search(path.read_text())
+                self.assertIsNone(found,
+                                  f"{path.name} still sizes a numeric slot at 24")
         finally:
             tmp.cleanup()
 
