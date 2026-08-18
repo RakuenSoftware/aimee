@@ -17,7 +17,7 @@
     "src/tests/test_cli_launch.c": 2,
     "src/tests/test_cli_mcp_serve.c": 2,
     "src/tests/test_cli_v1_delegate.c": 10,
-    "src/tests/test_client_integrations.c": 16,
+    "src/tests/test_client_integrations.c": 8,
     "src/tests/test_cmd_delegate.c": 2,
     "src/tests/test_cmd_hooks_scope.c": 7,
     "src/tests/test_cmd_profile.c": 2,
