@@ -245,8 +245,8 @@ int db1_git_ownership_get_owner(const char *repo_path, const char *branch_name, 
    const char *fields[] = {repo_path, branch_name};
    char *const values[] = {owner_out};
    const size_t caps[] = {owner_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, fields, 2, values, caps, 1, NULL);
-   return read_result(status, owner_out);
+   int wire_status = call_stage(AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, fields, 2, values, caps, 1, NULL);
+   return read_result(wire_status, owner_out);
 }
 
 int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
@@ -256,8 +256,8 @@ int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *
    const char *fields[] = {repo_path, session_id};
    char *const values[] = {branch_out};
    const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, fields, 2, values, caps, 1, NULL);
-   return read_result(status, branch_out);
+   int wire_status = call_stage(AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, fields, 2, values, caps, 1, NULL);
+   return read_result(wire_status, branch_out);
 }
 
 int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *session_out, size_t session_len)
@@ -267,8 +267,8 @@ int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *s
    const char *fields[] = {session_prefix};
    char *const values[] = {session_out};
    const size_t caps[] = {session_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX, fields, 1, values, caps, 1, NULL);
-   return read_result(status, session_out);
+   int wire_status = call_stage(AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX, fields, 1, values, caps, 1, NULL);
+   return read_result(wire_status, session_out);
 }
 
 int db1_session_feature_branch_upsert(const char *repo_path, const char *session_id, const char *feature_branch)
@@ -286,8 +286,8 @@ int db1_session_feature_branch_get(const char *repo_path, const char *session_id
    const char *fields[] = {repo_path, session_id};
    char *const values[] = {branch_out};
    const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_GET, fields, 2, values, caps, 1, NULL);
-   return read_result(status, branch_out);
+   int wire_status = call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_GET, fields, 2, values, caps, 1, NULL);
+   return read_result(wire_status, branch_out);
 }
 
 /* clang-format on */

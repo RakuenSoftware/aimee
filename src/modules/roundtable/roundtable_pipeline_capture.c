@@ -136,23 +136,23 @@ int rtp_seam_register_attempt(int pipeline_pass_id, const char *run_id)
       return -1;
 
    rtp_pass_t pass;
-   if (rtp_pass_get(pipeline_pass_id, &pass) != 0)
+   if (db1_roundtable_pass_get(pipeline_pass_id, &pass) != 0)
       return -1; /* unknown pass */
 
    /* the pass must belong to an active, non-terminal pipeline (#21). */
    rtp_run_t run;
-   if (rtp_run_get(pass.pipeline_id, &run) != 0)
+   if (db1_roundtable_run_get(pass.pipeline_id, &run) != 0)
       return -1;
    if (strcmp(run.state, RTP_STATE_DONE) == 0 || strcmp(run.state, RTP_STATE_FAILED) == 0 ||
        strcmp(run.state, RTP_STATE_ABANDONED) == 0)
       return -1;
 
-   int attempt_no = rtp_attempt_max_no(pipeline_pass_id) + 1;
+   int attempt_no = db1_roundtable_attempt_max_no(pipeline_pass_id) + 1;
    int att_id = 0;
-   if (rtp_attempt_create(pipeline_pass_id, attempt_no, run_id, &att_id) != 0)
+   if (db1_roundtable_attempt_create(pipeline_pass_id, attempt_no, run_id, &att_id) != 0)
       return -1;
    /* the newest attempt is the current one; older attempts step down (#30). */
-   rtp_attempt_supersede_others(pipeline_pass_id, att_id);
+   db1_roundtable_attempt_supersede_others(pipeline_pass_id, att_id);
    return 1;
 }
 
@@ -162,11 +162,11 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
       return 0;
 
    rtp_attempt_t att;
-   if (rtp_attempt_get_by_run(run_id, &att) != 0)
+   if (db1_roundtable_attempt_get_by_run(run_id, &att) != 0)
       return 0; /* not a pipeline run — ordinary roundtable_review, untouched */
 
    rtp_pass_t pass;
-   int have_pass = (rtp_pass_get(att.pass_id, &pass) == 0);
+   int have_pass = (db1_roundtable_pass_get(att.pass_id, &pass) == 0);
    int is_draft = have_pass && strcmp(pass.mode, RTP_MODE_DRAFT) == 0;
 
    rtp_envelope_t env;
@@ -203,7 +203,7 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
       snprintf(att.result_snapshot, sizeof(att.result_snapshot), "%s", result_json);
    /* a coarse terminal timestamp marker; the row also keeps submitted_at. */
    snprintf(att.terminal_at, sizeof(att.terminal_at), "captured");
-   rtp_attempt_update(&att);
+   db1_roundtable_attempt_update(&att);
 
    /* Cumulative cost roll-up (#46/#19): every terminal attempt with a known cost
     * accumulates into the phase and pipeline totals — including lost/superseded
@@ -212,7 +212,7 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
    if (have_pass && env.cost_known && env.cost_usd > 0.0)
    {
       rtp_run_t run2;
-      if (rtp_run_get(pass.pipeline_id, &run2) == 0)
+      if (db1_roundtable_run_get(pass.pipeline_id, &run2) == 0)
       {
          /* Attribute to a phase by an explicit whitelist, not a catch-all else,
           * so a future phase cannot silently misbill to the proposal bucket
@@ -223,7 +223,7 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
          else if (strcmp(pass.phase, RTP_PHASE_PROPOSAL) == 0)
             run2.proposal_phase_cost_usd += env.cost_usd;
          run2.total_cost_usd += env.cost_usd;
-         rtp_run_update(&run2);
+         db1_roundtable_run_update(&run2);
       }
    }
 
@@ -253,6 +253,6 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
       snprintf(pass.status, sizeof(pass.status), RTP_PASS_OPEN); /* awaits re-run */
    else
       snprintf(pass.status, sizeof(pass.status), RTP_PASS_CAPTURED);
-   rtp_pass_update(&pass);
+   db1_roundtable_pass_update(&pass);
    return 1;
 }

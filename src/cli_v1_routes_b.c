@@ -23,8 +23,8 @@
 
 static cJSON *marshal_aux_test(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("aux.test");
 
@@ -39,19 +39,19 @@ static cJSON *marshal_aux_test(int argc, char **argv)
 
 static cJSON *marshal_agent_episodes(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("model.episodes");
 
-   const char *agent = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "agent");
+   const char *agent = opts.pos_count > 0 ? opts.positional[0] : cli_args_get(&opts, "agent");
    if (agent && agent[0])
       cJSON_AddStringToObject(req, "agent", agent);
 
    return req;
 }
 
-static char *rpc_read_file_limited(const char *path, size_t limit, char *err, size_t err_len)
+static char *cli_read_file_limited(const char *path, size_t limit, char *err, size_t err_len)
 {
    FILE *f = fopen(path, "rb");
    if (!f)
@@ -161,7 +161,7 @@ static cJSON *marshal_skill_request(const char *method, int argc, char **argv)
       if (argc >= 2)
       {
          char err[256] = "";
-         char *content = rpc_read_file_limited(argv[1], 100 * 1024, err, sizeof(err));
+         char *content = cli_read_file_limited(argv[1], 100 * 1024, err, sizeof(err));
          if (content)
          {
             cJSON_AddStringToObject(req, "content", content);
@@ -199,8 +199,8 @@ static cJSON *marshal_skill_request(const char *method, int argc, char **argv)
 static cJSON *marshal_delegate_launch(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
 
    const char *path = opts.pos_count > 0 ? opts.positional[0] : NULL;
    if (!path || !path[0])
@@ -210,7 +210,7 @@ static cJSON *marshal_delegate_launch(int argc, char **argv)
    }
 
    char err[256] = "";
-   char *text = rpc_read_file_limited(path, 2 * 1024 * 1024, err, sizeof(err));
+   char *text = cli_read_file_limited(path, 2 * 1024 * 1024, err, sizeof(err));
    if (!text)
    {
       fprintf(stderr, "aimee: delegate launch failed: %s\n", err[0] ? err : "cannot read plan");
@@ -229,7 +229,7 @@ static cJSON *marshal_delegate_launch(int argc, char **argv)
    cJSON_AddStringToObject(req, "plan_path", path);
    cJSON_AddItemToObject(req, "plan", plan);
 
-   int parallel = rpc_get_int(&opts, "parallel", 3);
+   int parallel = cli_args_get_int(&opts, "parallel", 3);
    if (parallel > 0)
       cJSON_AddNumberToObject(req, "parallel", parallel);
 
@@ -239,7 +239,7 @@ static cJSON *marshal_delegate_launch(int argc, char **argv)
     * caller target a repo the SERVER can see (e.g. a benchmark checkout on the
     * remote host) instead of the client's own cwd; default to getcwd() so ordinary
     * local use is unchanged. */
-   const char *workdir = rpc_get(&opts, "workdir");
+   const char *workdir = cli_args_get(&opts, "workdir");
    char cwd_buf[4096];
    if (workdir && workdir[0])
       cJSON_AddStringToObject(req, "cwd", workdir);
@@ -250,11 +250,11 @@ static cJSON *marshal_delegate_launch(int argc, char **argv)
 
 static cJSON *marshal_trigger_list(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("trigger.list");
-   const char *status = rpc_get(&opts, "status");
+   const char *status = cli_args_get(&opts, "status");
    if (status && status[0])
       cJSON_AddStringToObject(req, "status", status);
    return req;
@@ -262,10 +262,10 @@ static cJSON *marshal_trigger_list(int argc, char **argv)
 
 static cJSON *marshal_trigger_id(const char *method, int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
-   const char *id = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "id");
+   const char *id = opts.pos_count > 0 ? opts.positional[0] : cli_args_get(&opts, "id");
    if (!id || !id[0])
    {
       fprintf(stderr, "aimee: usage: aimee trigger %s <id>\n",
@@ -282,12 +282,12 @@ static cJSON *marshal_trigger_id(const char *method, int argc, char **argv)
 
 static cJSON *marshal_trigger_fire(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
 
-   const char *source = rpc_get(&opts, "source");
-   const char *task = rpc_get(&opts, "task");
-   const char *proposal = rpc_get(&opts, "proposal");
+   const char *source = cli_args_get(&opts, "source");
+   const char *task = cli_args_get(&opts, "task");
+   const char *proposal = cli_args_get(&opts, "proposal");
 
    /* Proposals one-at-a-time fire: `--source proposals --proposal <name> --workspace <ws>`
     * files exactly that pending proposal through the WFE pipeline (no --task needed). */
@@ -310,21 +310,21 @@ static cJSON *marshal_trigger_fire(int argc, char **argv)
       cJSON_AddStringToObject(req, "task", task);
 
    const char *v;
-   if ((v = rpc_get(&opts, "proposal")) && v[0])
+   if ((v = cli_args_get(&opts, "proposal")) && v[0])
       cJSON_AddStringToObject(req, "proposal", v);
-   if ((v = rpc_get(&opts, "pipeline")) && v[0])
+   if ((v = cli_args_get(&opts, "pipeline")) && v[0])
       cJSON_AddStringToObject(req, "pipeline", v);
-   if ((v = rpc_get(&opts, "ref")) && v[0])
+   if ((v = cli_args_get(&opts, "ref")) && v[0])
       cJSON_AddStringToObject(req, "ref", v);
-   if ((v = rpc_get(&opts, "mode")) && v[0])
+   if ((v = cli_args_get(&opts, "mode")) && v[0])
       cJSON_AddStringToObject(req, "mode", v);
-   if ((v = rpc_get(&opts, "event")) && v[0])
+   if ((v = cli_args_get(&opts, "event")) && v[0])
       cJSON_AddStringToObject(req, "event", v);
-   if ((v = rpc_get(&opts, "workspace")) && v[0])
+   if ((v = cli_args_get(&opts, "workspace")) && v[0])
       cJSON_AddStringToObject(req, "workspace", v);
-   if ((v = rpc_get(&opts, "token")) && v[0])
+   if ((v = cli_args_get(&opts, "token")) && v[0])
       cJSON_AddStringToObject(req, "auth_token", v);
-   if ((v = rpc_get(&opts, "metadata")) && v[0])
+   if ((v = cli_args_get(&opts, "metadata")) && v[0])
       cJSON_AddStringToObject(req, "metadata", v);
    return req;
 }
@@ -332,12 +332,12 @@ static cJSON *marshal_trigger_fire(int argc, char **argv)
 static cJSON *marshal_cron_id(const char *method, int argc, char **argv)
 {
    static const char *bools[] = {"all", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bools, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bools, &opts);
 
-   const char *id = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "id");
+   const char *id = opts.pos_count > 0 ? opts.positional[0] : cli_args_get(&opts, "id");
    int all = (strcmp(method, "cron.enable") == 0 || strcmp(method, "cron.disable") == 0) &&
-             rpc_get(&opts, "all") != NULL;
+             cli_args_get(&opts, "all") != NULL;
    if (!id || !id[0])
    {
       if (all)
@@ -366,7 +366,7 @@ static cJSON *marshal_cron_id(const char *method, int argc, char **argv)
    cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "job_id", id);
    if (strcmp(method, "cron.history") == 0)
-      cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 20));
+      cJSON_AddNumberToObject(req, "limit", cli_args_get_int(&opts, "limit", 20));
    return req;
 }
 
@@ -374,11 +374,11 @@ static cJSON *marshal_cron_add(int argc, char **argv)
 {
    static const char *bools[] = {"only-if-changed", "first-run-silent", "pre-wake-gate", "disabled",
                                  NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bools, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bools, &opts);
 
-   const char *id = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "id");
-   const char *schedule = rpc_get(&opts, "schedule");
+   const char *id = opts.pos_count > 0 ? opts.positional[0] : cli_args_get(&opts, "id");
+   const char *schedule = cli_args_get(&opts, "schedule");
    if (!id || !id[0] || !schedule || !schedule[0])
    {
       fprintf(stderr, "aimee: usage: aimee cron add <id> --schedule S [--mode llm|script|hybrid] "
@@ -391,27 +391,27 @@ static cJSON *marshal_cron_add(int argc, char **argv)
    cJSON_AddStringToObject(req, "schedule", schedule);
 
    const char *v;
-   if ((v = rpc_get(&opts, "mode")) && v[0])
+   if ((v = cli_args_get(&opts, "mode")) && v[0])
       cJSON_AddStringToObject(req, "mode", v);
-   if ((v = rpc_get(&opts, "script")) && v[0])
+   if ((v = cli_args_get(&opts, "script")) && v[0])
       cJSON_AddStringToObject(req, "script", v);
-   if ((v = rpc_get(&opts, "prompt")) && v[0])
+   if ((v = cli_args_get(&opts, "prompt")) && v[0])
       cJSON_AddStringToObject(req, "prompt", v);
-   if ((v = rpc_get(&opts, "workdir")) && v[0])
+   if ((v = cli_args_get(&opts, "workdir")) && v[0])
       cJSON_AddStringToObject(req, "workdir", v);
-   if ((v = rpc_get(&opts, "target")) && v[0])
+   if ((v = cli_args_get(&opts, "target")) && v[0])
       cJSON_AddStringToObject(req, "deliver_target", v);
-   if ((v = rpc_get(&opts, "context-from")) && v[0])
+   if ((v = cli_args_get(&opts, "context-from")) && v[0])
       cJSON_AddStringToObject(req, "context_from", v);
-   if ((v = rpc_get(&opts, "when-context-contains")) && v[0])
+   if ((v = cli_args_get(&opts, "when-context-contains")) && v[0])
       cJSON_AddStringToObject(req, "when_context_contains", v);
-   if (rpc_get(&opts, "only-if-changed"))
+   if (cli_args_get(&opts, "only-if-changed"))
       cJSON_AddBoolToObject(req, "deliver_only_if_changed", 1);
-   if (rpc_get(&opts, "first-run-silent"))
+   if (cli_args_get(&opts, "first-run-silent"))
       cJSON_AddBoolToObject(req, "deliver_first_run_silent", 1);
-   if (rpc_get(&opts, "pre-wake-gate"))
+   if (cli_args_get(&opts, "pre-wake-gate"))
       cJSON_AddBoolToObject(req, "pre_wake_gate", 1);
-   if (rpc_get(&opts, "disabled"))
+   if (cli_args_get(&opts, "disabled"))
       cJSON_AddBoolToObject(req, "enabled", 0);
 
    cJSON *skills = cJSON_CreateArray();
@@ -454,15 +454,15 @@ static cJSON *marshal_workspace_add(int argc, char **argv)
    cJSON *req = marshal_agent_args("workspace.add", argc, argv);
    if (!req)
       return NULL;
-   rpc_opts_t opts;
-   /* --no-scan takes no value, so it must be declared boolean: rpc_parse would
+   cli_args_t opts;
+   /* --no-scan takes no value, so it must be declared boolean: cli_args_parse would
     * otherwise treat the following argument as its value, and swallow the flag
     * entirely when it is last. */
    static const char *ws_bool_flags[] = {"no-scan", NULL};
-   rpc_parse(argc, argv, ws_bool_flags, &opts);
+   cli_args_parse(argc, argv, ws_bool_flags, &opts);
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "root", opts.positional[0]);
-   const char *prov = rpc_get(&opts, "provider");
+   const char *prov = cli_args_get(&opts, "provider");
    if (prov)
       cJSON_AddStringToObject(req, "provider", prov);
    /* The mirror coordinates need surfacing for the same reason root and provider
@@ -473,10 +473,10 @@ static cJSON *marshal_workspace_add(int argc, char **argv)
     * "--provider mirror requires --remote <url>" while staring at the flag the
     * user had just typed. The socket dispatch still parses argv, so both paths
     * now carry them. */
-   const char *rem = rpc_get(&opts, "remote");
+   const char *rem = cli_args_get(&opts, "remote");
    if (rem)
       cJSON_AddStringToObject(req, "remote", rem);
-   const char *hd = rpc_get(&opts, "head");
+   const char *hd = cli_args_get(&opts, "head");
    if (hd)
       cJSON_AddStringToObject(req, "head", hd);
    /* --no-scan registers the workspace and returns instead of walking every
@@ -485,7 +485,7 @@ static cJSON *marshal_workspace_add(int argc, char **argv)
     * already succeeded; the background ingest timer indexes them regardless.
     * Omitted (not sent as true) by default, so an older server sees exactly the
     * body it saw before. */
-   if (rpc_has_flag(&opts, "no-scan"))
+   if (cli_args_has_flag(&opts, "no-scan"))
       cJSON_AddBoolToObject(req, "scan", 0);
    return req;
 }
@@ -896,24 +896,24 @@ static cJSON *marshal_provider_set(int argc, char **argv)
 static cJSON *marshal_provider_list(int argc, char **argv)
 {
    static const char *bool_flags[] = {"available", "all", "json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("provider.list");
    if (!req)
       return NULL;
-   if (rpc_get(&opts, "available"))
+   if (cli_args_get(&opts, "available"))
       cJSON_AddTrueToObject(req, "available_only");
-   if (rpc_get(&opts, "all"))
+   if (cli_args_get(&opts, "all"))
       cJSON_AddTrueToObject(req, "all");
-   if (rpc_get(&opts, "json"))
+   if (cli_args_get(&opts, "json"))
       cJSON_AddTrueToObject(req, "json");
    return req;
 }
 
 static cJSON *marshal_provider_name_method(const char *method, int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args(method);
    if (!req)
       return NULL;
@@ -925,14 +925,14 @@ static cJSON *marshal_provider_name_method(const char *method, int argc, char **
 static cJSON *marshal_provider_models(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("provider.models");
    if (!req)
       return NULL;
    if (opts.pos_count > 0 && opts.positional[0] && opts.positional[0][0])
       cJSON_AddStringToObject(req, "name", opts.positional[0]);
-   if (rpc_get(&opts, "json"))
+   if (cli_args_get(&opts, "json"))
       cJSON_AddTrueToObject(req, "json");
    return req;
 }
@@ -940,25 +940,25 @@ static cJSON *marshal_provider_models(int argc, char **argv)
 static cJSON *marshal_model_list(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", "open-weights", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("catalog.list");
    if (!req)
       return NULL;
-   const char *capability = rpc_get(&opts, "capability");
+   const char *capability = cli_args_get(&opts, "capability");
    if (capability && capability[0])
       cJSON_AddStringToObject(req, "capability", capability);
-   if (rpc_get(&opts, "json"))
+   if (cli_args_get(&opts, "json"))
       cJSON_AddTrueToObject(req, "json");
-   if (rpc_has_flag(&opts, "open-weights"))
+   if (cli_args_has_flag(&opts, "open-weights"))
       cJSON_AddBoolToObject(req, "open_weights_only", 1);
    return req;
 }
 
 static cJSON *marshal_model_show(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    if (opts.pos_count < 1)
    {
       fprintf(stderr, "aimee: usage: aimee catalog show [provider:]<model>\n");
@@ -989,24 +989,24 @@ static cJSON *marshal_model_show(int argc, char **argv)
 static cJSON *marshal_dogfood_tag(int argc, char **argv)
 {
    static const char *bool_flags[] = {"surprise", "no-surprise", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "dogfood.tag");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "record_id", opts.positional[0]);
-   const char *outcome = rpc_get(&opts, "outcome");
+   const char *outcome = cli_args_get(&opts, "outcome");
    if (outcome)
       cJSON_AddStringToObject(req, "outcome", outcome);
-   const char *notes = rpc_get(&opts, "notes");
+   const char *notes = cli_args_get(&opts, "notes");
    if (notes)
       cJSON_AddStringToObject(req, "notes", notes);
-   const char *richness = rpc_get(&opts, "richness");
+   const char *richness = cli_args_get(&opts, "richness");
    if (richness)
       cJSON_AddNumberToObject(req, "richness", atoi(richness));
-   if (rpc_get(&opts, "surprise"))
+   if (cli_args_get(&opts, "surprise"))
       cJSON_AddTrueToObject(req, "surprise");
-   else if (rpc_get(&opts, "no-surprise"))
+   else if (cli_args_get(&opts, "no-surprise"))
       cJSON_AddFalseToObject(req, "surprise");
    return req;
 }
@@ -1014,14 +1014,14 @@ static cJSON *marshal_dogfood_tag(int argc, char **argv)
 static cJSON *marshal_dogfood_report(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "dogfood.report");
-   const char *month = rpc_get(&opts, "month");
+   const char *month = cli_args_get(&opts, "month");
    if (month)
       cJSON_AddStringToObject(req, "month", month);
-   const char *dir = rpc_get(&opts, "dir");
+   const char *dir = cli_args_get(&opts, "dir");
    if (dir)
       cJSON_AddStringToObject(req, "dir", dir);
    return req;
@@ -1030,17 +1030,17 @@ static cJSON *marshal_dogfood_report(int argc, char **argv)
 static cJSON *marshal_dogfood_review(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "dogfood.review");
-   const char *month = rpc_get(&opts, "month");
+   const char *month = cli_args_get(&opts, "month");
    if (month)
       cJSON_AddStringToObject(req, "month", month);
-   const char *dir = rpc_get(&opts, "dir");
+   const char *dir = cli_args_get(&opts, "dir");
    if (dir)
       cJSON_AddStringToObject(req, "dir", dir);
-   const char *limit = rpc_get(&opts, "limit");
+   const char *limit = cli_args_get(&opts, "limit");
    if (limit)
       cJSON_AddNumberToObject(req, "limit", atoi(limit));
    return req;
@@ -1048,19 +1048,19 @@ static cJSON *marshal_dogfood_review(int argc, char **argv)
 
 static cJSON *marshal_eval_run(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "eval.run");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "suite_dir", opts.positional[0]);
-   const char *ablation = rpc_get(&opts, "ablation");
+   const char *ablation = cli_args_get(&opts, "ablation");
    if (ablation)
       cJSON_AddStringToObject(req, "ablation", ablation);
-   const char *runs = rpc_get(&opts, "runs");
+   const char *runs = cli_args_get(&opts, "runs");
    if (runs)
       cJSON_AddNumberToObject(req, "runs", atoi(runs));
-   const char *seed = rpc_get(&opts, "seed");
+   const char *seed = cli_args_get(&opts, "seed");
    if (seed)
       cJSON_AddNumberToObject(req, "seed", strtoul(seed, NULL, 10));
    char cwd[4096];
@@ -1071,8 +1071,8 @@ static cJSON *marshal_eval_run(int argc, char **argv)
 
 static cJSON *marshal_eval_results(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "eval.results");
    if (opts.pos_count > 0)
@@ -1082,11 +1082,11 @@ static cJSON *marshal_eval_results(int argc, char **argv)
 
 static cJSON *marshal_identity_snapshot(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "identity.snapshot");
-   const char *out = rpc_get(&opts, "out");
+   const char *out = cli_args_get(&opts, "out");
    if (out)
       cJSON_AddStringToObject(req, "out", out);
    char cwd[4096];
@@ -1097,15 +1097,15 @@ static cJSON *marshal_identity_snapshot(int argc, char **argv)
 
 static cJSON *marshal_identity_diff(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "identity.diff");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "a", opts.positional[0]);
    if (opts.pos_count > 1)
       cJSON_AddStringToObject(req, "b", opts.positional[1]);
-   const char *ft = rpc_get(&opts, "flip-threshold");
+   const char *ft = cli_args_get(&opts, "flip-threshold");
    if (ft)
       cJSON_AddNumberToObject(req, "flip_threshold", atof(ft));
    char cwd[4096];
@@ -1119,18 +1119,18 @@ static cJSON *marshal_identity_diff(int argc, char **argv)
 static cJSON *marshal_api_enable(int argc, char **argv)
 {
    const char *bool_flags[] = {"vscode", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
 
    cJSON *req = marshal_no_args("api.enable");
    if (!req)
       return NULL;
-   if (rpc_has_flag(&opts, "vscode"))
+   if (cli_args_has_flag(&opts, "vscode"))
       cJSON_AddBoolToObject(req, "vscode", 1);
-   int port = rpc_get_int(&opts, "port", 0);
+   int port = cli_args_get_int(&opts, "port", 0);
    if (port > 0)
       cJSON_AddNumberToObject(req, "port", port);
-   int rate = rpc_get_int(&opts, "rate-limit", 0);
+   int rate = cli_args_get_int(&opts, "rate-limit", 0);
    if (rate > 0)
       cJSON_AddNumberToObject(req, "rate_limit", rate);
    return req;
@@ -1141,8 +1141,8 @@ static cJSON *marshal_api_enable(int argc, char **argv)
  * but the thin CLI reported "no /v1 route". */
 static cJSON *marshal_graph_sync_code(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("graph.sync_code");
    if (opts.pos_count >= 1)
       cJSON_AddStringToObject(req, "project", opts.positional[0]);
@@ -1152,12 +1152,12 @@ static cJSON *marshal_graph_sync_code(int argc, char **argv)
 /* graph explain <entity> [--limit N] → graph.explain. */
 static cJSON *marshal_graph_explain(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("graph.explain");
    if (opts.pos_count >= 1)
       cJSON_AddStringToObject(req, "entity", opts.positional[0]);
-   cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 40));
+   cJSON_AddNumberToObject(req, "limit", cli_args_get_int(&opts, "limit", 40));
    return req;
 }
 
@@ -1167,8 +1167,8 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
    /* No bool flags: `--admin` was removed — a merge needing an admin override of
     * branch protection is human-only (operator ruling 2026-07-15). */
    static const char *bool_flags[] = {NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
@@ -1179,23 +1179,23 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
    {
       if (opts.pos_count > 0)
          cJSON_AddStringToObject(req, "idea", opts.positional[0]);
-      if ((v = rpc_get(&opts, "done-bar")) && v[0])
+      if ((v = cli_args_get(&opts, "done-bar")) && v[0])
          cJSON_AddStringToObject(req, "done_bar", v);
-      if ((v = rpc_get(&opts, "base-branch")) && v[0])
+      if ((v = cli_args_get(&opts, "base-branch")) && v[0])
          cJSON_AddStringToObject(req, "base_branch", v);
-      if ((v = rpc_get(&opts, "repo-root")) && v[0])
+      if ((v = cli_args_get(&opts, "repo-root")) && v[0])
          cJSON_AddStringToObject(req, "repo_root", v);
-      if ((v = rpc_get(&opts, "brief")) && v[0])
+      if ((v = cli_args_get(&opts, "brief")) && v[0])
          cJSON_AddStringToObject(req, "brief", v);
       /* PR-lifecycle fields (#2). */
-      if ((v = rpc_get(&opts, "head-branch")) && v[0])
+      if ((v = cli_args_get(&opts, "head-branch")) && v[0])
          cJSON_AddStringToObject(req, "head_branch", v);
-      if ((v = rpc_get(&opts, "remote")) && v[0])
+      if ((v = cli_args_get(&opts, "remote")) && v[0])
          cJSON_AddStringToObject(req, "remote", v);
-      if ((v = rpc_get(&opts, "worktree-path")) && v[0])
+      if ((v = cli_args_get(&opts, "worktree-path")) && v[0])
          cJSON_AddStringToObject(req, "worktree_path", v);
       /* strict question-count gate (#3): --questions "q1||q2||q3" -> array. */
-      if ((v = rpc_get(&opts, "questions")) && v[0])
+      if ((v = cli_args_get(&opts, "questions")) && v[0])
       {
          cJSON *qarr = cJSON_AddArrayToObject(req, "questions");
          char *dup = strdup(v);
@@ -1219,7 +1219,7 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
    }
    else if (strcmp(method, "pipeline.list") == 0)
    {
-      if ((v = rpc_get(&opts, "state")) && v[0])
+      if ((v = cli_args_get(&opts, "state")) && v[0])
          cJSON_AddStringToObject(req, "state", v);
    }
    else if (strcmp(method, "pipeline.gate") == 0)
@@ -1228,28 +1228,28 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
          cJSON_AddNumberToObject(req, "pipeline_id", atoi(opts.positional[0]));
       if (opts.pos_count > 1)
          cJSON_AddStringToObject(req, "verdict", opts.positional[1]);
-      if ((v = rpc_get(&opts, "reason")) && v[0])
+      if ((v = cli_args_get(&opts, "reason")) && v[0])
          cJSON_AddStringToObject(req, "reason", v);
-      if ((v = rpc_get(&opts, "operator-principal")) && v[0])
+      if ((v = cli_args_get(&opts, "operator-principal")) && v[0])
          cJSON_AddStringToObject(req, "operator_principal", v);
    }
    else /* status / cancel / resume / advance */
    {
       if (opts.pos_count > 0)
          cJSON_AddNumberToObject(req, "pipeline_id", atoi(opts.positional[0]));
-      if ((v = rpc_get(&opts, "artifact")) && v[0])
+      if ((v = cli_args_get(&opts, "artifact")) && v[0])
          cJSON_AddStringToObject(req, "artifact", v);
-      if ((v = rpc_get(&opts, "artifact-hash")) && v[0])
+      if ((v = cli_args_get(&opts, "artifact-hash")) && v[0])
          cJSON_AddStringToObject(req, "artifact_hash", v);
       /* resume can repair repo/workspace metadata after an impl-workspace failure
        * (#3): the same fields accepted by start. */
-      if ((v = rpc_get(&opts, "repo-root")) && v[0])
+      if ((v = cli_args_get(&opts, "repo-root")) && v[0])
          cJSON_AddStringToObject(req, "repo_root", v);
-      if ((v = rpc_get(&opts, "remote")) && v[0])
+      if ((v = cli_args_get(&opts, "remote")) && v[0])
          cJSON_AddStringToObject(req, "remote", v);
-      if ((v = rpc_get(&opts, "head-branch")) && v[0])
+      if ((v = cli_args_get(&opts, "head-branch")) && v[0])
          cJSON_AddStringToObject(req, "head_branch", v);
-      if ((v = rpc_get(&opts, "worktree-path")) && v[0])
+      if ((v = cli_args_get(&opts, "worktree-path")) && v[0])
          cJSON_AddStringToObject(req, "worktree_path", v);
    }
    return req;
@@ -1319,8 +1319,8 @@ static cJSON *marshal_vault_unlock(int argc, char **argv)
 /* `aimee vault set <agent> <cred> <secret>` */
 static cJSON *marshal_vault_set(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("vault.set");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "agent", opts.positional[0]);
@@ -1334,8 +1334,8 @@ static cJSON *marshal_vault_set(int argc, char **argv)
 /* `aimee vault set-server <agent> <cred> <secret>` */
 static cJSON *marshal_vault_set_server(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("vault.set_server");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "agent", opts.positional[0]);
@@ -1349,8 +1349,8 @@ static cJSON *marshal_vault_set_server(int argc, char **argv)
 /* `aimee vault capability <grant|revoke|list> [principal]` */
 static cJSON *marshal_vault_capability(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("vault.capability");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "action", opts.positional[0]);
@@ -1362,8 +1362,8 @@ static cJSON *marshal_vault_capability(int argc, char **argv)
 /* `aimee vault delete <agent> <cred>` */
 static cJSON *marshal_vault_delete(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("vault.delete");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "agent", opts.positional[0]);
@@ -1375,12 +1375,12 @@ static cJSON *marshal_vault_delete(int argc, char **argv)
 /* `aimee cert issue <cn> [--days N]` */
 static cJSON *marshal_cert_issue(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("cert.issue");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "cn", opts.positional[0]);
-   const char *days = rpc_get(&opts, "days");
+   const char *days = cli_args_get(&opts, "days");
    if (days && days[0])
       cJSON_AddNumberToObject(req, "days", atoi(days));
    return req;
@@ -1389,8 +1389,8 @@ static cJSON *marshal_cert_issue(int argc, char **argv)
 /* `aimee cert revoke <serial>` */
 static cJSON *marshal_cert_revoke(int argc, char **argv)
 {
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("cert.revoke");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "serial", opts.positional[0]);
@@ -1406,44 +1406,9 @@ typedef cJSON *(*marshal_method_fn)(const char *method, int argc, char **argv);
  * exact tables are consulted before the prefix fallbacks so an exact method
  * (e.g. agent.episodes) is never shadowed by a prefix (agent.*). */
 static const char *const MARSHAL_NO_ARGS[] = {
-    "api.disable",
-    "api.status",
-    "audit.checkpoint",
-    "audit.seal",
-    "audit.snapshot",
-    "audit.verify",
-    "aux.config_show",
-    "calibration.readiness",
-    "cert.list",
-    "config.deploy_env",
-    "config.show",
-    "cron.list",
-    "delegate.backend_list",
-    "delegate.sandbox_list",
-    "demotion.check",
-    "doctor.forensics",
-    "economizer.stats",
-    "episode.list",
-    "hud.status",
-    "identity.show",
-    "kb.curator",
-    "kb.health",
-    "kb.ingest.status",
-    "mcp.audit",
-    "memory.stats",
-    "catalog.refresh",
-    "notes.list",
-    "provider.get",
-    "ranker.export_view",
-    "ranker.fit",
-    "rules.generate",
-    "rules.list",
-    "server.health",
-    "toolset.list",
-    "vault.list",
-    "vault.lock",
-    "workers",
-    "workspace.list",
+/* Rows live in server/cli_marshal_defs_data.h: the server serves them, and
+ * this compiled-in copy is the last resort when it cannot be asked. */
+#include "server/cli_marshal_defs_data.h"
 };
 
 static const struct
@@ -1484,6 +1449,7 @@ static const struct
     {"identity.diff", marshal_identity_diff},
     {"identity.snapshot", marshal_identity_snapshot},
     {"index.blast_radius", marshal_index_blast_radius},
+    {"index.ast_grep", marshal_index_ast_grep},
     {"index.deps", marshal_index_deps},
     {"index.find", marshal_index_find},
     {"index.find_callers", marshal_index_find_callers},
@@ -1506,6 +1472,7 @@ static const struct
     {"kb.status", marshal_kb_status},
     {"kb.update", marshal_kb_update},
     {"mcp.recheck", marshal_mcp_recheck},
+    {"tool.call", marshal_tool_call},
     {"memory.embed", marshal_memory_embed},
     {"memory.archive", marshal_memory_archive},
     {"memory.benchmark", marshal_memory_benchmark},
@@ -1702,6 +1669,15 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       cJSON_AddStringToObject(req, "name", argv[0]);
       return req;
    }
+   /* What the SERVER says the body should be, before this build's own list.
+    *
+    * Without this, serving routes/catalogue/dispatch still left a new no-arg
+    * command unusable: the client could find it and address it, then refused to
+    * send anything because it had no row saying the body is empty. A client
+    * preferring its own list here would reintroduce exactly that. */
+   if (cli_v1_manifest_method_takes_no_args(method))
+      return marshal_no_args(method);
+
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
       if (strcmp(method, MARSHAL_NO_ARGS[i]) == 0)

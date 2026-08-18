@@ -30,6 +30,10 @@
 #ifndef DEC_DB1_WEB_PAGE_CACHE_H
 #define DEC_DB1_WEB_PAGE_CACHE_H 1
 
+/* How wide a pinned address may be. It crosses the module boundary, so the
+   contract states it rather than each caller sizing its own buffer. */
+#define DB1_WEB_PAGE_ADDR_LEN 64
+
 #include <stddef.h>
 
 #ifdef __cplusplus

@@ -168,38 +168,41 @@ static void test_http_stream(void)
    printf("  http_stream: ok\n");
 }
 
-/* ---- method -> first-class /v1 REST route map ---- */
+/* ---- method -> /v1 route lookup, over a server-supplied manifest ---- */
 static void test_v1_route_map(void)
 {
    const char *verb = NULL;
 
-   /* POST routes carry the full body. */
-   assert(strcmp(cli_v1_route_for_method("index.find", &verb), "/v1/index/find") == 0);
-   assert(strcmp(verb, "POST") == 0);
-   assert(strcmp(cli_v1_route_for_method("memory.store", &verb), "/v1/memory/store") == 0);
-   assert(strcmp(cli_v1_route_for_method("workspace.add", &verb), "/v1/workspaces") == 0 &&
-          strcmp(verb, "POST") == 0);
-   assert(strcmp(verb, "POST") == 0);
-   assert(strcmp(cli_v1_route_for_method("collab_rules.approve", &verb),
-                 "/v1/collab_rules/approve") == 0);
+   /* Which method maps to which path is the SERVER's property now: the client
+    * fetches the map (GET /v1/cli/manifest) instead of carrying one. Asserting
+    * specific paths here would re-create the second copy this removed, and it is
+    * already covered where the map lives -- server-api-conformance-check and the
+    * route descriptor.
+    *
+    * What is still the client's, and what this covers, is the LOOKUP: the
+    * sync/async split, the verb, and unknown methods resolving to nothing. */
+   cJSON *doc = cJSON_Parse("{\"manifest_version\":1,\"routes\":["
+                            "{\"op\":\"thing.get\",\"verb\":\"GET\",\"path\":\"/v1/thing\"},"
+                            "{\"op\":\"thing.put\",\"verb\":\"POST\",\"path\":\"/v1/thing/put\"},"
+                            "{\"op\":\"slow.build\",\"verb\":\"POST\",\"path\":\"/v1/slow/build\","
+                            "\"async\":true}]}");
+   assert(doc);
+   cli_v1_manifest_set_for_test(doc);
+
+   assert(strcmp(cli_v1_route_for_method("thing.get", &verb), "/v1/thing") == 0);
+   assert(strcmp(verb, "GET") == 0);
+   assert(strcmp(cli_v1_route_for_method("thing.put", &verb), "/v1/thing/put") == 0);
    assert(strcmp(verb, "POST") == 0);
 
-   /* No-argument reads map to GET. */
-   assert(strcmp(cli_v1_route_for_method("hud.status", &verb), "/v1/hud") == 0);
-   assert(strcmp(verb, "GET") == 0);
-   assert(strcmp(cli_v1_route_for_method("collab_rules.list", &verb), "/v1/collab_rules") == 0);
-   assert(strcmp(verb, "GET") == 0);
+   /* The async split: a queued row is NOT a synchronous route and vice versa, so
+    * a caller cannot accidentally treat a run handle as a final response. */
+   assert(cli_v1_route_for_method("slow.build", &verb) == NULL);
+   assert(strcmp(cli_v1_async_route_for_method("slow.build", &verb), "/v1/slow/build") == 0);
+   assert(strcmp(verb, "POST") == 0);
+   assert(cli_v1_async_route_for_method("thing.get", &verb) == NULL);
 
-   /* Param-bearing GET reads are mapped too: the client now sends the body on
-    * GET (the server reads it via Content-Length), so filters survive. */
-   assert(strcmp(cli_v1_route_for_method("skill.list", &verb), "/v1/skills") == 0 &&
-          strcmp(verb, "GET") == 0);
-   /* Durable session history is distinct from GET /v1/sessions, which lists
-    * ephemeral live presences and deliberately returns a bare array. */
-   assert(strcmp(cli_v1_route_for_method("session.list", &verb), "/v1/sessions/list") == 0 &&
-          strcmp(verb, "POST") == 0);
-   /* {id}-bearing path routes resolve via the path-id map, not cli_v1_route_for_method. */
-   assert(cli_v1_route_for_method("workspace.get", &verb) == NULL);
+   /* {id}-bearing routes still resolve through the path-id map, which is a
+    * different marshalling contract and is not carried in the manifest. */
    const char *suffix = NULL, *id_field = NULL;
    assert(strcmp(cli_v1_pathid_route_for_method("workspace.get", &verb, &suffix, &id_field),
                  "/v1/workspaces/") == 0 &&
@@ -214,10 +217,6 @@ static void test_v1_route_map(void)
           strcmp(id_field, "session_id") == 0);
    assert(cli_v1_pathid_route_for_method("memory.search", &verb, &suffix, &id_field) == NULL);
 
-   /* delegate runs over POST /v1/delegate/run (forced background remotely). */
-   assert(strcmp(cli_v1_route_for_method("delegate", &verb), "/v1/delegate/run") == 0 &&
-          strcmp(verb, "POST") == 0);
-
    /* Unknown / unmapped methods return NULL with verb defaulted to POST. */
    verb = NULL;
    assert(cli_v1_route_for_method("not.a.real.method", &verb) == NULL);
@@ -228,12 +227,81 @@ static void test_v1_route_map(void)
    printf("  v1_route_map: ok\n");
 }
 
+/* ---- dispatch rows: served ones decide which commands exist ---- */
+static void test_served_dispatch(void)
+{
+   /* A cmd/verb pair this build has never contained. If a served row cannot
+    * introduce one, moving the rows to the server bought nothing: a capability
+    * added server-side would still need a client rebuild to be invokable. */
+   cJSON *doc = cJSON_Parse("{\"manifest_version\":1,\"routes\":[],\"dispatch\":["
+                            "{\"cmd\":\"brandnew\",\"sub\":\"thing\","
+                            "\"method\":\"brandnew.thing\",\"timeout_ms\":1234},"
+                            "{\"cmd\":\"solo\",\"method\":\"solo.any\"},"
+                            "{\"cmd\":\"bare\",\"sub\":\"\",\"method\":\"bare.none\"}]}");
+   assert(doc);
+   cli_v1_manifest_set_for_test(doc);
+
+   cli_v1_route_t r;
+   char *argv1[] = {"thing"};
+   assert(cli_v1_lookup("brandnew", 1, argv1, &r) == 1);
+   assert(strcmp(r.method, "brandnew.thing") == 0);
+   assert(r.timeout_ms == 1234);
+
+   /* An ABSENT "sub" is the wildcard: it matches whatever the first arg is. */
+   char *argv2[] = {"anything-at-all"};
+   assert(cli_v1_lookup("solo", 1, argv2, &r) == 1);
+   assert(strcmp(r.method, "solo.any") == 0);
+
+   /* A present-but-EMPTY "sub" matches only when no subcommand was given. The
+    * two are different states and collapsing them silently changes matching. */
+   assert(cli_v1_lookup("bare", 0, NULL, &r) == 1);
+   assert(strcmp(r.method, "bare.none") == 0);
+   char *argv3[] = {"unexpected"};
+   assert(cli_v1_lookup("bare", 1, argv3, &r) == 0);
+
+   /* Served rows REPLACE the compiled-in set rather than adding to it: a client
+    * that kept preferring its own build would still hide new commands, which is
+    * the coupling this removes. `memory search` is in the built-in table and
+    * absent from the manifest above. */
+   char *argv4[] = {"search"};
+   assert(cli_v1_lookup("memory", 1, argv4, &r) == 0);
+
+   printf("  served_dispatch: ok\n");
+}
+
+/* ---- served argument shapes ---- */
+static void test_served_marshal(void)
+{
+   /* Only an explicit "args":"none" may make the client send an empty body. A
+    * looser reading would send {} for a command that needed arguments, which
+    * fails at the server with a worse message than the client's own refusal. */
+   cJSON *doc = cJSON_Parse("{\"manifest_version\":1,\"routes\":[],\"marshal\":["
+                            "{\"method\":\"brandnew.thing\",\"args\":\"none\"},"
+                            "{\"method\":\"needs.args\",\"args\":\"positional\"},"
+                            "{\"method\":\"no.shape\"}]}");
+   assert(doc);
+   cli_v1_manifest_set_for_test(doc);
+
+   assert(cli_v1_manifest_method_takes_no_args("brandnew.thing") == 1);
+   /* A shape this client does not understand leaves the decision to its own
+    * marshaller rather than guessing an empty body. */
+   assert(cli_v1_manifest_method_takes_no_args("needs.args") == 0);
+   assert(cli_v1_manifest_method_takes_no_args("no.shape") == 0);
+   assert(cli_v1_manifest_method_takes_no_args("never.mentioned") == 0);
+   assert(cli_v1_manifest_method_takes_no_args(NULL) == 0);
+   assert(cli_v1_manifest_method_takes_no_args("") == 0);
+
+   printf("  served_marshal: ok\n");
+}
+
 int main(void)
 {
    printf("cli_http_transport:\n");
    test_transport_parse();
    test_build_request();
    test_v1_route_map();
+   test_served_dispatch();
+   test_served_marshal();
    test_http_round_trip();
    test_http_stream();
    printf("All cli_http_transport tests passed.\n");

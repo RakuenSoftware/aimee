@@ -16,7 +16,7 @@ typedef struct
       const char *value;
    } flags[V1_MAX_FLAGS];
    int flag_count;
-} rpc_opts_t;
+} cli_args_t;
 int cli_v1_args_request_json(int argc, char **argv);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);
 const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot);
@@ -40,6 +40,8 @@ cJSON *marshal_delegate_log(int argc, char **argv);
 cJSON *marshal_roundtable_review(int argc, char **argv);
 cJSON *marshal_delegate_status(int argc, char **argv);
 cJSON *marshal_index_blast_radius(int argc, char **argv);
+cJSON *marshal_index_ast_grep(int argc, char **argv);
+cJSON *marshal_tool_call(int argc, char **argv);
 cJSON *marshal_index_deps(int argc, char **argv);
 cJSON *marshal_index_find(int argc, char **argv);
 cJSON *marshal_index_find_callers(int argc, char **argv);
@@ -246,10 +248,10 @@ void pt_print_workspace_list(const char *method, cJSON *resp);
 void pt_print_workspace_mirror_sync(const char *method, cJSON *resp);
 void pt_print_workspace_remove(const char *method, cJSON *resp);
 void pt_print_worktree_gc(const char *method, cJSON *resp);
-const char *rpc_get(const rpc_opts_t *opts, const char *name);
-int rpc_get_int(const rpc_opts_t *opts, const char *name, int def);
-int rpc_has_flag(const rpc_opts_t *opts, const char *name);
-void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t *out);
+const char *cli_args_get(const cli_args_t *opts, const char *name);
+int cli_args_get_int(const cli_args_t *opts, const char *name, int def);
+int cli_args_has_flag(const cli_args_t *opts, const char *name);
+void cli_args_parse(int argc, char **argv, const char **bool_flags, cli_args_t *out);
 
 /* The largest /v1 request body the server will accept, mirrored client-side so
  * the CLI can refuse an oversized request itself. A body over this is dropped by

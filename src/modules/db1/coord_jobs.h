@@ -20,6 +20,9 @@ extern "C"
 #define DB1_COORD_FILES_LEN    2048
 #define DB1_COORD_ROLE_LEN     32
 #define DB1_COORD_CWD_LEN      512
+/* A dispatched prompt crosses the module boundary, so its width is the
+   contract's rather than each caller's. */
+#define DB1_COORD_PROMPT_LEN   16384
 #define DB1_COORD_RESULT_LEN   4096
 #define DB1_COORD_ERROR_LEN    1024
 #define DB1_COORD_MAX_TASKS    64

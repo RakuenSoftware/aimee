@@ -940,6 +940,29 @@ jobs:
         # cleaning up between runs.
         run: bash scripts/run-p1-rls-gate.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_rls_ci
 
+  # The client/server integration harness. It was NOT gated, which is how it
+  # silently rotted: the co-location ban removed well-known-socket discovery, the
+  # harness had no explicitly configured endpoint, and every client assertion in
+  # it failed as "aimee-server unavailable" against a server running two lines
+  # away. Nothing noticed for as long as nothing ran it. An ungated harness is a
+  # harness that will be wrong when you next need it.
+  integration-tests:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          # Same transient-apt-mirror workaround the sibling jobs carry.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev
+      - name: Client/server integration harness
+        run: cd src && make -j$(nproc) integration-tests
+
   init-migrate-service-test:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}

@@ -397,15 +397,9 @@ int db1_agent_job_take_lease(int job_id, const char *owner)
    return claimed && final_rc == SQLITE_OK ? 0 : -1;
 }
 
-void db1_agent_job_free(db1_agent_job_t *job)
-{
-   if (!job)
-      return;
-   free(job->prompt);
-   free(job->result);
-   job->prompt = NULL;
-   job->result = NULL;
-}
+/* db1_agent_job_free lives in src/agent_job_release.c. It frees what the
+   caller was handed, and since the row crosses the module boundary that
+   allocation is the client's -- freeing it is not this side's business. */
 
 int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
 {

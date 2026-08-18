@@ -127,6 +127,187 @@
 #define AIMEE_DB1_OP_TRIGGER_STATUS_SET                21u
 #define AIMEE_DB1_OP_TRIGGER_GET                       22u
 #define AIMEE_DB1_OP_TRIGGER_LIST_JSON                 23u
+#define AIMEE_DB1_OP_COORD_JOB_CREATE                  24u
+#define AIMEE_DB1_OP_COORD_TASK_ADD                    25u
+#define AIMEE_DB1_OP_COORD_TASK_CLAIM_NEXT             26u
+#define AIMEE_DB1_OP_COORD_TASK_COMPLETE               27u
+#define AIMEE_DB1_OP_COORD_TASK_FAIL                   28u
+#define AIMEE_DB1_OP_COORD_TASK_COMPLETE_OWNED         29u
+#define AIMEE_DB1_OP_COORD_TASK_FAIL_OWNED             30u
+#define AIMEE_DB1_OP_COORD_TASK_RELEASE                31u
+#define AIMEE_DB1_OP_COORD_TASK_RELEASE_BOUNDED        32u
+#define AIMEE_DB1_OP_COORD_TASK_RELEASE_BOUNDED_OWNED  33u
+#define AIMEE_DB1_OP_COORD_OWNER_RECOVER               34u
+#define AIMEE_DB1_OP_COORD_JOB_GET                     35u
+#define AIMEE_DB1_OP_COORD_TASK_LIST                   36u
+#define AIMEE_DB1_OP_COORD_JOB_CANCEL                  37u
+#define AIMEE_DB1_OP_COORD_JOB_REFRESH_STATUS          38u
+#define AIMEE_DB1_OP_COORD_JOB_FILE_CONFLICT           39u
+#define AIMEE_DB1_OP_COORD_JOB_LIST_RECENT             40u
+#define AIMEE_DB1_OP_COORD_JOB_LIST_ACTIVE_IDS         41u
+#define AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH           42u
+#define AIMEE_DB1_OP_CRON_JOB_UPSERT                   43u
+#define AIMEE_DB1_OP_CRON_JOB_GET                      44u
+#define AIMEE_DB1_OP_CRON_JOB_LOAD                     45u
+#define AIMEE_DB1_OP_CRON_JOB_SET_ENABLED              46u
+#define AIMEE_DB1_OP_CRON_JOB_SET_ENABLED_ALL          47u
+#define AIMEE_DB1_OP_CRON_JOB_DELETE                   48u
+#define AIMEE_DB1_OP_CRON_JOB_RECORD_RUN               49u
+#define AIMEE_DB1_OP_CRON_JOB_LIST_JSON                50u
+#define AIMEE_DB1_OP_CRON_JOB_HISTORY_JSON             51u
+#define AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT            52u
+#define AIMEE_DB1_OP_CRON_JOB_LAST_OUTPUT_HASH         53u
+
+/* Family 5: delegation spawns, reservations, checkpoints and the agent_jobs
+ * ledger they reserve against. These move as ONE unit: a reservation resolves
+ * to a job id, and server_compute.c records that the ledger and the launch
+ * were deliberately co-located because a ledger across a boundary from the
+ * launch left paid-for jobs that nothing could replay. Splitting them across
+ * families would restore exactly that topology one migration at a time. */
+
+#define AIMEE_DB1_EVENT_DELEGATION 11781u
+#define AIMEE_DB1_STAGE_DELEGATION 5u
+
+#define AIMEE_DB1_OP_DELEGATION_MESSAGE_RECORD               1u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_RECORD                 2u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_COMPLETE               3u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_PREEMPT                4u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_STATUS                 5u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_STOP_REASON            6u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_IS_STOPPED             7u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_IS_CANCELLED           8u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_IS_ACTIVE              9u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_COUNT_TOTAL            10u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_FIND_ROOT              11u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_COUNT_DESCENDANTS      12u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_LIST_ACTIVE            13u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_BY_ID           14u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_RECURSIVE       15u
+#define AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_STALE           16u
+#define AIMEE_DB1_OP_DELEGATE_RESERVATION_GET                17u
+#define AIMEE_DB1_OP_DELEGATE_RESERVATION_ADOPT              18u
+#define AIMEE_DB1_OP_DELEGATE_RESERVATION_SAVE               19u
+#define AIMEE_DB1_OP_DELEGATE_RESERVATION_FORGET             20u
+#define AIMEE_DB1_OP_DELEGATE_RESERVATION_FORGET_IF_MATCHES  21u
+#define AIMEE_DB1_OP_DELEGATION_CHECKPOINT_SAVE              22u
+#define AIMEE_DB1_OP_DELEGATION_CHECKPOINT_LOAD              23u
+#define AIMEE_DB1_OP_AGENT_JOB_CREATE                        24u
+#define AIMEE_DB1_OP_AGENT_JOB_UPDATE                        25u
+#define AIMEE_DB1_OP_AGENT_JOB_COMPLETE                      26u
+#define AIMEE_DB1_OP_AGENT_JOB_SET_AGENT                     27u
+#define AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT                     28u
+#define AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT_EXT                 29u
+#define AIMEE_DB1_OP_AGENT_JOB_IS_CANCELLED                  30u
+#define AIMEE_DB1_OP_AGENT_JOB_CLASSIFY_STALE                31u
+#define AIMEE_DB1_OP_AGENT_JOB_GET                           32u
+#define AIMEE_DB1_OP_AGENT_JOB_GET_BY_PARTICIPANT            33u
+#define AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT_IS_STALE            34u
+#define AIMEE_DB1_OP_AGENT_JOB_TAKE_LEASE                    35u
+#define AIMEE_DB1_OP_AGENT_JOB_LIST_RECENT                   36u
+#define AIMEE_DB1_OP_AGENT_JOB_LIST_RUNNING_IDS              37u
+#define AIMEE_DB1_OP_AGENT_JOB_CANCEL_BY_ID                  38u
+#define AIMEE_DB1_OP_AGENT_JOB_CANCEL_UNASSIGNED             39u
+#define AIMEE_DB1_OP_AGENT_JOB_CANCEL_NONTERMINAL_ON_RESTART 40u
+#define AIMEE_DB1_OP_AGENT_JOB_CANCEL_STALE                  41u
+#define AIMEE_DB1_OP_AGENT_LOG_ENTRY_LIST                    42u
+#define AIMEE_DB1_OP_DELEGATE_LEARNING_RECORD                43u
+#define AIMEE_DB1_OP_DELEGATE_LEARNING_INJECT_PROMPT         44u
+
+/* Family 6: server and webchat session rows: who is talking, when they last
+ * spoke, and what the conversation was called. */
+
+#define AIMEE_DB1_EVENT_SESSIONS 11782u
+#define AIMEE_DB1_STAGE_SESSIONS 6u
+
+#define AIMEE_DB1_OP_SERVER_SESSION_CREATE                 1u
+#define AIMEE_DB1_OP_SERVER_SESSION_GET                    2u
+#define AIMEE_DB1_OP_SERVER_SESSION_SET_OUTCOME            3u
+#define AIMEE_DB1_OP_SERVER_SESSION_DELETE                 4u
+#define AIMEE_DB1_OP_SERVER_SESSION_LIST_RECENT            5u
+#define AIMEE_DB1_OP_SERVER_SESSION_SEARCH_BY_TITLE        6u
+#define AIMEE_DB1_OP_SERVER_SESSION_COUNT                  7u
+#define AIMEE_DB1_OP_SERVER_SESSION_LIST_EXPIRED           8u
+#define AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED         9u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_SAVE                  10u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_LOAD                  11u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_DELETE                12u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT          13u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH          14u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST            15u
+#define AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD             16u
+#define AIMEE_DB1_OP_SESSION_STALE_READS                   17u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET            18u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER 19u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND           20u
+#define AIMEE_DB1_OP_WEBCHAT_LIVE_SET                      21u
+#define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                      22u
+
+/* Family 7: machine-local runtime state: caches, this box's operator and
+ * clones, the model catalogue it fetched, and the snapshots it took. */
+
+#define AIMEE_DB1_EVENT_RUNTIME 11783u
+#define AIMEE_DB1_STAGE_RUNTIME 7u
+
+#define AIMEE_DB1_OP_RUNTIME_STATE_SET                    1u
+#define AIMEE_DB1_OP_RUNTIME_STATE_GET                    2u
+#define AIMEE_DB1_OP_RUNTIME_STATE_ADD_INT                3u
+#define AIMEE_DB1_OP_PROJECT_CLONE_UPSERT                 4u
+#define AIMEE_DB1_OP_PROJECT_CLONE_GET                    5u
+#define AIMEE_DB1_OP_PROJECT_CLONE_DELETE                 6u
+#define AIMEE_DB1_OP_PROJECT_CLONE_LIST                   7u
+#define AIMEE_DB1_OP_PROJECT_CLONE_LIST_BY_PROJECT        8u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_UPSERT                9u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_GET                   10u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_GET_ACTIVE            11u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_SET_ACTIVE            12u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_DELETE                13u
+#define AIMEE_DB1_OP_LOCAL_OPERATOR_LIST                  14u
+#define AIMEE_DB1_OP_ENV_CAPABILITY_SET                   15u
+#define AIMEE_DB1_OP_ENV_CAPABILITY_GET                   16u
+#define AIMEE_DB1_OP_ENV_CAPABILITY_LIST                  17u
+#define AIMEE_DB1_OP_MAINTENANCE_STATE_LOAD               18u
+#define AIMEE_DB1_OP_MAINTENANCE_STATE_SAVE               19u
+#define AIMEE_DB1_OP_MODEL_CATALOG_IS_FRESH               20u
+#define AIMEE_DB1_OP_MODEL_CATALOG_GET                    21u
+#define AIMEE_DB1_OP_MODEL_CATALOG_REPLACE                22u
+#define AIMEE_DB1_OP_MODEL_PRICE_GET                      23u
+#define AIMEE_DB1_OP_MODEL_PRICE_SET                      24u
+#define AIMEE_DB1_OP_MODEL_PRICE_DELETE                   25u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_OBSERVE        26u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_LIST           27u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_GET            28u
+#define AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_RESET_FIELD    29u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_SET          30u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_GET          31u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_DELETE       32u
+#define AIMEE_DB1_OP_TOOL_LOCAL_AVAILABILITY_LIST         33u
+#define AIMEE_DB1_OP_CONTEXT_CACHE_GET                    34u
+#define AIMEE_DB1_OP_CONTEXT_CACHE_PUT                    35u
+#define AIMEE_DB1_OP_CONTEXT_CACHE_INVALIDATE             36u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_INSERT              37u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_COUNT_MIN_SAMPLES   38u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_IDS_MIN_SAMPLES     39u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_COUNT_FOR_MEMORY    40u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_SESSIONS_FOR_MEMORY 41u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_HAS_MEMORY          42u
+#define AIMEE_DB1_OP_AGENT_CACHE_GET                      43u
+#define AIMEE_DB1_OP_AGENT_CACHE_PUT                      44u
+#define AIMEE_DB1_OP_WEB_PAGE_GET                         45u
+#define AIMEE_DB1_OP_WEB_PAGE_PUT                         46u
+#define AIMEE_DB1_OP_WEB_PAGE_DROP                        47u
+#define AIMEE_DB1_OP_WEB_PAGE_CANONICAL_URL               48u
+#define AIMEE_DB1_OP_FSNAP_CREATE                         49u
+#define AIMEE_DB1_OP_FSNAP_GET_OR_CREATE                  50u
+#define AIMEE_DB1_OP_FSNAP_RECORD_FILE                    51u
+#define AIMEE_DB1_OP_FSNAP_PRUNE                          52u
+#define AIMEE_DB1_OP_FSNAP_LIST                           53u
+#define AIMEE_DB1_OP_FSNAP_RESTORE                        54u
+#define AIMEE_DB1_OP_FSNAP_GET                            55u
+#define AIMEE_DB1_OP_DECISION_RECORD                      56u
+#define AIMEE_DB1_OP_MCP_OSV_CACHE_GET                    57u
+#define AIMEE_DB1_OP_MCP_OSV_CACHE_UPSERT                 58u
+#define AIMEE_DB1_OP_MCP_OSV_CACHE_LIST                   59u
+#define AIMEE_DB1_OP_MCP_OSV_AUDIT                        60u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
@@ -134,8 +315,8 @@
    prompts and documents, an in-process caller passes those whole, and the
    frame already bounds what arrived. */
 #define AIMEE_DB1_STATE_MAX  6144u
-#define AIMEE_DB1_VALUE_MAX  8192u
-#define AIMEE_DB1_FIELDS_MAX 33u
+#define AIMEE_DB1_VALUE_MAX  1048576u
+#define AIMEE_DB1_FIELDS_MAX 513u
 
 #define AIMEE_DB1_STATUS_OK       0u
 #define AIMEE_DB1_STATUS_MISSING  1u

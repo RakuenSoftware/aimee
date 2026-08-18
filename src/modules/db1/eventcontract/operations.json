@@ -7,9 +7,11 @@
   "db",
   "db1_init",
   "db1_module_init",
+  "db1_module_support",
   "db1_time",
   "db1_write",
   "db_schema",
+  "maintenance",
   "module_adapter"
  ],
  "coupled_sources": [
@@ -94,6 +96,8 @@
    "retired_sources": [
     "agent_log.c",
     "cognify_jobs.c",
+    "coord_jobs.c",
+    "db1_cron_jobs.c",
     "db1_trigger.c"
    ]
   },
@@ -101,7 +105,7 @@
    "id": 5,
    "name": "delegation",
    "event_kind": 11781,
-   "active": false,
+   "active": true,
    "doc": "delegation spawns, reservations, checkpoints and the agent_jobs ledger they reserve against. These move as ONE unit: a reservation resolves to a job id, and server_compute.c records that the ledger and the launch were deliberately co-located because a ledger across a boundary from the launch left paid-for jobs that nothing could replay. Splitting them across families would restore exactly that topology one migration at a time.",
    "client_doc": "",
    "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint, agent_jobs",
@@ -112,44 +116,75 @@
     "delegation_checkpoint",
     "delegations"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "agent_jobs.c",
+    "delegate_learning.c",
+    "delegate_reservation.c",
+    "delegation_checkpoint.c",
+    "delegations.c"
+   ]
   },
   {
    "id": 6,
-   "name": "workflow",
-   "event_kind": 11782,
-   "active": false,
-   "doc": "the workflow engine's stores, plans and traces.",
-   "client_doc": "",
-   "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
-   "sources": [
-    "execution_plans",
-    "execution_trace",
-    "pipelines",
-    "roadmap_runtime",
-    "roundtable_pipeline",
-    "wfe_binding",
-    "wfe_store"
-   ],
-   "retired_sources": []
-  },
-  {
-   "id": 7,
    "name": "sessions",
-   "event_kind": 11783,
-   "active": false,
-   "doc": "server and webchat session rows.",
+   "event_kind": 11782,
+   "active": true,
+   "doc": "server and webchat session rows: who is talking, when they last spoke, and what the conversation was called.",
    "client_doc": "",
-   "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live",
+   "covers": "primary_sessions, server_sessions, session_paths, webchat_claude_sessions, webchat_live",
    "sources": [
     "primary_sessions",
     "server_sessions",
     "session_paths",
-    "session_state",
     "webchat_claude_sessions",
     "webchat_live"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "primary_sessions.c",
+    "server_sessions.c",
+    "session_paths.c",
+    "webchat_claude_sessions.c",
+    "webchat_live.c"
+   ]
+  },
+  {
+   "id": 7,
+   "name": "runtime",
+   "event_kind": 11783,
+   "active": true,
+   "doc": "machine-local runtime state: caches, this box's operator and clones, the model catalogue it fetched, and the snapshots it took.",
+   "client_doc": "",
+   "covers": "caches, decisions, env, fsnap, local_operator, mcp_osv_cache, model_catalog, model_pricing, project_clones, runtime_state, tool_local_availability, web_page_cache, working_profile_local",
+   "sources": [
+    "caches",
+    "decisions",
+    "env",
+    "fsnap",
+    "local_operator",
+    "mcp_osv_cache",
+    "model_catalog",
+    "model_pricing",
+    "project_clones",
+    "runtime_state",
+    "tool_local_availability",
+    "web_page_cache",
+    "working_profile_local"
+   ],
+   "retired_sources": [
+    "caches.c",
+    "decisions.c",
+    "env.c",
+    "fsnap.c",
+    "local_operator.c",
+    "mcp_osv_cache.c",
+    "model_catalog.c",
+    "model_pricing.c",
+    "project_clones.c",
+    "runtime_state.c",
+    "tool_local_availability.c",
+    "web_page_cache.c",
+    "working_profile_local.c"
+   ]
   },
   {
    "id": 8,
@@ -189,27 +224,33 @@
   },
   {
    "id": 10,
-   "name": "runtime",
+   "name": "workflow",
    "event_kind": 11786,
    "active": false,
-   "doc": "local runtime resolution, caches and model metadata.",
+   "doc": "the workflow engine's stores, plans and traces.",
    "client_doc": "",
-   "covers": "runtime_state, project_clones, local_operator, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache",
+   "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
    "sources": [
-    "caches",
-    "decisions",
-    "env",
-    "fsnap",
-    "local_operator",
-    "maintenance",
-    "mcp_osv_cache",
-    "model_catalog",
-    "model_pricing",
-    "project_clones",
-    "runtime_state",
-    "tool_local_availability",
-    "web_page_cache",
-    "working_profile_local"
+    "execution_plans",
+    "execution_trace",
+    "pipelines",
+    "roadmap_runtime",
+    "roundtable_pipeline",
+    "wfe_binding",
+    "wfe_store"
+   ],
+   "retired_sources": []
+  },
+  {
+   "id": 11,
+   "name": "guardrail_state",
+   "event_kind": 11787,
+   "active": false,
+   "doc": "per-session guardrail state: the hook's view of a session, stored as a scalar row plus five child tables and read back as one nested struct.",
+   "client_doc": "",
+   "covers": "session_state",
+   "sources": [
+    "session_state"
    ],
    "retired_sources": []
   }
@@ -3978,6 +4019,7785 @@
      }
     ],
     "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 24,
+   "name": "coord_job_create",
+   "c_name": "db1_coord_job_create",
+   "c_params": [
+    "plan_id",
+    "max_concurrent"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "plan_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 25,
+   "name": "coord_task_add",
+   "c_name": "db1_coord_job_add_task",
+   "c_params": [
+    "job_id",
+    "step_id",
+    "files_json",
+    "role",
+    "prompt",
+    "cwd",
+    "persona"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "step_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "files_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cwd",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "persona",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 26,
+   "name": "coord_task_claim_next",
+   "c_name": "db1_coord_job_claim_next",
+   "c_params": [
+    "job_id",
+    "delegate_name",
+    "out"
+   ],
+   "c_returns": "member",
+   "c_member": "id",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "delegate_name",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_task_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "step_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "files",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "preempt_requeues",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 27,
+   "name": "coord_task_complete",
+   "c_name": "db1_coord_job_complete_task",
+   "c_params": [
+    "task_id",
+    "result"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 28,
+   "name": "coord_task_fail",
+   "c_name": "db1_coord_job_fail_task",
+   "c_params": [
+    "task_id",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 29,
+   "name": "coord_task_complete_owned",
+   "c_name": "db1_coord_job_complete_task_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "result"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 30,
+   "name": "coord_task_fail_owned",
+   "c_name": "db1_coord_job_fail_task_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 31,
+   "name": "coord_task_release",
+   "c_name": "db1_coord_job_release_task",
+   "c_params": [
+    "task_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 32,
+   "name": "coord_task_release_bounded",
+   "c_name": "db1_coord_job_release_task_bounded",
+   "c_params": [
+    "task_id",
+    "max_requeues"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 33,
+   "name": "coord_task_release_bounded_owned",
+   "c_name": "db1_coord_job_release_task_bounded_owned",
+   "c_params": [
+    "task_id",
+    "claimed_by",
+    "max_requeues"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 34,
+   "name": "coord_owner_recover",
+   "c_name": "db1_coord_job_recover_owner",
+   "c_params": [
+    "claimed_by",
+    "max_requeues",
+    "requeued_out",
+    "failed_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "claimed_by",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max_requeues",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "requeued",
+      "type": "int"
+     },
+     {
+      "name": "failed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 35,
+   "name": "coord_job_get",
+   "c_name": "db1_coord_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "total_tasks",
+      "type": "int"
+     },
+     {
+      "name": "done_tasks",
+      "type": "int"
+     },
+     {
+      "name": "failed_tasks",
+      "type": "int"
+     },
+     {
+      "name": "running_tasks",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 36,
+   "name": "coord_task_list",
+   "c_name": "db1_coord_job_list_tasks",
+   "c_params": [
+    "job_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_task_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "step_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "files",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "preempt_requeues",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 37,
+   "name": "coord_job_cancel",
+   "c_name": "db1_coord_job_cancel",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 38,
+   "name": "coord_job_refresh_status",
+   "c_name": "db1_coord_job_refresh_status",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 39,
+   "name": "coord_job_file_conflict",
+   "c_name": "db1_coord_job_has_file_conflict",
+   "c_params": [
+    "job_id",
+    "files_json"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "files_json",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 40,
+   "name": "coord_job_list_recent",
+   "c_name": "db1_coord_job_list_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_coord_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "max_concurrent",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "total_tasks",
+      "type": "int"
+     },
+     {
+      "name": "done_tasks",
+      "type": "int"
+     },
+     {
+      "name": "failed_tasks",
+      "type": "int"
+     },
+     {
+      "name": "running_tasks",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 41,
+   "name": "coord_job_list_active_ids",
+   "c_name": "db1_coord_job_list_active_ids",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 64,
+     "column": {
+      "kind": "int"
+     }
+    },
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 42,
+   "name": "coord_task_get_dispatch",
+   "c_name": "db1_coord_task_get_dispatch",
+   "c_params": [
+    "task_id",
+    "role_out",
+    "role_cap",
+    "prompt_out",
+    "prompt_cap",
+    "files_out",
+    "files_cap",
+    "cwd_out",
+    "cwd_cap",
+    "persona_out",
+    "persona_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "width": "DB1_COORD_ROLE_LEN"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "width": "DB1_COORD_PROMPT_LEN"
+     },
+     {
+      "name": "files",
+      "type": "text",
+      "width": "DB1_COORD_FILES_LEN"
+     },
+     {
+      "name": "cwd",
+      "type": "text",
+      "width": "DB1_COORD_CWD_LEN"
+     },
+     {
+      "name": "persona",
+      "type": "text",
+      "width": "DB1_COORD_ROLE_LEN"
+     }
+    ],
+    "max_bytes": 32768
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 43,
+   "name": "cron_job_upsert",
+   "c_name": "db1_cron_job_upsert",
+   "c_params": [
+    "job"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "cron_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "schedule",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "script",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "workdir",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "context_from",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "required": false,
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_target",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 44,
+   "name": "cron_job_get",
+   "c_name": "db1_cron_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 45,
+   "name": "cron_job_load",
+   "c_name": "db1_cron_jobs_load",
+   "c_params": [
+    "out",
+    "max",
+    "enabled_only"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "enabled_only",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 32
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 46,
+   "name": "cron_job_set_enabled",
+   "c_name": "db1_cron_job_set_enabled",
+   "c_params": [
+    "job_id",
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 47,
+   "name": "cron_job_set_enabled_all",
+   "c_name": "db1_cron_jobs_set_enabled_all",
+   "c_params": [
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 48,
+   "name": "cron_job_delete",
+   "c_name": "db1_cron_job_delete",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 49,
+   "name": "cron_job_record_run",
+   "c_name": "db1_cron_job_record_run",
+   "c_params": [
+    "job_id",
+    "status",
+    "silent",
+    "delivered",
+    "output",
+    "error",
+    "output_hash"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "silent",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "delivered",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "output_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "run_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 50,
+   "name": "cron_job_list_json",
+   "c_name": "db1_cron_jobs_list_json",
+   "c_params": [],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "jobs",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 51,
+   "name": "cron_job_history_json",
+   "c_name": "db1_cron_job_history_json",
+   "c_params": [
+    "job_id",
+    "limit"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "limit",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "history",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 52,
+   "name": "cron_job_latest_output",
+   "c_name": "db1_cron_job_latest_output",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 53,
+   "name": "cron_job_last_output_hash",
+   "c_name": "db1_cron_job_last_output_hash",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output_hash",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 1,
+   "name": "delegation_message_record",
+   "c_name": "db1_delegation_message_record",
+   "c_params": [
+    "delegation_id",
+    "direction",
+    "content"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "direction",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "content",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 2,
+   "name": "delegation_spawn_record",
+   "c_name": "db1_delegation_spawn_record",
+   "c_params": [
+    "delegation_id",
+    "parent_delegation_id",
+    "session_id",
+    "depth",
+    "role"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "parent_delegation_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "depth",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 3,
+   "name": "delegation_spawn_complete",
+   "c_name": "db1_delegation_spawn_complete",
+   "c_params": [
+    "delegation_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 4,
+   "name": "delegation_spawn_preempt",
+   "c_name": "db1_delegation_spawn_preempt",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 5,
+   "name": "delegation_spawn_status",
+   "c_name": "db1_delegation_spawn_status",
+   "c_params": [
+    "delegation_id",
+    "out",
+    "out_sz"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "status",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 6,
+   "name": "delegation_spawn_stop_reason",
+   "c_name": "db1_delegation_spawn_stop_reason",
+   "c_params": [
+    "delegation_id",
+    "out",
+    "out_sz"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "stop_reason",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 7,
+   "name": "delegation_spawn_is_stopped",
+   "c_name": "db1_delegation_spawn_is_stopped",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "stopped",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 8,
+   "name": "delegation_spawn_is_cancelled",
+   "c_name": "db1_delegation_spawn_is_cancelled",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "cancelled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 9,
+   "name": "delegation_spawn_is_active",
+   "c_name": "db1_delegation_spawn_is_active",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "active",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 10,
+   "name": "delegation_spawn_count_total",
+   "c_name": "db1_delegation_spawn_count_total",
+   "c_params": [
+    "session_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "total",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 11,
+   "name": "delegation_spawn_find_root",
+   "c_name": "db1_delegation_spawn_find_root",
+   "c_params": [
+    "delegation_id",
+    "out",
+    "out_sz"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "root_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 12,
+   "name": "delegation_spawn_count_descendants",
+   "c_name": "db1_delegation_spawn_count_descendants",
+   "c_params": [
+    "root_delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "root_delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "descendants",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 13,
+   "name": "delegation_spawn_list_active",
+   "c_name": "db1_delegation_spawn_list_active",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 256,
+     "column": {
+      "kind": "int"
+     }
+    },
+    "fields": [
+     {
+      "name": "spawn_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 14,
+   "name": "delegation_spawn_cancel_by_id",
+   "c_name": "db1_delegation_spawn_cancel_by_id",
+   "c_params": [
+    "spawn_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "spawn_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 15,
+   "name": "delegation_spawn_cancel_recursive",
+   "c_name": "db1_delegation_spawn_cancel_recursive",
+   "c_params": [
+    "spawn_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "spawn_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 16,
+   "name": "delegation_spawn_cancel_stale",
+   "c_name": "db1_delegation_spawn_cancel_stale",
+   "c_params": [],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 17,
+   "name": "delegate_reservation_get",
+   "c_name": "db1_delegate_reservation_get",
+   "c_params": [
+    "execution_key",
+    "out_job_id",
+    "participant",
+    "participant_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "participant",
+      "type": "text",
+      "width": "DB1_AJ_PARTICIPANT_LEN"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 18,
+   "name": "delegate_reservation_adopt",
+   "c_name": "db1_delegate_reservation_adopt_sole_legacy",
+   "c_params": [
+    "execution_key",
+    "work_item_id",
+    "out_job_id",
+    "participant",
+    "participant_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "participant",
+      "type": "text",
+      "width": "DB1_AJ_PARTICIPANT_LEN"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 19,
+   "name": "delegate_reservation_save",
+   "c_name": "db1_delegate_reservation_save",
+   "c_params": [
+    "execution_key",
+    "work_item_id",
+    "job_id",
+    "participant"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "participant",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 20,
+   "name": "delegate_reservation_forget",
+   "c_name": "db1_delegate_reservation_forget",
+   "c_params": [
+    "execution_key"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 21,
+   "name": "delegate_reservation_forget_if_matches",
+   "c_name": "db1_delegate_reservation_forget_if_matches",
+   "c_params": [
+    "execution_key",
+    "job_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "forgotten",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 22,
+   "name": "delegation_checkpoint_save",
+   "c_name": "db1_delegation_checkpoint_save",
+   "c_params": [
+    "delegation_id",
+    "job_id",
+    "attempt",
+    "steps_json",
+    "last_output",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "attempt",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "steps_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "last_output",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 23,
+   "name": "delegation_checkpoint_load",
+   "c_name": "db1_delegation_checkpoint_load",
+   "c_params": [
+    "delegation_id",
+    "steps_out",
+    "steps_cap",
+    "error_out",
+    "error_cap",
+    "output_out",
+    "output_cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "steps",
+      "type": "text",
+      "width": "DB1_CHECKPOINT_STEPS_LEN"
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "width": "DB1_CHECKPOINT_ERROR_LEN"
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "width": "DB1_CHECKPOINT_OUTPUT_LEN"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 24,
+   "name": "agent_job_create",
+   "c_name": "db1_agent_job_create",
+   "c_params": [
+    "role",
+    "prompt",
+    "agent_name",
+    "lease_owner"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "lease_owner",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 25,
+   "name": "agent_job_update",
+   "c_name": "db1_agent_job_update",
+   "c_params": [
+    "job_id",
+    "status",
+    "cursor_turn",
+    "result"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 26,
+   "name": "agent_job_complete",
+   "c_name": "db1_agent_job_complete",
+   "c_params": [
+    "job_id",
+    "status",
+    "cursor_turn",
+    "result",
+    "has_cost",
+    "cost_usd"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "has_cost",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "cost_usd",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 27,
+   "name": "agent_job_set_agent",
+   "c_name": "db1_agent_job_set_agent",
+   "c_params": [
+    "job_id",
+    "agent_name"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 28,
+   "name": "agent_job_heartbeat",
+   "c_name": "db1_agent_job_heartbeat",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 29,
+   "name": "agent_job_heartbeat_ext",
+   "c_name": "db1_agent_job_heartbeat_ext",
+   "c_params": [
+    "job_id",
+    "current_tool",
+    "api_call_count"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "current_tool",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "api_call_count",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 30,
+   "name": "agent_job_is_cancelled",
+   "c_name": "db1_agent_job_is_cancelled",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "cancelled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 31,
+   "name": "agent_job_classify_stale",
+   "c_name": "db1_agent_job_classify_stale",
+   "c_params": [
+    "job_id",
+    "idle_threshold_secs",
+    "in_tool_threshold_secs",
+    "out_state",
+    "out_state_cap"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "idle_threshold_secs",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "in_tool_threshold_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "state",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 32,
+   "name": "agent_job_get",
+   "c_name": "db1_agent_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "participant_token",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int"
+     },
+     {
+      "name": "lease_owner",
+      "type": "text"
+     },
+     {
+      "name": "heartbeat_at",
+      "type": "text"
+     },
+     {
+      "name": "current_tool",
+      "type": "text"
+     },
+     {
+      "name": "api_call_count",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 33,
+   "name": "agent_job_get_by_participant",
+   "c_name": "db1_agent_job_get_by_participant",
+   "c_params": [
+    "participant_token",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "participant_token",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "participant_token",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int"
+     },
+     {
+      "name": "lease_owner",
+      "type": "text"
+     },
+     {
+      "name": "heartbeat_at",
+      "type": "text"
+     },
+     {
+      "name": "current_tool",
+      "type": "text"
+     },
+     {
+      "name": "api_call_count",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 34,
+   "name": "agent_job_heartbeat_is_stale",
+   "c_name": "db1_agent_job_heartbeat_is_stale",
+   "c_params": [
+    "heartbeat_at",
+    "stale_minutes"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "heartbeat_at",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stale_minutes",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "stale",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 35,
+   "name": "agent_job_take_lease",
+   "c_name": "db1_agent_job_take_lease",
+   "c_params": [
+    "job_id",
+    "owner"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 36,
+   "name": "agent_job_list_recent",
+   "c_name": "db1_agent_job_list_recent",
+   "c_params": [
+    "out",
+    "max",
+    "include_heavy"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "include_heavy",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "participant_token",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "cursor_turn",
+      "type": "int"
+     },
+     {
+      "name": "lease_owner",
+      "type": "text"
+     },
+     {
+      "name": "heartbeat_at",
+      "type": "text"
+     },
+     {
+      "name": "current_tool",
+      "type": "text"
+     },
+     {
+      "name": "api_call_count",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 37,
+   "name": "agent_job_list_running_ids",
+   "c_name": "db1_agent_job_list_running_ids",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 256,
+     "column": {
+      "kind": "int"
+     }
+    },
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 38,
+   "name": "agent_job_cancel_by_id",
+   "c_name": "db1_agent_job_cancel_by_id",
+   "c_params": [
+    "job_id",
+    "reason"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 39,
+   "name": "agent_job_cancel_unassigned",
+   "c_name": "db1_agent_job_cancel_unassigned",
+   "c_params": [
+    "job_id",
+    "reason",
+    "min_age_secs"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "min_age_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "cancelled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 40,
+   "name": "agent_job_cancel_nonterminal_on_restart",
+   "c_name": "db1_agent_job_cancel_nonterminal_on_restart",
+   "c_params": [
+    "reason"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 41,
+   "name": "agent_job_cancel_stale",
+   "c_name": "db1_agent_job_cancel_stale",
+   "c_params": [
+    "threshold_seconds",
+    "reason"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "threshold_seconds",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 42,
+   "name": "agent_log_entry_list",
+   "c_name": "db1_agent_log_list",
+   "c_params": [
+    "agent_filter",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "agent_filter",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_entry_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "turns",
+      "type": "int"
+     },
+     {
+      "name": "tool_calls",
+      "type": "int"
+     },
+     {
+      "name": "success",
+      "type": "int"
+     },
+     {
+      "name": "confidence",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int"
+     },
+     {
+      "name": "latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 43,
+   "name": "delegate_learning_record",
+   "c_name": "db1_delegate_learning_record",
+   "c_params": [
+    "session_id",
+    "role",
+    "failure_mode",
+    "lesson",
+    "evidence_json",
+    "confidence"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "failure_mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "lesson",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "evidence_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "confidence",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "delegation",
+   "id": 44,
+   "name": "delegate_learning_inject_prompt",
+   "c_name": "db1_delegate_learning_inject_prompt",
+   "c_params": [
+    "role",
+    "system_prompt",
+    "top_n"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "system_prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "top_n",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "prompt",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 1,
+   "name": "server_session_create",
+   "c_name": "db1_server_session_create",
+   "c_params": [
+    "id",
+    "client_type",
+    "principal"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "client_type",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "principal",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 2,
+   "name": "server_session_get",
+   "c_name": "db1_server_session_get",
+   "c_params": [
+    "id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_server_session_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "client_type",
+      "type": "text"
+     },
+     {
+      "name": "principal",
+      "type": "text"
+     },
+     {
+      "name": "title",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "last_activity_at",
+      "type": "text"
+     },
+     {
+      "name": "claude_session_id",
+      "type": "text"
+     },
+     {
+      "name": "outcome",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "chat_key",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 3,
+   "name": "server_session_set_outcome",
+   "c_name": "db1_server_session_set_outcome",
+   "c_params": [
+    "id",
+    "outcome"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "outcome",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 4,
+   "name": "server_session_delete",
+   "c_name": "db1_server_session_delete",
+   "c_params": [
+    "id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 5,
+   "name": "server_session_list_recent",
+   "c_name": "db1_server_session_list_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_server_session_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "client_type",
+      "type": "text"
+     },
+     {
+      "name": "principal",
+      "type": "text"
+     },
+     {
+      "name": "title",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "last_activity_at",
+      "type": "text"
+     },
+     {
+      "name": "claude_session_id",
+      "type": "text"
+     },
+     {
+      "name": "outcome",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "chat_key",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 6,
+   "name": "server_session_search_by_title",
+   "c_name": "db1_server_session_search_by_title",
+   "c_params": [
+    "pattern",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pattern",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_server_session_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "client_type",
+      "type": "text"
+     },
+     {
+      "name": "principal",
+      "type": "text"
+     },
+     {
+      "name": "title",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "last_activity_at",
+      "type": "text"
+     },
+     {
+      "name": "claude_session_id",
+      "type": "text"
+     },
+     {
+      "name": "outcome",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "chat_key",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 7,
+   "name": "server_session_count",
+   "c_name": "db1_server_session_count",
+   "c_params": [
+    "since_or_null"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_or_null",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 8,
+   "name": "server_session_list_expired",
+   "c_name": "db1_server_session_list_expired",
+   "c_params": [
+    "threshold_seconds",
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "threshold_seconds",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 256,
+     "column": {
+      "kind": "text",
+      "width": "DB1_SS_ID_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 9,
+   "name": "server_session_delete_expired",
+   "c_name": "db1_server_session_delete_expired",
+   "c_params": [
+    "threshold_seconds"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "threshold_seconds",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "deleted",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 10,
+   "name": "primary_session_save",
+   "c_name": "db1_primary_session_save",
+   "c_params": [
+    "session_id",
+    "agent_name",
+    "provider",
+    "messages_json"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "provider",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "messages_json",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 11,
+   "name": "primary_session_load",
+   "c_name": "db1_primary_session_load",
+   "c_params": [
+    "session_id",
+    "agent_name",
+    "provider"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "provider",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "messages_json",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 12,
+   "name": "primary_session_delete",
+   "c_name": "db1_primary_session_delete",
+   "c_params": [
+    "session_id",
+    "agent_name",
+    "provider"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "provider",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 13,
+   "name": "primary_session_alloc_recent",
+   "c_name": "db1_primary_session_alloc_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_primary_session_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256,
+     "allocate": true
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "provider",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "messages_json",
+      "type": "text",
+      "alloc": 1048576
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 14,
+   "name": "primary_session_alloc_search",
+   "c_name": "db1_primary_session_alloc_search",
+   "c_params": [
+    "query",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "query",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_primary_session_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256,
+     "allocate": true
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "provider",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "messages_json",
+      "type": "text",
+      "alloc": 1048576
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 15,
+   "name": "primary_session_get_latest",
+   "c_name": "db1_primary_session_get_latest",
+   "c_params": [
+    "session_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_primary_session_row_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "provider",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "messages_json",
+      "type": "text",
+      "alloc": 1048576
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 16,
+   "name": "session_write_path_record",
+   "c_name": "db1_session_write_path_record",
+   "c_params": [
+    "session_id",
+    "path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "path",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 17,
+   "name": "session_stale_reads",
+   "c_name": "db1_session_stale_reads",
+   "c_params": [
+    "parent_session_id",
+    "child_session_id",
+    "out_paths",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "parent_session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "child_session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_paths",
+     "bound": "max",
+     "max_rows": 256,
+     "column": {
+      "kind": "text",
+      "width": "DB1_SESSION_PATH_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "path",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 131072
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 18,
+   "name": "webchat_claude_session_get",
+   "c_name": "db1_webchat_claude_session_get",
+   "c_params": [
+    "principal",
+    "aimee_session_id",
+    "out",
+    "out_n"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "principal",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "aimee_session_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "claude_session_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 19,
+   "name": "webchat_claude_session_owned_by_other",
+   "c_name": "db1_webchat_claude_session_owned_by_other",
+   "c_params": [
+    "principal",
+    "aimee_session_id",
+    "claude_session_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "principal",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "aimee_session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "claude_session_id",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "owned",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 20,
+   "name": "webchat_claude_session_bind",
+   "c_name": "db1_webchat_claude_session_bind",
+   "c_params": [
+    "principal",
+    "aimee_session_id",
+    "claude_session_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "principal",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "aimee_session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "claude_session_id",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 21,
+   "name": "webchat_live_set",
+   "c_name": "db1_webchat_live_set",
+   "c_params": [
+    "session_id",
+    "turn_id",
+    "text",
+    "status"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "turn_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "text",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "sessions",
+   "id": 22,
+   "name": "webchat_live_get",
+   "c_name": "db1_webchat_live_get",
+   "c_params": [
+    "session_id",
+    "since_rev",
+    "turn_id",
+    "text",
+    "status",
+    "rev"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "since_rev",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "turn_id",
+      "type": "text",
+      "alloc": 256
+     },
+     {
+      "name": "text",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "alloc": 64
+     },
+     {
+      "name": "rev",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 1,
+   "name": "runtime_state_set",
+   "c_name": "db1_runtime_state_set",
+   "c_params": [
+    "key",
+    "value"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "value",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 2,
+   "name": "runtime_state_get",
+   "c_name": "db1_runtime_state_get",
+   "c_params": [
+    "key",
+    "out",
+    "out_len"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "value",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 3,
+   "name": "runtime_state_add_int",
+   "c_name": "db1_runtime_state_add_int",
+   "c_params": [
+    "key",
+    "delta",
+    "new_value_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "delta",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "new_value",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 4,
+   "name": "project_clone_upsert",
+   "c_name": "db1_project_clone_upsert",
+   "c_params": [
+    "clone_path",
+    "project_uuid",
+    "canonical_url",
+    "origin_url",
+    "upstream_url"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "project_uuid",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "canonical_url",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "origin_url",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "upstream_url",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 5,
+   "name": "project_clone_get",
+   "c_name": "db1_project_clone_get",
+   "c_params": [
+    "clone_path",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_project_clone_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text"
+     },
+     {
+      "name": "project_uuid",
+      "type": "text"
+     },
+     {
+      "name": "canonical_url",
+      "type": "text"
+     },
+     {
+      "name": "origin_url",
+      "type": "text"
+     },
+     {
+      "name": "upstream_url",
+      "type": "text"
+     },
+     {
+      "name": "last_seen_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 6,
+   "name": "project_clone_delete",
+   "c_name": "db1_project_clone_delete",
+   "c_params": [
+    "clone_path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 7,
+   "name": "project_clone_list",
+   "c_name": "db1_project_clone_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_project_clone_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text"
+     },
+     {
+      "name": "project_uuid",
+      "type": "text"
+     },
+     {
+      "name": "canonical_url",
+      "type": "text"
+     },
+     {
+      "name": "origin_url",
+      "type": "text"
+     },
+     {
+      "name": "upstream_url",
+      "type": "text"
+     },
+     {
+      "name": "last_seen_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 8,
+   "name": "project_clone_list_by_project",
+   "c_name": "db1_project_clone_list_by_project",
+   "c_params": [
+    "project_uuid",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "project_uuid",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_project_clone_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "clone_path",
+      "type": "text"
+     },
+     {
+      "name": "project_uuid",
+      "type": "text"
+     },
+     {
+      "name": "canonical_url",
+      "type": "text"
+     },
+     {
+      "name": "origin_url",
+      "type": "text"
+     },
+     {
+      "name": "upstream_url",
+      "type": "text"
+     },
+     {
+      "name": "last_seen_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 9,
+   "name": "local_operator_upsert",
+   "c_name": "db1_local_operator_upsert",
+   "c_params": [
+    "secret_ref",
+    "operator_uuid",
+    "active",
+    "display_hint"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "active",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "display_hint",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 10,
+   "name": "local_operator_get",
+   "c_name": "db1_local_operator_get",
+   "c_params": [
+    "secret_ref",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_local_operator_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text"
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text"
+     },
+     {
+      "name": "active",
+      "type": "int"
+     },
+     {
+      "name": "display_hint",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 11,
+   "name": "local_operator_get_active",
+   "c_name": "db1_local_operator_get_active",
+   "c_params": [
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "struct": "db1_local_operator_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text"
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text"
+     },
+     {
+      "name": "active",
+      "type": "int"
+     },
+     {
+      "name": "display_hint",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 12,
+   "name": "local_operator_set_active",
+   "c_name": "db1_local_operator_set_active",
+   "c_params": [
+    "secret_ref"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "changed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 13,
+   "name": "local_operator_delete",
+   "c_name": "db1_local_operator_delete",
+   "c_params": [
+    "secret_ref"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 14,
+   "name": "local_operator_list",
+   "c_name": "db1_local_operator_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_local_operator_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "secret_ref",
+      "type": "text"
+     },
+     {
+      "name": "operator_uuid",
+      "type": "text"
+     },
+     {
+      "name": "active",
+      "type": "int"
+     },
+     {
+      "name": "display_hint",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 15,
+   "name": "env_capability_set",
+   "c_name": "db1_env_capability_set",
+   "c_params": [
+    "key",
+    "value"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "capability",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "value",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 16,
+   "name": "env_capability_get",
+   "c_name": "db1_env_capability_get",
+   "c_params": [
+    "key",
+    "value_out",
+    "value_len",
+    "detected_at_out",
+    "detected_at_len"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "capability",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "value",
+      "type": "text",
+      "width": "DB1_ENV_VALUE_LEN"
+     },
+     {
+      "name": "detected_at",
+      "type": "text",
+      "width": "DB1_ENV_TS_LEN"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 17,
+   "name": "env_capability_list",
+   "c_name": "db1_env_capability_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_env_capability_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "key",
+      "type": "text"
+     },
+     {
+      "name": "value",
+      "type": "text"
+     },
+     {
+      "name": "detected_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 18,
+   "name": "maintenance_state_load",
+   "c_name": "db1_maintenance_state_load",
+   "c_params": [
+    "key",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_name",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_maintenance_state_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "present",
+      "type": "int"
+     },
+     {
+      "name": "last_run_at",
+      "type": "text"
+     },
+     {
+      "name": "last_memory_count",
+      "type": "int64"
+     },
+     {
+      "name": "last_changes",
+      "type": "int"
+     },
+     {
+      "name": "last_elapsed_ms",
+      "type": "double"
+     },
+     {
+      "name": "last_summary_json",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 19,
+   "name": "maintenance_state_save",
+   "c_name": "db1_maintenance_state_save",
+   "c_params": [
+    "key",
+    "st"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_maintenance_state_t",
+    "struct_from": 1,
+    "fields": [
+     {
+      "name": "state_name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "present",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "last_run_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "last_memory_count",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "last_changes",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "last_elapsed_ms",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "last_summary_json",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 20,
+   "name": "model_catalog_is_fresh",
+   "c_name": "db1_model_catalog_is_fresh",
+   "c_params": [
+    "provider",
+    "ttl_seconds"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "provider",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "ttl_seconds",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "fresh",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 21,
+   "name": "model_catalog_get",
+   "c_name": "db1_model_catalog_get",
+   "c_params": [
+    "provider",
+    "models_out",
+    "n_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "provider",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "provider_model_t",
+    "list": {
+     "out": "models_out",
+     "count": "n_out",
+     "max_rows": 512,
+     "allocate": true
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "display_name",
+      "type": "text"
+     },
+     {
+      "name": "context_window",
+      "type": "int"
+     },
+     {
+      "name": "max_output",
+      "type": "int"
+     },
+     {
+      "name": "caps",
+      "type": "int"
+     },
+     {
+      "name": "deprecated",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 22,
+   "name": "model_catalog_replace",
+   "c_name": "db1_model_catalog_replace",
+   "c_params": [
+    "provider",
+    "models",
+    "n"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "provider",
+      "type": "text",
+      "required": true
+     }
+    ],
+    "repeated": {
+     "values": "models",
+     "count": "n",
+     "max_values": 512,
+     "struct": "provider_model_t",
+     "fields": [
+      {
+       "name": "id",
+       "type": "text"
+      },
+      {
+       "name": "display_name",
+       "type": "text"
+      },
+      {
+       "name": "context_window",
+       "type": "int"
+      },
+      {
+       "name": "max_output",
+       "type": "int"
+      },
+      {
+       "name": "caps",
+       "type": "int"
+      },
+      {
+       "name": "deprecated",
+       "type": "int"
+      }
+     ]
+    }
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 23,
+   "name": "model_price_get",
+   "c_name": "db1_model_price_get",
+   "c_params": [
+    "model",
+    "in_per_mtok",
+    "out_per_mtok"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "model",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "in_per_mtok",
+      "type": "double"
+     },
+     {
+      "name": "out_per_mtok",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 24,
+   "name": "model_price_set",
+   "c_name": "db1_model_price_set",
+   "c_params": [
+    "model",
+    "in_per_mtok",
+    "out_per_mtok"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "model",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "in_per_mtok",
+      "type": "double",
+      "required": true
+     },
+     {
+      "name": "out_per_mtok",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 25,
+   "name": "model_price_delete",
+   "c_name": "db1_model_price_delete",
+   "c_params": [
+    "model"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "model",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 26,
+   "name": "working_profile_local_observe",
+   "c_name": "db1_working_profile_local_observe",
+   "c_params": [
+    "field",
+    "value",
+    "confidence",
+    "session_id",
+    "threshold"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "field",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "value",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "confidence",
+      "type": "double",
+      "required": true
+     },
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "threshold",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "promoted",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 27,
+   "name": "working_profile_local_list",
+   "c_name": "db1_working_profile_local_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_working_profile_local_state_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "field",
+      "type": "text"
+     },
+     {
+      "name": "value",
+      "type": "text"
+     },
+     {
+      "name": "observation_count",
+      "type": "int"
+     },
+     {
+      "name": "score",
+      "type": "double"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 28,
+   "name": "working_profile_local_get",
+   "c_name": "db1_working_profile_local_get",
+   "c_params": [
+    "field",
+    "out"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "field",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_working_profile_local_state_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "field",
+      "type": "text"
+     },
+     {
+      "name": "value",
+      "type": "text"
+     },
+     {
+      "name": "observation_count",
+      "type": "int"
+     },
+     {
+      "name": "score",
+      "type": "double"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 29,
+   "name": "working_profile_local_reset_field",
+   "c_name": "db1_working_profile_local_reset_field",
+   "c_params": [
+    "field"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "field",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 30,
+   "name": "tool_local_availability_set",
+   "c_name": "db1_tool_local_availability_set",
+   "c_params": [
+    "tool_uuid",
+    "usable",
+    "binary_path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "usable",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "binary_path",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 31,
+   "name": "tool_local_availability_get",
+   "c_name": "db1_tool_local_availability_get",
+   "c_params": [
+    "tool_uuid",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_tool_local_availability_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text"
+     },
+     {
+      "name": "usable",
+      "type": "int"
+     },
+     {
+      "name": "binary_path",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 32,
+   "name": "tool_local_availability_delete",
+   "c_name": "db1_tool_local_availability_delete",
+   "c_params": [
+    "tool_uuid"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 33,
+   "name": "tool_local_availability_list",
+   "c_name": "db1_tool_local_availability_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_tool_local_availability_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "tool_uuid",
+      "type": "text"
+     },
+     {
+      "name": "usable",
+      "type": "int"
+     },
+     {
+      "name": "binary_path",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 34,
+   "name": "context_cache_get",
+   "c_name": "db1_context_cache_get",
+   "c_params": [
+    "hash",
+    "out",
+    "out_len"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "hash",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 35,
+   "name": "context_cache_put",
+   "c_name": "db1_context_cache_put",
+   "c_params": [
+    "hash",
+    "output"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "hash",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 36,
+   "name": "context_cache_invalidate",
+   "c_name": "db1_context_cache_invalidate",
+   "c_params": [],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 37,
+   "name": "context_snapshot_insert",
+   "c_name": "db1_context_snapshot_insert",
+   "c_params": [
+    "session_id",
+    "memory_id",
+    "relevance_score"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "relevance_score",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 38,
+   "name": "context_snapshot_count_min_samples",
+   "c_name": "db1_context_snapshot_count_memories_with_min_samples",
+   "c_params": [
+    "min_samples"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "min_samples",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 39,
+   "name": "context_snapshot_ids_min_samples",
+   "c_name": "db1_context_snapshot_list_memory_ids_with_min_samples",
+   "c_params": [
+    "min_samples",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "min_samples",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 1024,
+     "column": {
+      "kind": "int64"
+     }
+    },
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 40,
+   "name": "context_snapshot_count_for_memory",
+   "c_name": "db1_context_snapshot_count_for_memory",
+   "c_params": [
+    "memory_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 41,
+   "name": "context_snapshot_sessions_for_memory",
+   "c_name": "db1_context_snapshot_list_sessions_for_memory",
+   "c_params": [
+    "memory_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 512,
+     "column": {
+      "kind": "text",
+      "width": "DB1_CONTEXT_SNAPSHOT_SESSION_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 42,
+   "name": "context_snapshot_has_memory",
+   "c_name": "db1_context_snapshot_has_memory",
+   "c_params": [
+    "memory_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "present",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 43,
+   "name": "agent_cache_get",
+   "c_name": "db1_agent_cache_get",
+   "c_params": [
+    "role",
+    "prompt"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "result",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 44,
+   "name": "agent_cache_put",
+   "c_name": "db1_agent_cache_put",
+   "c_params": [
+    "role",
+    "prompt",
+    "result"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 45,
+   "name": "web_page_get",
+   "c_name": "db1_web_page_get",
+   "c_params": [
+    "url",
+    "age_secs",
+    "pinned_addr_out",
+    "pinned_addr_len"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "body",
+      "type": "text",
+      "alloc": 1048576
+     },
+     {
+      "name": "age_secs",
+      "type": "int64"
+     },
+     {
+      "name": "pinned_addr",
+      "type": "text",
+      "width": "DB1_WEB_PAGE_ADDR_LEN"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 46,
+   "name": "web_page_put",
+   "c_name": "db1_web_page_put",
+   "c_params": [
+    "url",
+    "body",
+    "pinned_addr"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "body",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "pinned_addr",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 47,
+   "name": "web_page_drop",
+   "c_name": "db1_web_page_drop",
+   "c_params": [
+    "url"
+   ],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 48,
+   "name": "web_page_canonical_url",
+   "c_name": "db1_web_page_canonical_url",
+   "c_params": [
+    "url",
+    "out",
+    "out_len"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "url",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "canonical",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 49,
+   "name": "fsnap_create",
+   "c_name": "db1_fsnap_create",
+   "c_params": [
+    "session_id",
+    "turn",
+    "label"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "label",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 50,
+   "name": "fsnap_get_or_create",
+   "c_name": "db1_fsnap_get_or_create",
+   "c_params": [
+    "session_id",
+    "turn",
+    "label"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "turn",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "label",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 51,
+   "name": "fsnap_record_file",
+   "c_name": "db1_fsnap_record_file",
+   "c_params": [
+    "snap_id",
+    "path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "path",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 52,
+   "name": "fsnap_prune",
+   "c_name": "db1_fsnap_prune",
+   "c_params": [
+    "session_id",
+    "keep"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "keep",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "pruned",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 53,
+   "name": "fsnap_list",
+   "c_name": "db1_fsnap_list",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "fsnap_info_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "turn",
+      "type": "int"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "label",
+      "type": "text"
+     },
+     {
+      "name": "file_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 54,
+   "name": "fsnap_restore",
+   "c_name": "db1_fsnap_restore",
+   "c_params": [
+    "snap_id",
+    "files_restored",
+    "files_deleted"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "files_restored",
+      "type": "int"
+     },
+     {
+      "name": "files_deleted",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 55,
+   "name": "fsnap_get",
+   "c_name": "db1_fsnap_get",
+   "c_params": [
+    "snap_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "snap_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "fsnap_info_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "turn",
+      "type": "int"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "label",
+      "type": "text"
+     },
+     {
+      "name": "file_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 56,
+   "name": "decision_record",
+   "c_name": "db1_decision_record",
+   "c_params": [
+    "window_id",
+    "description",
+    "created_at"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "description",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 57,
+   "name": "mcp_osv_cache_get",
+   "c_name": "db1_mcp_osv_cache_get",
+   "c_params": [
+    "ecosystem",
+    "name",
+    "version",
+    "ttl_hours",
+    "out"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "ecosystem",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "version",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "ttl_hours",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_mcp_osv_cache_row_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "client_name",
+      "type": "text"
+     },
+     {
+      "name": "ecosystem",
+      "type": "text"
+     },
+     {
+      "name": "name",
+      "type": "text"
+     },
+     {
+      "name": "version",
+      "type": "text"
+     },
+     {
+      "name": "verdict",
+      "type": "text"
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "int64"
+     },
+     {
+      "name": "checked_at_text",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 58,
+   "name": "mcp_osv_cache_upsert",
+   "c_name": "db1_mcp_osv_cache_upsert",
+   "c_params": [
+    "ecosystem",
+    "name",
+    "version",
+    "verdict",
+    "advisory_ids"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "ecosystem",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "version",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "verdict",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 59,
+   "name": "mcp_osv_cache_list",
+   "c_name": "db1_mcp_osv_cache_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_mcp_osv_cache_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "client_name",
+      "type": "text"
+     },
+     {
+      "name": "ecosystem",
+      "type": "text"
+     },
+     {
+      "name": "name",
+      "type": "text"
+     },
+     {
+      "name": "version",
+      "type": "text"
+     },
+     {
+      "name": "verdict",
+      "type": "text"
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text"
+     },
+     {
+      "name": "checked_at",
+      "type": "int64"
+     },
+     {
+      "name": "checked_at_text",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "runtime",
+   "id": 60,
+   "name": "mcp_osv_audit",
+   "c_name": "db1_mcp_osv_audit",
+   "c_params": [
+    "client_name",
+    "ecosystem",
+    "name",
+    "version",
+    "verdict",
+    "action",
+    "advisory_ids"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "client_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "ecosystem",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "version",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "verdict",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "action",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "advisory_ids",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
    }
   }
  ]

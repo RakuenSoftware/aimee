@@ -7,7 +7,7 @@
  * the SUBCOMMAND was wrong. That message sends people hunting for a missing route
  * that already exists.
  *
- * The first cut of the helper walked rpc_routes with sizeof/sizeof, which runs
+ * The first cut of the helper walked cli_command_routes with sizeof/sizeof, which runs
  * off the end into the table's {NULL,...} sentinel and segfaults in strcmp. The
  * unknown-command case below is the regression guard for that crash. */
 
@@ -532,8 +532,72 @@ static void test_memory_recall_query_feeds_the_hint(void)
    printf("  memory recall --query feeds the hint the server reads\n");
 }
 
+/* MCP is an alternate transport, not a larger capability surface. The generic
+ * CLI projection must preserve the registered tool name and arguments, and the
+ * ergonomic ast-grep alias must reach that exact same dispatch. */
+static void test_every_mcp_tool_has_cli_dispatch(void)
+{
+   char *generic[] = {(char *)"ast_grep_search", (char *)"--lang", (char *)"python",
+                      (char *)"pattern=$OBJ.open($PATH)", (char *)"limit=12"};
+   cJSON *req = marshal_tool_call(5, generic);
+   assert(req);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "method")->valuestring, "mcp.call") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "tool")->valuestring, "ast_grep_search") ==
+          0);
+   cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(cJSON_IsObject(args));
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "lang")->valuestring, "python") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "pattern")->valuestring,
+                 "$OBJ.open($PATH)") == 0);
+   assert(cJSON_GetObjectItemCaseSensitive(args, "limit")->valueint == 12);
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(req, "cwd")));
+   cJSON_Delete(req);
+
+   char *alias[] = {(char *)"--lang", (char *)"python", (char *)"--path", (char *)"app",
+                    (char *)"$OBJ.open($PATH)"};
+   req = marshal_index_ast_grep(5, alias);
+   assert(req);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "method")->valuestring, "mcp.call") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "tool")->valuestring, "ast_grep_search") ==
+          0);
+   args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   const char *cwd = cJSON_GetObjectItemCaseSensitive(req, "cwd")->valuestring;
+   const char *path = cJSON_GetObjectItemCaseSensitive(args, "path")->valuestring;
+   assert(strncmp(path, cwd, strlen(cwd)) == 0);
+   assert(strcmp(path + strlen(cwd), "/app") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "pattern")->valuestring,
+                 "$OBJ.open($PATH)") == 0);
+   cJSON_Delete(req);
+
+   char *assignment[] = {(char *)"--lang", (char *)"python", (char *)"--path", (char *)"app",
+                         (char *)"$X.replace(day=$Y)"};
+   req = marshal_index_ast_grep(5, assignment);
+   assert(req);
+   args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "pattern")->valuestring,
+                 "$X.replace(day=$Y)") == 0);
+   cJSON_Delete(req);
+
+   char *default_path[] = {(char *)"--lang=python", (char *)"$OBJ.open($PATH)"};
+   req = marshal_index_ast_grep(2, default_path);
+   assert(req);
+   args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(args, "path")));
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "path")->valuestring,
+                 cJSON_GetObjectItemCaseSensitive(req, "cwd")->valuestring) == 0);
+   cJSON_Delete(req);
+
+   cli_v1_route_t route = {0};
+   char *sub[] = {(char *)"ast-grep"};
+   assert(cli_v1_lookup("index", 1, sub, &route) == 1);
+   assert(strcmp(route.method, "index.ast_grep") == 0);
+   assert(strcmp(route.server_method, "mcp.call") == 0);
+   printf("  every MCP tool has CLI dispatch; ast-grep has a first-class alias\n");
+}
+
 int main(void)
 {
+   test_every_mcp_tool_has_cli_dispatch();
    printf("test_cli_v1_subcommands\n");
    test_memory_store_keeps_unquoted_content();
    test_memory_get_as_of_is_wired();

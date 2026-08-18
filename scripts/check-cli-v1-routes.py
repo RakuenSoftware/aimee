@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Guard that the thin client's method -> /v1 route map is in sync with the
-server registry.
+"""Guard that every method the CLI can dispatch is actually reachable.
 
-The map is generated from src/server/server_http_routes.c by
-scripts/gen-cli-v1-routes.py and lives inline in the thin-client TU
-(src/cli_v1_routes*.c) between the @@GEN-CLI-V1-ROUTES BEGIN/END markers. This
-check regenerates the block and diffs it against what's committed in the file, so
-a registry change that isn't reflected in the committed map fails `make lint`
-instead of silently leaving the client without its first-class /v1 route.
+The client no longer carries a copy of the method -> /v1 route map; it fetches
+it from the server (GET /v1/cli/manifest), so there is no second copy to drift
+and nothing here to diff. The route set below is read from the server registry
+(via gen-cli-v1-routes.py, kept as the extractor) because that is now the only
+place it exists.
 
-Beyond that sync check, three independent directions must hold for a command to
+Three independent directions must hold for a command to
 actually work. Each has its own check, and each shipped broken at least once:
 
   route + marshaller, no dispatch row  -> unreachable_methods()
@@ -42,24 +40,12 @@ def committed_block():
 
 
 def main() -> int:
-    fname, committed = committed_block()
-    if committed is None:
-        print("check-cli-v1-routes: FAIL — @@GEN-CLI-V1-ROUTES markers not found in "
-              "src/cli_v1_routes*.c; run scripts/gen-cli-v1-routes.py")
-        return 1
-    fresh = subprocess.run([sys.executable, str(GEN), "--stdout"],
-                           check=True, capture_output=True, text=True).stdout.strip("\n")
-    if committed != fresh:
-        print("check-cli-v1-routes: FAIL — the generated /v1 route map is stale vs "
-              "server_http_routes.c; run scripts/gen-cli-v1-routes.py and commit.")
-        return 1
-    n = sum(1 for ln in fresh.splitlines() if ln.lstrip().startswith('{"'))
 
     orphans = unreachable_methods()
     if orphans:
         print("check-cli-v1-routes: FAIL — these /v1 methods have a route and a "
               "marshaller but no `aimee <cmd> <sub>` row in the dispatch table in "
-              "src/cli_v1_routes.c, so no thin client can invoke them:")
+              "src/server/cli_dispatch_defs_data.h, so no thin client can invoke them:")
         for m in orphans:
             print(f"  {m}")
         return 1
@@ -85,8 +71,8 @@ def main() -> int:
             print(f"  {m}")
         return 1
 
-    print(f"check-cli-v1-routes: ok ({n} client /v1 routes in sync, all reachable, "
-          f"all marshalled, all routed)")
+    print("check-cli-v1-routes: ok (all dispatchable methods reachable, marshalled "
+          "and routed; the route map itself is served by the server)")
     return 0
 
 
@@ -123,6 +109,10 @@ def marshal_coverage():
         for body in MARSHAL_FN_RE.findall(text):        # hand-written cases
             exact |= set(EXACT_RE.findall(body))
             prefixes |= set(PREFIX_RE.findall(body))
+    # The no-arg methods moved to the server so they can be SERVED: a client that
+    # cannot marshal refuses to send, so a new no-arg command was findable and
+    # addressable and still unusable. src/cli_v1_routes_b.c only #includes them now.
+    exact |= set(NO_ARGS_ITEM_RE.findall(NO_ARG_ROWS.read_text(encoding="utf-8")))
     return exact, prefixes
 
 
@@ -143,8 +133,7 @@ def dispatchable_without_marshaller():
     routed = set()
     for f in sorted(glob.glob(TARGET_GLOB)):
         routed |= set(ROUTE_RE.findall(Path(f).read_text(encoding="utf-8")))
-    dispatch = set(DISPATCH_RE.findall(
-        Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
+    dispatch = set(DISPATCH_RE.findall(DISPATCH_ROWS.read_text(encoding="utf-8")))
     exact, prefixes = marshal_coverage()
     # Only methods that also have a path: a dispatch row for a method with no route is
     # a different defect, reported by dispatchable_without_route(). (That was not true
@@ -162,8 +151,7 @@ def unreachable_methods():
         text = Path(f).read_text(encoding="utf-8")
         routed |= set(ROUTE_RE.findall(text))
         marshalled |= set(MARSHAL_RE.findall(text))
-    dispatch = set(DISPATCH_RE.findall(
-        Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
+    dispatch = set(DISPATCH_RE.findall(DISPATCH_ROWS.read_text(encoding="utf-8")))
     return sorted((routed & marshalled) - dispatch)
 
 
@@ -178,13 +166,17 @@ def unreachable_methods():
 # that: handler, capability entry, dispatch row, marshaller and printer all present,
 # and no row in g_v1_routes[].
 #
-# rpc_routes[] rows are (cmd, subcommand, method, server_method, ...). When
+# cli_command_routes[] rows are (cmd, subcommand, method, server_method, ...). When
 # server_method is set THAT is what gets routed, not method -- `aimee memory archive`
 # dispatches memory.archive but routes memory.user_capture, and `aimee git verify`
 # routes mcp.call. Resolving the wrong one here would report four working commands as
-# broken. Parse only the rpc_routes[] table, so unrelated brace-lists elsewhere in the
+# broken. Parse only the cli_command_routes[] table, so unrelated brace-lists elsewhere in the
 # file (bool flag names, response keys) cannot masquerade as dispatch rows.
-RPC_TABLE_RE = re.compile(r"\}\s*rpc_routes\[\]\s*=\s*\{(.*?)\n\};", re.S)
+RPC_TABLE_RE = re.compile(r"\}\s*cli_command_routes\[\]\s*=\s*\{(.*?)\n\};", re.S)
+# The rows themselves live with the server now (they are served to the client);
+# src/cli_v1_routes.c only #includes them.
+DISPATCH_ROWS = ROOT / "src" / "server" / "cli_dispatch_defs_data.h"
+NO_ARG_ROWS = ROOT / "src" / "server" / "cli_marshal_defs_data.h"
 RPC_ROW_RE = re.compile(
     r'\{"[a-z0-9_-]+",\s*(?:NULL|"[a-z0-9 _-]*")\s*,\s*"([a-z0-9_.]+)"\s*,'
     r'\s*(NULL|"[a-z0-9_.]+")')
@@ -197,18 +189,24 @@ PATHID_RE = re.compile(
 
 def dispatchable_without_route():
     """Methods the CLI dispatches that resolve to no /v1 route at all."""
-    routed = set()
+    # The server registry is the only place the route map lives now, so ask the
+    # extractor for it rather than scraping the client (which no longer has one).
+    fresh = subprocess.run([sys.executable, str(GEN), "--stdout"],
+                           check=True, capture_output=True, text=True).stdout
+    routed = set(ROUTE_RE.findall(fresh))
     for f in sorted(glob.glob(TARGET_GLOB)):
         text = Path(f).read_text(encoding="utf-8")
-        routed |= set(ROUTE_RE.findall(text))    # generated sync + async, and bespoke[]
+        routed |= set(ROUTE_RE.findall(text))    # bespoke[] rows still client-side
         routed |= set(PATHID_RE.findall(text))   # {id}-bearing prefix routes
-    src = Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")
-    table = RPC_TABLE_RE.search(src)
-    if not table:
-        raise SystemExit("check-cli-v1-routes: rpc_routes[] table not found in "
-                         "src/cli_v1_routes.c; this check cannot run")
+    # The rows are a bare initializer list in the shared data file (both the
+    # server, which serves them, and the client, which falls back to them,
+    # #include it), so there is no surrounding table to match -- read it whole.
+    rows = DISPATCH_ROWS.read_text(encoding="utf-8")
+    if '{"' not in rows:
+        raise SystemExit("check-cli-v1-routes: no dispatch rows in "
+                         f"{DISPATCH_ROWS}; this check cannot run")
     effective = set()
-    for method, server_method in RPC_ROW_RE.findall(table.group(1)):
+    for method, server_method in RPC_ROW_RE.findall(rows):
         effective.add(server_method.strip('"') if server_method != "NULL" else method)
     return sorted(effective - routed)
 

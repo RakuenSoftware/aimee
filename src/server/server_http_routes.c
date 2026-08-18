@@ -98,28 +98,7 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
 
-typedef enum
-{
-   RM_EXACT,  /* path == entry->path */
-   RM_PREFIX, /* path == entry->path + <id> ( + entry->suffix ), <id> one segment */
-} route_match_kind_t;
-
 static int mgmt_hex_key(const char *hex, unsigned char key[32]);
-
-/* One row of the /v1 route registry. `op`, when non-NULL, derives the required
- * capability from the NDJSON method twin (server_capability_for_method) so the
- * HTTP route inherits exactly its socket-method capability; otherwise `caps` is
- * used verbatim. `handler` is NULL for streaming routes (see file header). */
-typedef struct
-{
-   const char *verb;   /* "GET" / "POST" / "PUT" / "DELETE" */
-   const char *path;   /* exact path, or static prefix for RM_PREFIX */
-   const char *suffix; /* trailing segment for RM_PREFIX (e.g. "/stop"), else NULL */
-   route_match_kind_t kind;
-   const char *op;           /* NDJSON method twin for cap derivation, or NULL */
-   uint32_t caps;            /* required caps when op == NULL */
-   route_handler_fn handler; /* buffered handler, or NULL for streaming routes */
-} http_route_t;
 
 /* ── route handler adapters ───────────────────────────────────────────────
  * Thin uniform-signature wrappers over the existing route_* helpers so a single
@@ -1217,7 +1196,7 @@ static int rh_wf_proposal(const route_req_t *rq, char *resp, int cap)
  * server_dispatch against the connection caps (g_rpc_conn_caps). Only safe for
  * single-response methods (the buffered HTTP listener must not block): streaming
  * or foreground-blocking methods must not use this. */
-static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
+int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
 {
    if (!rq->op || !rq->op[0])
       return err_json(resp, cap, 500, "route has no dispatch method");
@@ -1491,7 +1470,7 @@ int server_http_submit_op_run(const char *op_method, const char *body_json, uint
    return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
 }
 
-static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
+int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
 {
    return submit_op_run_internal(rq->op, rq->body, g_rpc_conn_caps, 0, resp, cap);
 }
@@ -1752,7 +1731,7 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
 /* ── the registry ─────────────────────────────────────────────────────────
  * Rows are matched first-to-last; matches are mutually exclusive across
  * (verb, path, suffix), so order is not significant for correctness. */
-static const http_route_t g_v1_routes[] = {
+const http_route_t g_v1_routes[] = {
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
     {"GET", "/v1/ready", NULL, RM_EXACT, NULL, 0, rh_ready},
@@ -1771,6 +1750,11 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},
     {"GET", "/v1/models", NULL, RM_EXACT, NULL, 0, rh_models},
     {"GET", "/v1/openapi.json", NULL, RM_EXACT, NULL, 0, rh_openapi},
+    /* The client's route map. Public for the same reason the OpenAPI document
+     * is: it describes the surface, it grants nothing, and a client that cannot
+     * read it cannot address the server at all — so gating it would make an
+     * auth failure look like a missing command. */
+    {"GET", "/v1/cli/manifest", NULL, RM_EXACT, NULL, 0, rh_cli_manifest},
     {"GET", "/v1/openapi.yaml", NULL, RM_EXACT, NULL, 0, rh_openapi},
 
     /* Reads / queries — cap derived from the NDJSON twin where one exists, else

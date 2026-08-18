@@ -300,6 +300,33 @@ components:
         session_id: { type: string }
         attach_id: { type: string }
         events_url: { type: string }
+    CliManifest:
+      type: object
+      required: [manifest_version, routes]
+      properties:
+        manifest_version:
+          type: integer
+          description: >
+            Bumped only when the SHAPE of this document changes. A client that
+            does not recognise the version must say so rather than guess at the
+            rows.
+        server_version: { type: string }
+        routes:
+          type: array
+          items:
+            type: object
+            required: [op, verb, path]
+            properties:
+              op:
+                type: string
+                description: Method name the client asks for, e.g. "config.show".
+              verb: { type: string, enum: [GET, POST, PUT, DELETE] }
+              path: { type: string }
+              async:
+                type: boolean
+                description: >
+                  Present and true when POSTing returns a run handle to poll at
+                  GET /v1/runs/{id} instead of a final response.
 paths:
   /health:
     get:
@@ -311,6 +338,32 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /cli/manifest:
+    get:
+      summary: The thin client's method to route map
+      description: >
+        The map of dispatchable method (`op`) to `/v1` route, read off this
+        server's live route registry. The thin client fetches this instead of
+        carrying a compiled-in copy, so a capability added to the server is
+        reachable from an existing client with no client rebuild.
+
+        `async: true` marks rows whose POST returns a run handle to poll at
+        `GET /v1/runs/{id}` rather than a final response; the client must know
+        this to drive the request and cannot infer it from the path. Rows with
+        an inline `{id}` segment are not listed; those carry a different
+        marshalling contract.
+
+        Unauthenticated for the same reason as the OpenAPI document: it
+        describes the surface and grants nothing, and a client that cannot read
+        it cannot address the server at all, so gating it would make an
+        authentication failure look like a missing command.
+      security: []
+      responses:
+        "200":
+          description: The route map
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CliManifest' }
   /ready:
     get:
       summary: Readiness probe
