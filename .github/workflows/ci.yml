@@ -42,6 +42,24 @@ jobs:
   # success, so required checks remain mergeable for documentation-only PRs.
   change-scope:
     runs-on: ubuntu-latest
+    # No job here had a timeout, so a hung one ran until GitHub's 6-hour
+    # default. That is not hypothetical: five jobs on one run sat in_progress
+    # for three hours, `lint` stuck the whole time on "Install clang-format" --
+    # an apt-mirror hang with nothing to do with the change under test -- and
+    # would have held the PR for three more.
+    #
+    # 30 minutes is ~4.5x the slowest job measured across three green runs on
+    # `testing`:
+    #
+    #     6m33s  e2e-docker (T2)      2m59s  build-integrity
+    #     6m01s  e2e-docker (T1)      2m25s  lint
+    #     5m16s  unit-tests (1/2)     0m04s  change-scope
+    #
+    # Deliberately uniform and deliberately generous. Tuning each job to its own
+    # runtime is how module-inventory's descriptor-envelope ended up cancelled
+    # at 5m16s against a 5m cap, passing or failing on runner weather. This
+    # bounds a HANG; it is not a performance budget.
+    timeout-minutes: 30
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       # Separate from docs_only on purpose: see the documentation step below.
@@ -107,6 +125,7 @@ jobs:
     # Scans only the PR's NEW commits (base..head), so existing history is
     # grandfathered while any newly introduced trailer fails the PR.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -176,6 +195,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -237,6 +257,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -298,6 +319,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -335,6 +357,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     name: unit-tests (${{ matrix.label }}/2)
     strategy:
       fail-fast: false
@@ -447,6 +470,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       AIMEE_DB2_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_db2_process_ci
       EMBEDDER_DIMS: "384"
@@ -498,6 +522,7 @@ jobs:
     needs: [change-scope, unit-test-shards, db2-process-replay, p1-rls-gate]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Confirm complete unit gate
         env:
@@ -565,6 +590,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -650,6 +676,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -707,6 +734,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -774,6 +802,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -830,6 +859,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -909,6 +939,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -950,6 +981,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -995,6 +1027,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -1045,6 +1078,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -1135,6 +1169,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Set up MinGW-w64
@@ -1211,6 +1246,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # macOS ships ONE universal (arm64 + x86_64) thin client, matching the
@@ -1280,6 +1316,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -1316,6 +1353,7 @@ jobs:
     # One runner per topology so the deploy matrix runs in PARALLEL instead of
     # serially on one runner (T1+T2+T3 back-to-back was the long pole of CI).
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -1406,6 +1444,7 @@ jobs:
     # bootstrap bearer must pin the cert, auto-rotate to a strong bearer, and
     # persist it on both sides; the consumed bootstrap must be dead afterwards.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -1433,6 +1472,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -1463,6 +1503,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies

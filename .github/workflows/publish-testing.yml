@@ -51,6 +51,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -155,6 +156,7 @@ jobs:
   # two platforms. Adding a leg here is a matrix entry if that trade stops holding.
   thin-client:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
