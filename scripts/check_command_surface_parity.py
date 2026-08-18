@@ -56,7 +56,16 @@ def cli_routes():
     out = {}
     for m in re.finditer(r'\{"([a-z0-9_]+)",\s*"([a-z0-9_]*)",\s*"([a-z0-9_.]+)"', body):
         group, verb, method = m.groups()
-        out[method] = (group, verb)
+        # A LIST, not an assignment. This was `out[method] = (group, verb)`,
+        # last-writer-wins, so a method reachable under two group names
+        # collapsed to one entry and this report could not see aliasing at all
+        # -- it was blind to it by construction, not by omission. `agent` and
+        # `model` resolve to the same ten methods; `server` and `status` to the
+        # same one. The registry this report feeds rejects a duplicate
+        # (group, verb) by design, so those pairs are decisions someone has to
+        # make before it can be populated, and a report that hides them is
+        # worse than no report.
+        out.setdefault(method, []).append((group, verb))
     return out
 
 
@@ -132,9 +141,36 @@ def _plant_test():
     return 1
 
 
+def _plant_test_aliases():
+    """Prove the extractor still SEES a method under two group names.
+
+    It did not, for as long as this report existed: `out[method] = (group, verb)`
+    is last-writer-wins, so aliasing was invisible by construction. The first
+    plant test above only proves the rows can be read at all -- it would pass
+    just as happily with the collapsing assignment restored, which is exactly
+    how the blindness survived having a plant test.
+    """
+    global _CLI_TEXT
+    _CLI_TEXT = ('{"alpha", "run", "thing.run", NULL, NULL, 0},\n'
+                 '{"beta", "run", "thing.run", NULL, NULL, 0},\n')
+    try:
+        rows = cli_routes()
+    finally:
+        _CLI_TEXT = None
+    names = {g for g, _ in rows.get("thing.run", [])}
+    if names == {"alpha", "beta"}:
+        print("check_command_surface_parity: alias plant-test ok "
+              "(one method under two groups was kept, not collapsed)")
+        return 0
+    print("check_command_surface_parity: ALIAS PLANT FAIL - a method reachable under "
+          f"two groups came back as {sorted(names)}; aliasing is invisible again",
+          file=sys.stderr)
+    return 1
+
+
 def main():
     if "--plant-test" in sys.argv:
-        return _plant_test()
+        return _plant_test() or _plant_test_aliases()
     ap = argparse.ArgumentParser()
     ap.add_argument("--require", action="append", default=[],
                     help="group that MUST be consistent; exits non-zero if not")
@@ -145,7 +181,9 @@ def main():
     core = mcp_core()
     guide = guidance_names(core)
 
-    print(f"CLI routes (cli_command_routes[]):        {len(cli)}")
+    spellings = sum(len(v) for v in cli.values())
+    print(f"CLI methods (dispatch rows):       {len(cli)} "
+          f"({spellings} group/verb spellings)")
     print(f"MCP dispatch (mcp_tool_table[]):  {len(disp)}")
     print(f"MCP shown (MCP_CORE_TOOLS[]):     {len(core)}")
     print()
@@ -167,22 +205,46 @@ def main():
 
     # CLI groups whose verbs have no MCP presence at all, under either spelling.
     groups = {}
-    for method, (group, verb) in cli.items():
-        # Spellings actually in use are inconsistent -- memory.recall is
-        # `memory_recall` but memory.search is `search_memory`, verb-first. A
-        # mechanical mapping cannot tell "absent" from "spelled backwards", which
-        # is itself the thing the registry fixes, so try both orders and do not
-        # count a reversed hit as missing.
-        flat = f"{group}_{verb}" if verb else group
-        rev = f"{verb}_{group}" if verb else group
-        seen = flat in disp or rev in disp or method.replace(".", "_") in disp or group in disp
-        groups.setdefault(group, []).append((method, seen))
+    for method, spellings in cli.items():
+      for group, verb in spellings:
+          # Spellings actually in use are inconsistent -- memory.recall is
+          # `memory_recall` but memory.search is `search_memory`, verb-first. A
+          # mechanical mapping cannot tell "absent" from "spelled backwards", which
+          # is itself the thing the registry fixes, so try both orders and do not
+          # count a reversed hit as missing.
+          flat = f"{group}_{verb}" if verb else group
+          rev = f"{verb}_{group}" if verb else group
+          seen = flat in disp or rev in disp or method.replace(".", "_") in disp or group in disp
+          groups.setdefault(group, []).append((method, seen))
     missing_groups = {g: [m for m, s in v if not s] for g, v in groups.items()}
     missing_groups = {g: v for g, v in missing_groups.items() if v}
     total_missing = sum(len(v) for v in missing_groups.values())
     print(f"CLI routes with no MCP counterpart: {total_missing} across {len(missing_groups)} groups")
     for g in sorted(missing_groups)[:10]:
         print(f"  {g:16s} {len(missing_groups[g]):3d}  e.g. {missing_groups[g][0]}")
+
+    # Methods reachable under more than one group name. The registry's whole
+    # invariant is that a name resolves one way, and these are the places where
+    # two already do -- each one a decision (keep both as aliases, or retire
+    # one) that has to be made before the table can be populated.
+    aliased = {m: gs for m, gs in cli.items() if len({g for g, _ in gs}) > 1}
+    print(f"\nmethods reachable under more than one group: {len(aliased)}")
+    for method in sorted(aliased):
+        names = sorted({g for g, _ in aliased[method]})
+        print(f"  {method:28s} <- {', '.join(names)}")
+
+    # And groups whose method sets are the SAME set, which is the stronger
+    # statement: not an overlap, a second name for one capability.
+    by_group = {}
+    for method, spellings in cli.items():
+        for group, _ in spellings:
+            by_group.setdefault(group, set()).add(method)
+    names = sorted(by_group)
+    identical = [(a, b) for i, a in enumerate(names) for b in names[i + 1:]
+                 if by_group[a] and by_group[a] == by_group[b]]
+    print(f"groups whose method sets are identical: {len(identical)}")
+    for a, b in identical:
+        print(f"  {a} == {b}  ({len(by_group[a])} method(s))")
 
     rc = 0
     for group in args.require:
