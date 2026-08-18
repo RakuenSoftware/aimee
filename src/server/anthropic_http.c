@@ -30,6 +30,7 @@
 #include "modules/memory/gw_stage_memory.h"
 #include "gw_stage_registry.h"
 #include "gw_stage_governance.h"
+#include "gw_stage_completion.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include <aimee/ir/aimee_ir_metrics.h>
@@ -526,6 +527,48 @@ static int messages_buffered(const char *body, char *resp, int cap)
    }
 
    translate_request(req, driver, ag, &messages, &tools, &system_text);
+   {
+      char *tool_system = gw_request_tool_system_prompt(tools, system_text);
+      if (tool_system)
+         LOG_INFO("aimee.tools", "applied CLI-first policy to buffered Anthropic turn");
+      char *completion_system =
+          gw_request_completion_system_prompt(messages, tool_system ? tool_system : system_text);
+      if (completion_system)
+      {
+         LOG_INFO("completion.gate", "applied continuation policy to buffered Anthropic turn");
+         free(system_text);
+         system_text = completion_system;
+         if (parity)
+         {
+            cJSON *system = cJSON_CreateString(system_text);
+            if (system)
+            {
+               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
+                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
+               else
+                  cJSON_AddItemToObject(req, "system", system);
+            }
+         }
+      }
+      else if (tool_system)
+      {
+         free(system_text);
+         system_text = tool_system;
+         tool_system = NULL;
+         if (parity)
+         {
+            cJSON *system = cJSON_CreateString(system_text);
+            if (system)
+            {
+               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
+                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
+               else
+                  cJSON_AddItemToObject(req, "system", system);
+            }
+         }
+      }
+      free(tool_system);
+   }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
@@ -652,6 +695,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
                                    parsed.prompt_tokens, parsed.completion_tokens,
                                    parsed.cache_write_tokens, parsed.cache_read_tokens,
                                    "anthropic-ingress", NULL);
+
+      if (gw_response_run_completion(&parsed, messages, tools, "tool_use"))
+         LOG_INFO("completion.gate", "continued incomplete buffered Anthropic repair");
    }
 
    mint_msg_id(msg_id, sizeof(msg_id));
@@ -983,6 +1029,7 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
                                             const char *extra, agent_t *ag,
                                             const delegate_driver_t *driver, const char *model,
                                             const char *msg_id, int responses_wire,
+                                            const cJSON *messages, const cJSON *tools,
                                             server_http_sse_event_emit emit, void *ctx)
 {
    char *buf_resp = NULL;
@@ -1011,7 +1058,6 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
          }
          gw_response_run_governance(&parsed, anthropic_governance_enabled(),
                                     gateway_prevent_subagents_enabled());
-         emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
          /* Cost accounting (mirror the buffered path). */
          if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
              agent_ingress_accounting_enabled())
@@ -1019,6 +1065,12 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
                                       parsed.prompt_tokens, parsed.completion_tokens,
                                       parsed.cache_write_tokens, parsed.cache_read_tokens,
                                       "anthropic-ingress", NULL);
+         /* The continuation may rewrite `parsed`, so it has to run BEFORE the
+          * reply is serialised to the client -- emitting first would ship the
+          * incomplete answer and then repair a copy nobody sees. */
+         if (gw_response_run_completion(&parsed, messages, tools, "tool_use"))
+            LOG_INFO("completion.gate", "continued incomplete streamed Anthropic repair");
+         emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
          agent_free_parsed_response(&parsed);
       }
       else
@@ -1033,7 +1085,6 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
             aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
             gw_response_run_governance(&parsed, anthropic_governance_enabled(),
                                        gateway_prevent_subagents_enabled());
-            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
             /* Cost accounting (mirror the buffered path). */
             if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
                 agent_ingress_accounting_enabled())
@@ -1041,6 +1092,12 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
                                          parsed.prompt_tokens, parsed.completion_tokens,
                                          parsed.cache_write_tokens, parsed.cache_read_tokens,
                                          "anthropic-ingress", NULL);
+            /* The continuation may rewrite `parsed`, so it has to run BEFORE the
+             * reply is serialised to the client -- emitting first would ship the
+             * incomplete answer and then repair a copy nobody sees. */
+            if (gw_response_run_completion(&parsed, messages, tools, "tool_use"))
+               LOG_INFO("completion.gate", "continued incomplete streamed Anthropic repair");
+            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
             agent_free_parsed_response(&parsed);
          }
          else
@@ -1305,6 +1362,48 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    }
 
    translate_request(req, driver, ag, &messages, &tools, &system_text);
+   {
+      char *tool_system = gw_request_tool_system_prompt(tools, system_text);
+      if (tool_system)
+         LOG_INFO("aimee.tools", "applied CLI-first policy to streamed Anthropic turn");
+      char *completion_system =
+          gw_request_completion_system_prompt(messages, tool_system ? tool_system : system_text);
+      if (completion_system)
+      {
+         LOG_INFO("completion.gate", "applied continuation policy to streamed Anthropic turn");
+         free(system_text);
+         system_text = completion_system;
+         if (parity)
+         {
+            cJSON *system = cJSON_CreateString(system_text);
+            if (system)
+            {
+               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
+                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
+               else
+                  cJSON_AddItemToObject(req, "system", system);
+            }
+         }
+      }
+      else if (tool_system)
+      {
+         free(system_text);
+         system_text = tool_system;
+         tool_system = NULL;
+         if (parity)
+         {
+            cJSON *system = cJSON_CreateString(system_text);
+            if (system)
+            {
+               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
+                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
+               else
+                  cJSON_AddItemToObject(req, "system", system);
+            }
+         }
+      }
+      free(tool_system);
+   }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
       goto cleanup;
@@ -1398,7 +1497,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    if (gateway_prevent_subagents_enabled() || responses_wire)
    {
       messages_stream_buffered_replay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,
-                                      driver, model, msg_id, responses_wire, emit, ctx);
+                                      driver, model, msg_id, responses_wire, messages, tools, emit,
+                                      ctx);
       goto cleanup;
    }
 
