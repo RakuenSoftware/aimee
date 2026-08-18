@@ -213,12 +213,12 @@ extern "C"
    } rtp_gate_t;
 
    /* ---- runs ---- */
-   int rtp_run_create(const char *idea, const char *done_bar, const char *repo_root,
-                      const char *base_branch, int *out_id);
-   int rtp_run_get(int id, rtp_run_t *out);
+   int db1_roundtable_run_create(const char *idea, const char *done_bar, const char *repo_root,
+                                 const char *base_branch, int *out_id);
+   int db1_roundtable_run_get(int id, rtp_run_t *out);
    /* Full update of all mutable columns from the struct, keyed by out->id. */
-   int rtp_run_update(const rtp_run_t *run);
-   int rtp_run_set_state(int id, const char *state, const char *phase);
+   int db1_roundtable_run_update(const rtp_run_t *run);
+   int db1_roundtable_run_set_state(int id, const char *state, const char *phase);
    /* Atomic compare-and-swap of the run state: move id from `expected` to `next`
     * only if the row's current state still equals `expected`. Returns 0 when
     * exactly one row changed (the caller won the transition), -1 otherwise (no
@@ -226,49 +226,50 @@ extern "C"
     * (#55) so two concurrent `gate pass` calls cannot both merge. `expected` and
     * `next` must differ: a no-op SET changes zero rows and would report a false
     * "already resolved" (-1). */
-   int rtp_run_cas_state(int id, const char *expected, const char *next);
+   int db1_roundtable_run_cas_state(int id, const char *expected, const char *next);
    /* List by state filter (NULL = all non-terminal). Returns count or -1. */
-   int rtp_run_list(const char *state_filter, rtp_run_t *out, int max);
+   int db1_roundtable_run_list(const char *state_filter, rtp_run_t *out, int max);
    /* Count runs whose admission_class == 'active' (section 1 admission control). */
-   int rtp_run_count_active(void);
+   int db1_roundtable_run_count_active(void);
    /* The id of a non-terminal run that already owns head_branch (optionally
     * scoped to repo_root), excluding exclude_id; 0 if none. Branch/PR ownership
     * guard so two runs can't mutate the same branch/PR (#48). */
-   int rtp_run_branch_owner(const char *repo_root, const char *head_branch, int exclude_id);
+   int db1_roundtable_run_branch_owner(const char *repo_root, const char *head_branch,
+                                       int exclude_id);
 
    /* ---- passes ---- */
-   int rtp_pass_create(int pipeline_id, const char *phase, const char *mode, int pass_no,
-                       const char *artifact_hash, int *out_id);
-   int rtp_pass_get(int id, rtp_pass_t *out);
-   int rtp_pass_update(const rtp_pass_t *pass);
+   int db1_roundtable_pass_create(int pipeline_id, const char *phase, const char *mode, int pass_no,
+                                  const char *artifact_hash, int *out_id);
+   int db1_roundtable_pass_get(int id, rtp_pass_t *out);
+   int db1_roundtable_pass_update(const rtp_pass_t *pass);
    /* Most recent pass for a pipeline+phase (highest pass_no). */
-   int rtp_pass_latest(int pipeline_id, const char *phase, rtp_pass_t *out);
+   int db1_roundtable_pass_latest(int pipeline_id, const char *phase, rtp_pass_t *out);
    /* Highest pass_no for pipeline+phase, or 0 if none. */
-   int rtp_pass_max_no(int pipeline_id, const char *phase);
+   int db1_roundtable_pass_max_no(int pipeline_id, const char *phase);
    /* Highest chunk_group for a pipeline+phase, or 0 if none. */
-   int rtp_pass_max_group(int pipeline_id, const char *phase);
+   int db1_roundtable_pass_max_group(int pipeline_id, const char *phase);
    /* Aggregate the passes of one chunked-review group. Returns 0 ok, -1 error. */
-   int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group,
-                          rtp_group_agg_t *out);
+   int db1_roundtable_pass_group_agg(int pipeline_id, const char *phase, int chunk_group,
+                                     rtp_group_agg_t *out);
 
    /* ---- attempts ---- */
-   int rtp_attempt_create(int pass_id, int attempt_no, const char *run_id, int *out_id);
-   int rtp_attempt_get_by_run(const char *run_id, rtp_attempt_t *out);
-   int rtp_attempt_current(int pass_id, rtp_attempt_t *out);
-   int rtp_attempt_update(const rtp_attempt_t *attempt);
+   int db1_roundtable_attempt_create(int pass_id, int attempt_no, const char *run_id, int *out_id);
+   int db1_roundtable_attempt_get_by_run(const char *run_id, rtp_attempt_t *out);
+   int db1_roundtable_attempt_current(int pass_id, rtp_attempt_t *out);
+   int db1_roundtable_attempt_update(const rtp_attempt_t *attempt);
    /* Highest attempt_no for a pass, or 0 if none. */
-   int rtp_attempt_max_no(int pass_id);
+   int db1_roundtable_attempt_max_no(int pass_id);
    /* Mark every attempt of pass_id except keep_attempt_id as not-current. */
-   int rtp_attempt_supersede_others(int pass_id, int keep_attempt_id);
+   int db1_roundtable_attempt_supersede_others(int pass_id, int keep_attempt_id);
 
    /* ---- gates ---- */
-   int rtp_gate_create(int pipeline_id, int gate_no, int pr_number, const char *expected_head_sha,
-                       int *out_id);
-   int rtp_gate_get(int pipeline_id, int gate_no, rtp_gate_t *out);
-   int rtp_gate_update(const rtp_gate_t *gate);
+   int db1_roundtable_gate_create(int pipeline_id, int gate_no, int pr_number,
+                                  const char *expected_head_sha, int *out_id);
+   int db1_roundtable_gate_get(int pipeline_id, int gate_no, rtp_gate_t *out);
+   int db1_roundtable_gate_update(const rtp_gate_t *gate);
    /* 1 if the gate row's created_at is older than `hours` (unanswered-gate TTL,
     * #47/#57); 0 otherwise or on error. */
-   int rtp_gate_age_exceeds_hours(int pipeline_id, int gate_no, int hours);
+   int db1_roundtable_gate_age_exceeds_hours(int pipeline_id, int gate_no, int hours);
 
 #ifdef __cplusplus
 }
