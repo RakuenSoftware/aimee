@@ -75,7 +75,7 @@ int roadmap_report_write(const char *roadmap_id)
    const char *rm_phase = "";
    rdm_dispatch_t disp;
    memset(&disp, 0, sizeof(disp));
-   if (rdm_dispatch_get(roadmap_id, &disp) == 0)
+   if (db1_roadmap_dispatch_get(roadmap_id, &disp) == 0)
    {
       rm_status = disp.status;
       rm_phase = disp.phase;

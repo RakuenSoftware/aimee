@@ -110,7 +110,7 @@ int roadmap_milestone_all_done(const char *roadmap_id, const char *parent_id, co
 
       /* Check DB1 state. */
       rdm_unit_dispatch_t u;
-      if (rdm_unit_get(roadmap_id, uid, &u) != 0)
+      if (db1_roadmap_unit_get(roadmap_id, uid, &u) != 0)
       {
          cJSON_Delete(payload);
          aimee_pg_finalize(st);
