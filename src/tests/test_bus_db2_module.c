@@ -65,6 +65,7 @@ typedef struct
    int (*demote_kind)(const char *ts, const char *kind, double confidence, const char *days_neg);
    int (*demote_cascade)(const char *ts);
    int (*promote_stable)(const char *ts);
+   int (*reclassify_directives)(int require_approval);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -126,6 +127,7 @@ static int expire_stale_provenance_calls;
 static int demote_cascade_calls;
 static char demote_kind_stamp[32];
 static int promote_stable_calls;
+static int reclassify_last_gate;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -623,6 +625,19 @@ static int promote_stable(const char *ts)
    return ts && ts[0] ? 4 : -1;
 }
 
+int db2_memory_promotion_reclassify_directives(int require_approval)
+{
+   (void)require_approval;
+   return 0;
+}
+
+static int reclassify_directives(int require_approval)
+{
+   reclassify_last_gate = require_approval;
+   /* The gated path promotes fewer rows than the open one. */
+   return require_approval ? 3 : 7;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -942,6 +957,7 @@ int main(void)
        .demote_kind = demote_kind,
        .demote_cascade = demote_cascade,
        .promote_stable = promote_stable,
+       .reclassify_directives = reclassify_directives,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1105,6 +1121,14 @@ int main(void)
    assert(aimee_db2_promote_stable_call(call_client, &client, 7039, 0, &tier_promoted, NULL,
                                         NULL) == AIMEE_MODULE_CALL_OK);
    assert(tier_promoted == 4 && promote_stable_calls == 1);
+
+   uint32_t reclassified = 99;
+   assert(aimee_db2_reclassify_directives_call(call_client, &client, 7040, 0, 1u, &reclassified,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reclassified == 3 && reclassify_last_gate == 1);
+   assert(aimee_db2_reclassify_directives_call(call_client, &client, 7041, 0, 0u, &reclassified,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reclassified == 7 && reclassify_last_gate == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

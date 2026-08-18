@@ -295,6 +295,11 @@ int main(int argc, char **argv)
                                         NULL) == AIMEE_MODULE_CALL_OK);
    assert(tier_promoted == 0);
 
+   uint32_t reclassified = 99;
+   assert(aimee_db2_reclassify_directives_call(call_client, &client, 9042, 0, 1u, &reclassified,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reclassified == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

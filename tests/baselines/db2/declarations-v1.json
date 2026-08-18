@@ -17682,9 +17682,15 @@
           "line": 79
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.reclassify_directives operation fixes the tiers and directive kinds and carries only the approval gate, which is a genuine caller choice: the batch path runs ungated while the operator approval path requires a recorded approval for policies."
+      },
       "signature": "int db2_memory_promotion_reclassify_directives ( int require_approval )",
       "signature_sha256": "88e3de895e181cfa0e53afb4a04454b155146ff7e1666a483f350f9079216153",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_reclassify_directives"
     },
     {
@@ -25776,15 +25782,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c7d5b9d8be3082affb3a04d7352b5330bd9cd1739649ac309cc1ca3229a3cef7",
+  "fingerprint": "7a25f8ec444a4061fad60691c6a3fd3477bed28ac2e8fe5cf24a107244ee06d5",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 666,
+    "audit_pending": 665,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 292
+    "reviewed": 293
   }
 }

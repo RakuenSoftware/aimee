@@ -266,6 +266,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .demote_kind = db2_memory_promotion_demote_kind,
        .demote_cascade = db2_memory_promotion_demote_cascade,
        .promote_stable = db2_memory_promotion_promote_stable_l2_to_l3,
+       .reclassify_directives = db2_memory_promotion_reclassify_directives,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -755,6 +756,24 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_promote_stable_reply_encode((uint32_t)promoted, response_body,
                                                    response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint32_t require_approval = 0u;
+      if (aimee_db2_reclassify_directives_request_decode(request_body, request_len,
+                                                         &require_approval) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->reclassify_directives)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int reclassified = backend->reclassify_directives((int)require_approval);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (reclassified < 0 || reclassified > (int)AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_reclassify_directives_reply_encode((uint32_t)reclassified, response_body,
+                                                          response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

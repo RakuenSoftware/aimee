@@ -56,6 +56,9 @@ type wireBaseline struct {
 			ConfidenceBits             uint64   `json:"confidence_bits"`
 			UseCount                   uint32   `json:"use_count"`
 			StableDays                 uint32   `json:"stable_days"`
+			GatedKind                  string   `json:"gated_kind"`
+			RequireApproval            uint32   `json:"require_approval"`
+			OpenPositive               string   `json:"open_positive"`
 			Promotions                 uint32   `json:"promotions"`
 			Demotions                  uint32   `json:"demotions"`
 			Expirations                uint32   `json:"expirations"`
@@ -92,6 +95,7 @@ type wireBaseline struct {
 				StaleLevel1Deleted    uint32            `json:"stale_level1_deleted"`
 				CascadedCount         uint32            `json:"cascaded_count"`
 				PromotedCount         uint32            `json:"promoted_count"`
+				ReclassifiedCount     uint32            `json:"reclassified_count"`
 				Exists                uint32            `json:"exists"`
 				Found                 uint32            `json:"found"`
 				ID                    uint64            `json:"id"`
@@ -210,7 +214,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 30 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 31 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -239,7 +243,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[26].Name != "stats_counts" ||
 		baseline.Operations[27].Name != "expire" ||
 		baseline.Operations[28].Name != "demote" ||
-		baseline.Operations[29].Name != "promote_stable" {
+		baseline.Operations[29].Name != "promote_stable" ||
+		baseline.Operations[30].Name != "reclassify_directives" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -1063,6 +1068,62 @@ func TestPromoteStableMatchesEverySharedCVector(t *testing.T) {
 	}
 	if _, err := EncodePromoteStableReply(PromoteStableMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
 		t.Fatalf("promoted count past its bound encoded: %v", err)
+	}
+}
+
+func TestReclassifyDirectivesMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[30]
+	request := operation.Request
+	if request.SourceTier != ReclassifyDirectivesSourceTier ||
+		request.TargetTier != ReclassifyDirectivesTargetTier ||
+		request.GatedKind != ReclassifyDirectivesGatedKind {
+		t.Fatalf("directive policy = (%q, %q, %q), generated = (%q, %q, %q)",
+			request.SourceTier, request.TargetTier, request.GatedKind,
+			ReclassifyDirectivesSourceTier, ReclassifyDirectivesTargetTier,
+			ReclassifyDirectivesGatedKind)
+	}
+	// Both gate settings round-trip: the gated request and the open one.
+	for _, probe := range []struct {
+		gate uint32
+		hex  string
+	}{{request.RequireApproval, request.Positive}, {0, request.OpenPositive}} {
+		want := decodeHex(t, probe.hex)
+		got, err := EncodeReclassifyDirectivesRequest(probe.gate)
+		if err != nil || string(got) != string(want) {
+			t.Fatalf("request gate=%d = (%x, %v), want %x", probe.gate, got, err, want)
+		}
+		gate, err := DecodeReclassifyDirectivesRequest(want)
+		if err != nil || gate != probe.gate {
+			t.Fatalf("decode gate = (%d, %v), want %d", gate, err, probe.gate)
+		}
+	}
+	for _, vector := range request.Negative {
+		if _, err := DecodeReclassifyDirectivesRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeReclassifyDirectivesReply(vector.ReclassifiedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		reclassified, err := DecodeReclassifyDirectivesReply(got)
+		if err != nil || reclassified != vector.ReclassifiedCount {
+			t.Fatalf("decode = (%d, %v)", reclassified, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		reclassified, err := DecodeReclassifyDirectivesReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || reclassified != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, reclassified, err)
+		}
+	}
+	// The gate is a boolean.
+	if _, err := EncodeReclassifyDirectivesRequest(ReclassifyDirectivesGateMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("gate past its bound encoded: %v", err)
+	}
+	if _, err := EncodeReclassifyDirectivesReply(ReclassifyDirectivesMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("reclassified count past its bound encoded: %v", err)
 	}
 }
 

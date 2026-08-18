@@ -1612,6 +1612,14 @@
       "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy — tier, kinds, confidence floor, use count, and settling window — so callers cannot promote rows into the slow-changing tier on terms of their own."
     },
     {
+      "symbol": "db2_memory_promotion_reclassify_directives",
+      "signature_sha256": "88e3de895e181cfa0e53afb4a04454b155146ff7e1666a483f350f9079216153",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.reclassify_directives operation fixes the tiers and directive kinds and carries only the approval gate, which is a genuine caller choice: the batch path runs ungated while the operator approval path requires a recorded approval for policies."
+    },
+    {
       "symbol": "db2_memory_provenance_delete",
       "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
       "disposition": "private-db2",

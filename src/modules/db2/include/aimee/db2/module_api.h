@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "d30da8bc27f6684fb7e63b507fe7cc3c8aebbc72c9f36f47bb5ba2245ad2a8f2"
+#define AIMEE_DB2_CONTRACT_SHA256 "3dd161daf451c4f71eee4d5cc7a588fa3e5a8b81d1001f4d773871222f56e636"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -291,6 +291,17 @@
 #define AIMEE_DB2_PROMOTE_STABLE_USE_COUNT                5u
 #define AIMEE_DB2_PROMOTE_STABLE_DAYS                     30u
 #define AIMEE_DB2_PROMOTE_STABLE_MAX                      2147483647u
+#define AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES             AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES             AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES         21u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN       28u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN      28u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_ERROR_LEN         24u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_SOURCE_TIER       "L3"
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_TARGET_TIER       "L4"
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATED_KIND        "policy"
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX          1u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX               2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1985,6 +1996,76 @@ static inline int aimee_db2_promote_stable_reply_decode(const uint8_t *input, si
    if (decoded > AIMEE_DB2_PROMOTE_STABLE_MAX)
       return -1;
    *promoted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_reclassify_directives_request_encode(uint32_t require_approval,
+                                                                 uint8_t *output, size_t capacity)
+{
+   if (!output || require_approval > AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX ||
+       capacity < AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES, 0u, 4u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, require_approval);
+   return 0;
+}
+
+static inline int aimee_db2_reclassify_directives_request_decode(const uint8_t *input,
+                                                                 size_t input_len,
+                                                                 uint32_t *require_approval)
+{
+   if (require_approval)
+      *require_approval = 0u;
+   if (!require_approval)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES || header.flags != 0u ||
+       header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX)
+      return -1;
+   *require_approval = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_reclassify_directives_reply_encode(uint32_t reclassified_count,
+                                                               uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || reclassified_count > AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX ||
+       capacity < AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, reclassified_count);
+   *output_len = AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_reclassify_directives_reply_decode(const uint8_t *input,
+                                                               size_t input_len,
+                                                               uint32_t *reclassified_count)
+{
+   if (reclassified_count)
+      *reclassified_count = 0u;
+   if (!reclassified_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX)
+      return -1;
+   *reclassified_count = decoded;
    return 0;
 }
 

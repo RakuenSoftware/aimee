@@ -564,6 +564,33 @@ class ContractTests(unittest.TestCase):
              "promoted_count_too_large", "short", "long"],
         )
 
+    def test_reclassify_directives_vectors_cover_both_gate_settings(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][30]
+        self.assertEqual(operation["name"], "reclassify_directives")
+        request = operation["request"]
+        self.assertEqual(
+            (request["source_tier"], request["target_tier"], request["kinds"],
+             request["gated_kind"], request["require_approval"]),
+            ("L3", "L4", ["policy", "workflow"], "policy", 1),
+        )
+        # The open request is a canonical vector too, not just the gated one.
+        self.assertNotEqual(request["open_positive"], request["positive"])
+        self.assertEqual(
+            [row["mutation"] for row in request["negative"]],
+            ["bad_flags", "payload_length", "gate_out_of_range", "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["reclassified_count"])
+             for row in operation["reply"]["positive"]],
+            [(0, 3)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "reclassified_count_too_large", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -1183,6 +1210,36 @@ class ContractTests(unittest.TestCase):
         for mutate, rule in cases:
             with self.subTest(rule=rule):
                 self.assert_rule(mutate, rule)
+
+    def test_reclassify_directives_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][30].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][30].__setitem__("results", ["ok", "denied"]),
+             "operation-results"),
+            (lambda value: value["operations"][30]["request"]["policy"].__setitem__(
+                "target_tier", "L5"), "reclassify-directives-request"),
+            (lambda value: value["operations"][30]["request"]["policy"]["kinds"].append("fact"),
+             "reclassify-directives-request"),
+            # A gate wider than a boolean would admit undefined settings.
+            (lambda value: value["operations"][30]["request"]["field"].__setitem__("maximum", 2),
+             "reclassify-directives-request"),
+            (lambda value: value["operations"][30]["reply"]["field"].__setitem__(
+                "maximum", 0xffffffff), "reclassify-directives-reply"),
+            (lambda value: value["operations"][30].__setitem__("transaction", "none"),
+             "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_reclassify_directives_gate_must_narrow_a_promotable_kind(self) -> None:
+        # A gated kind outside the promotable set would make the gate a no-op:
+        # every eligible row would bypass it.
+        def mutate(value):
+            value["operations"][30]["request"]["policy"]["gated_kind"] = "fact"
+            value["operations"][30]["request"]["policy"]["kinds"] = ["policy", "workflow"]
+        self.assert_rule(mutate, "reclassify-directives-request")
 
     def test_pool_status_shape_mutations(self) -> None:
         cases = (

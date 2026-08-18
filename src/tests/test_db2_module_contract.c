@@ -93,6 +93,9 @@ static char demote_cascade_stamp[32];
 static int promote_stable_value;
 static int promote_stable_calls;
 static char promote_stable_stamp[32];
+static int reclassify_value;
+static int reclassify_calls;
+static int reclassify_last_gate;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -140,6 +143,7 @@ static int transport_expect_stats_counts;
 static int transport_expect_expire;
 static int transport_expect_demote;
 static int transport_expect_promote_stable;
+static int transport_expect_reclassify;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -667,6 +671,19 @@ int db2_memory_promotion_promote_stable_l2_to_l3(const char *ts)
    return 0;
 }
 
+int db2_memory_promotion_reclassify_directives(int require_approval)
+{
+   (void)require_approval;
+   return 0;
+}
+
+static int reclassify_directives(int require_approval)
+{
+   reclassify_calls++;
+   reclassify_last_gate = require_approval;
+   return reclassify_value;
+}
+
 static int promote_stable(const char *ts)
 {
    promote_stable_calls++;
@@ -923,6 +940,9 @@ static void reset(void)
    promote_stable_value = 4;
    promote_stable_calls = 0;
    promote_stable_stamp[0] = '\0';
+   reclassify_value = 3;
+   reclassify_calls = 0;
+   reclassify_last_gate = -1;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -965,6 +985,7 @@ static void reset(void)
    transport_expect_expire = 0;
    transport_expect_demote = 0;
    transport_expect_promote_stable = 0;
+   transport_expect_reclassify = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -985,7 +1006,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_promote_stable            ? AIMEE_DB2_EVENT_PROMOTE_STABLE
+       transport_expect_reclassify                ? AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES
+       : transport_expect_promote_stable          ? AIMEE_DB2_EVENT_PROMOTE_STABLE
        : transport_expect_demote                  ? AIMEE_DB2_EVENT_DEMOTE
        : transport_expect_expire                  ? AIMEE_DB2_EVENT_EXPIRE
        : transport_expect_stats_counts            ? AIMEE_DB2_EVENT_STATS_COUNTS
@@ -1016,7 +1038,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_promote_stable            ? AIMEE_DB2_STAGE_PROMOTE_STABLE
+       transport_expect_reclassify                ? AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES
+       : transport_expect_promote_stable          ? AIMEE_DB2_STAGE_PROMOTE_STABLE
        : transport_expect_demote                  ? AIMEE_DB2_STAGE_DEMOTE
        : transport_expect_expire                  ? AIMEE_DB2_STAGE_EXPIRE
        : transport_expect_stats_counts            ? AIMEE_DB2_STAGE_STATS_COUNTS
@@ -1050,7 +1073,13 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_promote_stable)
+   if (transport_expect_reclassify)
+   {
+      uint32_t gate = 99;
+      assert(aimee_db2_reclassify_directives_request_decode(request_body, request_len, &gate) == 0);
+      assert(gate == 1u);
+   }
+   else if (transport_expect_promote_stable)
       assert(aimee_db2_promote_stable_request_decode(request_body, request_len) == 0);
    else if (transport_expect_demote)
       assert(aimee_db2_demote_request_decode(request_body, request_len) == 0);
@@ -2051,6 +2080,43 @@ static void test_promote_stable_wire(void)
    assert(aimee_db2_promote_stable_reply_decode(reply, reply_len, &promoted) == 0 && promoted == 4);
    assert(aimee_db2_promote_stable_reply_encode(AIMEE_DB2_PROMOTE_STABLE_MAX + 1u, reply,
                                                 sizeof(reply), &reply_len) == -1);
+   assert(reply_len == 0);
+}
+
+static void test_reclassify_directives_wire(void)
+{
+   assert(strcmp(AIMEE_DB2_RECLASSIFY_DIRECTIVES_SOURCE_TIER, "L3") == 0);
+   assert(strcmp(AIMEE_DB2_RECLASSIFY_DIRECTIVES_TARGET_TIER, "L4") == 0);
+   assert(strcmp(AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATED_KIND, "policy") == 0);
+
+   uint8_t request[AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN] = {0};
+   uint32_t gate = 99;
+   /* Both gate settings are canonical requests. */
+   assert(aimee_db2_reclassify_directives_request_encode(1u, request, sizeof(request)) == 0);
+   assert(aimee_db2_reclassify_directives_request_decode(request, sizeof(request), &gate) == 0 &&
+          gate == 1u);
+   assert(aimee_db2_reclassify_directives_request_encode(0u, request, sizeof(request)) == 0);
+   assert(aimee_db2_reclassify_directives_request_decode(request, sizeof(request), &gate) == 0 &&
+          gate == 0u);
+
+   /* The gate is a boolean, so anything wider is refused on both sides. */
+   assert(aimee_db2_reclassify_directives_request_encode(
+              AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX + 1u, request, sizeof(request)) == -1);
+   assert(aimee_db2_reclassify_directives_request_encode(1u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + AIMEE_DB2_ENVELOPE_HEADER_LEN, 2u);
+   assert(aimee_db2_reclassify_directives_request_decode(request, sizeof(request), &gate) == -1);
+   assert(gate == 0u);
+   assert(aimee_db2_reclassify_directives_request_encode(1u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12u, 1u);
+   assert(aimee_db2_reclassify_directives_request_decode(request, sizeof(request), &gate) == -1);
+
+   uint8_t reply[AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, reclassified = 99;
+   assert(aimee_db2_reclassify_directives_reply_encode(3u, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_reclassify_directives_reply_decode(reply, reply_len, &reclassified) == 0 &&
+          reclassified == 3);
+   assert(aimee_db2_reclassify_directives_reply_encode(AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX + 1u,
+                                                       reply, sizeof(reply), &reply_len) == -1);
    assert(reply_len == 0);
 }
 
@@ -3229,6 +3295,41 @@ static void test_promote_stable_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_reclassify_directives_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.reclassify_directives = reclassify_directives};
+   uint8_t request[AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN];
+   uint32_t response_len = 99, reclassified = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES};
+
+   /* The gate the caller sent is the gate the backend sees. */
+   assert(aimee_db2_reclassify_directives_request_encode(1u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(reclassify_calls == 1 && reclassify_last_gate == 1);
+   assert(aimee_db2_reclassify_directives_reply_decode(response, response_len, &reclassified) ==
+              0 &&
+          reclassified == 3);
+
+   assert(aimee_db2_reclassify_directives_request_encode(0u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(reclassify_calls == 2 && reclassify_last_gate == 0);
+
+   reclassify_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   reclassify_value = 3;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -3913,6 +4014,26 @@ static void test_promote_stable_typed_client(void)
    assert(promoted == 4 && transport_calls == 1);
 }
 
+static void test_reclassify_directives_typed_client(void)
+{
+   reset();
+   transport_expect_reclassify = 1;
+   uint32_t reclassified = 99;
+   assert(aimee_db2_reclassify_directives_call(NULL, NULL, 77, 88, 1u, &reclassified, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(reclassified == 0);
+   /* A gate outside its range never reaches the transport. */
+   assert(aimee_db2_reclassify_directives_call(
+              transport, (void *)0x1234, 77, 88, AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX + 1u,
+              &reclassified, NULL, NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(transport_calls == 0);
+   assert(aimee_db2_reclassify_directives_reply_encode(
+              3u, transport_response, sizeof(transport_response), &transport_response_len) == 0);
+   assert(aimee_db2_reclassify_directives_call(transport, (void *)0x1234, 77, 88, 1u, &reclassified,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reclassified == 3 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -4104,6 +4225,7 @@ int main(void)
    test_expire_wire();
    test_demote_wire();
    test_promote_stable_wire();
+   test_reclassify_directives_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4134,6 +4256,7 @@ int main(void)
    test_expire_handler();
    test_demote_handler();
    test_promote_stable_handler();
+   test_reclassify_directives_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -4164,6 +4287,7 @@ int main(void)
    test_expire_typed_client();
    test_demote_typed_client();
    test_promote_stable_typed_client();
+   test_reclassify_directives_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

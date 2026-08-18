@@ -865,6 +865,35 @@
         "encoded_size_error": 24,
         "field": {"name": "promoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
       }
+    },
+    {
+      "family": "memory",
+      "id": 21,
+      "name": "reclassify_directives",
+      "wire_format": "db2-envelope-flag-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Reclassifying canonical relational directive rows into the highest-priority tier is DB2 lifecycle authority and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_promotion_reclassify_directives"],
+      "request": {
+        "encoded_size": 28,
+        "policy": {
+          "source_tier": "L3",
+          "target_tier": "L4",
+          "kinds": ["policy", "workflow"],
+          "gated_kind": "policy"
+        },
+        "field": {"name": "require_approval", "type": "u32", "minimum": 0, "maximum": 1}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "reclassified_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }

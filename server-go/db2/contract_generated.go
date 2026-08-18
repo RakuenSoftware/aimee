@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "d30da8bc27f6684fb7e63b507fe7cc3c8aebbc72c9f36f47bb5ba2245ad2a8f2"
+const ContractSHA256 = "3dd161daf451c4f71eee4d5cc7a588fa3e5a8b81d1001f4d773871222f56e636"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -198,6 +198,14 @@ const PromoteStableConfidenceBits uint64 = 4606732058837280358
 const PromoteStableUseCount uint32 = 5
 const PromoteStableDays uint32 = 30
 const PromoteStableMax uint32 = 2147483647
+const EventReclassifyDirectives = EventMemory
+const StageReclassifyDirectives = FamilyMemory
+const OperationReclassifyDirectives uint32 = 21
+const ReclassifyDirectivesSourceTier = "L3"
+const ReclassifyDirectivesTargetTier = "L4"
+const ReclassifyDirectivesGatedKind = "policy"
+const ReclassifyDirectivesGateMax uint32 = 1
+const ReclassifyDirectivesMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1035,6 +1043,63 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// EncodeReclassifyDirectivesRequest emits the approval gate, the operation's only input.
+func EncodeReclassifyDirectivesRequest(requireApproval uint32) ([]byte, error) {
+	if requireApproval > ReclassifyDirectivesGateMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationReclassifyDirectives, 0, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], requireApproval)
+	return request, nil
+}
+
+// DecodeReclassifyDirectivesRequest validates the operation and the bounded gate.
+func DecodeReclassifyDirectivesRequest(request []byte) (uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReclassifyDirectives || header.Flags != 0 ||
+		header.PayloadLen != 4 || len(request) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	requireApproval := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if requireApproval > ReclassifyDirectivesGateMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return requireApproval, nil
+}
+
+// EncodeReclassifyDirectivesReply emits the bounded number of reclassified rows.
+func EncodeReclassifyDirectivesReply(reclassifiedCount uint32) ([]byte, error) {
+	if reclassifiedCount > ReclassifyDirectivesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationReclassifyDirectives, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], reclassifiedCount)
+	return reply, nil
+}
+
+// DecodeReclassifyDirectivesReply validates the operation and bounded count.
+func DecodeReclassifyDirectivesReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReclassifyDirectives ||
+		header.Result != ResultOK || header.PayloadLen != 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	reclassifiedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if reclassifiedCount > ReclassifyDirectivesMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return reclassifiedCount, nil
 }
 
 // EncodePromoteStableRequest emits the empty request for the fixed stability policy.

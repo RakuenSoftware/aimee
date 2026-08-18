@@ -221,7 +221,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "effectiveness_update",
                                                                 "effectiveness_demote",
                                                                 "health_record",
-                                                                "promote_stable") else
+                                                                "promote_stable",
+                                                                "reclassify_directives") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1128,9 +1129,47 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply_field != {"name": "promoted_count", "type": "u32", "minimum": 0,
                                     "maximum": 0x7fffffff}):
                 fail("promote-stable-reply", "reply must contain one bounded promotion count")
+        elif key == ("memory", 21) and name == "reclassify_directives" and \
+                operation["wire_format"] == "db2-envelope-flag-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_reclassify_directives"]:
+                fail("operation-c-symbols",
+                     "reclassify_directives C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "reclassify_directives results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "policy", "field"},
+                            "reclassify_directives.request")
+            policy = _keys(request["policy"],
+                           {"source_tier", "target_tier", "kinds", "gated_kind"},
+                           "reclassify_directives.request.policy")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "reclassify_directives.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 4 or
+                    policy != {"source_tier": "L3", "target_tier": "L4",
+                               "kinds": ["policy", "workflow"], "gated_kind": "policy"} or
+                    request_field != {"name": "require_approval", "type": "u32", "minimum": 0,
+                                      "maximum": 1}):
+                fail("reclassify-directives-request",
+                     "request must fix the tiers and kinds and carry only the approval gate")
+            # The gate only narrows the gated kind; the other directive kind is
+            # always eligible, so a gated_kind outside the promotable set would
+            # make the gate meaningless.
+            if policy["gated_kind"] not in policy["kinds"]:
+                fail("reclassify-directives-request",
+                     "the gated kind must be one of the promotable directive kinds")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "reclassify_directives.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "reclassify_directives.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "reclassified_count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("reclassify-directives-reply",
+                     "reply must contain one bounded reclassification count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 30 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 31 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1139,9 +1178,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
             "health_record", "health_retention", "health_counters", "stats_counts",
-            "expire", "demote", "promote_stable"]:
+            "expire", "demote", "promote_stable", "reclassify_directives"]:
         fail("unsupported-operation",
-             "the partial generator requires the thirty supported operations exactly once")
+             "the partial generator requires the thirty-one supported operations exactly once")
     return catalog
 
 
@@ -1295,6 +1334,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     expire = catalog["operations"][27]
     demote = catalog["operations"][28]
     promote_stable = catalog["operations"][29]
+    reclassify_directives = catalog["operations"][30]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1601,6 +1641,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     promote_stable_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(promote_stable["id"]), 0, _put_u32(4),
+    )
+    reclassify_gated_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reclassify_directives["id"]), 0, _put_u32(1),
+    )
+    reclassify_open_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(reclassify_directives["id"]), 0, _put_u32(0),
+    )
+    reclassify_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(reclassify_directives["id"]), 0, _put_u32(3),
     )
 
     value = {
@@ -2972,6 +3021,49 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (promote_stable_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": reclassify_directives["family"],
+            "id": reclassify_directives["id"],
+            "name": reclassify_directives["name"],
+            "request": {
+                # Both gate settings are canonical: the batch path runs open,
+                # the operator approval path runs gated.
+                "positive": reclassify_gated_request.hex(),
+                "require_approval": 1,
+                "open_positive": reclassify_open_request.hex(),
+                "source_tier": reclassify_directives["request"]["policy"]["source_tier"],
+                "target_tier": reclassify_directives["request"]["policy"]["target_tier"],
+                "kinds": list(reclassify_directives["request"]["policy"]["kinds"]),
+                "gated_kind": reclassify_directives["request"]["policy"]["gated_kind"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(reclassify_gated_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(reclassify_gated_request, 16, 0).hex()},
+                    {"mutation": "gate_out_of_range", "hex":
+                     mutate_u32(reclassify_gated_request, ENVELOPE_HEADER_LEN, 2).hex()},
+                    {"mutation": "short", "hex": reclassify_gated_request[:-1].hex()},
+                    {"mutation": "long", "hex": (reclassify_gated_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "reclassified_count": 3, "hex": reclassify_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(reclassify_ok, 8, 20).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(reclassify_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(reclassify_directives["id"]), 0, b"").hex()},
+                    {"mutation": "reclassified_count_too_large", "hex":
+                     (reclassify_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": reclassify_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (reclassify_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -3014,6 +3106,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     expire = catalog["operations"][27]
     demote = catalog["operations"][28]
     promote_stable = catalog["operations"][29]
+    reclassify_directives = catalog["operations"][30]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -3424,6 +3517,25 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{promote_stable['request']['policy']['stable_days']}u"),
         ("AIMEE_DB2_PROMOTE_STABLE_MAX",
          f"{promote_stable['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES", f"{reclassify_directives['id']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN",
+         f"{reclassify_directives['request']['encoded_size']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN",
+         f"{reclassify_directives['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_ERROR_LEN",
+         f"{reclassify_directives['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_SOURCE_TIER",
+         f"\"{reclassify_directives['request']['policy']['source_tier']}\""),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_TARGET_TIER",
+         f"\"{reclassify_directives['request']['policy']['target_tier']}\""),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATED_KIND",
+         f"\"{reclassify_directives['request']['policy']['gated_kind']}\""),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX",
+         f"{reclassify_directives['request']['field']['maximum']}u"),
+        ("AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX",
+         f"{reclassify_directives['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -5147,6 +5259,76 @@ static inline int aimee_db2_promote_stable_reply_decode(const uint8_t *input, si
    return 0;
 }}
 
+static inline int aimee_db2_reclassify_directives_request_encode(uint32_t require_approval,
+                                                                 uint8_t *output, size_t capacity)
+{{
+   if (!output || require_approval > AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX ||
+       capacity < AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES, 0u, 4u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, require_approval);
+   return 0;
+}}
+
+static inline int aimee_db2_reclassify_directives_request_decode(const uint8_t *input,
+                                                                 size_t input_len,
+                                                                 uint32_t *require_approval)
+{{
+   if (require_approval)
+      *require_approval = 0u;
+   if (!require_approval)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES || header.flags != 0u ||
+       header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX)
+      return -1;
+   *require_approval = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_reclassify_directives_reply_encode(uint32_t reclassified_count,
+                                                               uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || reclassified_count > AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX ||
+       capacity < AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, reclassified_count);
+   *output_len = AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_reclassify_directives_reply_decode(const uint8_t *input,
+                                                               size_t input_len,
+                                                               uint32_t *reclassified_count)
+{{
+   if (reclassified_count)
+      *reclassified_count = 0u;
+   if (!reclassified_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX)
+      return -1;
+   *reclassified_count = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -6096,6 +6278,11 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *promoted_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_reclassify_directives_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t require_approval, uint32_t *reclassified_count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -6761,6 +6948,35 @@ aimee_module_call_result_t aimee_db2_promote_stable_call(aimee_db2_call_fn call,
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_reclassify_directives_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, uint32_t require_approval,
+                                     uint32_t *reclassified_count,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (reclassified_count)
+      *reclassified_count = 0u;
+   if (!call || !reclassified_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_reclassify_directives_request_encode(require_approval, request, sizeof(request)) !=
+       0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES,
+            AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reclassify_directives_reply_decode(response, response_len, reclassified_count) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -7030,6 +7246,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     expire = catalog["operations"][27]
     demote = catalog["operations"][28]
     promote_stable = catalog["operations"][29]
+    reclassify_directives = catalog["operations"][30]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -7229,6 +7446,14 @@ const PromoteStableConfidenceBits uint64 = {promote_stable['request']['policy'][
 const PromoteStableUseCount uint32 = {promote_stable['request']['policy']['minimum_use_count']}
 const PromoteStableDays uint32 = {promote_stable['request']['policy']['stable_days']}
 const PromoteStableMax uint32 = {promote_stable['reply']['field']['maximum']}
+const EventReclassifyDirectives = EventMemory
+const StageReclassifyDirectives = FamilyMemory
+const OperationReclassifyDirectives uint32 = {reclassify_directives['id']}
+const ReclassifyDirectivesSourceTier = "{reclassify_directives['request']['policy']['source_tier']}"
+const ReclassifyDirectivesTargetTier = "{reclassify_directives['request']['policy']['target_tier']}"
+const ReclassifyDirectivesGatedKind = "{reclassify_directives['request']['policy']['gated_kind']}"
+const ReclassifyDirectivesGateMax uint32 = {reclassify_directives['request']['field']['maximum']}
+const ReclassifyDirectivesMax uint32 = {reclassify_directives['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -8064,6 +8289,63 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// EncodeReclassifyDirectivesRequest emits the approval gate, the operation's only input.
+func EncodeReclassifyDirectivesRequest(requireApproval uint32) ([]byte, error) {{
+	if requireApproval > ReclassifyDirectivesGateMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationReclassifyDirectives, 0, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], requireApproval)
+	return request, nil
+}}
+
+// DecodeReclassifyDirectivesRequest validates the operation and the bounded gate.
+func DecodeReclassifyDirectivesRequest(request []byte) (uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReclassifyDirectives || header.Flags != 0 ||
+		header.PayloadLen != 4 || len(request) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	requireApproval := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if requireApproval > ReclassifyDirectivesGateMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return requireApproval, nil
+}}
+
+// EncodeReclassifyDirectivesReply emits the bounded number of reclassified rows.
+func EncodeReclassifyDirectivesReply(reclassifiedCount uint32) ([]byte, error) {{
+	if reclassifiedCount > ReclassifyDirectivesMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReclassifyDirectives, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], reclassifiedCount)
+	return reply, nil
+}}
+
+// DecodeReclassifyDirectivesReply validates the operation and bounded count.
+func DecodeReclassifyDirectivesReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReclassifyDirectives ||
+		header.Result != ResultOK || header.PayloadLen != 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	reclassifiedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if reclassifiedCount > ReclassifyDirectivesMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return reclassifiedCount, nil
 }}
 
 // EncodePromoteStableRequest emits the empty request for the fixed stability policy.

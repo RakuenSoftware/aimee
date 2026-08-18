@@ -52,6 +52,7 @@ typedef struct
    int (*demote_kind)(const char *ts, const char *kind, double confidence, const char *days_neg);
    int (*demote_cascade)(const char *ts);
    int (*promote_stable)(const char *ts);
+   int (*reclassify_directives)(int require_approval);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
