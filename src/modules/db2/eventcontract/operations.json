@@ -3,6 +3,11 @@
   "module": "db2",
   "wire_version": 1,
   "catalog_complete": false,
+  "body_envelope": {
+    "request_magic": 1364341316,
+    "reply_magic": 1381118532,
+    "header_len": 24
+  },
   "families": [
     {
       "id": 1,

@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "e8744f638842c3a8fa783b206fb702c3ed1efba069770d314701b63a2f4961dc"
+const ContractSHA256 = "19b4021429a4b60bd00487df9f4996ad041cfec86219774ce3b0b8e73d00ec9d"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -40,6 +40,10 @@ const EventHealth = EventLifecycle
 const StageHealth = FamilyLifecycle
 const OperationHealth uint32 = 1
 
+const EnvelopeHeaderLen = 24
+const envelopeRequestMagic uint32 = 0x51523244
+const envelopeReplyMagic uint32 = 0x52523244
+
 const healthRequestMagic uint32 = 0x51483244
 const healthResponseMagic uint32 = 0x52483244
 const healthRequestLen = 8
@@ -51,6 +55,87 @@ const HealthFlagKBTables uint32 = 1 << 2
 const healthFlagAll uint32 = 0x7
 
 var ErrMalformedHealth = errors.New("db2: malformed lifecycle health frame")
+var ErrMalformedEnvelope = errors.New("db2: malformed operation envelope")
+
+// RequestHeader is the fixed-width prefix for every post-bootstrap DB2
+// operation request. Payload contains the exact declared operation body.
+type RequestHeader struct {
+	Operation  uint32
+	Flags      uint32
+	PayloadLen uint32
+}
+
+// ReplyHeader is the fixed-width prefix for every post-bootstrap DB2 operation
+// reply. Result is one of the closed Result* values above.
+type ReplyHeader struct {
+	Operation  uint32
+	Result     uint32
+	PayloadLen uint32
+}
+
+func encodeEnvelopeHeader(magic, operation, code, payloadLen uint32) ([]byte, error) {
+	if operation == 0 || magic == envelopeReplyMagic && code > ResultInvalidState {
+		return nil, ErrMalformedEnvelope
+	}
+	header := make([]byte, EnvelopeHeaderLen)
+	binary.LittleEndian.PutUint32(header[0:4], magic)
+	binary.LittleEndian.PutUint16(header[4:6], uint16(WireVersion))
+	binary.LittleEndian.PutUint16(header[6:8], uint16(EnvelopeHeaderLen))
+	binary.LittleEndian.PutUint32(header[8:12], operation)
+	binary.LittleEndian.PutUint32(header[12:16], code)
+	binary.LittleEndian.PutUint32(header[16:20], payloadLen)
+	return header, nil
+}
+
+func decodeEnvelopeHeader(frame []byte, magic uint32, reply bool) (uint32, uint32, uint32, error) {
+	if len(frame) < EnvelopeHeaderLen ||
+		binary.LittleEndian.Uint32(frame[0:4]) != magic ||
+		binary.LittleEndian.Uint16(frame[4:6]) != uint16(WireVersion) ||
+		binary.LittleEndian.Uint16(frame[6:8]) != uint16(EnvelopeHeaderLen) ||
+		binary.LittleEndian.Uint32(frame[8:12]) == 0 ||
+		binary.LittleEndian.Uint32(frame[20:24]) != 0 {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	operation := binary.LittleEndian.Uint32(frame[8:12])
+	code := binary.LittleEndian.Uint32(frame[12:16])
+	payloadLen := binary.LittleEndian.Uint32(frame[16:20])
+	if uint64(payloadLen) != uint64(len(frame)-EnvelopeHeaderLen) ||
+		reply && code > ResultInvalidState {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	return operation, code, payloadLen, nil
+}
+
+// EncodeRequestHeader emits the header to which the caller appends payloadLen
+// canonical payload bytes.
+func EncodeRequestHeader(operation, flags, payloadLen uint32) ([]byte, error) {
+	return encodeEnvelopeHeader(envelopeRequestMagic, operation, flags, payloadLen)
+}
+
+// DecodeRequestHeader validates a complete header-plus-payload frame.
+func DecodeRequestHeader(frame []byte) (RequestHeader, error) {
+	operation, flags, payloadLen, err := decodeEnvelopeHeader(frame, envelopeRequestMagic, false)
+	if err != nil {
+		return RequestHeader{}, err
+	}
+	return RequestHeader{Operation: operation, Flags: flags, PayloadLen: payloadLen}, nil
+}
+
+// EncodeReplyHeader emits the header to which the provider appends payloadLen
+// canonical payload bytes.
+func EncodeReplyHeader(operation, result, payloadLen uint32) ([]byte, error) {
+	return encodeEnvelopeHeader(envelopeReplyMagic, operation, result, payloadLen)
+}
+
+// DecodeReplyHeader validates a complete header-plus-payload frame and the
+// closed result-code domain.
+func DecodeReplyHeader(frame []byte) (ReplyHeader, error) {
+	operation, result, payloadLen, err := decodeEnvelopeHeader(frame, envelopeReplyMagic, true)
+	if err != nil {
+		return ReplyHeader{}, err
+	}
+	return ReplyHeader{Operation: operation, Result: result, PayloadLen: payloadLen}, nil
+}
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally
 // contains no DSN, SQL, provider identity, or implementation-specific detail.

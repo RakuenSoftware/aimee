@@ -64,10 +64,14 @@ class ContractTests(unittest.TestCase):
         fingerprint = generator.catalog_fingerprint(catalog)
         self.assertIn(fingerprint.encode(), header)
         self.assertIn(b"#define AIMEE_DB2_RESULT_INVALID_STATE 5u", header)
+        self.assertIn(b"aimee_db2_request_header_decode", header)
+        self.assertIn(b"AIMEE_DB2_ENVELOPE_HEADER_LEN", header)
         self.assertIn(b"aimee_db2_health_call", client_header)
         self.assertIn(b"AIMEE_MODULE_CALL_PROTOCOL", client_source)
         self.assertIn(fingerprint.encode(), go_contract)
         self.assertIn(b"func DecodeHealthResponse", go_contract)
+        self.assertIn(b"func DecodeRequestHeader", go_contract)
+        self.assertIn(b"func DecodeReplyHeader", go_contract)
         self.assertIn(b"ErrMalformedHealth", go_contract)
         self.assertIn(b"ResultOK", go_contract)
         self.assertIn(b"HealthFlagPGTrgm", go_contract)
@@ -76,6 +80,32 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(
             json.loads(baseline)["result_codes"],
             [{"id": index, "name": name} for index, name in enumerate(generator.RESULT_CODES)],
+        )
+
+    def test_additive_body_envelope_vectors_are_closed_and_fixed_width(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        envelope = baseline["body_envelope"]
+        self.assertEqual(envelope["header_len"], generator.ENVELOPE_HEADER_LEN)
+        request = bytes.fromhex(envelope["request"]["positive"])
+        self.assertEqual(len(request), generator.ENVELOPE_HEADER_LEN + 3)
+        self.assertEqual(int.from_bytes(request[0:4], "little"),
+                         generator.ENVELOPE_REQUEST_MAGIC)
+        self.assertEqual(int.from_bytes(request[6:8], "little"),
+                         generator.ENVELOPE_HEADER_LEN)
+        self.assertEqual(int.from_bytes(request[16:20], "little"), 3)
+        self.assertEqual(
+            [row["mutation"] for row in envelope["request"]["negative"]],
+            ["bad_magic", "bad_version", "bad_header_len", "zero_operation",
+             "payload_length", "reserved", "short", "long"],
+        )
+        self.assertEqual(
+            [row["result"] for row in envelope["reply"]["positive"]],
+            list(range(len(generator.RESULT_CODES))),
+        )
+        self.assertEqual(
+            [row["mutation"] for row in envelope["reply"]["negative"]],
+            ["bad_magic", "bad_version", "bad_header_len", "zero_operation",
+             "unknown_result", "payload_length", "reserved", "short", "long"],
         )
 
     def test_wire_vectors_cover_every_flag_and_closed_failure_fields(self) -> None:
@@ -101,6 +131,13 @@ class ContractTests(unittest.TestCase):
             (lambda value: value.__setitem__("wire_version", True), "wire-version"),
             (lambda value: value.__setitem__("catalog_complete", 1), "catalog-complete-type"),
             (lambda value: value.__setitem__("catalog_complete", True), "catalog-complete"),
+            (lambda value: value["body_envelope"].__setitem__("request_magic", 1),
+             "body-envelope"),
+            (lambda value: value["body_envelope"].__setitem__("reply_magic", 1),
+             "body-envelope"),
+            (lambda value: value["body_envelope"].__setitem__("header_len", 23),
+             "body-envelope"),
+            (lambda value: value["body_envelope"].__setitem__("extra", 1), "keys"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

@@ -150,6 +150,92 @@ static void test_wire_contract(void)
    assert(!schema_ok && !have_pg_trgm && !kb_tables_ok);
 }
 
+static void test_body_envelope(void)
+{
+   uint8_t frame[AIMEE_DB2_ENVELOPE_HEADER_LEN + 3] = {0};
+   const uint32_t operation = 0x01020304u;
+   assert(aimee_db2_request_header_encode(operation, 5u, 3u, frame, sizeof(frame)) == 0);
+   frame[AIMEE_DB2_ENVELOPE_HEADER_LEN] = 0xaa;
+   frame[AIMEE_DB2_ENVELOPE_HEADER_LEN + 1] = 0xbb;
+   frame[AIMEE_DB2_ENVELOPE_HEADER_LEN + 2] = 0xcc;
+   aimee_db2_request_header_t request = {9, 9, 9};
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), &request) == 0);
+   assert(request.operation == operation && request.flags == 5 && request.payload_len == 3);
+
+   assert(aimee_db2_request_header_encode(0, 0, 0, frame, sizeof(frame)) == -1);
+   assert(aimee_db2_request_header_encode(1, 0, 0, NULL, sizeof(frame)) == -1);
+   assert(aimee_db2_request_header_encode(1, 0, 0, frame, AIMEE_DB2_ENVELOPE_HEADER_LEN - 1) == -1);
+   assert(aimee_db2_request_header_decode(NULL, sizeof(frame), &request) == -1);
+   assert(request.operation == 0 && request.flags == 0 && request.payload_len == 0);
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), NULL) == -1);
+
+   assert(aimee_db2_request_header_encode(operation, 5u, 3u, frame, sizeof(frame)) == 0);
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame) - 1, &request) == -1);
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame) + 1, &request) == -1);
+   frame[0] ^= 1u;
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), &request) == -1);
+   frame[0] ^= 1u;
+   frame[4] ^= 1u;
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), &request) == -1);
+   frame[4] ^= 1u;
+   frame[6] ^= 1u;
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), &request) == -1);
+   frame[6] ^= 1u;
+   aimee_db2_put_u32(frame + 8, 0);
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), &request) == -1);
+   aimee_db2_put_u32(frame + 8, operation);
+   aimee_db2_put_u32(frame + 20, 1);
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), &request) == -1);
+   assert(aimee_db2_request_header_encode(operation, 5u, 3u, frame, sizeof(frame)) == 0);
+   aimee_db2_put_u32(frame + 16, 4);
+   assert(aimee_db2_request_header_decode(frame, sizeof(frame), &request) == -1);
+
+   for (uint32_t result = AIMEE_DB2_RESULT_OK; result <= AIMEE_DB2_RESULT_INVALID_STATE; ++result)
+   {
+      assert(aimee_db2_reply_header_encode(operation, result, 3u, frame, sizeof(frame)) == 0);
+      aimee_db2_reply_header_t reply = {9, 9, 9};
+      assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == 0);
+      assert(reply.operation == operation && reply.result == result && reply.payload_len == 3);
+   }
+   assert(aimee_db2_reply_header_encode(0, 0, 0, frame, sizeof(frame)) == -1);
+   assert(aimee_db2_reply_header_encode(operation, AIMEE_DB2_RESULT_INVALID_STATE + 1u, 0, frame,
+                                        sizeof(frame)) == -1);
+   assert(aimee_db2_reply_header_encode(operation, 0, 0, NULL, sizeof(frame)) == -1);
+   assert(aimee_db2_reply_header_encode(operation, 0, 0, frame,
+                                        AIMEE_DB2_ENVELOPE_HEADER_LEN - 1) == -1);
+   assert(aimee_db2_reply_header_encode(operation, AIMEE_DB2_RESULT_OK, 3u, frame, sizeof(frame)) ==
+          0);
+   aimee_db2_put_u32(frame + 12, AIMEE_DB2_RESULT_INVALID_STATE + 1u);
+   aimee_db2_reply_header_t reply = {9, 9, 9};
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == -1);
+   assert(reply.operation == 0 && reply.result == 0 && reply.payload_len == 0);
+   assert(aimee_db2_reply_header_encode(operation, AIMEE_DB2_RESULT_OK, 3u, frame, sizeof(frame)) ==
+          0);
+   frame[0] ^= 1u;
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == -1);
+   frame[0] ^= 1u;
+   frame[4] ^= 1u;
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == -1);
+   frame[4] ^= 1u;
+   frame[6] ^= 1u;
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == -1);
+   frame[6] ^= 1u;
+   aimee_db2_put_u32(frame + 8, 0);
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == -1);
+   aimee_db2_put_u32(frame + 8, operation);
+   aimee_db2_put_u32(frame + 16, 4);
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == -1);
+   aimee_db2_put_u32(frame + 16, 3);
+   aimee_db2_put_u32(frame + 20, 1);
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), &reply) == -1);
+   assert(aimee_db2_reply_header_encode(operation, AIMEE_DB2_RESULT_OK, 3u, frame, sizeof(frame)) ==
+          0);
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame) - 1, &reply) == -1);
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame) + 1, &reply) == -1);
+   assert(aimee_db2_reply_header_decode(NULL, sizeof(frame), &reply) == -1);
+   assert(aimee_db2_reply_header_decode(frame, sizeof(frame), NULL) == -1);
+}
+
 static aimee_module_status_t invoke(const aimee_db2_module_backend_t *backend,
                                     aimee_module_invocation_t *invocation, uint8_t *request,
                                     uint32_t request_len, uint8_t *response,
@@ -258,6 +344,7 @@ static void test_typed_client(void)
 int main(void)
 {
    test_wire_contract();
+   test_body_envelope();
    test_handler_success_and_failures();
    test_typed_client();
    puts("test_db2_module_contract: ok");

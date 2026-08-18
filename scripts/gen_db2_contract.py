@@ -32,6 +32,9 @@ FAMILIES = (
     "maintenance",
 )
 RESULT_CODES = ("ok", "not_found", "conflict", "denied", "retryable", "invalid_state")
+ENVELOPE_REQUEST_MAGIC = 0x51523244  # "D2RQ", little-endian
+ENVELOPE_REPLY_MAGIC = 0x52523244  # "D2RR", little-endian
+ENVELOPE_HEADER_LEN = 24
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 
@@ -123,7 +126,7 @@ def _string(value: object, label: str, maximum: int = 128) -> str:
 def validate_catalog(value: object) -> dict[str, object]:
     catalog = _keys(value, {
         "schema_version", "module", "wire_version", "catalog_complete", "families",
-        "result_codes", "operations",
+        "body_envelope", "result_codes", "operations",
     }, "catalog")
     if type(catalog["schema_version"]) is not int or catalog["schema_version"] != 1:
         fail("schema-version", "schema_version must equal 1")
@@ -135,6 +138,17 @@ def validate_catalog(value: object) -> dict[str, object]:
         fail("catalog-complete-type", "catalog_complete must be boolean")
     if catalog["catalog_complete"]:
         fail("catalog-complete", "the health-only catalog cannot claim declaration completeness")
+    envelope = _keys(
+        catalog["body_envelope"], {"request_magic", "reply_magic", "header_len"},
+        "body_envelope",
+    )
+    if (_integer(envelope["request_magic"], "body_envelope.request_magic", 0, 0xffffffff) !=
+            ENVELOPE_REQUEST_MAGIC or
+            _integer(envelope["reply_magic"], "body_envelope.reply_magic", 0, 0xffffffff) !=
+            ENVELOPE_REPLY_MAGIC or
+            _integer(envelope["header_len"], "body_envelope.header_len", 1, 0xffff) !=
+            ENVELOPE_HEADER_LEN):
+        fail("body-envelope", "body envelope magic or header length differs from version 1")
 
     raw_families = catalog["families"]
     if not isinstance(raw_families, list) or len(raw_families) != len(FAMILIES):
@@ -281,6 +295,19 @@ def _put_u32(value: int) -> bytes:
     return value.to_bytes(4, "little")
 
 
+def _put_u16(value: int) -> bytes:
+    return value.to_bytes(2, "little")
+
+
+def _envelope(
+        catalog: dict[str, object], magic: int, operation: int, code: int, payload: bytes) -> bytes:
+    return (
+        _put_u32(magic) + _put_u16(int(catalog["wire_version"])) +
+        _put_u16(ENVELOPE_HEADER_LEN) + _put_u32(operation) + _put_u32(code) +
+        _put_u32(len(payload)) + _put_u32(0) + payload
+    )
+
+
 def baseline_bytes(catalog: dict[str, object]) -> bytes:
     operation = catalog["operations"][0]
     request = _put_u32(operation["request"]["magic"]) + _put_u32(catalog["wire_version"])
@@ -290,6 +317,24 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 _put_u32(flags) + _put_u32(0))
         replies.append({"flags": flags, "hex": body.hex()})
     response = bytes.fromhex(replies[0]["hex"])
+    envelope_payload = bytes.fromhex("aabbcc")
+    envelope_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, 0x01020304, 5, envelope_payload,
+    )
+    envelope_replies = [
+        {
+            "result": index,
+            "hex": _envelope(
+                catalog, ENVELOPE_REPLY_MAGIC, 0x01020304, index, envelope_payload,
+            ).hex(),
+        }
+        for index in range(len(RESULT_CODES))
+    ]
+    envelope_reply = bytes.fromhex(envelope_replies[0]["hex"])
+
+    def mutate_u32(frame: bytes, offset: int, value: int) -> bytes:
+        return frame[:offset] + _put_u32(value) + frame[offset + 4:]
+
     value = {
         "schema_version": 1,
         "catalog_sha256": catalog_fingerprint(catalog),
@@ -298,6 +343,53 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
         "result_codes": [
             {"id": index, "name": name} for index, name in enumerate(catalog["result_codes"])
         ],
+        "body_envelope": {
+            "header_len": ENVELOPE_HEADER_LEN,
+            "request": {
+                "positive": envelope_request.hex(),
+                "negative": [
+                    {"mutation": "bad_magic", "hex":
+                     (bytes([envelope_request[0] ^ 1]) + envelope_request[1:]).hex()},
+                    {"mutation": "bad_version", "hex":
+                     (envelope_request[:4] + bytes([envelope_request[4] ^ 1]) +
+                      envelope_request[5:]).hex()},
+                    {"mutation": "bad_header_len", "hex":
+                     (envelope_request[:6] + bytes([envelope_request[6] ^ 1]) +
+                      envelope_request[7:]).hex()},
+                    {"mutation": "zero_operation", "hex":
+                     mutate_u32(envelope_request, 8, 0).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(envelope_request, 16, len(envelope_payload) + 1).hex()},
+                    {"mutation": "reserved", "hex":
+                     mutate_u32(envelope_request, 20, 1).hex()},
+                    {"mutation": "short", "hex": envelope_request[:-1].hex()},
+                    {"mutation": "long", "hex": (envelope_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": envelope_replies,
+                "negative": [
+                    {"mutation": "bad_magic", "hex":
+                     (bytes([envelope_reply[0] ^ 1]) + envelope_reply[1:]).hex()},
+                    {"mutation": "bad_version", "hex":
+                     (envelope_reply[:4] + bytes([envelope_reply[4] ^ 1]) +
+                      envelope_reply[5:]).hex()},
+                    {"mutation": "bad_header_len", "hex":
+                     (envelope_reply[:6] + bytes([envelope_reply[6] ^ 1]) +
+                      envelope_reply[7:]).hex()},
+                    {"mutation": "zero_operation", "hex":
+                     mutate_u32(envelope_reply, 8, 0).hex()},
+                    {"mutation": "unknown_result", "hex":
+                     mutate_u32(envelope_reply, 12, len(RESULT_CODES)).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(envelope_reply, 16, len(envelope_payload) + 1).hex()},
+                    {"mutation": "reserved", "hex":
+                     mutate_u32(envelope_reply, 20, 1).hex()},
+                    {"mutation": "short", "hex": envelope_reply[:-1].hex()},
+                    {"mutation": "long", "hex": (envelope_reply + b"\0").hex()},
+                ],
+            },
+        },
         "operations": [{
             "family": operation["family"],
             "id": operation["id"],
@@ -362,6 +454,13 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_REQUEST_LEN", f"{operation['request']['encoded_size']}u"),
         ("AIMEE_DB2_RESPONSE_LEN", f"{operation['reply']['encoded_size']}u"),
     ])
+    envelope_macros = macros([
+        ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
+         f"0x{ENVELOPE_REQUEST_MAGIC:08x}u /* \"D2RQ\", little-endian */"),
+        ("AIMEE_DB2_ENVELOPE_REPLY_MAGIC",
+         f"0x{ENVELOPE_REPLY_MAGIC:08x}u /* \"D2RR\", little-endian */"),
+        ("AIMEE_DB2_ENVELOPE_HEADER_LEN", f"{ENVELOPE_HEADER_LEN}u"),
+    ])
     all_flags = sum(1 << item["bit"] for item in flags)
     flag_macros = macros([
         *((f"AIMEE_DB2_FLAG_{item['name'].upper()}", f"0x{1 << item['bit']:x}u")
@@ -385,7 +484,29 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
 
 {operation_macros}
 
+{envelope_macros}
+
 {flag_macros}
+
+typedef struct
+{{
+   uint32_t operation;
+   uint32_t flags;
+   uint32_t payload_len;
+}} aimee_db2_request_header_t;
+
+typedef struct
+{{
+   uint32_t operation;
+   uint32_t result;
+   uint32_t payload_len;
+}} aimee_db2_reply_header_t;
+
+static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
+{{
+   output[0] = (uint8_t)value;
+   output[1] = (uint8_t)(value >> 8u);
+}}
 
 static inline void aimee_db2_put_u32(uint8_t *output, uint32_t value)
 {{
@@ -399,6 +520,84 @@ static inline uint32_t aimee_db2_get_u32(const uint8_t *input)
    for (unsigned index = 0; index < 4; ++index)
       value |= (uint32_t)input[index] << (index * 8u);
    return value;
+}}
+
+static inline uint16_t aimee_db2_get_u16(const uint8_t *input)
+{{
+   return (uint16_t)((uint16_t)input[0] | (uint16_t)((uint16_t)input[1] << 8u));
+}}
+
+static inline int aimee_db2_request_header_encode(uint32_t operation, uint32_t flags,
+                                                  uint32_t payload_len, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN || operation == 0)
+      return -1;
+   aimee_db2_put_u32(output, AIMEE_DB2_ENVELOPE_REQUEST_MAGIC);
+   aimee_db2_put_u16(output + 4, (uint16_t)AIMEE_DB2_WIRE_VERSION);
+   aimee_db2_put_u16(output + 6, (uint16_t)AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   aimee_db2_put_u32(output + 8, operation);
+   aimee_db2_put_u32(output + 12, flags);
+   aimee_db2_put_u32(output + 16, payload_len);
+   aimee_db2_put_u32(output + 20, 0u);
+   return 0;
+}}
+
+static inline int aimee_db2_request_header_decode(const uint8_t *input, size_t input_len,
+                                                  aimee_db2_request_header_t *header)
+{{
+   if (header)
+      *header = (aimee_db2_request_header_t){{0}};
+   if (!input || !header || input_len < AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input) != AIMEE_DB2_ENVELOPE_REQUEST_MAGIC ||
+       aimee_db2_get_u16(input + 4) != AIMEE_DB2_WIRE_VERSION ||
+       aimee_db2_get_u16(input + 6) != AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input + 8) == 0 || aimee_db2_get_u32(input + 20) != 0u ||
+       (size_t)aimee_db2_get_u32(input + 16) !=
+           input_len - AIMEE_DB2_ENVELOPE_HEADER_LEN)
+      return -1;
+   header->operation = aimee_db2_get_u32(input + 8);
+   header->flags = aimee_db2_get_u32(input + 12);
+   header->payload_len = aimee_db2_get_u32(input + 16);
+   return 0;
+}}
+
+static inline int aimee_db2_reply_header_encode(uint32_t operation, uint32_t result,
+                                                uint32_t payload_len, uint8_t *output,
+                                                size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN || operation == 0 ||
+       result > AIMEE_DB2_RESULT_INVALID_STATE)
+      return -1;
+   aimee_db2_put_u32(output, AIMEE_DB2_ENVELOPE_REPLY_MAGIC);
+   aimee_db2_put_u16(output + 4, (uint16_t)AIMEE_DB2_WIRE_VERSION);
+   aimee_db2_put_u16(output + 6, (uint16_t)AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   aimee_db2_put_u32(output + 8, operation);
+   aimee_db2_put_u32(output + 12, result);
+   aimee_db2_put_u32(output + 16, payload_len);
+   aimee_db2_put_u32(output + 20, 0u);
+   return 0;
+}}
+
+static inline int aimee_db2_reply_header_decode(const uint8_t *input, size_t input_len,
+                                                aimee_db2_reply_header_t *header)
+{{
+   if (header)
+      *header = (aimee_db2_reply_header_t){{0}};
+   if (!input || !header || input_len < AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input) != AIMEE_DB2_ENVELOPE_REPLY_MAGIC ||
+       aimee_db2_get_u16(input + 4) != AIMEE_DB2_WIRE_VERSION ||
+       aimee_db2_get_u16(input + 6) != AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input + 8) == 0 ||
+       aimee_db2_get_u32(input + 12) > AIMEE_DB2_RESULT_INVALID_STATE ||
+       aimee_db2_get_u32(input + 20) != 0u ||
+       (size_t)aimee_db2_get_u32(input + 16) !=
+           input_len - AIMEE_DB2_ENVELOPE_HEADER_LEN)
+      return -1;
+   header->operation = aimee_db2_get_u32(input + 8);
+   header->result = aimee_db2_get_u32(input + 12);
+   header->payload_len = aimee_db2_get_u32(input + 16);
+   return 0;
 }}
 
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
@@ -584,6 +783,10 @@ const EventHealth = EventLifecycle
 const StageHealth = FamilyLifecycle
 const OperationHealth uint32 = {operation['id']}
 
+const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
+const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
+const envelopeReplyMagic uint32 = 0x{ENVELOPE_REPLY_MAGIC:08x}
+
 const healthRequestMagic uint32 = 0x{operation['request']['magic']:08x}
 const healthResponseMagic uint32 = 0x{operation['reply']['magic']:08x}
 const healthRequestLen = {operation['request']['encoded_size']}
@@ -593,6 +796,87 @@ const healthResponseLen = {operation['reply']['encoded_size']}
 const healthFlagAll uint32 = 0x{all_flags:x}
 
 var ErrMalformedHealth = errors.New("db2: malformed lifecycle health frame")
+var ErrMalformedEnvelope = errors.New("db2: malformed operation envelope")
+
+// RequestHeader is the fixed-width prefix for every post-bootstrap DB2
+// operation request. Payload contains the exact declared operation body.
+type RequestHeader struct {{
+	Operation  uint32
+	Flags      uint32
+	PayloadLen uint32
+}}
+
+// ReplyHeader is the fixed-width prefix for every post-bootstrap DB2 operation
+// reply. Result is one of the closed Result* values above.
+type ReplyHeader struct {{
+	Operation  uint32
+	Result     uint32
+	PayloadLen uint32
+}}
+
+func encodeEnvelopeHeader(magic, operation, code, payloadLen uint32) ([]byte, error) {{
+	if operation == 0 || magic == envelopeReplyMagic && code > ResultInvalidState {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header := make([]byte, EnvelopeHeaderLen)
+	binary.LittleEndian.PutUint32(header[0:4], magic)
+	binary.LittleEndian.PutUint16(header[4:6], uint16(WireVersion))
+	binary.LittleEndian.PutUint16(header[6:8], uint16(EnvelopeHeaderLen))
+	binary.LittleEndian.PutUint32(header[8:12], operation)
+	binary.LittleEndian.PutUint32(header[12:16], code)
+	binary.LittleEndian.PutUint32(header[16:20], payloadLen)
+	return header, nil
+}}
+
+func decodeEnvelopeHeader(frame []byte, magic uint32, reply bool) (uint32, uint32, uint32, error) {{
+	if len(frame) < EnvelopeHeaderLen ||
+		binary.LittleEndian.Uint32(frame[0:4]) != magic ||
+		binary.LittleEndian.Uint16(frame[4:6]) != uint16(WireVersion) ||
+		binary.LittleEndian.Uint16(frame[6:8]) != uint16(EnvelopeHeaderLen) ||
+		binary.LittleEndian.Uint32(frame[8:12]) == 0 ||
+		binary.LittleEndian.Uint32(frame[20:24]) != 0 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	operation := binary.LittleEndian.Uint32(frame[8:12])
+	code := binary.LittleEndian.Uint32(frame[12:16])
+	payloadLen := binary.LittleEndian.Uint32(frame[16:20])
+	if uint64(payloadLen) != uint64(len(frame)-EnvelopeHeaderLen) ||
+		reply && code > ResultInvalidState {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	return operation, code, payloadLen, nil
+}}
+
+// EncodeRequestHeader emits the header to which the caller appends payloadLen
+// canonical payload bytes.
+func EncodeRequestHeader(operation, flags, payloadLen uint32) ([]byte, error) {{
+	return encodeEnvelopeHeader(envelopeRequestMagic, operation, flags, payloadLen)
+}}
+
+// DecodeRequestHeader validates a complete header-plus-payload frame.
+func DecodeRequestHeader(frame []byte) (RequestHeader, error) {{
+	operation, flags, payloadLen, err := decodeEnvelopeHeader(frame, envelopeRequestMagic, false)
+	if err != nil {{
+		return RequestHeader{{}}, err
+	}}
+	return RequestHeader{{Operation: operation, Flags: flags, PayloadLen: payloadLen}}, nil
+}}
+
+// EncodeReplyHeader emits the header to which the provider appends payloadLen
+// canonical payload bytes.
+func EncodeReplyHeader(operation, result, payloadLen uint32) ([]byte, error) {{
+	return encodeEnvelopeHeader(envelopeReplyMagic, operation, result, payloadLen)
+}}
+
+// DecodeReplyHeader validates a complete header-plus-payload frame and the
+// closed result-code domain.
+func DecodeReplyHeader(frame []byte) (ReplyHeader, error) {{
+	operation, result, payloadLen, err := decodeEnvelopeHeader(frame, envelopeReplyMagic, true)
+	if err != nil {{
+		return ReplyHeader{{}}, err
+	}}
+	return ReplyHeader{{Operation: operation, Result: result, PayloadLen: payloadLen}}, nil
+}}
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally
 // contains no DSN, SQL, provider identity, or implementation-specific detail.

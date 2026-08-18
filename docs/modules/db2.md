@@ -16,10 +16,13 @@ client, the shared `server-go/db2` Go caller contract, and fingerprinted positiv
 vectors. Both clients accept a narrow bus-call interface rather than depending on a daemon global,
 so C, Go, `aimee-kb`, and parity harnesses exercise the same bytes and contract fingerprint. The Go
 package is caller-side only during phase one: it does not read the DB2 DSN, open PostgreSQL, serve a
-stage, or become a second DB2 owner. The fixed eight-byte request carries only magic and wire version. The
-fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence; unknown flags and
-non-zero reserved bytes fail closed. The exported process now binds that response to the strong
-production DB2 health probes; explicit injected backends are confined to tests.
+stage, or become a second DB2 owner. The frozen bootstrap health operation keeps its fixed eight-byte
+request and sixteen-byte response. Every later catalog operation uses the generated 24-byte
+request/reply envelope: distinct magic, a 16-bit version and header length, operation discriminator,
+request flags or a closed reply result, exact payload length, and zero reserved bytes. Shared C/Go
+positive and negative vectors pin that additive envelope without changing a health byte. The exported
+process binds health to the strong production DB2 probes; explicit injected backends are confined to
+tests.
 
 ## Dependencies and consumers
 

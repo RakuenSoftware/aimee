@@ -187,14 +187,17 @@ names and PostgreSQL mechanics from leaking into the later DB3 contract without 
 provider-neutral logical operations are ineligible. `catalog_complete` cannot pass while the ledger
 contains an `audit-pending` production declaration.
 
-The bus already carries event kind, correlation, deadline, cancellation, and fragmentation.
-The DB2 request body therefore has only a 24-byte little-endian header followed by the declared
-payload: `magic:u32`, `version:u16`, `header_len:u16`, `operation:u32`, `flags:u32`,
-`payload_len:u32`, and `reserved:u32`. Replies use the same shape with reply magic and replace
-`flags` with a closed result code (`ok`, `not_found`, `conflict`, `denied`, `retryable`, or
-`invalid_state`). Unknown bits, nonzero reserved bytes, length mismatches, undeclared results,
-and noncanonical unused tails fail as invalid requests. Transport cancellation, deadline, and
-internal failure remain module-runtime statuses rather than domain replies.
+The bus already carries event kind, correlation, deadline, cancellation, and fragmentation. The
+already-frozen bootstrap health request/reply keeps its dedicated 8/16-byte codec. Every subsequent
+DB2 request body has only a 24-byte little-endian header followed by the declared payload:
+`magic:u32`, `version:u16`, `header_len:u16`, `operation:u32`, `flags:u32`, `payload_len:u32`, and
+`reserved:u32`. Replies use the same shape with distinct reply magic and replace `flags` with a
+closed result code (`ok`, `not_found`, `conflict`, `denied`, `retryable`, or `invalid_state`). The
+generated C and Go codecs and their shared positive/negative vectors land before the second operation,
+so adding it cannot reinterpret the bootstrap bytes. Unknown operation-specific bits, nonzero
+reserved bytes, length mismatches, undeclared results, and noncanonical unused tails fail as invalid
+requests. Transport cancellation, deadline, and internal failure remain module-runtime statuses
+rather than domain replies.
 
 Contract version 1 freezes when phase one activates. A later additive operation increments the
 catalog without reusing identifiers; an incompatible field change requires a new version and a

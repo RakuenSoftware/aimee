@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "e8744f638842c3a8fa783b206fb702c3ed1efba069770d314701b63a2f4961dc"
+#define AIMEE_DB2_CONTRACT_SHA256 "19b4021429a4b60bd00487df9f4996ad041cfec86219774ce3b0b8e73d00ec9d"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -41,10 +41,34 @@
 #define AIMEE_DB2_REQUEST_LEN      8u
 #define AIMEE_DB2_RESPONSE_LEN     16u
 
+#define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
+#define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
+#define AIMEE_DB2_ENVELOPE_HEADER_LEN    24u
+
 #define AIMEE_DB2_FLAG_SCHEMA    0x1u
 #define AIMEE_DB2_FLAG_PG_TRGM   0x2u
 #define AIMEE_DB2_FLAG_KB_TABLES 0x4u
 #define AIMEE_DB2_FLAG_ALL       0x7u
+
+typedef struct
+{
+   uint32_t operation;
+   uint32_t flags;
+   uint32_t payload_len;
+} aimee_db2_request_header_t;
+
+typedef struct
+{
+   uint32_t operation;
+   uint32_t result;
+   uint32_t payload_len;
+} aimee_db2_reply_header_t;
+
+static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
+{
+   output[0] = (uint8_t)value;
+   output[1] = (uint8_t)(value >> 8u);
+}
 
 static inline void aimee_db2_put_u32(uint8_t *output, uint32_t value)
 {
@@ -58,6 +82,84 @@ static inline uint32_t aimee_db2_get_u32(const uint8_t *input)
    for (unsigned index = 0; index < 4; ++index)
       value |= (uint32_t)input[index] << (index * 8u);
    return value;
+}
+
+static inline uint16_t aimee_db2_get_u16(const uint8_t *input)
+{
+   return (uint16_t)((uint16_t)input[0] | (uint16_t)((uint16_t)input[1] << 8u));
+}
+
+static inline int aimee_db2_request_header_encode(uint32_t operation, uint32_t flags,
+                                                  uint32_t payload_len, uint8_t *output,
+                                                  size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN || operation == 0)
+      return -1;
+   aimee_db2_put_u32(output, AIMEE_DB2_ENVELOPE_REQUEST_MAGIC);
+   aimee_db2_put_u16(output + 4, (uint16_t)AIMEE_DB2_WIRE_VERSION);
+   aimee_db2_put_u16(output + 6, (uint16_t)AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   aimee_db2_put_u32(output + 8, operation);
+   aimee_db2_put_u32(output + 12, flags);
+   aimee_db2_put_u32(output + 16, payload_len);
+   aimee_db2_put_u32(output + 20, 0u);
+   return 0;
+}
+
+static inline int aimee_db2_request_header_decode(const uint8_t *input, size_t input_len,
+                                                  aimee_db2_request_header_t *header)
+{
+   if (header)
+      *header = (aimee_db2_request_header_t){0};
+   if (!input || !header || input_len < AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input) != AIMEE_DB2_ENVELOPE_REQUEST_MAGIC ||
+       aimee_db2_get_u16(input + 4) != AIMEE_DB2_WIRE_VERSION ||
+       aimee_db2_get_u16(input + 6) != AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input + 8) == 0 || aimee_db2_get_u32(input + 20) != 0u ||
+       (size_t)aimee_db2_get_u32(input + 16) !=
+           input_len - AIMEE_DB2_ENVELOPE_HEADER_LEN)
+      return -1;
+   header->operation = aimee_db2_get_u32(input + 8);
+   header->flags = aimee_db2_get_u32(input + 12);
+   header->payload_len = aimee_db2_get_u32(input + 16);
+   return 0;
+}
+
+static inline int aimee_db2_reply_header_encode(uint32_t operation, uint32_t result,
+                                                uint32_t payload_len, uint8_t *output,
+                                                size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN || operation == 0 ||
+       result > AIMEE_DB2_RESULT_INVALID_STATE)
+      return -1;
+   aimee_db2_put_u32(output, AIMEE_DB2_ENVELOPE_REPLY_MAGIC);
+   aimee_db2_put_u16(output + 4, (uint16_t)AIMEE_DB2_WIRE_VERSION);
+   aimee_db2_put_u16(output + 6, (uint16_t)AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   aimee_db2_put_u32(output + 8, operation);
+   aimee_db2_put_u32(output + 12, result);
+   aimee_db2_put_u32(output + 16, payload_len);
+   aimee_db2_put_u32(output + 20, 0u);
+   return 0;
+}
+
+static inline int aimee_db2_reply_header_decode(const uint8_t *input, size_t input_len,
+                                                aimee_db2_reply_header_t *header)
+{
+   if (header)
+      *header = (aimee_db2_reply_header_t){0};
+   if (!input || !header || input_len < AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input) != AIMEE_DB2_ENVELOPE_REPLY_MAGIC ||
+       aimee_db2_get_u16(input + 4) != AIMEE_DB2_WIRE_VERSION ||
+       aimee_db2_get_u16(input + 6) != AIMEE_DB2_ENVELOPE_HEADER_LEN ||
+       aimee_db2_get_u32(input + 8) == 0 ||
+       aimee_db2_get_u32(input + 12) > AIMEE_DB2_RESULT_INVALID_STATE ||
+       aimee_db2_get_u32(input + 20) != 0u ||
+       (size_t)aimee_db2_get_u32(input + 16) !=
+           input_len - AIMEE_DB2_ENVELOPE_HEADER_LEN)
+      return -1;
+   header->operation = aimee_db2_get_u32(input + 8);
+   header->result = aimee_db2_get_u32(input + 12);
+   header->payload_len = aimee_db2_get_u32(input + 16);
+   return 0;
 }
 
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)

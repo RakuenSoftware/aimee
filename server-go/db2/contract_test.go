@@ -11,7 +11,27 @@ import (
 type wireBaseline struct {
 	CatalogSHA256 string `json:"catalog_sha256"`
 	WireVersion   uint32 `json:"wire_version"`
-	Operations    []struct {
+	BodyEnvelope  struct {
+		HeaderLen uint32 `json:"header_len"`
+		Request   struct {
+			Positive string `json:"positive"`
+			Negative []struct {
+				Mutation string `json:"mutation"`
+				Hex      string `json:"hex"`
+			} `json:"negative"`
+		} `json:"request"`
+		Reply struct {
+			Positive []struct {
+				Result uint32 `json:"result"`
+				Hex    string `json:"hex"`
+			} `json:"positive"`
+			Negative []struct {
+				Mutation string `json:"mutation"`
+				Hex      string `json:"hex"`
+			} `json:"negative"`
+		} `json:"reply"`
+	} `json:"body_envelope"`
+	Operations []struct {
 		Request struct {
 			Positive string `json:"positive"`
 			Negative []struct {
@@ -30,6 +50,72 @@ type wireBaseline struct {
 			} `json:"negative"`
 		} `json:"reply"`
 	} `json:"operations"`
+}
+
+func TestBodyEnvelopeMatchesEverySharedCVector(t *testing.T) {
+	envelope := loadWireBaseline(t).BodyEnvelope
+	if envelope.HeaderLen != EnvelopeHeaderLen {
+		t.Fatalf("header length = %d, generated Go = %d", envelope.HeaderLen, EnvelopeHeaderLen)
+	}
+	payload := []byte{0xaa, 0xbb, 0xcc}
+	requestHeader, err := EncodeRequestHeader(0x01020304, 5, uint32(len(payload)))
+	if err != nil {
+		t.Fatalf("EncodeRequestHeader: %v", err)
+	}
+	request := append(requestHeader, payload...)
+	wantRequest := decodeHex(t, envelope.Request.Positive)
+	if string(request) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", request, wantRequest)
+	}
+	decodedRequest, err := DecodeRequestHeader(wantRequest)
+	if err != nil || decodedRequest != (RequestHeader{
+		Operation: 0x01020304, Flags: 5, PayloadLen: 3,
+	}) {
+		t.Fatalf("decoded request = (%+v, %v)", decodedRequest, err)
+	}
+	for _, vector := range envelope.Request.Negative {
+		t.Run("request_"+vector.Mutation, func(t *testing.T) {
+			header, err := DecodeRequestHeader(decodeHex(t, vector.Hex))
+			if !errors.Is(err, ErrMalformedEnvelope) || header != (RequestHeader{}) {
+				t.Fatalf("request = (%+v, %v), want zero/malformed", header, err)
+			}
+		})
+	}
+	if header, err := EncodeRequestHeader(0, 0, 0); !errors.Is(err, ErrMalformedEnvelope) || header != nil {
+		t.Fatalf("zero-operation request = (%x, %v)", header, err)
+	}
+
+	for _, vector := range envelope.Reply.Positive {
+		vector := vector
+		t.Run("reply_result_"+string(rune('0'+vector.Result)), func(t *testing.T) {
+			header, err := EncodeReplyHeader(0x01020304, vector.Result, uint32(len(payload)))
+			if err != nil {
+				t.Fatalf("EncodeReplyHeader: %v", err)
+			}
+			reply := append(header, payload...)
+			want := decodeHex(t, vector.Hex)
+			if string(reply) != string(want) {
+				t.Fatalf("reply = %x, want %x", reply, want)
+			}
+			decoded, err := DecodeReplyHeader(want)
+			if err != nil || decoded != (ReplyHeader{
+				Operation: 0x01020304, Result: vector.Result, PayloadLen: 3,
+			}) {
+				t.Fatalf("decoded reply = (%+v, %v)", decoded, err)
+			}
+		})
+	}
+	for _, vector := range envelope.Reply.Negative {
+		t.Run("reply_"+vector.Mutation, func(t *testing.T) {
+			header, err := DecodeReplyHeader(decodeHex(t, vector.Hex))
+			if !errors.Is(err, ErrMalformedEnvelope) || header != (ReplyHeader{}) {
+				t.Fatalf("reply = (%+v, %v), want zero/malformed", header, err)
+			}
+		})
+	}
+	if header, err := EncodeReplyHeader(1, ResultInvalidState+1, 0); !errors.Is(err, ErrMalformedEnvelope) || header != nil {
+		t.Fatalf("unknown-result reply = (%x, %v)", header, err)
+	}
 }
 
 func decodeHex(t *testing.T, value string) []byte {
