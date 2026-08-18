@@ -146,6 +146,17 @@
 #define AIMEE_DB1_OP_COORD_JOB_LIST_RECENT             40u
 #define AIMEE_DB1_OP_COORD_JOB_LIST_ACTIVE_IDS         41u
 #define AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH           42u
+#define AIMEE_DB1_OP_CRON_JOB_UPSERT                   43u
+#define AIMEE_DB1_OP_CRON_JOB_GET                      44u
+#define AIMEE_DB1_OP_CRON_JOB_LOAD                     45u
+#define AIMEE_DB1_OP_CRON_JOB_SET_ENABLED              46u
+#define AIMEE_DB1_OP_CRON_JOB_SET_ENABLED_ALL          47u
+#define AIMEE_DB1_OP_CRON_JOB_DELETE                   48u
+#define AIMEE_DB1_OP_CRON_JOB_RECORD_RUN               49u
+#define AIMEE_DB1_OP_CRON_JOB_LIST_JSON                50u
+#define AIMEE_DB1_OP_CRON_JOB_HISTORY_JSON             51u
+#define AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT            52u
+#define AIMEE_DB1_OP_CRON_JOB_LAST_OUTPUT_HASH         53u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
