@@ -701,11 +701,16 @@ git init --object-format=sha256 -b feature.locked "$MIRROR_CLIENT" >/dev/null
 # the snapshot, the reconstruction and the MCP Git path (SHA-1 is covered by
 # unit tests). It therefore needs a git that honours --object-format=sha256.
 #
-# A runner whose git quietly gives SHA-1 instead produced five failures in a
-# row, none of which named the cause: the snapshot carried a 40-hex head with no
-# branch or upstream, and every assertion after it disagreed about something
-# else. An absent capability is a skip, exactly like aimee-kb above -- not five
-# assertions failing about a mirror that was never the problem.
+# This probe is a PRECONDITION guard, not the fix for anything observed. I added
+# it believing CI's git had produced SHA-1: the snapshot there carried a 40-hex
+# head with no branch or upstream, and five assertions failed about it. That was
+# wrong. The probe has never fired in CI, and the section passes there -- the
+# 40-hex head came from reading a DIFFERENT workspace's snapshot, which the
+# selection below used to make arbitrarily.
+#
+# It stays because the precondition is real: this section drives SHA-256 ids
+# deliberately, and a runner that cannot provide one should say so once rather
+# than fail five assertions about a mirror that was never the problem.
 MIRROR_OBJFMT=$(git -C "$MIRROR_CLIENT" rev-parse --show-object-format 2>/dev/null) || true
 if [ "$MIRROR_OBJFMT" = "sha256" ]; then
     MIRROR_SHA256=1
@@ -768,6 +773,16 @@ check_output "identical mirror-sync continuation persisted" '"seq":1' echo "$RES
 RESP=$(http_rpc "${MIRROR_REQS[5]}") || true
 check_output "identical mirror-sync reuses generation" '"generation":1' echo "$RESP"
 
+# Select the snapshot by IDENTITY, not by whatever the filesystem yields first.
+#
+# This was `find ... -name client.snapshot -print -quit`, which returns an
+# arbitrary match -- and in CI it returned the wrong one: a snapshot with a
+# 40-hex head and no branch or upstream, which failed five assertions in a row
+# about a mirror that was fine. Locally there is one snapshot, so it was always
+# right here, and the bug stayed invisible until this harness first ran in CI.
+#
+# The assertions below are about THIS mirror, so match the head this fixture
+# just pushed.
 SNAPSHOT=$(grep -rl "$MIRROR_HEAD" "$AIMEE_HOME/workspaces" --include=client.snapshot 2>/dev/null | head -1) || true
 if [ -z "$SNAPSHOT" ]; then
     # Nothing published for THIS head. Show what was published instead, so the
