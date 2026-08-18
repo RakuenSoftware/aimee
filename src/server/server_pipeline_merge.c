@@ -158,7 +158,7 @@ void advance_after_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no,
    if (!merge_sha || !merge_sha[0])
    {
       const char *mp = gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
-      rtp_run_set_state(id, mp, NULL);
+      db1_roundtable_run_set_state(id, mp, NULL);
       cJSON_AddBoolToObject(resp, "merged", 1);
       cJSON_AddBoolToObject(resp, "advanced", 0);
       cJSON_AddStringToObject(resp, "state", mp);
@@ -169,9 +169,9 @@ void advance_after_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no,
       return;
    }
    snprintf(gate->merge_sha, sizeof(gate->merge_sha), "%s", merge_sha);
-   rtp_gate_update(gate);
+   db1_roundtable_gate_update(gate);
    const char *next = gate_no == 2 ? RTP_STATE_DONE : RTP_STATE_IMPLEMENTING;
-   rtp_run_set_state(id, next, RTP_PHASE_IMPL);
+   db1_roundtable_run_set_state(id, next, RTP_PHASE_IMPL);
    /* the merge itself succeeded and is recorded — always report that truthfully. */
    cJSON_AddBoolToObject(resp, "merged", 1);
    cJSON_AddBoolToObject(resp, "advanced", 1);
@@ -179,12 +179,12 @@ void advance_after_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no,
    if (gate_no == 1)
    {
       rtp_run_t r2;
-      if (rtp_run_get(id, &r2) == 0)
+      if (db1_roundtable_run_get(id, &r2) == 0)
       {
          if (strcmp(r2.admission_class, RTP_ADMIT_ACTIVE) != 0)
          {
             snprintf(r2.admission_class, sizeof(r2.admission_class), RTP_ADMIT_ACTIVE);
-            rtp_run_update(&r2);
+            db1_roundtable_run_update(&r2);
          }
          /* the implementation phase gets its own dedicated branch/worktree off the
           * merge commit (#2). If that fails we must NOT silently continue with the
@@ -199,7 +199,7 @@ void advance_after_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no,
             r2.base_sha[0] = '\0';
             r2.impl_pr_number = 0;
             r2.impl_pr_url[0] = '\0';
-            rtp_run_update(&r2);
+            db1_roundtable_run_update(&r2);
             *run = r2;
             cJSON_AddStringToObject(resp, "action", "escalate");
             cJSON_AddStringToObject(resp, "state", RTP_STATE_IMPLEMENTING);
@@ -331,7 +331,7 @@ void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, c
    snprintf(gate->merge_command, sizeof(gate->merge_command), "gh pr merge %d --merge%s",
             gate->pr_number, match);
    gate->merge_exit_code = exit_code;
-   rtp_gate_update(gate);
+   db1_roundtable_gate_update(gate);
 
    if (merged)
    {

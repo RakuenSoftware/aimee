@@ -1,14 +1,14 @@
 /* test_roadmap_auto.c — unit tests for the roadmap dispatch-loop runtime.
  *
  * Tests:
- *   1. rdm_dispatch_upsert + rdm_dispatch_get round-trip.
- *   2. rdm_dispatch_set_status and rdm_dispatch_set_phase updates.
- *   3. rdm_unit_ensure + rdm_unit_get round-trip.
- *   4. rdm_unit_claim sets state='active', increments dispatch_attempts.
- *   5. rdm_unit_finish sets state, result, error.
- *   6. rdm_unit_select_next returns pending tasks in insertion order.
- *   7. rdm_unit_select_next returns 1 (no unit) when all are claimed/done.
- *   8. rdm_unit_increment_verify_attempts increments the counter.
+ *   1. db1_roadmap_dispatch_upsert + db1_roadmap_dispatch_get round-trip.
+ *   2. db1_roadmap_dispatch_set_status and db1_roadmap_dispatch_set_phase updates.
+ *   3. db1_roadmap_unit_ensure + db1_roadmap_unit_get round-trip.
+ *   4. db1_roadmap_unit_claim sets state='active', increments dispatch_attempts.
+ *   5. db1_roadmap_unit_finish sets state, result, error.
+ *   6. db1_roadmap_unit_select_next returns pending tasks in insertion order.
+ *   7. db1_roadmap_unit_select_next returns 1 (no unit) when all are claimed/done.
+ *   8. db1_roadmap_unit_increment_verify_attempts increments the counter.
  *   9. roadmap_milestone_parse_verdict parses pass/partial/fail/unknown.
  *  10. tool_policy_mode: verify that "planning" and "docs" are recognized strings.
  */
@@ -47,9 +47,9 @@ static void close_db(void)
 static void test_dispatch_upsert_get(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-1", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-1", "balanced", 1, 0) == 0);
    rdm_dispatch_t d;
-   assert(rdm_dispatch_get("rm-1", &d) == 0);
+   assert(db1_roadmap_dispatch_get("rm-1", &d) == 0);
    assert(strcmp(d.roadmap_id, "rm-1") == 0);
    assert(strcmp(d.status, "running") == 0);
    assert(strcmp(d.phase, "plan") == 0);
@@ -63,11 +63,11 @@ static void test_dispatch_upsert_get(void)
 static void test_dispatch_set_status_phase(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-2", "budget", 0, 0) == 0);
-   assert(rdm_dispatch_set_status("rm-2", "paused", "budget_ceiling") == 0);
-   assert(rdm_dispatch_set_phase("rm-2", "execute") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-2", "budget", 0, 0) == 0);
+   assert(db1_roadmap_dispatch_set_status("rm-2", "paused", "budget_ceiling") == 0);
+   assert(db1_roadmap_dispatch_set_phase("rm-2", "execute") == 0);
    rdm_dispatch_t d;
-   assert(rdm_dispatch_get("rm-2", &d) == 0);
+   assert(db1_roadmap_dispatch_get("rm-2", &d) == 0);
    assert(strcmp(d.status, "paused") == 0);
    assert(strcmp(d.phase, "execute") == 0);
    assert(strcmp(d.exit_reason, "budget_ceiling") == 0);
@@ -79,12 +79,12 @@ static void test_dispatch_set_status_phase(void)
 static void test_unit_ensure_get(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-3", "balanced", 1, 0) == 0);
-   assert(rdm_unit_ensure("rm-3", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-3", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_unit_ensure("rm-3", "u1", "task", "execution") == 0);
    /* second ensure is idempotent */
-   assert(rdm_unit_ensure("rm-3", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_unit_ensure("rm-3", "u1", "task", "execution") == 0);
    rdm_unit_dispatch_t u;
-   assert(rdm_unit_get("rm-3", "u1", &u) == 0);
+   assert(db1_roadmap_unit_get("rm-3", "u1", &u) == 0);
    assert(strcmp(u.unit_id, "u1") == 0);
    assert(strcmp(u.level, "task") == 0);
    assert(strcmp(u.state, "pending") == 0);
@@ -98,11 +98,11 @@ static void test_unit_ensure_get(void)
 static void test_unit_claim(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-4", "balanced", 1, 0) == 0);
-   assert(rdm_unit_ensure("rm-4", "u1", "task", "execution") == 0);
-   assert(rdm_unit_claim("rm-4", "u1", "loop", "/tmp/wt") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-4", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_unit_ensure("rm-4", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_unit_claim("rm-4", "u1", "loop", "/tmp/wt") == 0);
    rdm_unit_dispatch_t u;
-   assert(rdm_unit_get("rm-4", "u1", &u) == 0);
+   assert(db1_roadmap_unit_get("rm-4", "u1", &u) == 0);
    assert(strcmp(u.state, "active") == 0);
    assert(strcmp(u.claimed_by, "loop") == 0);
    assert(strcmp(u.worktree_path, "/tmp/wt") == 0);
@@ -115,12 +115,12 @@ static void test_unit_claim(void)
 static void test_unit_finish(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-5", "balanced", 1, 0) == 0);
-   assert(rdm_unit_ensure("rm-5", "u1", "task", "execution") == 0);
-   assert(rdm_unit_claim("rm-5", "u1", "loop", "") == 0);
-   assert(rdm_unit_finish("rm-5", "u1", "done", "verified", "") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-5", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_unit_ensure("rm-5", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_unit_claim("rm-5", "u1", "loop", "") == 0);
+   assert(db1_roadmap_unit_finish("rm-5", "u1", "done", "verified", "") == 0);
    rdm_unit_dispatch_t u;
-   assert(rdm_unit_get("rm-5", "u1", &u) == 0);
+   assert(db1_roadmap_unit_get("rm-5", "u1", &u) == 0);
    assert(strcmp(u.state, "done") == 0);
    assert(strcmp(u.result, "verified") == 0);
    close_db();
@@ -131,11 +131,11 @@ static void test_unit_finish(void)
 static void test_select_next_order(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-6", "balanced", 1, 0) == 0);
-   assert(rdm_unit_ensure("rm-6", "u1", "task", "execution") == 0);
-   assert(rdm_unit_ensure("rm-6", "u2", "task", "execution") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-6", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_unit_ensure("rm-6", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_unit_ensure("rm-6", "u2", "task", "execution") == 0);
    char uid[64] = "";
-   assert(rdm_unit_select_next("rm-6", uid, sizeof(uid)) == 0);
+   assert(db1_roadmap_unit_select_next("rm-6", uid, sizeof(uid)) == 0);
    assert(strcmp(uid, "u1") == 0); /* lowest id first */
    close_db();
    printf("  select_next_order: ok\n");
@@ -145,11 +145,11 @@ static void test_select_next_order(void)
 static void test_select_next_none(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-7", "balanced", 1, 0) == 0);
-   assert(rdm_unit_ensure("rm-7", "u1", "task", "execution") == 0);
-   assert(rdm_unit_claim("rm-7", "u1", "loop", "") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-7", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_unit_ensure("rm-7", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_unit_claim("rm-7", "u1", "loop", "") == 0);
    char uid[64] = "";
-   int rc = rdm_unit_select_next("rm-7", uid, sizeof(uid));
+   int rc = db1_roadmap_unit_select_next("rm-7", uid, sizeof(uid));
    assert(rc == 1); /* no unclaimed pending unit */
    close_db();
    printf("  select_next_none: ok\n");
@@ -159,12 +159,12 @@ static void test_select_next_none(void)
 static void test_increment_verify_attempts(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-8", "balanced", 1, 0) == 0);
-   assert(rdm_unit_ensure("rm-8", "u1", "task", "execution") == 0);
-   assert(rdm_unit_increment_verify_attempts("rm-8", "u1") == 0);
-   assert(rdm_unit_increment_verify_attempts("rm-8", "u1") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-8", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_unit_ensure("rm-8", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_unit_increment_verify_attempts("rm-8", "u1") == 0);
+   assert(db1_roadmap_unit_increment_verify_attempts("rm-8", "u1") == 0);
    rdm_unit_dispatch_t u;
-   assert(rdm_unit_get("rm-8", "u1", &u) == 0);
+   assert(db1_roadmap_unit_get("rm-8", "u1", &u) == 0);
    assert(u.verify_attempts == 2);
    close_db();
    printf("  increment_verify_attempts: ok\n");
@@ -214,17 +214,17 @@ static void test_verify_exhaustion_state(void)
 {
    /* Simulate the loop's behavior: after max retries the unit becomes needs_review. */
    open_db();
-   assert(rdm_dispatch_upsert("rm-fi", "balanced", 1, 0) == 0);
-   assert(rdm_unit_ensure("rm-fi", "u1", "task", "execution") == 0);
-   assert(rdm_unit_claim("rm-fi", "u1", "loop", "") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-fi", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_unit_ensure("rm-fi", "u1", "task", "execution") == 0);
+   assert(db1_roadmap_unit_claim("rm-fi", "u1", "loop", "") == 0);
    /* Simulate exhausting verify retries (increment 3 times). */
-   assert(rdm_unit_increment_verify_attempts("rm-fi", "u1") == 0);
-   assert(rdm_unit_increment_verify_attempts("rm-fi", "u1") == 0);
-   assert(rdm_unit_increment_verify_attempts("rm-fi", "u1") == 0);
-   assert(rdm_unit_finish("rm-fi", "u1", "needs_review", "",
-                          "verification exhausted after retries") == 0);
+   assert(db1_roadmap_unit_increment_verify_attempts("rm-fi", "u1") == 0);
+   assert(db1_roadmap_unit_increment_verify_attempts("rm-fi", "u1") == 0);
+   assert(db1_roadmap_unit_increment_verify_attempts("rm-fi", "u1") == 0);
+   assert(db1_roadmap_unit_finish("rm-fi", "u1", "needs_review", "",
+                                  "verification exhausted after retries") == 0);
    rdm_unit_dispatch_t u;
-   assert(rdm_unit_get("rm-fi", "u1", &u) == 0);
+   assert(db1_roadmap_unit_get("rm-fi", "u1", &u) == 0);
    assert(strcmp(u.state, "needs_review") == 0);
    assert(u.verify_attempts == 3);
    close_db();
@@ -238,10 +238,10 @@ static void test_stuck_guard_semantics(void)
     * >= half the ROADMAP_AUTO_STUCK_WINDOW slots, the loop pauses.
     * We verify the DB1 status update that the guard writes. */
    open_db();
-   assert(rdm_dispatch_upsert("rm-stuck", "balanced", 1, 0) == 0);
-   assert(rdm_dispatch_set_status("rm-stuck", "paused", "stuck") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-stuck", "balanced", 1, 0) == 0);
+   assert(db1_roadmap_dispatch_set_status("rm-stuck", "paused", "stuck") == 0);
    rdm_dispatch_t d;
-   assert(rdm_dispatch_get("rm-stuck", &d) == 0);
+   assert(db1_roadmap_dispatch_get("rm-stuck", &d) == 0);
    assert(strcmp(d.status, "paused") == 0);
    assert(strcmp(d.exit_reason, "stuck") == 0);
    close_db();
@@ -252,10 +252,10 @@ static void test_stuck_guard_semantics(void)
 static void test_budget_ceiling_status(void)
 {
    open_db();
-   assert(rdm_dispatch_upsert("rm-budget", "balanced", 1, 1000) == 0);
-   assert(rdm_dispatch_set_status("rm-budget", "paused", "budget_ceiling") == 0);
+   assert(db1_roadmap_dispatch_upsert("rm-budget", "balanced", 1, 1000) == 0);
+   assert(db1_roadmap_dispatch_set_status("rm-budget", "paused", "budget_ceiling") == 0);
    rdm_dispatch_t d;
-   assert(rdm_dispatch_get("rm-budget", &d) == 0);
+   assert(db1_roadmap_dispatch_get("rm-budget", &d) == 0);
    assert(strcmp(d.exit_reason, "budget_ceiling") == 0);
    assert(d.budget_ceiling_tokens == 1000);
    close_db();

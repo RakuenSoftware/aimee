@@ -171,31 +171,32 @@ static void teardown(void)
 static void test_draft_completion(void)
 {
    int pid = 0;
-   assert(rtp_run_create("build a thing", NULL, "/r", "testing", &pid) == 0);
+   assert(db1_roundtable_run_create("build a thing", NULL, "/r", "testing", &pid) == 0);
    /* drafting state with a captured, valid DRAFT pass whose attempt snapshot
     * carries the skeleton artifact. */
    int pass_id = 0;
-   assert(rtp_pass_create(pid, RTP_PHASE_PROPOSAL, RTP_MODE_DRAFT, 1, "h", &pass_id) == 0);
+   assert(db1_roundtable_pass_create(pid, RTP_PHASE_PROPOSAL, RTP_MODE_DRAFT, 1, "h", &pass_id) ==
+          0);
    rtp_pass_t p;
-   assert(rtp_pass_get(pass_id, &p) == 0);
+   assert(db1_roundtable_pass_get(pass_id, &p) == 0);
    snprintf(p.status, sizeof(p.status), RTP_PASS_CAPTURED);
-   assert(rtp_pass_update(&p) == 0);
+   assert(db1_roundtable_pass_update(&p) == 0);
    int att = 0;
-   assert(rtp_attempt_create(pass_id, 1, "oprun_d", &att) == 0);
+   assert(db1_roundtable_attempt_create(pass_id, 1, "oprun_d", &att) == 0);
    rtp_attempt_t a;
-   assert(rtp_attempt_get_by_run("oprun_d", &a) == 0);
+   assert(db1_roundtable_attempt_get_by_run("oprun_d", &a) == 0);
    a.envelope_valid = 1;
    snprintf(a.capture_status, sizeof(a.capture_status), RTP_CAP_CAPTURED);
    snprintf(a.result_snapshot, sizeof(a.result_snapshot),
             "{\"artifact\":\"# Proposal skeleton\\n## Goal\\n## Scope\\n\",\"best_round\":1}");
-   assert(rtp_attempt_update(&a) == 0);
+   assert(db1_roundtable_attempt_update(&a) == 0);
 
    /* advance: DRAFT must store the skeleton + move to proposal_review (NOT gate). */
    call_advance(pid);
    assert(!g_is_error);
    assert(strcmp(resp_action(), "drafted") == 0);
    rtp_run_t run;
-   assert(rtp_run_get(pid, &run) == 0);
+   assert(db1_roundtable_run_get(pid, &run) == 0);
    assert(strcmp(run.state, RTP_STATE_PROPOSAL_REVIEW) == 0);
    assert(run.proposal_ref[0] != '\0');
    /* the proposal lands on a dedicated branch + worktree as a real proposal file
@@ -227,10 +228,10 @@ static void test_draft_completion(void)
 static void test_gate_ttl_via_gate(void)
 {
    int pid = 0;
-   assert(rtp_run_create("ttl idea", NULL, "/r", "testing", &pid) == 0);
-   assert(rtp_run_set_state(pid, RTP_STATE_GATE1_PENDING, NULL) == 0);
+   assert(db1_roundtable_run_create("ttl idea", NULL, "/r", "testing", &pid) == 0);
+   assert(db1_roundtable_run_set_state(pid, RTP_STATE_GATE1_PENDING, NULL) == 0);
    int gid = 0;
-   assert(rtp_gate_create(pid, 1, 7, "deadbeef", &gid) == 0);
+   assert(db1_roundtable_gate_create(pid, 1, 7, "deadbeef", &gid) == 0);
 
    /* backdate the gate so it is past a 1h TTL (second connection to the temp db). */
    sqlite3 *raw = NULL;
@@ -262,11 +263,11 @@ static void test_gate_ttl_via_gate(void)
    assert(g_is_error); /* rejected, not passed */
    assert(strstr(g_err, "TTL") != NULL);
    rtp_run_t run;
-   assert(rtp_run_get(pid, &run) == 0);
+   assert(db1_roundtable_run_get(pid, &run) == 0);
    assert(strcmp(run.state, RTP_STATE_ABANDONED) == 0);
    /* the gate verdict was never recorded as pass. */
    rtp_gate_t g;
-   assert(rtp_gate_get(pid, 1, &g) == 0);
+   assert(db1_roundtable_gate_get(pid, 1, &g) == 0);
    assert(strcmp(g.verdict, "pass") != 0);
    printf("  gate TTL abandons via pipeline.gate (never passes): ok\n");
 }
