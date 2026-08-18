@@ -23,7 +23,7 @@ typedef enum
 /* Complete immutable tuple returned by the authority-only database facade.
  * Character arrays are canonical NUL-terminated fixed records with a zero
  * unused tail. The ordinary kb process must never receive this record. */
-typedef struct
+typedef struct kb_mgmt_token_authority_record
 {
    int newly_admitted;
    char correlation_id[65];
@@ -80,7 +80,7 @@ typedef struct
  * request digest, because the bearer is a browser or thin client rather than an
  * enrolled server. `audience` is the enrolled server the token is minted for;
  * `target_enrollment_id` binds that audience to its enrollment row. */
-typedef struct
+typedef struct kb_identity_token_authority_record
 {
    int newly_admitted;
    char correlation_id[65];
@@ -142,12 +142,12 @@ extern "C"
 
    /* Validate the fixed identity record independently of private-key use. */
    /* 1 if `subject` is a well-formed DATA-PLANE subject. Exposed only so the grammar
- * can be cross-checked against its three other copies (tests/subject_corpus.h);
- * the authority itself reaches it through record_valid. Not the management actor
- * grammar, which is stricter and excludes the bare form. */
-int kb_identity_token_authority_subject_valid(const char *subject);
+    * can be cross-checked against its three other copies (tests/subject_corpus.h);
+    * the authority itself reaches it through record_valid. Not the management actor
+    * grammar, which is stricter and excludes the bare form. */
+   int kb_identity_token_authority_subject_valid(const char *subject);
 
-int kb_identity_token_authority_record_valid(const kb_identity_token_authority_record_t *record);
+   int kb_identity_token_authority_record_valid(const kb_identity_token_authority_record_t *record);
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,7 @@
 #ifndef DEC_DB2_CANONICAL_INDEX_H
 #define DEC_DB2_CANONICAL_INDEX_H 1
 
+#include "css_analyze.h"
 #include "index.h"
 
 #ifdef __cplusplus
@@ -35,6 +36,25 @@ extern "C"
    typedef int (*canonical_index_exec_capture_fn)(const char *const argv[], char **out_buf,
                                                   size_t max_out);
    void canonical_index_set_exec_capture(canonical_index_exec_capture_fn capture);
+
+   typedef css_stylesheet_t *(*db2_css_analyze_fn)(const char *text, size_t len);
+   typedef void (*db2_css_stylesheet_free_fn)(css_stylesheet_t *stylesheet);
+   typedef int (*db2_css_extract_class_tokens_fn)(const char *text, size_t len,
+                                                  char (*out)[CSS_CLASS_TOKEN_MAX], int max);
+
+   /* Internal declaration of the CSS host contract exported publicly through
+    * <aimee/db2/host_contracts.h>. */
+   void
+   aimee_db2_register_css_analysis_providers(db2_css_analyze_fn analyze,
+                                             db2_css_stylesheet_free_fn release,
+                                             db2_css_extract_class_tokens_fn extract_class_tokens);
+
+   /* Validate provider-owned output before the indexer uses it. Exposed for
+    * focused boundary tests; scan paths use these same helpers. */
+   css_stylesheet_t *canonical_index_css_analyze(const char *text, size_t len);
+   void canonical_index_css_stylesheet_free(css_stylesheet_t *stylesheet);
+   int canonical_index_css_extract_class_tokens(const char *text, size_t len,
+                                                char (*out)[CSS_CLASS_TOKEN_MAX], int max);
 
    /* Scan a project rooted at `root`, registering it as `name`.
     * Skips files unchanged since their stored scanned_at unless force=1.

@@ -214,6 +214,15 @@ target_include_directories(test_bus_db2_module PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
 target_link_libraries(test_bus_db2_module PRIVATE aimee-core-event-bus Threads::Threads)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(test_bus_db2_process
+    test_bus_db2_process.c
+    ../modules/db2/client/generated.c)
+  target_include_directories(test_bus_db2_process PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
+  target_link_libraries(test_bus_db2_process PRIVATE aimee-core-event-bus Threads::Threads)
+endif()
 aimee_add_test(test_db3_route
   test_db3_route.c
   ../modules/db2/db3_route.c)

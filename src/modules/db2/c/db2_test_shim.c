@@ -10,7 +10,7 @@
 #ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
 
 #include "db2_test_shim.h"
-#include "modules/config/config_embedder_dims.h" /* the one width declaration (no config link) */
+#include "config_embedder_dims.h" /* the one width declaration (no config link) */
 
 #include "db2.h"
 #include "db2_internal.h"

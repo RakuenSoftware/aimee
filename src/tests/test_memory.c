@@ -2770,6 +2770,34 @@ int main(void)
       teardown();
    }
 
+   /* --- every kind lands in a bucket, so the breakdown sums to the total --- */
+   {
+      setup();
+      memory_t m;
+      static const char *const kinds[KIND_COUNT] = {
+          KIND_FACT,    KIND_PREFERENCE, KIND_DECISION, KIND_EPISODE,  KIND_TASK,
+          KIND_SCRATCH, KIND_PROCEDURE,  KIND_POLICY,   KIND_WORKFLOW, KIND_OPINION,
+      };
+      for (int i = 0; i < KIND_COUNT; i++)
+      {
+         char key[64];
+         snprintf(key, sizeof(key), "kind-bucket-%d", i);
+         assert(memory_insert(TIER_L1, kinds[i], key, "bucket coverage", 0.5, "s1", &m) == 0);
+      }
+
+      memory_stats_t stats;
+      memory_stats(&stats);
+      int summed = 0;
+      for (int i = 0; i < KIND_COUNT; i++)
+      {
+         assert(stats.kind_counts[i] == 1);
+         summed += stats.kind_counts[i];
+      }
+      assert(summed == stats.total && stats.total == KIND_COUNT);
+
+      teardown();
+   }
+
    /* --- classify_intent tests --- */
    {
       /* Debug intent */

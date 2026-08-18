@@ -1,4 +1,6 @@
 #include "db2_witness_emit.h"
+#include "db2_witness_checkpoint.h"
+#include "db2_vault_witness_provider.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +10,6 @@
 #include "db_postgres.h"  /* aimee_pg_* */
 #include "modules/vault/vault_witness_checkpoint.h"
 #include "modules/vault/vault_witness_record.h"
-#include "modules/vault/vault_witness_signer.h"
 
 #define EMIT_ERR        256
 #define EMIT_MAX_SHARDS 4096
@@ -143,7 +144,7 @@ static db2_witness_emit_result_t emit_shard_batch(void *conn, const pending_t *p
        * is the check that makes an emitted copy worth comparing against; without it
        * a drifted encoder would publish well-formed evidence that can never match. */
       uint8_t recomputed[32];
-      if (vault_witness_record_digest(&r, recomputed) != 0 ||
+      if (db2_vault_witness_record_digest(&r, recomputed) != 0 ||
           memcmp(recomputed, stored_hash, 32) != 0)
       {
          rc = DB2_WITNESS_EMIT_PARITY_MISMATCH;
@@ -152,15 +153,15 @@ static db2_witness_emit_result_t emit_shard_batch(void *conn, const pending_t *p
 
       uint8_t wire[VAULT_WITNESS_RECORD_MAX];
       size_t wlen = 0;
-      if (vault_witness_record_encode(&r, wire, sizeof wire, &wlen) != 0)
+      if (db2_vault_witness_record_encode(&r, wire, sizeof wire, &wlen) != 0)
       {
          rc = DB2_WITNESS_EMIT_ERROR;
          break;
       }
       uint8_t frame[VAULT_WITNESS_EXPORT_HEADER_LEN + VAULT_WITNESS_RECORD_MAX];
       size_t flen = 0;
-      if (vault_witness_export_frame(VAULT_WITNESS_EXPORT_RECORD, wire, wlen, frame, sizeof frame,
-                                     &flen) != 0)
+      if (db2_vault_witness_export_frame(VAULT_WITNESS_EXPORT_RECORD, wire, wlen, frame,
+                                         sizeof frame, &flen) != 0)
       {
          rc = DB2_WITNESS_EMIT_ERROR;
          break;
@@ -300,15 +301,15 @@ static db2_witness_emit_result_t emit_checkpoints(void *conn, int64_t after, int
 
       uint8_t wire[VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
       size_t wlen = 0;
-      if (vault_witness_checkpoint_encode(&cp, wire, sizeof wire, &wlen) != 0)
+      if (db2_vault_witness_checkpoint_encode(&cp, wire, sizeof wire, &wlen) != 0)
       {
          rc = DB2_WITNESS_EMIT_ERROR;
          break;
       }
       uint8_t frame[VAULT_WITNESS_EXPORT_HEADER_LEN + VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
       size_t flen = 0;
-      if (vault_witness_export_frame(VAULT_WITNESS_EXPORT_CHECKPOINT, wire, wlen, frame,
-                                     sizeof frame, &flen) != 0)
+      if (db2_vault_witness_export_frame(VAULT_WITNESS_EXPORT_CHECKPOINT, wire, wlen, frame,
+                                         sizeof frame, &flen) != 0)
       {
          rc = DB2_WITNESS_EMIT_ERROR;
          break;
@@ -336,8 +337,8 @@ static db2_witness_emit_result_t emit_checkpoints(void *conn, int64_t after, int
       if (sblen > 0)
          memcpy(payload + 8, snap, (size_t)sblen);
       size_t sflen = 0;
-      int fr = vault_witness_export_frame(VAULT_WITNESS_EXPORT_SNAPSHOT, payload, plen, sframe,
-                                          VAULT_WITNESS_EXPORT_HEADER_LEN + plen, &sflen);
+      int fr = db2_vault_witness_export_frame(VAULT_WITNESS_EXPORT_SNAPSHOT, payload, plen, sframe,
+                                              VAULT_WITNESS_EXPORT_HEADER_LEN + plen, &sflen);
       free(payload);
       if (fr != 0)
       {

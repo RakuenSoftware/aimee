@@ -24,6 +24,18 @@ export PATH="$REPO_ROOT:$PATH"
 export HOME=$(mktemp -d /tmp/aimee-integ-XXXXXX)
 export AIMEE_HOME="$HOME/.config/aimee"
 unset AIMEE_PROFILE
+# One session id for the whole run. Every `aimee mcp-serve` this harness spawns
+# derives its session from AIMEE_SESSION_ID, falling back to its PPID -- and the
+# helpers spawn each request from a separate python process, so without this
+# every single MCP request minted a NEW session and materialized its own
+# `git worktree add` of this entire repository. Eight full checkouts per run,
+# where a real host has one session and one worktree.
+#
+# That is not just waste. The git tool call is the first request that has to
+# reach aimee-server, and on a slow CI disk its checkout ran past the 30s
+# mcp-serve request timeout, failing as "aimee-server unavailable after
+# retries" while the checks either side of it reached that same server fine.
+export AIMEE_SESSION_ID="integ$$"
 mkdir -p "$AIMEE_HOME"
 SOCKET="$AIMEE_HOME/aimee.sock"
 export AIMEE_SOCK="$SOCKET"
@@ -35,6 +47,88 @@ HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 # Without this every client assertion below fails as "aimee-server unavailable"
 # while the server it started is running perfectly well two lines away.
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
+
+# ---------------------------------------------------------------
+# The DB1 module.
+#
+# Most of DB1 is served by a separate process now, and the daemon has no
+# in-process fallback: with nothing attached, every migrated call answers
+# "capability absent" and the operation fails. In a container the module
+# supervisor starts it from server.modules; this harness has no supervisor, so
+# it does what the supervisor does -- install the module beside the socket,
+# write the grant the daemon's policy loader reads, and attach it once the
+# daemon is up.
+#
+# Without this the harness exercises a daemon that cannot reach its own store,
+# and reports it as "failed to create session" rather than as a missing module.
+#
+# The grant is written only when the module is actually there. A grant naming an
+# executable that does not resolve is not one the daemon ignores: it refuses to
+# start the module bus, and the server exits before it listens. The make target
+# builds the module, so the ordinary path has one; a hand-run without it
+# degrades to the old behaviour rather than to a server that will not come up.
+# ---------------------------------------------------------------
+DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module-db1"
+DB1_MODULE="$AIMEE_HOME/aimee-module-db1"
+MODULE_POLICY_DIR="$AIMEE_HOME/modules.d/server"
+MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
+DB1_MODULE_PID=""
+
+install_db1_module() {
+    [ -x "$DB1_MODULE_BUILT" ] || return 0
+    # Copied beside the socket rather than granted where it was built: a grant
+    # pins a resolved path, and a build tree is not where a deployed module
+    # lives.
+    cp "$DB1_MODULE_BUILT" "$DB1_MODULE" || return 0
+    chmod 0755 "$DB1_MODULE"
+    mkdir -p "$MODULE_POLICY_DIR"
+    # Read the serve list from the grant the exporter generates when it is
+    # there, so this cannot drift from what the module serves. It is a build
+    # artifact and not always present, and under `set -e` a failed command
+    # substitution ends the run, so the read is guarded rather than trusted.
+    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/db1.grant"
+    local serve=""
+    if [ -r "$generated" ]; then
+        serve=$(sed -n 's/^serve=//p' "$generated" || true)
+    fi
+    [ -n "$serve" ] || serve="11777,11778,11779,11780,11781,11782,11783,11784"
+    cat >"$MODULE_POLICY_DIR/db1.grant" <<GRANT
+version=1
+principal_class=1
+principal_ref=30
+uid=self
+executable=$DB1_MODULE
+publish=
+subscribe=
+request=
+serve=$serve
+GRANT
+}
+
+start_db1_module() {
+    [ -x "$DB1_MODULE" ] || return 0
+    stop_db1_module
+    AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db" "$DB1_MODULE" "$MODULE_BUS_SOCK" >/dev/null 2>&1 &
+    DB1_MODULE_PID=$!
+    # Wait for the module to answer rather than guessing, for the reason
+    # start_server does: a fixed sleep is either a stall or a flake.
+    local i
+    for i in $(seq 1 100); do
+        [ -S "$MODULE_BUS_SOCK" ] && break
+        kill -0 "$DB1_MODULE_PID" 2>/dev/null || break
+        sleep 0.1
+    done
+}
+
+stop_db1_module() {
+    if [ -n "$DB1_MODULE_PID" ]; then
+        kill "$DB1_MODULE_PID" 2>/dev/null || true
+        wait "$DB1_MODULE_PID" 2>/dev/null || true
+        DB1_MODULE_PID=""
+    fi
+}
+
+install_db1_module
 
 PASS=0
 FAIL=0
@@ -54,8 +148,40 @@ check() {
         PASS=$((PASS + 1))
     else
         echo "FAIL: $desc"
+        dump_server_log
         FAIL=$((FAIL + 1))
     fi
+}
+
+# What the server was doing when a check failed. Bounded, and only for the
+# first few failures: enough to diagnose, not enough to bury the summary.
+# Without this a server-side stall is invisible -- the client reports only that
+# it gave up, which reads as "the server is down" even while the checks either
+# side of it are served fine.
+SERVER_LOG=""
+SERVER_LOG_DUMPS=0
+dump_server_log() {
+    [ "$SERVER_LOG_DUMPS" -lt 3 ] || return 0
+    SERVER_LOG_DUMPS=$((SERVER_LOG_DUMPS + 1))
+    # Say which case this is rather than going quiet. A silent helper here would
+    # repeat, in miniature, the bug it exists to fix: the reader cannot tell
+    # "the server said nothing" from "nobody looked".
+    # Two different files, and the useful one is not the obvious one. The
+    # redirect on start_server captures only what the server writes to
+    # stdout/stderr, which for a healthy boot is nothing; the request log --
+    # every route, its status and its timing -- goes to AIMEE_HOME/server.log.
+    # Prefer that, and fall back to the capture so a server that dies before it
+    # can open its log still gets to say why.
+    local shown=0
+    local f
+    for f in "$AIMEE_HOME/server.log" "$SERVER_LOG"; do
+        [ -n "$f" ] && [ -s "$f" ] || continue
+        echo "  aimee-server log (last 20 lines of $f):"
+        tail -20 "$f" 2>/dev/null | sed 's/^/    /'
+        shown=1
+        break
+    done
+    [ "$shown" -eq 1 ] || echo "  aimee-server log: nothing recorded in $AIMEE_HOME/server.log or ${SERVER_LOG:-(no capture path)}"
 }
 
 check_output() {
@@ -68,6 +194,7 @@ check_output() {
         PASS=$((PASS + 1))
     else
         echo "FAIL: $desc (expected '$expected', got '$(echo "$output" | head -1)')"
+        dump_server_log
         FAIL=$((FAIL + 1))
     fi
 }
@@ -261,12 +388,18 @@ PY
 # socket-present means ready to serve. Polling also returns as soon as it is up,
 # which is faster than the sleep it replaces on a machine that is not loaded.
 start_server() {
-    local log="$HOME/aimee-server.$$.log"
+    # Global, not local: a failing CHECK needs this as much as a failing bind.
+    # A server that answers slowly, or not at all, says why here and nowhere
+    # else, and every check that reads only the client's side has to guess.
+    SERVER_LOG="$HOME/aimee-server.$$.log"
+    local log="$SERVER_LOG"
     "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
     local i
     for i in $(seq 1 300); do
-        [ -S "$HTTP_SOCK" ] && return 0
+        # The daemon owns the module bus socket, so the module attaches only
+        # once the daemon is listening -- which is what this loop waits for.
+        [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
         # A dead process will never bind; fail fast rather than waiting out the
         # full window for a server that has already exited.
         kill -0 "$SERVER_PID" 2>/dev/null || break
@@ -290,6 +423,7 @@ ABORT_CMD=""
 trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
 cleanup() {
+    stop_db1_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -452,6 +586,10 @@ fi
 # point, on every CI run of this harness. That line was in the log from the
 # first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
+# Reap before removing its HOME. kill only requests exit, so without this the
+# server can still be writing under $TCP_HOME while rm -rf walks it, and rm
+# fails with ENOTEMPTY when a directory gains entries between unlinking its
+# children and removing it. Under 'set -e' that aborts the whole harness.
 wait "$TCP_SRV_PID" 2>/dev/null || true
 # `|| true` regardless: teardown of a temporary directory must never decide
 # whether the suite continues. Even with the wait, anything else holding a file
@@ -496,7 +634,33 @@ RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":4,"method":"resources/read","p
 check_output "mcp resources/read config" '"mimeType":"application/json"' echo "$RESP"
 check_output "mcp resources/read config text" '\"protocolVersion\":\"2024-11-05\"' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}') || true
+# Retry ONCE when the bridge reports the server unreachable.
+#
+# A tools/call is a POST, and cli_mcp_serve.c deliberately never retries those:
+# "a lost response must not duplicate a mutation whose first attempt may have
+# completed." That is right, and it makes this check single-shot -- one slow
+# response on a loaded runner fails it. It has failed twice now for two
+# different reasons, which makes it the flakiest check here.
+#
+# So retry the CHECK, not the request. Safe precisely because git_status is a
+# read: a second attempt cannot duplicate anything, which is the whole reason
+# the product refuses to retry the general case. Anything other than "server
+# unavailable" is a real answer and is asserted on as-is, so a genuine
+# regression still fails on the first attempt.
+mcp_git_status() {
+    local out
+    out=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}' 2>/dev/null) || true
+    case "$out" in
+        *"unavailable after retries"*)
+            echo "  (mcp git_status: bridge reported the server unreachable; retrying once)" >&2
+            sleep 2
+            out=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}' 2>/dev/null) || true
+            ;;
+    esac
+    printf '%s' "$out"
+}
+
+RESP=$(mcp_git_status) || true
 check_output "mcp git_status tool call" '"content"' echo "$RESP"
 check_output "mcp git_status result text" 'branch:' echo "$RESP"
 
@@ -547,17 +711,14 @@ fi
 # Sessions are persisted through the DB1 sessions stage, which the db1/db2
 # event-bus conversion has moved OUT of this process: db1_client/sessions.c
 # calls obs_bus_module_available() first and answers "failed to create session"
-# with nothing serving the stage. This harness starts aimee-server alone —
-# module processes are launched by the container's module-supervisor, not by the
-# server — so the stage is absent here by construction, exactly like aimee-kb
-# above. That composition is covered where it belongs: unit-test-db1-module-bus
-# execs the real module binary against a live bus ("a failure to start the
-# module is a failure of this test, never a skip"), and the Docker E2E matrix
-# runs the supervised stack.
+# with nothing serving the stage. The server does not launch modules; a
+# container's module-supervisor does, and start_db1_module above now does the
+# same thing here, so the stage IS reachable and these run as ordinary checks.
 #
-# Probe once and skip rather than reporting an absent dependency as a server
-# regression. If the stage ever does answer here, these run as ordinary checks
-# with no edit — the probe is the switch, not a hardcoded expectation.
+# The probe stays. It was written when the stage was absent by construction, and
+# it is still the right shape: it is the switch rather than a hardcoded
+# expectation, so a run without a built module degrades to skips instead of to
+# a wall of failures. What changed is which way it answers.
 RESP=$(srv_auth_req '{"method":"session.create","client_type":"test"}') || true
 if echo "$RESP" | grep -qF '"status":"ok"'; then
     DB1_SESSIONS_AVAILABLE=1
@@ -603,7 +764,16 @@ RESP=$(srv_auth_req "{\"method\":\"session.close\",\"session_id\":\"$SID\"}") ||
 check_output "session.close" '"status":"ok"' echo "$RESP"
 
 RESP=$(srv_auth_req '{"method":"session.list"}') || true
-check_output "session.list empty after close" '"sessions":[]' echo "$RESP"
+# The sessions this block opened are gone -- not "the list is empty". The MCP
+# checks above open a session of their own and never close it, so an empty list
+# is only true when sessions do not actually persist. That was the case while
+# nothing served the DB1 sessions stage and this whole block was skipped; with
+# the module attached the leftover is real, and asserting emptiness tested the
+# absence of persistence rather than the behaviour of close.
+check "session.list drops the closed session" \
+    sh -c "! echo '$RESP' | grep -q \"$SID\""
+check "session.list drops the client-closed session" \
+    sh -c "! echo '$RESP' | grep -q \"$CLOSE_SID\""
 fi  # DB1_SESSIONS_AVAILABLE
 
 # ============================================================

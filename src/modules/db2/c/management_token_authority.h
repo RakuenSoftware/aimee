@@ -44,10 +44,27 @@ typedef enum
    DB2_MANAGEMENT_TOKEN_INTENT_IDENTITY = 3
 } db2_management_token_intent_kind_t;
 
+typedef int (*db2_mgmt_token_record_valid_fn)(const kb_mgmt_token_authority_record_t *record);
+typedef int (*db2_identity_token_record_valid_fn)(
+    const kb_identity_token_authority_record_t *record);
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+   /* Internal declaration of the paired authority-record host contract exported
+    * publicly through <aimee/db2/host_contracts.h>. */
+   void aimee_db2_register_token_record_validators(db2_mgmt_token_record_valid_fn management,
+                                                   db2_identity_token_record_valid_fn identity);
+
+   /* Fail closed unless the corresponding host validator is registered and
+    * returns the contract's exact success value. Kept visible for focused
+    * boundary tests; decoders use the same helpers. */
+   int
+   db2_management_token_authority_record_validate(const kb_mgmt_token_authority_record_t *record);
+   int db2_management_identity_authority_record_validate(
+       const kb_identity_token_authority_record_t *record);
 
    int db2_management_token_authority_open(db2_management_token_authority_ctx_t *ctx,
                                            const char *conninfo, char *errbuf, size_t errlen);
@@ -115,11 +132,9 @@ extern "C"
    db2_management_token_authority_kind(db2_management_token_authority_ctx_t *ctx,
                                        const char correlation_id[65], const char jti[65],
                                        db2_management_token_intent_kind_t *kind);
-   db2_management_token_authority_result_t
-   db2_management_token_read_claim(db2_management_token_authority_ctx_t *ctx,
-                                   const char correlation_id[65], const char jti[65],
-                                   const char lease_owner[65],
-                                   kb_mgmt_token_authority_record_t *out);
+   db2_management_token_authority_result_t db2_management_token_read_claim(
+       db2_management_token_authority_ctx_t *ctx, const char correlation_id[65], const char jti[65],
+       const char lease_owner[65], kb_mgmt_token_authority_record_t *out);
    db2_management_token_authority_result_t
    db2_management_token_read_finalize(db2_management_token_authority_ctx_t *ctx,
                                       const char correlation_id[65], const char jti[65],

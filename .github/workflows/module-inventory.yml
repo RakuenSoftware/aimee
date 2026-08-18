@@ -238,21 +238,20 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    # Raised from 5. This job spends almost all of its time in two
-    # subprocess-heavy suites -- test_validate_module_descriptors (46 tests,
-    # each re-running the validator over the tree; 52s locally) and
-    # test_gen_db1_contract (65s locally) -- which together are ~2 minutes on a
-    # developer machine and roughly double that on a runner.
+    # Two suites are ~99% of this job: test_gen_db1_contract and
+    # test_validate_module_descriptors. Both scale with the descriptor and
+    # operation catalogs, so the job grows every time a module or operation is
+    # added, and every other step here is sub-second.
     #
-    # It last passed at 4m47s against a 5m cap: thirteen seconds of headroom.
-    # The next runs were killed at 5m15s and 5m16s, on `testing` as well as on
-    # PR branches, so the gate was failing repo-wide on nothing but its own
-    # clock. Its siblings here are at 187s, 68s and 25s against the same cap, so
-    # 5 minutes is not wrong in general -- only for this job.
+    # At timeout-minutes: 5 it had already reached 4m56s on `testing` -- four
+    # seconds of margin -- so it was not gating anything, it was waiting to fail
+    # for whoever pushed next. It then did, twice, at 5m17s, and reported as
+    # "Cancelled after 5m", which reads like a concurrency cancel rather than
+    # the timeout it is.
     #
-    # 12 puts today's 316s at ~44%, which is the ratio proposal-ordering already
-    # runs at (963s of 30m). Still bounded, so a real hang is still caught.
-    timeout-minutes: 12
+    # 15 gives real headroom without hiding a runaway: a genuine hang still
+    # fails, it just no longer fails on catalog growth alone.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -278,6 +277,8 @@ jobs:
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
       - name: Test exhaustive standalone C-process export generation
         run: python3 -I scripts/tests/test_export_c_process_build.py -v
+      - name: Test deterministic C embedded-header generation
+        run: python3 -I scripts/tests/test_generate_c_embedded_header.py -v
       - name: Test exhaustive C-process runtime-bundle builds
         run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
       - name: Enforce canonical module public-header layout
