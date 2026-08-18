@@ -229,21 +229,22 @@ static client_cmd_tier_t client_cmd_tier(const client_help_t *entry)
 
 static void print_client_commands(FILE *out, client_cmd_tier_t tier)
 {
-   /* Bootstrap commands first: they are the ones that work when the listing
-    * below cannot be fetched, so they must never depend on it. */
-   for (int i = 0; client_bootstrap_help[i].name; i++)
-   {
-      if (client_cmd_tier(&client_bootstrap_help[i]) != tier ||
-          client_bootstrap_help[i].hidden_default)
-         continue;
-      if (!client_cmd_available(client_bootstrap_help[i].name))
-         continue;
-      print_help_row(out, client_bootstrap_help[i].name, client_bootstrap_help[i].help);
-   }
-
+   /* The served catalogue is authoritative when there is one: it already
+    * contains the bootstrap commands, so listing those first shadowed the
+    * server's own wording with this build's and would double-list any command
+    * present in both. Bootstrap is a FALLBACK, not an override. */
    const cJSON *cmds = cli_v1_manifest_commands();
    if (!cmds)
    {
+      for (int i = 0; client_bootstrap_help[i].name; i++)
+      {
+         if (client_cmd_tier(&client_bootstrap_help[i]) != tier ||
+             client_bootstrap_help[i].hidden_default)
+            continue;
+         if (!client_cmd_available(client_bootstrap_help[i].name))
+            continue;
+         print_help_row(out, client_bootstrap_help[i].name, client_bootstrap_help[i].help);
+      }
       /* No server and no cache: show what this build knows, so `aimee` still
        * lists commands instead of printing three and a diagnostic. */
       for (int i = 0; client_builtin_help[i].name; i++)
@@ -318,17 +319,7 @@ static int client_help_command(int argc, char **argv)
 
    const char *target = argv[0];
 
-   for (int i = 0; client_bootstrap_help[i].name; i++)
-   {
-      if (strcmp(target, client_bootstrap_help[i].name) != 0)
-         continue;
-      fprintf(stderr, "aimee %s: %s\n", client_bootstrap_help[i].name,
-              client_bootstrap_help[i].help);
-      if (client_bootstrap_help[i].subcommands)
-         fprintf(stderr, "\nSubcommands:\n%s", client_bootstrap_help[i].subcommands);
-      return 0;
-   }
-
+   /* Served text wins, for the same reason as the listing above. */
    const cJSON *cmds = cli_v1_manifest_commands();
    const cJSON *row = NULL;
    cJSON_ArrayForEach(row, cmds)
@@ -342,6 +333,17 @@ static int client_help_command(int argc, char **argv)
       const cJSON *subs = cJSON_GetObjectItemCaseSensitive(row, "subcommands");
       if (cJSON_IsString(subs) && subs->valuestring[0])
          fprintf(stderr, "\nSubcommands:\n%s", subs->valuestring);
+      return 0;
+   }
+
+   for (int i = 0; client_bootstrap_help[i].name; i++)
+   {
+      if (strcmp(target, client_bootstrap_help[i].name) != 0)
+         continue;
+      fprintf(stderr, "aimee %s: %s\n", client_bootstrap_help[i].name,
+              client_bootstrap_help[i].help);
+      if (client_bootstrap_help[i].subcommands)
+         fprintf(stderr, "\nSubcommands:\n%s", client_bootstrap_help[i].subcommands);
       return 0;
    }
 

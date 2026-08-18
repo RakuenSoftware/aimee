@@ -227,12 +227,55 @@ static void test_v1_route_map(void)
    printf("  v1_route_map: ok\n");
 }
 
+/* ---- dispatch rows: served ones decide which commands exist ---- */
+static void test_served_dispatch(void)
+{
+   /* A cmd/verb pair this build has never contained. If a served row cannot
+    * introduce one, moving the rows to the server bought nothing: a capability
+    * added server-side would still need a client rebuild to be invokable. */
+   cJSON *doc = cJSON_Parse("{\"manifest_version\":1,\"routes\":[],\"dispatch\":["
+                            "{\"cmd\":\"brandnew\",\"sub\":\"thing\","
+                            "\"method\":\"brandnew.thing\",\"timeout_ms\":1234},"
+                            "{\"cmd\":\"solo\",\"method\":\"solo.any\"},"
+                            "{\"cmd\":\"bare\",\"sub\":\"\",\"method\":\"bare.none\"}]}");
+   assert(doc);
+   cli_v1_manifest_set_for_test(doc);
+
+   cli_v1_route_t r;
+   char *argv1[] = {"thing"};
+   assert(cli_v1_lookup("brandnew", 1, argv1, &r) == 1);
+   assert(strcmp(r.method, "brandnew.thing") == 0);
+   assert(r.timeout_ms == 1234);
+
+   /* An ABSENT "sub" is the wildcard: it matches whatever the first arg is. */
+   char *argv2[] = {"anything-at-all"};
+   assert(cli_v1_lookup("solo", 1, argv2, &r) == 1);
+   assert(strcmp(r.method, "solo.any") == 0);
+
+   /* A present-but-EMPTY "sub" matches only when no subcommand was given. The
+    * two are different states and collapsing them silently changes matching. */
+   assert(cli_v1_lookup("bare", 0, NULL, &r) == 1);
+   assert(strcmp(r.method, "bare.none") == 0);
+   char *argv3[] = {"unexpected"};
+   assert(cli_v1_lookup("bare", 1, argv3, &r) == 0);
+
+   /* Served rows REPLACE the compiled-in set rather than adding to it: a client
+    * that kept preferring its own build would still hide new commands, which is
+    * the coupling this removes. `memory search` is in the built-in table and
+    * absent from the manifest above. */
+   char *argv4[] = {"search"};
+   assert(cli_v1_lookup("memory", 1, argv4, &r) == 0);
+
+   printf("  served_dispatch: ok\n");
+}
+
 int main(void)
 {
    printf("cli_http_transport:\n");
    test_transport_parse();
    test_build_request();
    test_v1_route_map();
+   test_served_dispatch();
    test_http_round_trip();
    test_http_stream();
    printf("All cli_http_transport tests passed.\n");

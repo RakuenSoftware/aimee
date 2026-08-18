@@ -714,6 +714,18 @@ const cJSON *cli_v1_manifest_commands(void)
    return cJSON_IsArray(cmds) ? cmds : NULL;
 }
 
+/* The dispatch rows the server sent (cmd/verb -> method), or NULL when there is
+ * no catalogue. Borrowed -- lives in the cached manifest, which outlives every
+ * lookup. */
+const cJSON *cli_v1_manifest_dispatch(void)
+{
+   const cJSON *doc = cli_v1_manifest();
+   if (!doc)
+      return NULL;
+   const cJSON *rows = cJSON_GetObjectItemCaseSensitive(doc, "dispatch");
+   return cJSON_IsArray(rows) ? rows : NULL;
+}
+
 /* Test seam: install a manifest directly instead of fetching one. Unit tests
  * have no server to ask, and the mapping they used to assert (method -> path) is
  * the SERVER's property now — covered by server-api-conformance-check and by the
