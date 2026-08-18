@@ -644,17 +644,14 @@ fi
 # Sessions are persisted through the DB1 sessions stage, which the db1/db2
 # event-bus conversion has moved OUT of this process: db1_client/sessions.c
 # calls obs_bus_module_available() first and answers "failed to create session"
-# with nothing serving the stage. This harness starts aimee-server alone —
-# module processes are launched by the container's module-supervisor, not by the
-# server — so the stage is absent here by construction, exactly like aimee-kb
-# above. That composition is covered where it belongs: unit-test-db1-module-bus
-# execs the real module binary against a live bus ("a failure to start the
-# module is a failure of this test, never a skip"), and the Docker E2E matrix
-# runs the supervised stack.
+# with nothing serving the stage. The server does not launch modules; a
+# container's module-supervisor does, and start_db1_module above now does the
+# same thing here, so the stage IS reachable and these run as ordinary checks.
 #
-# Probe once and skip rather than reporting an absent dependency as a server
-# regression. If the stage ever does answer here, these run as ordinary checks
-# with no edit — the probe is the switch, not a hardcoded expectation.
+# The probe stays. It was written when the stage was absent by construction, and
+# it is still the right shape: it is the switch rather than a hardcoded
+# expectation, so a run without a built module degrades to skips instead of to
+# a wall of failures. What changed is which way it answers.
 RESP=$(srv_auth_req '{"method":"session.create","client_type":"test"}') || true
 if echo "$RESP" | grep -qF '"status":"ok"'; then
     DB1_SESSIONS_AVAILABLE=1
@@ -700,7 +697,16 @@ RESP=$(srv_auth_req "{\"method\":\"session.close\",\"session_id\":\"$SID\"}") ||
 check_output "session.close" '"status":"ok"' echo "$RESP"
 
 RESP=$(srv_auth_req '{"method":"session.list"}') || true
-check_output "session.list empty after close" '"sessions":[]' echo "$RESP"
+# The sessions this block opened are gone -- not "the list is empty". The MCP
+# checks above open a session of their own and never close it, so an empty list
+# is only true when sessions do not actually persist. That was the case while
+# nothing served the DB1 sessions stage and this whole block was skipped; with
+# the module attached the leftover is real, and asserting emptiness tested the
+# absence of persistence rather than the behaviour of close.
+check "session.list drops the closed session" \
+    sh -c "! echo '$RESP' | grep -q \"$SID\""
+check "session.list drops the client-closed session" \
+    sh -c "! echo '$RESP' | grep -q \"$CLOSE_SID\""
 fi  # DB1_SESSIONS_AVAILABLE
 
 # ============================================================
