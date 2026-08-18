@@ -1428,6 +1428,14 @@
       "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
     },
     {
+      "symbol": "db2_memory_health_count_memories",
+      "signature_sha256": "1cdbda7edb35f3f13d108fc1a047fd561995e710c21c130f7fa878650543192d",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Counting canonical rows for a health-cycle insert is private DB2 bookkeeping; the complete health-record operation owns this pre-step, while independent callers use the existing typed memory.total_count operation."
+    },
+    {
       "symbol": "db2_memory_key_exists",
       "signature_sha256": "209f3694a02607a189dccf2e451c0d13190cf52ff4a48270996ef0718bdd5828",
       "disposition": "wire-operation",

@@ -16364,9 +16364,15 @@
           "line": 18
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Counting canonical rows for a health-cycle insert is private DB2 bookkeeping; the complete health-record operation owns this pre-step, while independent callers use the existing typed memory.total_count operation."
+      },
       "signature": "int db2_memory_health_count_memories ( void )",
       "signature_sha256": "1cdbda7edb35f3f13d108fc1a047fd561995e710c21c130f7fa878650543192d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_count_memories"
     },
     {
@@ -25644,15 +25650,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8c35aeaf8f1701b5353660901f4c4417fd0fcae47dc1a6f4ae4420807f07734e",
+  "fingerprint": "9079bafc8289d57bc865bba6ef4591e1cb8bcf38d9677acae6a560a85ec6f119",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 688,
+    "audit_pending": 687,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 270
+    "reviewed": 271
   }
 }
