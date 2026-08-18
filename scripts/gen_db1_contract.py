@@ -56,13 +56,13 @@ SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
-PAYLOADS = ("none", "state", "text", "int", "int64", "double", "float", "struct")
+PAYLOADS = ("none", "state", "text", "int", "int64", "uint64", "double", "float", "struct")
 # A request carries a double for the same reason a reply does: a cost is a
 # number, and rounding it to an integer at the boundary would bill differently
 # on each side of it. The conversion is the one the reply already uses.
-FIELD_TYPES = ("text", "int", "int64", "double", "float")
+FIELD_TYPES = ("text", "int", "int64", "uint64", "double", "float")
 # Members that travel as decimal text and convert back on arrival.
-NUMERIC = ("int", "int64", "double", "float")
+NUMERIC = ("int", "int64", "uint64", "double", "float")
 
 
 # Widest decimal text a member can become, with room for the NUL. A %.17g
@@ -80,6 +80,11 @@ def numeric_format(kind: str) -> tuple[str, str]:
     """
     if kind == "int64":
         return "%lld", "(long long)"
+    if kind == "uint64":
+        # A content hash uses the whole width. Rendered signed it comes back as
+        # the same bits on a two's-complement machine and as a different number
+        # to anyone reading the frame, so it is rendered as what it is.
+        return "%llu", "(unsigned long long)"
     if kind == "double":
         return "%.17g", "(double)"
     if kind == "float":
@@ -99,6 +104,8 @@ def numeric_parse(kind: str, cell: str) -> str:
     """
     if kind == "int64":
         return f"(int64_t)strtoll({cell}, NULL, 10)"
+    if kind == "uint64":
+        return f"(uint64_t)strtoull({cell}, NULL, 10)"
     if kind == "float":
         return f"(float)strtod({cell}, NULL)"
     if kind == "double":
@@ -2474,7 +2481,7 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }}
 
-{parse_int}{parse_int64}{parse_double}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
+{parse_int}{parse_int64}{parse_uint64}{parse_double}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
    with no values, a read with one, a row with a value per member. */
 static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
                             const char *const *values, uint32_t count)
@@ -2664,6 +2671,23 @@ static int parse_int64(const char *text, int64_t *out)
 
 """
 
+PARSE_UINT64 = """/* The same, for a member the catalog declared unsigned. Signed parsing would
+   accept "-1" and store it as the largest hash there is. */
+static int parse_uint64(const char *text, uint64_t *out)
+{
+   if (!text || !text[0] || text[0] == '-')
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   unsigned long long value = strtoull(text, &end, 10);
+   if (errno != 0 || !end || *end != '\\0')
+      return 1;
+   *out = (uint64_t)value;
+   return 0;
+}
+
+"""
+
 PARSE_DOUBLE = """/* The same, for a value the catalog declared as a double. A cost parsed as an
    integer is a different number, and one that still looks like a price. */
 static int parse_double(const char *text, double *out)
@@ -2715,9 +2739,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind in ("double", "float")
-                            else "parse_int64")
+                            else "parse_uint64" if kind == "uint64" else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind in ("double", "float") else "int64_t")
+                             else "double" if kind in ("double", "float")
+                             else "uint64_t" if kind == "uint64" else "int64_t")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2733,9 +2758,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind in ("double", "float")
-                            else "parse_int64")
+                            else "parse_uint64" if kind == "uint64" else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind in ("double", "float") else "int64_t")
+                             else "double" if kind in ("double", "float")
+                             else "uint64_t" if kind == "uint64" else "int64_t")
                     parse.append(f"      {ctype} member_{position} = 0;\n"
                                  f"      if ({conv}(field[{position}], &member_{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2757,9 +2783,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind in ("double", "float")
-                            else "parse_int64")
+                            else "parse_uint64" if kind == "uint64" else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind in ("double", "float") else "int64_t")
+                             else "double" if kind in ("double", "float")
+                             else "uint64_t" if kind == "uint64" else "int64_t")
                     args.append(f"parsed{position}")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
@@ -3165,7 +3192,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         cases.append(head + (f"   {{\n{body}   }}\n"
                              if parse or returns_text or returns_id else body))
     used = {str(f["type"]) for o in operations for f in o["request"]["fields"]}
-    typed = bool(used & {"int", "int64", "double"})
+    typed = bool(used & {"int", "int64", "uint64", "double", "float"})
     # Storage for a single row's reply, at function scope because write_reply
     # reads it after the switch. One variable per distinct row type the family
     # answers with; a union would save stack but would have to invent member
@@ -3252,7 +3279,8 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                                  cases="".join(cases),
                                  parse_int=PARSE_INT if "int" in used else "",
                                  parse_int64=PARSE_INT64 if "int64" in used else "",
-                                 parse_double=PARSE_DOUBLE if "double" in used else "",
+                                 parse_double=PARSE_DOUBLE if used & {"double", "float"} else "",
+                                 parse_uint64=PARSE_UINT64 if "uint64" in used else "",
                                  int_includes=INT_INCLUDES if typed else "")
 
 

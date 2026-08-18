@@ -48,6 +48,7 @@
     "src/modules/db1/git_ownership.c",
     "src/modules/db1/git_ownership_stage.c",
     "src/modules/db1/guardrail_events.c",
+    "src/modules/db1/guardrail_state_stage.c",
     "src/modules/db1/interaction_events.c",
     "src/modules/db1/local_operator.c",
     "src/modules/db1/maintenance.c",

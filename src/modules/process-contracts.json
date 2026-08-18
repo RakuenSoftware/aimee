@@ -689,6 +689,11 @@
           "id": 8,
           "name": "db1-telemetry",
           "event_kind": 11784
+        },
+        {
+          "id": 9,
+          "name": "db1-guardrail-state",
+          "event_kind": 11785
         }
       ]
     }

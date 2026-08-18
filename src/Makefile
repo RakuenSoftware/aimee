@@ -322,14 +322,14 @@ CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 # of the tree call typed domain functions declared in modules/db1/*.h and never
 # see a handle. src/tests/support/{db1_init,wm}_mock.c are alternative implementations linked by
 # tests that want to exercise the API contract without a real backend.
-DB1_SRCS = modules/db1/db1_init.c modules/db1/db1_write.c modules/db1/checkpoints.c modules/db1/roadmap_runtime.c modules/db1/ensemble.c modules/db1/session_state.c modules/db1/execution_plans.c modules/db1/pipelines.c modules/db1/roundtable_pipeline.c modules/db1/secrets.c modules/db1/remote_client_grant.c modules/db1/execution_trace.c modules/db1/diagnostics.c modules/db1/maintenance.c modules/db1/server_management_jti.c modules/db1/server_identity_jti.c server/server_mgmt_jwks_cache.c modules/db1/wfe_store.c modules/db1/wfe_binding.c
+DB1_SRCS = modules/db1/db1_init.c modules/db1/db1_write.c modules/db1/checkpoints.c modules/db1/roadmap_runtime.c modules/db1/ensemble.c modules/db1/execution_plans.c modules/db1/pipelines.c modules/db1/roundtable_pipeline.c modules/db1/secrets.c modules/db1/remote_client_grant.c modules/db1/execution_trace.c modules/db1/diagnostics.c modules/db1/maintenance.c modules/db1/server_management_jti.c modules/db1/server_identity_jti.c server/server_mgmt_jwks_cache.c modules/db1/wfe_store.c modules/db1/wfe_binding.c
 DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 
 # Branch ownership is served by the DB1 module now, so the daemon links the bus
 # client rather than the domain. The domain itself still builds -- the module
 # process compiles it from the descriptor -- it just no longer sits inside this
 # binary. See src/db1_client/git_ownership.c.
-DB1_CLIENT_SRCS = db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c
+DB1_CLIENT_SRCS = db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c db1_client/guardrail_state.c
 
 DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 

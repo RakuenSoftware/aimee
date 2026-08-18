@@ -50,6 +50,11 @@
 #include "diagnose.h"
 #include "interaction_events.h"
 #include "clarify.h"
+#include "session_state.h"
+
+/* After session_state.h: guardrails.h uses severity_t from aimee.h and does
+   not include it, so it only compiles behind something that does. */
+#include "guardrails.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -57,7 +62,19 @@
 #include "wm.h"
 
 static char g_tmp[512];
+/* Every stage the module declares, in one place: the grant that admits them and
+   the wait that proves they attached read the same list, so adding a family
+   cannot admit a stage the fixture then fails to wait for -- or the reverse. */
+static const unsigned served[] = {
+    AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
+    AIMEE_DB1_EVENT_CONVERSATION,     AIMEE_DB1_EVENT_AGENT_WORK,
+    AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
+    AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
+    AIMEE_DB1_EVENT_GUARDRAIL_STATE,
+};
+
 static pid_t g_module = -1;
+static unsigned g_missing_stage;
 
 static void must(int condition, const char *what)
 {
@@ -81,12 +98,6 @@ static void write_grant(const char *policy_dir, const char *executable)
    /* Built from a list rather than a format string with one %u per stage: the
     * two drift the moment a stage is added, and the failure that produces is
     * "the module never registered", which points at the module. */
-   static const unsigned served[] = {
-       AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
-       AIMEE_DB1_EVENT_CONVERSATION,     AIMEE_DB1_EVENT_AGENT_WORK,
-       AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
-       AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
-   };
    fprintf(file, "version=1\nprincipal_class=1\nprincipal_ref=30\nuid=self\nexecutable=%s\nserve=",
            executable);
    for (size_t i = 0; i < sizeof served / sizeof served[0]; i++)
@@ -119,14 +130,18 @@ static void start_module(const char *executable, const char *socket_path, const 
       /* Every stage this fixture drives, not just the first: they register in
          order, and waiting on an early one races the ones after it -- which
          reads as the module answering "failed" to a call it never received. */
-      if (obs_bus_module_available(AIMEE_DB1_EVENT_AGENT_WORK) &&
-          obs_bus_module_available(AIMEE_DB1_EVENT_DELEGATION) &&
-          obs_bus_module_available(AIMEE_DB1_EVENT_SESSIONS) &&
-          obs_bus_module_available(AIMEE_DB1_EVENT_RUNTIME) &&
-          obs_bus_module_available(AIMEE_DB1_EVENT_TELEMETRY) &&
-          obs_bus_module_available(AIMEE_DB1_EVENT_CONVERSATION) &&
-          obs_bus_module_available(AIMEE_DB1_EVENT_GIT_OWNERSHIP))
+      unsigned missing = 0u;
+      for (size_t at = 0; at < sizeof served / sizeof served[0]; at++)
+      {
+         if (!obs_bus_module_available(served[at]))
+         {
+            missing = served[at];
+            break;
+         }
+      }
+      if (!missing)
          return;
+      g_missing_stage = missing;
       int status = 0;
       if (waitpid(child, &status, WNOHANG) == child)
       {
@@ -136,6 +151,12 @@ static void start_module(const char *executable, const char *socket_path, const 
       struct timespec pause = {0, 50 * 1000 * 1000};
       nanosleep(&pause, NULL);
    }
+   /* Name it. "the module never registered its stages" sent two separate
+      investigations at the module when the fault was a grant that never
+      mentioned the stage -- an ungranted stage and an unserved one look
+      identical from here, so say which one is absent. */
+   fprintf(stderr, "the module never registered stage kind %u (granted? built?)\n",
+           g_missing_stage);
    must(0, "module never registered its stages");
 }
 
@@ -700,6 +721,103 @@ static void test_a_row_that_carries_rows(void)
    printf("  PASS: a row that carries rows\n");
 }
 
+static void test_guardrail_state_crosses_with_its_collections(void)
+{
+   /* session_state_t is a record plus five collections -- 386 cells in one
+      frame. The risk here is not that it fails, it is that it comes back short
+      and a guardrail quietly forgets what it has seen, so this fills the ends
+      of the arrays rather than the beginnings. */
+   session_state_t saved;
+   memset(&saved, 0, sizeof saved);
+   snprintf(saved.session_mode, sizeof saved.session_mode, "%s", "build");
+   snprintf(saved.guardrail_mode, sizeof saved.guardrail_mode, "%s", "enforce");
+   snprintf(saved.tdd_mode, sizeof saved.tdd_mode, "%s", "strict");
+   saved.active_task_id = 4294967297LL;
+   saved.hook_call_count = 7;
+   saved.is_delegate = 1;
+
+   saved.seen_count = MAX_SEEN_PATHS;
+   for (int i = 0; i < MAX_SEEN_PATHS; i++)
+      snprintf(saved.seen_paths[i], MAX_SEEN_LEN, "/seen/%d", i);
+   saved.read_path_count = MAX_READ_PATHS;
+   for (int i = 0; i < MAX_READ_PATHS; i++)
+      snprintf(saved.read_paths[i], MAX_SEEN_LEN, "/read/%d", i);
+
+   saved.worktree_count = MAX_WORKTREES;
+   for (int i = 0; i < MAX_WORKTREES; i++)
+   {
+      snprintf(saved.worktrees[i].git_root, MAX_PATH_LEN, "/root/%d", i);
+      snprintf(saved.worktrees[i].worktree_path, MAX_PATH_LEN, "/tree/%d", i);
+   }
+   saved.tdd_write_count = MAX_TDD_WRITES;
+   for (int i = 0; i < MAX_TDD_WRITES; i++)
+   {
+      snprintf(saved.tdd_writes[i].stem, MAX_TDD_STEM, "stem-%d", i);
+      saved.tdd_writes[i].is_test = (i % 2);
+   }
+   saved.file_hash_count = MAX_FILE_HASHES;
+   for (int i = 0; i < MAX_FILE_HASHES; i++)
+   {
+      snprintf(saved.file_hashes[i].path, MAX_SEEN_LEN, "/hashed/%d", i);
+      /* Above INT64_MAX on purpose: a hash rendered as a signed number comes
+         back as a different number to anyone reading the frame. */
+      saved.file_hashes[i].content_hash = 18446744073709551615ULL - (uint64_t)i;
+   }
+   saved.ap_hit_count = MAX_AP_SESSION_HITS;
+   for (int i = 0; i < MAX_AP_SESSION_HITS; i++)
+   {
+      saved.ap_hits[i].pattern_id = 1000 + i;
+      saved.ap_hits[i].hits = i + 1;
+   }
+
+   must(db1_session_state_save("sess-guard", &saved) == 0, "save the guardrail state");
+
+   session_state_t back;
+   memset(&back, 0, sizeof back);
+   must(db1_session_state_load("sess-guard", &back) == 0, "load it back");
+   must(strcmp(back.session_mode, "build") == 0, "the scalars crossed");
+   must(back.active_task_id == 4294967297LL, "including the 64-bit one");
+
+   must(back.seen_count == MAX_SEEN_PATHS, "every seen path was counted");
+   must(strcmp(back.seen_paths[MAX_SEEN_PATHS - 1], "/seen/63") == 0,
+        "the LAST string in the array arrived, not just the first");
+   must(strcmp(back.read_paths[MAX_READ_PATHS - 1], "/read/63") == 0, "and in the second array");
+
+   must(strcmp(back.worktrees[MAX_WORKTREES - 1].worktree_path, "/tree/15") == 0,
+        "the last row of the last worktree arrived whole");
+   must(back.tdd_writes[MAX_TDD_WRITES - 1].is_test == (MAX_TDD_WRITES - 1) % 2,
+        "a row's numeric member did not shift");
+   /* file_hashes has no ORDER BY in the domain's load, so the row order is
+      SQLite's, not insertion order. Check every row against the hash its own
+      path implies rather than against a position, or the test pins an ordering
+      the domain never promised and breaks the day SQLite picks another plan. */
+   int tail_seen = 0;
+   must(back.file_hash_count == MAX_FILE_HASHES, "every hashed path arrived");
+   for (int at = 0; at < back.file_hash_count; at++)
+   {
+      int which = atoi(back.file_hashes[at].path + strlen("/hashed/"));
+      must(which >= 0 && which < MAX_FILE_HASHES, "a hashed path came back intact");
+      /* Saved as UINT64_MAX - which: every one of these is far above INT64_MAX,
+         so a signed round-trip anywhere on the wire lands negative and fails. */
+      must(back.file_hashes[at].content_hash == 18446744073709551615ULL - (uint64_t)which,
+           "an unsigned 64-bit hash came back as itself, not as a negative number");
+      tail_seen |= which == MAX_FILE_HASHES - 1;
+   }
+   must(tail_seen, "the last hashed slot arrived");
+   must(back.ap_hits[MAX_AP_SESSION_HITS - 1].hits == MAX_AP_SESSION_HITS,
+        "and the last pattern hit");
+
+   db1_session_state_summary_t summary;
+   memset(&summary, 0, sizeof summary);
+   must(db1_session_state_get_summary("sess-guard", &summary) == 0, "read the summary");
+   must(summary.hook_call_count == 7, "the summary counted the hooks");
+   must(db1_session_state_exists("sess-guard") == 1, "the state exists");
+   must(db1_session_state_delete("sess-guard") == 0, "delete it");
+   must(db1_session_state_exists("sess-guard") == 0, "and it is gone");
+
+   printf("  PASS: guardrail state crosses with its collections\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -744,6 +862,7 @@ int main(int argc, char **argv)
    test_a_bulk_replace_and_what_it_reads_back();
    test_costs_ids_and_a_nested_row();
    test_a_row_that_carries_rows();
+   test_guardrail_state_crosses_with_its_collections();
 
    stop_module();
    obs_bus_stop();

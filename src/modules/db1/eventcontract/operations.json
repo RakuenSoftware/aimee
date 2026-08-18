@@ -215,19 +215,18 @@
   },
   {
    "id": 9,
-   "name": "identity",
+   "name": "guardrail_state",
    "event_kind": 11785,
-   "active": false,
-   "doc": "secrets and the replay stores behind token consumption.",
+   "active": true,
+   "doc": "per-session guardrail state: the hook's view of a session, stored as a scalar row plus five child tables and read back as one nested struct.",
    "client_doc": "",
-   "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant",
+   "covers": "session_state",
    "sources": [
-    "remote_client_grant",
-    "secrets",
-    "server_identity_jti",
-    "server_management_jti"
+    "session_state"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "session_state.c"
+   ]
   },
   {
    "id": 10,
@@ -250,14 +249,17 @@
   },
   {
    "id": 11,
-   "name": "guardrail_state",
+   "name": "identity",
    "event_kind": 11787,
    "active": false,
-   "doc": "per-session guardrail state: the hook's view of a session, stored as a scalar row plus five child tables and read back as one nested struct.",
+   "doc": "secrets and the replay stores behind token consumption.",
    "client_doc": "",
-   "covers": "session_state",
+   "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant",
    "sources": [
-    "session_state"
+    "remote_client_grant",
+    "secrets",
+    "server_identity_jti",
+    "server_management_jti"
    ],
    "retired_sources": []
   },
@@ -15268,6 +15270,601 @@
      },
      {
       "name": "suggestion",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "guardrail_state",
+   "id": 1,
+   "name": "session_state_load",
+   "c_name": "db1_session_state_load",
+   "c_params": [
+    "sid",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "sid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "session_state_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "seen_paths",
+      "type": "text",
+      "repeat": 64
+     },
+     {
+      "name": "seen_count",
+      "type": "int"
+     },
+     {
+      "name": "session_mode",
+      "type": "text"
+     },
+     {
+      "name": "guardrail_mode",
+      "type": "text"
+     },
+     {
+      "name": "active_task_id",
+      "type": "int64"
+     },
+     {
+      "name": "hook_call_count",
+      "type": "int"
+     },
+     {
+      "name": "dirty",
+      "type": "int"
+     },
+     {
+      "name": "worktrees",
+      "type": "struct",
+      "repeat": 16,
+      "fields": [
+       {
+        "name": "git_root",
+        "type": "text"
+       },
+       {
+        "name": "worktree_path",
+        "type": "text"
+       }
+      ]
+     },
+     {
+      "name": "worktree_count",
+      "type": "int"
+     },
+     {
+      "name": "is_delegate",
+      "type": "int"
+     },
+     {
+      "name": "orch_direct_edits",
+      "type": "int"
+     },
+     {
+      "name": "orch_nudge_sent",
+      "type": "int"
+     },
+     {
+      "name": "skill_find_symbols_advisory_sent",
+      "type": "int"
+     },
+     {
+      "name": "skill_condition_waiting_advisory_sent",
+      "type": "int"
+     },
+     {
+      "name": "skill_tdd_advisory_sent",
+      "type": "int"
+     },
+     {
+      "name": "tdd_mode",
+      "type": "text"
+     },
+     {
+      "name": "tdd_writes",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "stem",
+        "type": "text"
+       },
+       {
+        "name": "is_test",
+        "type": "int"
+       }
+      ]
+     },
+     {
+      "name": "tdd_write_count",
+      "type": "int"
+     },
+     {
+      "name": "read_paths",
+      "type": "text",
+      "repeat": 64
+     },
+     {
+      "name": "read_path_count",
+      "type": "int"
+     },
+     {
+      "name": "file_hashes",
+      "type": "struct",
+      "repeat": 64,
+      "fields": [
+       {
+        "name": "path",
+        "type": "text"
+       },
+       {
+        "name": "content_hash",
+        "type": "uint64"
+       }
+      ]
+     },
+     {
+      "name": "file_hash_count",
+      "type": "int"
+     },
+     {
+      "name": "ap_hits",
+      "type": "struct",
+      "repeat": 32,
+      "fields": [
+       {
+        "name": "pattern_id",
+        "type": "int64"
+       },
+       {
+        "name": "hits",
+        "type": "int"
+       }
+      ]
+     },
+     {
+      "name": "ap_hit_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "guardrail_state",
+   "id": 2,
+   "name": "session_state_save",
+   "c_name": "db1_session_state_save",
+   "c_params": [
+    "sid",
+    "in"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "session_state_t",
+    "struct_from": 1,
+    "fields": [
+     {
+      "name": "sid",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "seen_paths",
+      "type": "text",
+      "repeat": 64,
+      "required": false
+     },
+     {
+      "name": "seen_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "session_mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "guardrail_mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "active_task_id",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "hook_call_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "dirty",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "worktrees",
+      "type": "struct",
+      "repeat": 16,
+      "fields": [
+       {
+        "name": "git_root",
+        "type": "text"
+       },
+       {
+        "name": "worktree_path",
+        "type": "text"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "worktree_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "is_delegate",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "orch_direct_edits",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "orch_nudge_sent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "skill_find_symbols_advisory_sent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "skill_condition_waiting_advisory_sent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "skill_tdd_advisory_sent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "tdd_mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "tdd_writes",
+      "type": "struct",
+      "repeat": 8,
+      "fields": [
+       {
+        "name": "stem",
+        "type": "text"
+       },
+       {
+        "name": "is_test",
+        "type": "int"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "tdd_write_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "read_paths",
+      "type": "text",
+      "repeat": 64,
+      "required": false
+     },
+     {
+      "name": "read_path_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "file_hashes",
+      "type": "struct",
+      "repeat": 64,
+      "fields": [
+       {
+        "name": "path",
+        "type": "text"
+       },
+       {
+        "name": "content_hash",
+        "type": "uint64"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "file_hash_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "ap_hits",
+      "type": "struct",
+      "repeat": 32,
+      "fields": [
+       {
+        "name": "pattern_id",
+        "type": "int64"
+       },
+       {
+        "name": "hits",
+        "type": "int"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "ap_hit_count",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "guardrail_state",
+   "id": 3,
+   "name": "session_state_delete",
+   "c_name": "db1_session_state_delete",
+   "c_params": [
+    "sid"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "sid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "guardrail_state",
+   "id": 4,
+   "name": "session_state_exists",
+   "c_name": "db1_session_state_exists",
+   "c_params": [
+    "sid"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "sid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "present",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "guardrail_state",
+   "id": 5,
+   "name": "session_state_list",
+   "c_name": "db1_session_state_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_session_state_summary_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "hook_call_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 131072
+   }
+  },
+  {
+   "family": "guardrail_state",
+   "id": 6,
+   "name": "session_state_get_summary",
+   "c_name": "db1_session_state_get_summary",
+   "c_params": [
+    "sid",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "sid",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_session_state_summary_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     },
+     {
+      "name": "hook_call_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "guardrail_state",
+   "id": 7,
+   "name": "session_state_list_expired",
+   "c_name": "db1_session_state_list_expired",
+   "c_params": [
+    "threshold_seconds",
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "threshold_seconds",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 256,
+     "column": {
+      "kind": "text",
+      "width": "DB1_SS_SID_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "session_id",
       "type": "text"
      }
     ],

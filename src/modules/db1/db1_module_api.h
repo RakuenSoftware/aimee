@@ -368,6 +368,20 @@
 #define AIMEE_DB1_OP_DIAGNOSE_ABANDON                       44u
 #define AIMEE_DB1_OP_DIAGNOSE_SUGGEST_PROBES                48u
 
+/* Family 9: per-session guardrail state: the hook's view of a session, stored
+ * as a scalar row plus five child tables and read back as one nested struct. */
+
+#define AIMEE_DB1_EVENT_GUARDRAIL_STATE 11785u
+#define AIMEE_DB1_STAGE_GUARDRAIL_STATE 9u
+
+#define AIMEE_DB1_OP_SESSION_STATE_LOAD         1u
+#define AIMEE_DB1_OP_SESSION_STATE_SAVE         2u
+#define AIMEE_DB1_OP_SESSION_STATE_DELETE       3u
+#define AIMEE_DB1_OP_SESSION_STATE_EXISTS       4u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST         5u
+#define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY  6u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED 7u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry
