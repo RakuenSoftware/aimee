@@ -4,7 +4,7 @@
 #include "db_schema.h"
 #include "db_postgres.h"
 #include "aimee.h" /* EMBED_MAX_DIM */
-#include "../schema_data.h"
+#include "schema_data.h"
 
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
 typedef struct sqlite3 sqlite3;

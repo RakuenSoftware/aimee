@@ -25,11 +25,14 @@ MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
-# Optional: third-party sources a module compiles but does not own, restricted
-# to src/vendor/. See export_c_repositories for why a vendored library is not
-# treated like a module-owned source.
-C_BUILD_OPTIONAL_KEYS = {"vendor_sources"}
+# Optional build properties include validated preprocessor switches and
+# third-party sources a module compiles but does not own. Vendor sources remain
+# restricted to src/vendor/; see export_c_repositories for the ownership rule.
+C_BUILD_OPTIONAL_KEYS = {
+    "compile_definitions", "generated_headers", "header_dependencies", "vendor_sources",
+}
 BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
+C_DEFINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 OWNERSHIP_FIELDS = (
     "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
     "go_tests",
@@ -180,6 +183,42 @@ def schema() -> dict[str, object]:
                         "items": {"type": "string"},
                         "uniqueItems": True,
                     },
+                    "compile_definitions": {
+                        "type": "array",
+                        "items": {"type": "string", "pattern": C_DEFINE_RE.pattern},
+                        "uniqueItems": True,
+                    },
+                    "generated_headers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["entries", "output"],
+                            "properties": {
+                                "output": {"type": "string"},
+                                "entries": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": ["source", "symbol"],
+                                        "properties": {
+                                            "source": {"type": "string"},
+                                            "symbol": {
+                                                "type": "string",
+                                                "pattern": C_DEFINE_RE.pattern,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "header_dependencies": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "uniqueItems": True,
+                    },
                     "pkg_config": {
                         "type": "array",
                         "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
@@ -188,6 +227,11 @@ def schema() -> dict[str, object]:
                     "system_libraries": {
                         "type": "array",
                         "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
+                        "uniqueItems": True,
+                    },
+                    "vendor_sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
                         "uniqueItems": True,
                     },
                 },
@@ -325,6 +369,92 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
                              pointer)
                 elif not BUILD_TOKEN_RE.fullmatch(entry):
                     fail("c-build-token", f"invalid build token {entry!r}", pointer)
+        definitions = build.get("compile_definitions", [])
+        if not isinstance(definitions, list):
+            fail("c-build-type", "c_build.compile_definitions must be an array",
+                 "/c_build/compile_definitions")
+        previous = ""
+        for index, definition in enumerate(definitions):
+            pointer = f"/c_build/compile_definitions/{index}"
+            if not isinstance(definition, str):
+                fail("c-build-type", "compile definition must be a string", pointer)
+            if definition <= previous:
+                fail("c-build-order", "compile definitions must be sorted and unique", pointer)
+            previous = definition
+            if not C_DEFINE_RE.fullmatch(definition):
+                fail("c-build-token", f"invalid compile definition {definition!r}", pointer)
+        header_dependencies = build.get("header_dependencies", [])
+        if not isinstance(header_dependencies, list):
+            fail("c-build-type", "c_build.header_dependencies must be an array",
+                 "/c_build/header_dependencies")
+        previous = ""
+        module_prefix = f"src/modules/{identifier}/"
+        for index, dependency in enumerate(header_dependencies):
+            pointer = f"/c_build/header_dependencies/{index}"
+            if not isinstance(dependency, str):
+                fail("c-build-type", "header dependency must be a string", pointer)
+            if dependency <= previous:
+                fail("c-build-order", "header dependencies must be sorted and unique", pointer)
+            previous = dependency
+            pure = PurePosixPath(dependency)
+            if (not dependency.startswith("src/") or "\\" in dependency or
+                    pure.is_absolute() or "." in pure.parts or ".." in pure.parts or
+                    pure.as_posix() != dependency or pure.suffix != ".h"):
+                fail("c-build-path", f"invalid header dependency {dependency!r}", pointer)
+            if dependency.startswith(module_prefix):
+                fail("c-build-header-owned",
+                     "module-local headers must use private_headers or public_headers", pointer)
+        generated = build.get("generated_headers", [])
+        if not isinstance(generated, list):
+            fail("c-build-type", "c_build.generated_headers must be an array",
+                 "/c_build/generated_headers")
+        previous_output = ""
+        for header_index, header in enumerate(generated):
+            pointer = f"/c_build/generated_headers/{header_index}"
+            if not isinstance(header, dict) or set(header) != {"entries", "output"}:
+                fail("c-build-generated-shape",
+                     "generated header must contain only entries and output", pointer)
+            output = header["output"]
+            output_path = PurePosixPath(output) if isinstance(output, str) else None
+            if (not isinstance(output, str) or "\\" in output or output <= previous_output or
+                    output_path is None or output_path.name != output or
+                    output_path.suffix != ".h"):
+                fail("c-build-generated-output",
+                     "generated header outputs must be sorted unique .h basenames",
+                     f"{pointer}/output")
+            previous_output = output
+            entries = header["entries"]
+            if not isinstance(entries, list) or not entries or len(entries) > MAX_ARRAY:
+                fail("c-build-generated-entries",
+                     "generated header entries must be a nonempty bounded array",
+                     f"{pointer}/entries")
+            previous_entry: tuple[str, str] | None = None
+            seen_symbols: set[str] = set()
+            for entry_index, entry in enumerate(entries):
+                entry_pointer = f"{pointer}/entries/{entry_index}"
+                if not isinstance(entry, dict) or set(entry) != {"source", "symbol"}:
+                    fail("c-build-generated-shape",
+                         "generated entry must contain only source and symbol", entry_pointer)
+                source, symbol = entry["source"], entry["symbol"]
+                source_path = PurePosixPath(source) if isinstance(source, str) else None
+                if (not isinstance(source, str) or not source or "\\" in source or
+                        source_path is None or source_path.is_absolute() or
+                        "." in source_path.parts or ".." in source_path.parts or
+                        source_path.as_posix() != source):
+                    fail("c-build-path", f"invalid generated input path {source!r}",
+                         f"{entry_pointer}/source")
+                if not isinstance(symbol, str) or not C_DEFINE_RE.fullmatch(symbol):
+                    fail("c-build-token", f"invalid generated C symbol {symbol!r}",
+                         f"{entry_pointer}/symbol")
+                key = (symbol, source)
+                if previous_entry is not None and key <= previous_entry:
+                    fail("c-build-order", "generated entries must be sorted and unique",
+                         entry_pointer)
+                if symbol in seen_symbols:
+                    fail("c-build-order", "generated entry symbols must be unique",
+                         f"{entry_pointer}/symbol")
+                previous_entry = key
+                seen_symbols.add(symbol)
     return identifier
 
 
@@ -550,6 +680,31 @@ def validate_ownership(
                 fail("c-build-path-escape", f"include root escapes repository: {raw}", pointer)
             if resolved != lexical or not resolved.is_dir():
                 fail("c-build-directory", f"include root is not a real directory: {raw}", pointer)
+        for header_index, header in enumerate(build.get("generated_headers", [])):
+            assert isinstance(header, dict)
+            for entry_index, entry in enumerate(header["entries"]):
+                assert isinstance(entry, dict)
+                raw = entry["source"]
+                assert isinstance(raw, str)
+                pointer = (f"/c_build/generated_headers/{header_index}/entries/"
+                           f"{entry_index}/source")
+                lexical = repo.resolve().joinpath(*PurePosixPath(raw).parts)
+                resolved = _resolve_owned(lexical, pointer)
+                if not _contained(resolved, repo.resolve()):
+                    fail("c-build-path-escape", f"generated input escapes repository: {raw}",
+                         pointer)
+                if resolved != lexical or not resolved.is_file():
+                    fail("c-build-file", f"generated input is not a real file: {raw}", pointer)
+        for index, raw in enumerate(build.get("header_dependencies", [])):
+            pointer = f"/c_build/header_dependencies/{index}"
+            pure = PurePosixPath(raw)
+            lexical = repo.resolve().joinpath(*pure.parts)
+            resolved = _resolve_owned(lexical, pointer)
+            if not _contained(resolved, repo.resolve()):
+                fail("c-build-path-escape", f"header dependency escapes repository: {raw}",
+                     pointer)
+            if resolved != lexical or not resolved.is_file():
+                fail("c-build-file", f"header dependency is not a real file: {raw}", pointer)
     for field in OWNERSHIP_FIELDS:
         raw_entries = value.get(field, [])
         if not isinstance(raw_entries, list):

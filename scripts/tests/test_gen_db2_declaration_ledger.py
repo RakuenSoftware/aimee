@@ -45,12 +45,12 @@ class DeclarationLedgerTests(unittest.TestCase):
         ledger.run(REPO_ROOT, False)
         value = ledger.build(REPO_ROOT)
         self.assertEqual(value["summary"], {
-            "headers": 136,
-            "declarations": 1357,
-            "reviewed": 62,
-            "audit_pending": 895,
-            "internal_unconsumed": 141,
-            "private_test_only": 259,
+            "headers": 138,
+            "declarations": 1397,
+            "reviewed": 294,
+            "audit_pending": 664,
+            "internal_unconsumed": 153,
+            "private_test_only": 286,
         })
         self.assertFalse(value["declarations_complete"])
         self.assertEqual(

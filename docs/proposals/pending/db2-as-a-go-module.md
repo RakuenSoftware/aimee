@@ -1,13 +1,25 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — residual scope only. S1 is complete, S2 is in progress, and S4/S6 remain open.
+- **State:** PENDING — residual scope only. S1 and S2 are complete, S3 is in progress, and S4/S6 remain open.
 - **Completed slices:** The C source boundary, separately buildable process shell, generated health
   contract/client, declaration and
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 37 sibling contracts. Its closure records 176 external symbols: 139
-  declared system links and those 37 injected contracts; portable API debt is zero. This is
+  link closure is complete. Its closure records 139 external symbols, all declared system links;
+  packaging, injected-contract, portable API, private-implementation, and dead-code debt are zero.
+  The disabled-by-default runtime bundle now compiles all 138 DB2 owner translation units into a
+  real `aimee-module-db2`, opens only from `AIMEE_DB2_URL`, and serves health through strong backend
+  symbols; missing or failed initialization refuses attachment without logging the DSN. Its
+  descriptor also owns deterministic SQL-to-header generation, so a clean runtime-bundle build no
+  longer depends on a prior monolithic build writing `src/schema_data.h`. Its standalone repository
+  now materializes the descriptor's explicit 55-header compatibility closure, keeps those files
+  distinct from DB2 ownership, and includes them in the reproducible source pin; all 138 DB2
+  translation units compile and link from the isolated export. The first live S3 replay group now
+  starts that packaged executable against fresh PostgreSQL, crosses an executable-bound event bus,
+  compares canonical health bytes, verifies the recorded dimension and schema effects, and serves
+  that effective dimension plus a bounded PostgreSQL pool snapshot through post-bootstrap envelope
+  operations. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -171,20 +183,27 @@ The declaration gate is separate from codec generation. A checked-in review bind
 normalized-signature hash to a closed disposition, family, DB3 placement, and reason. The generated
 ledger cross-references the exact frozen consumer set, records harmless identical declarations, and
 rejects conflicting signatures or unsupported C constructs rather than silently omitting them.
+Each catalog row also names its exact C backend symbols. Generation requires a one-to-one match with
+signature-bound `wire-operation` reviews in the same family and placement, so a codec cannot land
+without reducing the audited declaration debt and a review cannot claim a wire migration that the
+catalog does not implement.
 Test-only and unconsumed declarations do not become wire operations. The 61 currently externally
 referenced `pgvec_*` declarations are explicitly `private-db2`/`retained-db2`; this prevents provider
 names and PostgreSQL mechanics from leaking into the later DB3 contract without claiming that their
 provider-neutral logical operations are ineligible. `catalog_complete` cannot pass while the ledger
 contains an `audit-pending` production declaration.
 
-The bus already carries event kind, correlation, deadline, cancellation, and fragmentation.
-The DB2 request body therefore has only a 24-byte little-endian header followed by the declared
-payload: `magic:u32`, `version:u16`, `header_len:u16`, `operation:u32`, `flags:u32`,
-`payload_len:u32`, and `reserved:u32`. Replies use the same shape with reply magic and replace
-`flags` with a closed result code (`ok`, `not_found`, `conflict`, `denied`, `retryable`, or
-`invalid_state`). Unknown bits, nonzero reserved bytes, length mismatches, undeclared results,
-and noncanonical unused tails fail as invalid requests. Transport cancellation, deadline, and
-internal failure remain module-runtime statuses rather than domain replies.
+The bus already carries event kind, correlation, deadline, cancellation, and fragmentation. The
+already-frozen bootstrap health request/reply keeps its dedicated 8/16-byte codec. Every subsequent
+DB2 request body has only a 24-byte little-endian header followed by the declared payload:
+`magic:u32`, `version:u16`, `header_len:u16`, `operation:u32`, `flags:u32`, `payload_len:u32`, and
+`reserved:u32`. Replies use the same shape with distinct reply magic and replace `flags` with a
+closed result code (`ok`, `not_found`, `conflict`, `denied`, `retryable`, or `invalid_state`). The
+generated C and Go codecs and their shared positive/negative vectors land before the second operation,
+so adding it cannot reinterpret the bootstrap bytes. Unknown operation-specific bits, nonzero
+reserved bytes, length mismatches, undeclared results, and noncanonical unused tails fail as invalid
+requests. Transport cancellation, deadline, and internal failure remain module-runtime statuses
+rather than domain replies.
 
 Contract version 1 freezes when phase one activates. A later additive operation increments the
 catalog without reusing identifiers; an incompatible field change requires a new version and a
@@ -568,9 +587,85 @@ breaker lives; the adapter preserves the module's explicit C-host path for progr
 the Go owner intentionally declines. DB2 accepts only a dimension within the caller's bound and
 finite vector components, so an absent or malformed answer cannot become a stored vector.
 
+Tenant setup now receives canonical identity keys through a startup-installed identity-owner
+contract rather than linking `kb_identity_key`. The adapter accepts only the verifier-owned
+principal fields required by canonicalization. DB2 pins the kind values and independently validates
+the returned owner, issuer-scoped OIDC, normalized certificate, or bounded host-account grammar
+before a transaction begins, so an absent provider or malformed answer cannot set tenant GUCs.
+
+Management and identity token authority rows now cross a paired startup-installed validation
+contract rather than linking the canonical KB validators into DB2. Production and the narrow live
+drivers install both callbacks before opening the service path. DB2 admits a row only when the
+corresponding provider returns exact success; absent providers, ordinary rejection, and unexpected
+positive or negative statuses all fail closed before private-key use.
+
+Rendered CSS comparison now crosses one startup-installed CSS-owner contract instead of letting DB2
+parse, compare, and free the sibling module's object graph. The boundary returns only binary
+snapshot-validity and verdict flags plus a nonnegative diff count. DB2 verifies their internal
+consistency before recording a migration verdict, so absent providers, malformed snapshots,
+provider failures, and invalid output cannot be mistaken for equivalence.
+
+CSS structural analysis now uses a paired parser/release provider and bounded class-token extractor
+installed by the CSS owner. Before any derived write, DB2 validates stylesheet and nested declaration
+counts, terminated fixed fields, nonnegative specificity and line values, binary flags, and unique
+static class tokens. An unavailable provider or invalid object graph leaves existing derived state
+untouched instead of clearing or replacing it with an untrusted partial answer.
+
+Credential-record cryptography now crosses one copied vault-owner vtable. It covers canonical
+legacy/current AAD construction, strong randomness, DEK wrap/unwrap, authenticated secret
+encryption/decryption, and the KEK verifier. DB2 checks exact success and every variable bound,
+rejects inconsistent AAD lengths, and independently cleanses random, key, ciphertext, tag, and
+plaintext outputs after an absent or failed operation.
+
+Reseal database paths now receive their mutation deadline and canonical operation-ID/receipt
+functions through one copied vault-owner vtable. DB2 clips the returned absolute deadline to its
+own monotonic per-call window, re-parses lowercase operation IDs and compares the provider's bytes,
+and clears failed receipt and digest outputs. Missing or inconsistent providers stop the database
+operation before it can advance the reseal state machine.
+
+Witness database paths now receive canonical checkpoint/record encoding, hashing, sparse-Merkle,
+export framing, signer identity, signing, and verification through one copied vault-owner vtable.
+DB2 validates enum ranges, encoded lengths, frame sizes, shard ceilings, and exact success, and it
+cleanses partial hashes, identities, signatures, and wire outputs when the provider is absent or
+malformed. This closes the final 12 sibling calls: the standalone C closure now contains only its
+139 declared system links.
+
 The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
 SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and
 SQLite-only runtime imports are not dependencies of the deployable C or Go DB2 owner.
+
+The standalone repository no longer relies on undeclared monorepo headers. `c_build` records the
+55-header compatibility closure consumed by the retained C implementation; export and runtime
+admission validate normalized real header paths, reject module-local ownership laundering, copy the
+inputs into the isolated repository, and bind them into its source digest. This is packaging for the
+reviewed transitional C closure, not a claim that DB2 owns audit, config, CSS, DB1, guardrails,
+learning, memory, vault, or shared host contracts. The isolated export compiles and links all 138
+translation units against only that declared header set, `aimee-core`, and the 139 audited system
+links.
+
+The first S3 replay group fixes the standalone startup configuration gap and makes the proof
+blocking. `module_init.c` injects the single config-owned embedding-width default, preserves
+`EMBEDDER_DIMS` as an operator pin, and still refuses attachment when the DSN or initialization
+fails. The `db2-replay` target launches the packaged executable with its exact principal-29 grant
+against fresh pgvector PostgreSQL, compares raw response bytes to the generated health codec,
+repeats the call through the typed client, checks schema/extension/KB-table evidence, and terminates
+the process cleanly. CI separately verifies `kb_meta.schema_embedding_dim` and representative
+tables, and the stable `unit-tests` aggregate now requires this job. This proves the current health
+operation and schema bootstrap through the real process boundary. The same harness proves an
+expired deadline, deterministic cancellation after request publication, stale-terminal-reply
+draining, post-cancellation process health, and the first envelope-backed lifecycle operation:
+`embedding_dimension` returns the effective 1–4000 pgvector schema width or `invalid_state`.
+The following `pool_status` operation returns the initialized 16-slot pool plus bounded occupancy,
+waiter, lease, stuck, and poison counters from one DB2-owned snapshot. `embedding_refusals` preserves
+the DB2-owned count and last offered dimension that make a rejected schema-width change visible to
+lifecycle health, returning only the valid zero/zero or positive/positive states. `postgres_status`
+carries best-effort active/max connection, recovery-role, and replica-lag evidence.
+It uses explicit availability bits, canonicalizes unavailable values to zero, and keeps PostgreSQL
+operational evidence in DB2. `reembed_status` preserves the canonical maintenance marker as a
+bounded target dimension and start epoch, with explicit absent and malformed results. Its
+`reembed_clear` companion performs the idempotent single-statement marker delete after reconciliation.
+These operations do not claim the remaining catalog handlers, tenant, concurrency, ambiguity, or
+durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
 standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is

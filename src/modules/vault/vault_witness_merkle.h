@@ -31,7 +31,7 @@ extern "C"
 
 /* One occupied leaf: the 8-byte shard-key hash (position) and the 32-byte leaf
  * commitment (see vault_witness_leaf_hash). */
-typedef struct
+typedef struct vault_witness_leaf
 {
    uint8_t key[8];
    uint8_t hash[32];

@@ -30,6 +30,7 @@ RULES = Path("src/tests/Rules.mk")
 # live Postgres; a -live target needs a running service. Both are covered by
 # their own CI jobs, which is why they are exempt here rather than missing.
 INFRASTRUCTURE = {
+    "unit-test-bus-db2-process": "needs Postgres and the packaged DB2 executable",
     "unit-test-content-scope-pg": "needs Postgres",
     "unit-test-kb-audit-worm-pg": "needs Postgres",
     "unit-test-vault-pg": "needs Postgres",

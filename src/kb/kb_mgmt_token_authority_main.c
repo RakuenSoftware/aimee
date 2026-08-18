@@ -114,6 +114,9 @@ int main(int argc, char **argv)
       return 64;
    }
 
+   aimee_db2_register_token_record_validators(kb_mgmt_token_authority_record_valid,
+                                              kb_identity_token_authority_record_valid);
+
    char *dsn = copy_env("AIMEE_KB_TOKEN_AUTHORITY_DSN", 4096);
    char *helper = copy_env("AIMEE_VAULT_KMS_HELPER", PATH_MAX - 1);
    char *kms_id = copy_env("AIMEE_VAULT_KMS_KEY_ID", 600);

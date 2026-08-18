@@ -61,9 +61,9 @@ class BoundaryTests(unittest.TestCase):
 
     def test_production_tree_matches_baseline(self) -> None:
         result = checker.check(REPO_ROOT)
-        self.assertEqual(result["source_files"], 280)
-        self.assertEqual(result["consumer_files"], 304)
-        self.assertEqual(result["include_directives"], 992)
+        self.assertEqual(result["source_files"], 282)
+        self.assertEqual(result["consumer_files"], 305)
+        self.assertEqual(result["include_directives"], 994)
 
     def test_inventory_is_deterministic_sorted_and_classified(self) -> None:
         tmp = self.repo()
@@ -398,6 +398,30 @@ class BoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
                 checker.enforce_shrink_only(private_to_public, promoted)
 
+            private_embedder_dims = {
+                "consumers": [],
+                "outbound_dependencies": [{
+                    "source": "src/modules/db2/c/db2_test_shim.c",
+                    "header": "modules/config/config_embedder_dims.h",
+                    "resolved": "src/modules/config/config_embedder_dims.h",
+                    "classification": "module-private-api",
+                    "count": 1,
+                }],
+            }
+            shared_embedder_dims = json.loads(json.dumps(private_embedder_dims))
+            shared_row = shared_embedder_dims["outbound_dependencies"][0]
+            shared_row["header"] = "config_embedder_dims.h"
+            shared_row["resolved"] = "src/headers/config_embedder_dims.h"
+            shared_row["classification"] = "host-api"
+            checker.enforce_shrink_only(private_embedder_dims, shared_embedder_dims)
+            shared_row["count"] += 1
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(private_embedder_dims, shared_embedder_dims)
+            shared_row["count"] -= 1
+            shared_row["source"] = "src/modules/db2/c/store.c"
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(private_embedder_dims, shared_embedder_dims)
+
             vendor_cjson = {
                 "consumers": [],
                 "outbound_dependencies": [{
@@ -452,7 +476,7 @@ class BoundaryTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("304 consumers", result.stdout)
+        self.assertIn("305 consumers", result.stdout)
 
 
 if __name__ == "__main__":

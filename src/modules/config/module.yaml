@@ -41,7 +41,6 @@
     "src/modules/config/config.h",
     "src/modules/config/config_accessors.h",
     "src/modules/config/config_database.h",
-    "src/modules/config/config_embedder_dims.h",
     "src/modules/config/config_fields.h",
     "src/modules/config/config_internal.h",
     "src/modules/config/config_learning.h",
