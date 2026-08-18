@@ -255,7 +255,10 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
     fi
-    rm -rf "$HOME"
+    # Same reasoning as the TCP scratch home: cleanup must not be what
+    # fails the run. This one already reaps the server above, so the
+    # guard only covers other writers still holding the tree.
+    rm -rf "$HOME" || true
 }
 trap cleanup EXIT
 
@@ -381,8 +384,16 @@ else
     echo "  tcp: $TCP_BODY"
     FAIL=$((FAIL + 1))
 fi
+# kill is asynchronous: it returns before the server has exited, while the
+# process is still writing its WAL, socket and logs. Removing the tree then
+# races it -- the walk empties a directory, the still-live server recreates
+# a file in it, and the final rmdir fails with ENOTEMPTY. Under 'set -e'
+# that aborts the whole harness ~40 checks early with no failing check to
+# point at, which reads as a product bug rather than as cleanup. Reap the
+# process first, and never let removing a scratch dir decide the verdict.
 kill "$TCP_SRV_PID" 2>/dev/null || true
-rm -rf "$TCP_HOME"
+wait "$TCP_SRV_PID" 2>/dev/null || true
+rm -rf "$TCP_HOME" || true
 
 # Rebuild only the thin client with a new build ID. The existing server should
 # remain usable because compatibility is gated by major version, not build ID.
