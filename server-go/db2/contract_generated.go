@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "f9ae4a4f7f8f12494976c0a22e5803fb173f1bd0af0eee264dbdc00d79ed1d17"
+const ContractSHA256 = "f47bbf6e3863fbeeb888b724acc73a2a10077a6c27a6e77e611bb7bb8caa6f07"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -247,6 +247,10 @@ const EventTouch = EventMemory
 const StageTouch = FamilyMemory
 const OperationTouch uint32 = 28
 const TouchMemoryIDMax uint64 = 9223372036854775807
+const EventLinkDelete = EventMemory
+const StageLinkDelete = FamilyMemory
+const OperationLinkDelete uint32 = 29
+const LinkDeleteLinkIDMax uint64 = 9223372036854775807
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -856,6 +860,53 @@ func EncodeTouchReply() ([]byte, error) {
 func DecodeTouchReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationTouch || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeLinkDeleteRequest emits the relation the caller wants removed.
+func EncodeLinkDeleteRequest(linkID uint64) ([]byte, error) {
+	if linkID == 0 || linkID > LinkDeleteLinkIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationLinkDelete, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], linkID)
+	return request, nil
+}
+
+// DecodeLinkDeleteRequest validates the envelope and the bounded link.
+func DecodeLinkDeleteRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLinkDelete || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	linkID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if linkID == 0 || linkID > LinkDeleteLinkIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return linkID, nil
+}
+
+// EncodeLinkDeleteReply acknowledges the delete without a payload.
+func EncodeLinkDeleteReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationLinkDelete, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeLinkDeleteReply validates the acknowledgement and refuses any payload.
+func DecodeLinkDeleteReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationLinkDelete || header.Result != ResultOK ||
 		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
 		return ErrMalformedEnvelope
 	}

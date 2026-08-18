@@ -16926,9 +16926,15 @@
           "line": 28
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.link_delete operation replaces the single relation delete; the link identity is the caller's only input and the relation graph stays DB2 authority."
+      },
       "signature": "int db2_memory_link_delete ( int64_t link_id )",
       "signature_sha256": "1bfa3b6e1cc6270bbaa0a291044e810a1f8dd15720184d91c077499bb9abb3c3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_link_delete"
     },
     {
@@ -25824,15 +25830,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7b75dba19d6e29d9e4cc4721e545736942f8925b8448a6a22bc320264e134c7d",
+  "fingerprint": "f7aa0a47bc2eb16019a6ad0795f8044ef358096f51b347bba8739a27813e6e1d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 658,
+    "audit_pending": 657,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 300
+    "reviewed": 301
   }
 }

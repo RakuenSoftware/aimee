@@ -73,6 +73,7 @@ typedef struct
    int (*has_workspace_tag)(int64_t memory_id);
    int (*delete_row)(int64_t memory_id);
    int (*touch)(int64_t memory_id);
+   int (*link_delete)(int64_t link_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -118,6 +119,8 @@ static int workspace_tag_calls;
 static int delete_row_calls;
 static int touch_calls;
 static int64_t touch_last;
+static int link_delete_calls;
+static int64_t link_delete_last;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -745,6 +748,19 @@ static int touch(int64_t memory_id)
    return memory_id == 42 ? 0 : -1;
 }
 
+int db2_memory_link_delete(int64_t link_id)
+{
+   (void)link_id;
+   return -1;
+}
+
+static int link_delete(int64_t link_id)
+{
+   link_delete_calls++;
+   link_delete_last = link_id;
+   return link_id == 7 ? 0 : -1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1072,6 +1088,7 @@ int main(void)
        .has_workspace_tag = has_workspace_tag,
        .delete_row = delete_row,
        .touch = touch,
+       .link_delete = link_delete,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1284,6 +1301,12 @@ int main(void)
    assert(touch_calls == 1 && touch_last == 42);
    /* A memory the backend refuses surfaces as INTERNAL, not as a quiet ok. */
    assert(aimee_db2_touch_call(call_client, &client, 7051, 0, 43u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
+
+   assert(aimee_db2_link_delete_call(call_client, &client, 7052, 0, 7u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(link_delete_calls == 1 && link_delete_last == 7);
+   assert(aimee_db2_link_delete_call(call_client, &client, 7053, 0, 8u, NULL, NULL) ==
           AIMEE_MODULE_CALL_INTERNAL);
 
    aimee_db2_pool_status_t pool = {0};

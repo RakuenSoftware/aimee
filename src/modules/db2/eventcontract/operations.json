@@ -1068,6 +1068,29 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 29,
+      "name": "link_delete",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Relations between canonical memories are relational DB2 rows rather than portable ANN state, so removing one stays DB2 authority.",
+      "c_symbols": ["db2_memory_link_delete"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "link_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
     }
   ]
 }

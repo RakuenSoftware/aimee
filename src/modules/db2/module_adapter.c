@@ -11,6 +11,7 @@
 #include "c/memory_payload.h"
 #include "c/memory_promotion.h"
 #include "c/memory_query.h"
+#include "c/memory_relations.h"
 
 static int production_health_counters(int promote_use_count, double promote_confidence,
                                       aimee_db2_health_counters_t *counters)
@@ -275,6 +276,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .has_workspace_tag = db2_memory_has_any_workspace_tag,
        .delete_row = db2_memory_delete_row,
        .touch = db2_memory_touch,
+       .link_delete = db2_memory_link_delete,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -922,6 +924,22 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_touch_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_TOUCH_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t delete_link_id = 0u;
+      if (aimee_db2_link_delete_request_decode(request_body, request_len, &delete_link_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_LINK_DELETE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->link_delete)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         if (backend->link_delete((int64_t)delete_link_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_link_delete_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_LINK_DELETE_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

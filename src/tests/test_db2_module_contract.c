@@ -40,6 +40,9 @@ static int64_t delete_row_last;
 static int touch_value;
 static int touch_calls;
 static int64_t touch_last;
+static int link_delete_value;
+static int link_delete_calls;
+static int64_t link_delete_last;
 static int64_t workspace_tag_last;
 static int64_t total_count_value;
 static int total_count_calls;
@@ -343,6 +346,19 @@ static int touch(int64_t memory_id)
    touch_calls++;
    touch_last = memory_id;
    return touch_value;
+}
+
+int db2_memory_link_delete(int64_t link_id)
+{
+   (void)link_id;
+   return -1;
+}
+
+static int link_delete(int64_t link_id)
+{
+   link_delete_calls++;
+   link_delete_last = link_id;
+   return link_delete_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1004,6 +1020,9 @@ static void reset(void)
    touch_value = 0;
    touch_calls = 0;
    touch_last = 0;
+   link_delete_value = 0;
+   link_delete_calls = 0;
+   link_delete_last = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2293,6 +2312,31 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_link_delete_wire(void)
+{
+   uint8_t request[AIMEE_DB2_LINK_DELETE_REQUEST_LEN] = {0};
+   uint64_t link_id = 99;
+   assert(aimee_db2_link_delete_request_encode(7u, request, sizeof(request)) == 0);
+   assert(aimee_db2_link_delete_request_decode(request, sizeof(request), &link_id) == 0 &&
+          link_id == 7);
+   assert(aimee_db2_link_delete_request_encode(0u, request, sizeof(request)) == -1);
+   assert(aimee_db2_link_delete_request_encode(AIMEE_DB2_LINK_DELETE_LINK_ID_MAX + 1ull, request,
+                                               sizeof(request)) == -1);
+   assert(aimee_db2_link_delete_request_encode(7u, request, sizeof(request) - 1) == -1);
+   assert(aimee_db2_link_delete_request_encode(7u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_link_delete_request_decode(request, sizeof(request), &link_id) == -1 &&
+          link_id == 0);
+
+   uint8_t reply[AIMEE_DB2_LINK_DELETE_RESPONSE_LEN] = {0};
+   assert(aimee_db2_link_delete_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_link_delete_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_link_delete_reply_encode(reply, sizeof(reply) - 1) == -1);
+   assert(aimee_db2_link_delete_reply_encode(reply, sizeof(reply)) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_link_delete_reply_decode(reply, sizeof(reply)) == -1);
 }
 
 static void test_touch_wire(void)
@@ -3758,6 +3802,32 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_link_delete_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.link_delete = link_delete};
+   uint8_t request[AIMEE_DB2_LINK_DELETE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_LINK_DELETE_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_LINK_DELETE};
+   assert(aimee_db2_link_delete_request_encode(7u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(link_delete_calls == 1 && link_delete_last == 7);
+   assert(aimee_db2_link_delete_reply_decode(response, response_len) == 0);
+
+   link_delete_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   link_delete_value = 0;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_touch_handler(void)
 {
    reset();
@@ -4894,6 +4964,7 @@ int main(void)
    test_has_workspace_tag_wire();
    test_delete_row_wire();
    test_touch_wire();
+   test_link_delete_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4932,6 +5003,7 @@ int main(void)
    test_has_workspace_tag_handler();
    test_delete_row_handler();
    test_touch_handler();
+   test_link_delete_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

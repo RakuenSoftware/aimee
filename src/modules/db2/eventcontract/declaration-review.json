@@ -1572,6 +1572,14 @@
       "reason": "The typed memory.lifecycle_sweep_expired operation replaces the pending time-to-live archival pass; the source state, target state, and archive reason stay fixed policy behind the handler so no caller can archive a different set of rows."
     },
     {
+      "symbol": "db2_memory_link_delete",
+      "signature_sha256": "1bfa3b6e1cc6270bbaa0a291044e810a1f8dd15720184d91c077499bb9abb3c3",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.link_delete operation replaces the single relation delete; the link identity is the caller's only input and the relation graph stays DB2 authority."
+    },
+    {
       "symbol": "db2_memory_promotion_delete_l0",
       "signature_sha256": "912605e89f87fb0961d3e301d51dfbf71edd4ea9bec00ac6c3cfb73f1dc30938",
       "disposition": "wire-operation",

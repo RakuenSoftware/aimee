@@ -393,6 +393,16 @@ int main(int argc, char **argv)
    assert(aimee_db2_touch_call(call_client, &client, 9057, 0, 0u, NULL, NULL) ==
           AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Link 7 does not exist, but a delete that matches no row is still a
+    * completed statement, so this acknowledges rather than failing. Replayed
+    * because removing an absent relation is genuinely neutral. */
+   assert(aimee_db2_link_delete_call(call_client, &client, 9058, 0, 7u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_link_delete_call(call_client, &client, 9059, 0, 7u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_link_delete_call(call_client, &client, 9060, 0, 0u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
