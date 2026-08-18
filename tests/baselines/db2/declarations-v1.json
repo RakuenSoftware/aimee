@@ -13111,9 +13111,15 @@
           "line": 114
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "maintenance",
+        "reason": "Applying transaction-local PostgreSQL maintenance context is private DB2 execution state; each maintenance wire operation carries its bounded worker and project scope and owns the complete transaction."
+      },
       "signature": "int db2_maintenance_context_apply_current ( void )",
       "signature_sha256": "b0d4935635416a0e18f6029e62c74468c076e9f8a168ac092a374e6d8b09deb3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_maintenance_context_apply_current"
     },
     {
@@ -13146,9 +13152,15 @@
           "line": 103
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "maintenance",
+        "reason": "The thread-local maintenance job binding cannot cross a process boundary; generated operations carry the named worker and bounded project on every complete DB2 request."
+      },
       "signature": "int db2_maintenance_job_enter ( db2_maintenance_worker_t worker , const char * project )",
       "signature_sha256": "36e5a3cbab68f346202af712aa21408918118d91b5d5b04d1fd68ebc39ad5096",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_maintenance_job_enter"
     },
     {
@@ -13166,9 +13178,15 @@
           "line": 104
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "maintenance",
+        "reason": "Clearing a process-local maintenance job binding has no wire representation; explicit request scope replaces the caller-owned thread-local lifetime."
+      },
       "signature": "void db2_maintenance_job_leave ( void )",
       "signature_sha256": "0685d073893f36526a813dbe39df9f4a5980909891a858e5effe888ee58b6707",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_maintenance_job_leave"
     },
     {
@@ -13202,9 +13220,15 @@
           "line": 113
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "maintenance",
+        "reason": "Beginning a PostgreSQL transaction from thread-local maintenance state is private DB2 execution; a typed operation validates explicit scope and begins its own transaction instead."
+      },
       "signature": "int db2_maintenance_scope_begin_current ( void )",
       "signature_sha256": "856c2d92a6a8d95edde6a74075f8558898198905e0889c33aea1bf3a6f785992",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_maintenance_scope_begin_current"
     },
     {
@@ -13221,9 +13245,15 @@
           "line": 96
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "maintenance",
+        "reason": "A caller-controlled commit is forbidden across the module boundary; each declared maintenance mutation commits before publishing its bounded reply."
+      },
       "signature": "int db2_maintenance_scope_commit ( void )",
       "signature_sha256": "905ce3aa13e640dfc22763d2a83d387f37e8879e2aa8c13c1bd8cf5a1ab5d4fc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_maintenance_scope_commit"
     },
     {
@@ -13238,9 +13268,15 @@
           "line": 97
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "maintenance",
+        "reason": "A caller-controlled rollback is process-local transaction cleanup; failed or cancelled maintenance operations roll back inside DB2 before returning transport status."
+      },
       "signature": "void db2_maintenance_scope_rollback ( void )",
       "signature_sha256": "16671873f328705c35893f69b4ac85313a1b9f159bf80d15744698e22e957746",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_maintenance_scope_rollback"
     },
     {
@@ -20422,9 +20458,15 @@
           "line": 82
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "tenancy",
+        "reason": "A caller-held tenant transaction cannot cross the bus; each tenancy or tenant-scoped operation carries bounded verifier-owned principal fields and owns context setup through completion."
+      },
       "signature": "int db2_tenant_scope_begin ( const kb_principal_t * p , int64_t team )",
       "signature_sha256": "c1aed4cab1fc4d2813d1102f3cc7e77716752c5599de05af5592530a70775ef5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_tenant_scope_begin"
     },
     {
@@ -20464,9 +20506,15 @@
           "line": 87
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "tenancy",
+        "reason": "Committing caller-owned tenant state is not a wire operation; a complete scoped DB2 request commits before its reply and never returns a transaction token."
+      },
       "signature": "int db2_tenant_scope_commit ( void )",
       "signature_sha256": "9d0bc66c60b94c40bb9c852c6cf6460c7e0502d64da04eda23ea4bdda49e838b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_tenant_scope_commit"
     },
     {
@@ -20502,9 +20550,15 @@
           "line": 88
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "tenancy",
+        "reason": "Rollback and tenant-GUC clearing remain DB2 process cleanup; failures, cancellation, and denied scope roll back before the typed operation returns."
+      },
       "signature": "void db2_tenant_scope_rollback ( void )",
       "signature_sha256": "1771779335868a8ee19e35e09aec268549bb40259a235753f561a530c6fae97c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_tenant_scope_rollback"
     },
     {
@@ -24540,15 +24594,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1f514a2c5c26727a4a962032ff09513a68f9435afb8473a915090984e03a25a6",
+  "fingerprint": "8c990da15e54a8115e3daa12e9e4999c66da8e8e18649f7de179c6d8f308036f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 872,
+    "audit_pending": 863,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 86
+    "reviewed": 95
   }
 }
