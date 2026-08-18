@@ -16349,9 +16349,15 @@
           "line": 73
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_update operation carries the positive memory identifier and explicit clear state while DB2 owns the canonical nullable column update."
+      },
       "signature": "int db2_memory_health_clear_effectiveness ( int64_t memory_id )",
       "signature_sha256": "c82ea53ebcce66af7bc7cf3f96c6422aa84695e026530afae7b1f97a9bd8efb2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_clear_effectiveness"
     },
     {
@@ -16538,9 +16544,15 @@
           "line": 72
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_update operation preserves the host-computed binary64 value while DB2 owns the canonical effectiveness column update."
+      },
       "signature": "int db2_memory_health_set_effectiveness ( int64_t memory_id , double value )",
       "signature_sha256": "4bf8c5f279d8ad36105f1bd8a928a0200acf561a29c8e9d136e666250a60aec8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_set_effectiveness"
     },
     {
@@ -25668,15 +25680,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4e5ab7864d95b3ac431ade2c21f97911c89d2079b5e2711c9cfdd1f1668820c0",
+  "fingerprint": "e443f82725a1a8622433002a5e559c26bebc761da120f275b43f009e40eb8d29",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 684,
+    "audit_pending": 682,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 274
+    "reviewed": 276
   }
 }

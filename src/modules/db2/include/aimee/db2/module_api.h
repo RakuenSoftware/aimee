@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "d572b20bf05c7550242e883a9291cda3b65151d6babd7ae49c34fea09257bf8c"
+#define AIMEE_DB2_CONTRACT_SHA256 "869ad095591495af20e3f2b648629291d667b0dd33f3569ce4867a6c2c2e5e43"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -177,6 +177,14 @@
 #define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX      15u
 #define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX      15u
 #define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX             1u
+#define AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE          9u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN        44u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN       24u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_ERROR_LEN          24u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX      9223372036854775807ull
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX      1u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1025,6 +1033,87 @@ static inline int aimee_db2_key_exists_in_tier_pair_reply_decode(
    if (decoded > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX)
       return -1;
    *exists = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_effectiveness_update_request_encode(
+    uint64_t memory_id, uint32_t has_value, double value, uint8_t *output, size_t capacity)
+{
+   uint64_t value_bits = 0u;
+   if (sizeof(value) != sizeof(value_bits))
+      return -1;
+   memcpy(&value_bits, &value, sizeof(value_bits));
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX ||
+       has_value > AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX ||
+       (has_value == 0u && value_bits != 0u) ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE, 0u, 20u, output,
+                                       capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, has_value);
+   aimee_db2_put_u64(payload + 12u, value_bits);
+   return 0;
+}
+
+static inline int aimee_db2_effectiveness_update_request_decode(
+    const uint8_t *input, size_t input_len, uint64_t *memory_id, uint32_t *has_value,
+    double *value)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (has_value)
+      *has_value = 0u;
+   if (value)
+      *value = 0.0;
+   if (!memory_id || !has_value || !value || sizeof(*value) != sizeof(uint64_t))
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE || header.flags != 0u ||
+       header.payload_len != 20u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t decoded_has_value = aimee_db2_get_u32(payload + 8u);
+   uint64_t value_bits = aimee_db2_get_u64(payload + 12u);
+   if (decoded_memory_id == 0u ||
+       decoded_memory_id > AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX ||
+       decoded_has_value > AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX ||
+       (decoded_has_value == 0u && value_bits != 0u))
+      return -1;
+   memcpy(value, &value_bits, sizeof(value_bits));
+   *memory_id = decoded_memory_id;
+   *has_value = decoded_has_value;
+   return 0;
+}
+
+static inline int aimee_db2_effectiveness_update_reply_encode(uint32_t result, uint8_t *output,
+                                                              size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN ||
+       (result != AIMEE_DB2_RESULT_OK && result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE, result, 0u,
+                                        output, capacity);
+}
+
+static inline int aimee_db2_effectiveness_update_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result)
+{
+   if (result)
+      *result = 0u;
+   if (!result)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE || header.payload_len != 0u ||
+       (header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   *result = header.result;
    return 0;
 }
 

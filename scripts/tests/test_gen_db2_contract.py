@@ -285,6 +285,29 @@ class ContractTests(unittest.TestCase):
              "exists_too_large", "short", "long"],
         )
 
+    def test_effectiveness_update_vectors_preserve_binary64_and_closed_results(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][18]
+        self.assertEqual(operation["name"], "effectiveness_update")
+        self.assertEqual(
+            (operation["request"]["memory_id"], operation["request"]["has_value"],
+             operation["request"]["value_bits"]),
+            (42, 1, 0x3fe8000000000000),
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "zero_memory_id", "memory_id_too_large", "has_value_too_large",
+             "clear_with_value", "short", "long"],
+        )
+        self.assertEqual(
+            [row["result"] for row in operation["reply"]["positive"]],
+            [0, 5],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "payload_length", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -473,7 +496,7 @@ class ContractTests(unittest.TestCase):
             "operation-duplicate",
         )
         self.assert_rule(
-            lambda value: value["operations"].insert(-8, {
+            lambda value: value["operations"].insert(-9, {
                 **copy.deepcopy(value["operations"][0]),
                 "id": 11,
                 "name": "health_second",
@@ -639,6 +662,25 @@ class ContractTests(unittest.TestCase):
                 "maximum_bytes", 16), "key-exists-in-tier-pair-request"),
             (lambda value: value["operations"][17]["reply"]["field"].__setitem__(
                 "maximum", 2), "key-exists-in-tier-pair-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_effectiveness_update_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][18].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][18].__setitem__("results", ["ok"]),
+             "operation-results"),
+            (lambda value: value["operations"][18]["request"]["fields"][0].__setitem__(
+                "minimum", 0), "effectiveness-update-request"),
+            (lambda value: value["operations"][18]["request"]["fields"][1].__setitem__(
+                "maximum", 2), "effectiveness-update-request"),
+            (lambda value: value["operations"][18]["request"]["fields"][2].__setitem__(
+                "encoding", "host-double"), "effectiveness-update-request"),
+            (lambda value: value["operations"][18]["reply"].__setitem__(
+                "encoded_size_ok", 28), "effectiveness-update-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

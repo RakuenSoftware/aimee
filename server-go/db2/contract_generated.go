@@ -6,9 +6,10 @@ package db2
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 )
 
-const ContractSHA256 = "d572b20bf05c7550242e883a9291cda3b65151d6babd7ae49c34fea09257bf8c"
+const ContractSHA256 = "869ad095591495af20e3f2b648629291d667b0dd33f3569ce4867a6c2c2e5e43"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -120,6 +121,11 @@ const KeyExistsInTierPairKeyMax = 511
 const KeyExistsInTierPairTierAMax = 15
 const KeyExistsInTierPairTierBMax = 15
 const KeyExistsInTierPairMax uint32 = 1
+const EventEffectivenessUpdate = EventMemory
+const StageEffectivenessUpdate = FamilyMemory
+const OperationEffectivenessUpdate uint32 = 9
+const EffectivenessUpdateMemoryIDMax uint64 = 9223372036854775807
+const EffectivenessUpdateHasValueMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -801,6 +807,61 @@ func DecodeKeyExistsInTierPairReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return exists, nil
+}
+
+// EncodeEffectivenessUpdateRequest emits a canonical nullable binary64 update.
+func EncodeEffectivenessUpdateRequest(memoryID uint64, hasValue uint32, value float64) ([]byte, error) {
+	valueBits := math.Float64bits(value)
+	if memoryID == 0 || memoryID > EffectivenessUpdateMemoryIDMax ||
+		hasValue > EffectivenessUpdateHasValueMax || hasValue == 0 && valueBits != 0 {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationEffectivenessUpdate, 0, 20)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 20)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], hasValue)
+	binary.LittleEndian.PutUint64(payload[12:], valueBits)
+	return request, nil
+}
+
+// DecodeEffectivenessUpdateRequest validates and returns the nullable binary64 update.
+func DecodeEffectivenessUpdateRequest(request []byte) (uint64, uint32, float64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessUpdate || header.Flags != 0 ||
+		header.PayloadLen != 20 {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	hasValue := binary.LittleEndian.Uint32(payload[8:])
+	valueBits := binary.LittleEndian.Uint64(payload[12:])
+	if memoryID == 0 || memoryID > EffectivenessUpdateMemoryIDMax ||
+		hasValue > EffectivenessUpdateHasValueMax || hasValue == 0 && valueBits != 0 {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	return memoryID, hasValue, math.Float64frombits(valueBits), nil
+}
+
+// EncodeEffectivenessUpdateReply emits a closed success or invalid-state result.
+func EncodeEffectivenessUpdateReply(result uint32) ([]byte, error) {
+	if result != ResultOK && result != ResultInvalidState {
+		return nil, ErrMalformedEnvelope
+	}
+	return EncodeReplyHeader(OperationEffectivenessUpdate, result, 0)
+}
+
+// DecodeEffectivenessUpdateReply validates the closed result.
+func DecodeEffectivenessUpdateReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessUpdate || header.PayloadLen != 0 ||
+		header.Result != ResultOK && header.Result != ResultInvalidState {
+		return 0, ErrMalformedEnvelope
+	}
+	return header.Result, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

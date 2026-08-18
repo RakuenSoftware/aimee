@@ -229,6 +229,15 @@ int main(int argc, char **argv)
                                                  NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(key_exists == 0);
 
+   domain_result = 9;
+   assert(aimee_db2_effectiveness_update_call(call_client, &client, 9029, 0, 42, 1, 0.75,
+                                              &domain_result, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK);
+   domain_result = 9;
+   assert(aimee_db2_effectiveness_update_call(call_client, &client, 9030, 0, 42, 0, 0.0,
+                                              &domain_result, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

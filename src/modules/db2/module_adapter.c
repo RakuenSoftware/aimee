@@ -4,6 +4,7 @@
 
 #include "c/db2.h"
 #include "c/db2_pool.h"
+#include "c/memory_health.h"
 #include "c/memory_payload.h"
 #include "c/memory_query.h"
 
@@ -122,6 +123,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .key_exists = db2_memory_key_exists,
        .find_id_by_key_kind = db2_memory_find_id_by_key_kind,
        .key_exists_in_tier_pair = db2_memory_key_exists_in_tier_pair,
+       .clear_effectiveness = db2_memory_health_clear_effectiveness,
+       .set_effectiveness = db2_memory_health_set_effectiveness,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -293,6 +296,33 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_key_exists_in_tier_pair_reply_encode((uint32_t)raw_exists, response_body,
                                                             response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t effectiveness_memory_id = 0u;
+      uint32_t effectiveness_has_value = 0u;
+      double effectiveness_value = 0.0;
+      if (aimee_db2_effectiveness_update_request_decode(
+              request_body, request_len, &effectiveness_memory_id, &effectiveness_has_value,
+              &effectiveness_value) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || (effectiveness_has_value && !backend->set_effectiveness) ||
+             (!effectiveness_has_value && !backend->clear_effectiveness))
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int rc =
+             effectiveness_has_value
+                 ? backend->set_effectiveness((int64_t)effectiveness_memory_id, effectiveness_value)
+                 : backend->clear_effectiveness((int64_t)effectiveness_memory_id);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (rc != 0 && rc != -1)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         uint32_t domain_result = rc == 0 ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_INVALID_STATE;
+         if (aimee_db2_effectiveness_update_reply_encode(domain_result, response_body,
+                                                         response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

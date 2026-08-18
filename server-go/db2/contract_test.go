@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"testing"
 )
@@ -40,6 +41,9 @@ type wireBaseline struct {
 			Kind          string `json:"kind"`
 			TierA         string `json:"tier_a"`
 			TierB         string `json:"tier_b"`
+			MemoryID      uint64 `json:"memory_id"`
+			HasValue      uint32 `json:"has_value"`
+			ValueBits     uint64 `json:"value_bits"`
 			Negative      []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -169,7 +173,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 18 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 19 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -186,7 +190,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[14].Name != "session_l2_count" ||
 		baseline.Operations[15].Name != "key_exists" ||
 		baseline.Operations[16].Name != "find_id_by_key_kind" ||
-		baseline.Operations[17].Name != "key_exists_in_tier_pair" {
+		baseline.Operations[17].Name != "key_exists_in_tier_pair" ||
+		baseline.Operations[18].Name != "effectiveness_update" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -457,6 +462,46 @@ func TestKeyExistsInTierPairMatchesEverySharedCVector(t *testing.T) {
 		exists, err := DecodeKeyExistsInTierPairReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || exists != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, exists, err)
+		}
+	}
+}
+
+func TestEffectivenessUpdateMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[18]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	request, err := EncodeEffectivenessUpdateRequest(
+		operation.Request.MemoryID, operation.Request.HasValue,
+		math.Float64frombits(operation.Request.ValueBits))
+	if err != nil || string(request) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", request, err, wantRequest)
+	}
+	memoryID, hasValue, value, err := DecodeEffectivenessUpdateRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID ||
+		hasValue != operation.Request.HasValue || math.Float64bits(value) != operation.Request.ValueBits {
+		t.Fatalf("positive request = (%d, %d, %x, %v)",
+			memoryID, hasValue, math.Float64bits(value), err)
+	}
+	for _, vector := range operation.Request.Negative {
+		memoryID, hasValue, value, err := DecodeEffectivenessUpdateRequest(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || memoryID != 0 || hasValue != 0 || value != 0 {
+			t.Fatalf("negative request %s = (%d, %d, %v, %v)",
+				vector.Mutation, memoryID, hasValue, value, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeEffectivenessUpdateReply(vector.Result)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		result, err := DecodeEffectivenessUpdateReply(got)
+		if err != nil || result != vector.Result {
+			t.Fatalf("decode = (%d, %v)", result, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, err := DecodeEffectivenessUpdateReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, result, err)
 		}
 	}
 }

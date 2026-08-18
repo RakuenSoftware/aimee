@@ -202,7 +202,8 @@ def validate_catalog(value: object) -> dict[str, object]:
         if order and position <= order[-1]:
             fail("operation-order", "operations must be sorted by family id then operation id")
         order.append(position)
-        expected_transaction = ("single-statement" if name == "reembed_clear" else
+        expected_transaction = ("single-statement" if name in ("reembed_clear",
+                                                                "effectiveness_update") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
@@ -717,17 +718,54 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "maximum": 1}):
                 fail("key-exists-in-tier-pair-reply",
                      "reply must contain one boolean u32 value")
+        elif key == ("memory", 9) and name == "effectiveness_update" and \
+                operation["wire_format"] == "db2-envelope-u64-u32-f64-v1":
+            if operation["c_symbols"] != ["db2_memory_health_clear_effectiveness",
+                                           "db2_memory_health_set_effectiveness"]:
+                fail("operation-c-symbols",
+                     "effectiveness_update C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "effectiveness_update results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "fields", "consistency"},
+                            "effectiveness_update.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("effectiveness-update-request", "request must contain exactly three fields")
+            memory_id = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                              "effectiveness_update.request.fields[0]")
+            has_value = _keys(request_fields[1], {"name", "type", "minimum", "maximum"},
+                              "effectiveness_update.request.fields[1]")
+            value = _keys(request_fields[2], {"name", "type", "encoding"},
+                          "effectiveness_update.request.fields[2]")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "effectiveness_update.reply")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 20 or
+                    memory_id != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                  "maximum": 0x7fffffffffffffff} or
+                    has_value != {"name": "has_value", "type": "u32", "minimum": 0,
+                                  "maximum": 1} or
+                    value != {"name": "value", "type": "f64",
+                              "encoding": "ieee754-binary64-le"} or
+                    request["consistency"] !=
+                    "has_value=0 requires value bits to be positive zero"):
+                fail("effectiveness-update-request",
+                     "request must contain a positive identifier and canonical nullable binary64")
+            if reply != {"encoded_size_ok": ENVELOPE_HEADER_LEN,
+                         "encoded_size_error": ENVELOPE_HEADER_LEN, "fields": []}:
+                fail("effectiveness-update-reply", "reply must be an empty closed-result envelope")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 18 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 19 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
             "level3_count", "level2_count", "orphaned_l0_count", "total_count",
             "session_l2_count", "key_exists", "find_id_by_key_kind",
-            "key_exists_in_tier_pair"]:
+            "key_exists_in_tier_pair", "effectiveness_update"]:
         fail("unsupported-operation",
-             "the partial generator requires the eighteen supported operations exactly once")
+             "the partial generator requires the nineteen supported operations exactly once")
     return catalog
 
 
@@ -858,6 +896,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     key_exists = catalog["operations"][15]
     find_id_by_key_kind = catalog["operations"][16]
     key_exists_in_tier_pair = catalog["operations"][17]
+    effectiveness_update = catalog["operations"][18]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1065,6 +1104,17 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     key_exists_in_tier_pair_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(key_exists_in_tier_pair["id"]), 0, _put_u32(1),
+    )
+    effectiveness_value_bits = 0x3fe8000000000000  # 0.75
+    effectiveness_update_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(effectiveness_update["id"]), 0,
+        _put_u64(42) + _put_u32(1) + _put_u64(effectiveness_value_bits),
+    )
+    effectiveness_update_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_update["id"]), 0, b"",
+    )
+    effectiveness_update_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_update["id"]), 5, b"",
     )
 
     value = {
@@ -1931,6 +1981,52 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                      (key_exists_in_tier_pair_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": effectiveness_update["family"],
+            "id": effectiveness_update["id"],
+            "name": effectiveness_update["name"],
+            "request": {
+                "positive": effectiveness_update_request.hex(),
+                "memory_id": 42,
+                "has_value": 1,
+                "value_bits": effectiveness_value_bits,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(effectiveness_update_request, 12, 1).hex()},
+                    {"mutation": "zero_memory_id", "hex":
+                     (effectiveness_update_request[:ENVELOPE_HEADER_LEN] + _put_u64(0) +
+                      effectiveness_update_request[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "memory_id_too_large", "hex":
+                     (effectiveness_update_request[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0x8000000000000000) +
+                      effectiveness_update_request[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "has_value_too_large", "hex":
+                     mutate_u32(effectiveness_update_request, ENVELOPE_HEADER_LEN + 8, 2).hex()},
+                    {"mutation": "clear_with_value", "hex":
+                     mutate_u32(effectiveness_update_request, ENVELOPE_HEADER_LEN + 8, 0).hex()},
+                    {"mutation": "short", "hex": effectiveness_update_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_update_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": effectiveness_update_ok.hex()},
+                    {"result": 5, "hex": effectiveness_update_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(effectiveness_update_ok, 8, 8).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(effectiveness_update_ok, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(effectiveness_update["id"]), 0, b"\0").hex()},
+                    {"mutation": "short", "hex": effectiveness_update_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_update_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -1961,6 +2057,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     key_exists = catalog["operations"][15]
     find_id_by_key_kind = catalog["operations"][16]
     key_exists_in_tier_pair = catalog["operations"][17]
+    effectiveness_update = catalog["operations"][18]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -2196,6 +2293,19 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{key_exists_in_tier_pair['request']['fields'][2]['maximum_bytes']}u"),
         ("AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX",
          f"{key_exists_in_tier_pair['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE", f"{effectiveness_update['id']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN",
+         f"{effectiveness_update['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN",
+         f"{effectiveness_update['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_ERROR_LEN",
+         f"{effectiveness_update['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX",
+         f"{effectiveness_update['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX",
+         f"{effectiveness_update['request']['fields'][1]['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -3070,6 +3180,87 @@ static inline int aimee_db2_key_exists_in_tier_pair_reply_decode(
    if (decoded > AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX)
       return -1;
    *exists = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_update_request_encode(
+    uint64_t memory_id, uint32_t has_value, double value, uint8_t *output, size_t capacity)
+{{
+   uint64_t value_bits = 0u;
+   if (sizeof(value) != sizeof(value_bits))
+      return -1;
+   memcpy(&value_bits, &value, sizeof(value_bits));
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX ||
+       has_value > AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX ||
+       (has_value == 0u && value_bits != 0u) ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE, 0u, 20u, output,
+                                       capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, has_value);
+   aimee_db2_put_u64(payload + 12u, value_bits);
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_update_request_decode(
+    const uint8_t *input, size_t input_len, uint64_t *memory_id, uint32_t *has_value,
+    double *value)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (has_value)
+      *has_value = 0u;
+   if (value)
+      *value = 0.0;
+   if (!memory_id || !has_value || !value || sizeof(*value) != sizeof(uint64_t))
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE || header.flags != 0u ||
+       header.payload_len != 20u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t decoded_has_value = aimee_db2_get_u32(payload + 8u);
+   uint64_t value_bits = aimee_db2_get_u64(payload + 12u);
+   if (decoded_memory_id == 0u ||
+       decoded_memory_id > AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX ||
+       decoded_has_value > AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX ||
+       (decoded_has_value == 0u && value_bits != 0u))
+      return -1;
+   memcpy(value, &value_bits, sizeof(value_bits));
+   *memory_id = decoded_memory_id;
+   *has_value = decoded_has_value;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_update_reply_encode(uint32_t result, uint8_t *output,
+                                                              size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN ||
+       (result != AIMEE_DB2_RESULT_OK && result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE, result, 0u,
+                                        output, capacity);
+}}
+
+static inline int aimee_db2_effectiveness_update_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result)
+{{
+   if (result)
+      *result = 0u;
+   if (!result)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE || header.payload_len != 0u ||
+       (header.result != AIMEE_DB2_RESULT_OK && header.result != AIMEE_DB2_RESULT_INVALID_STATE))
+      return -1;
+   *result = header.result;
    return 0;
 }}
 
@@ -3966,6 +4157,11 @@ extern "C"
        const char *key, const char *tier_a, const char *tier_b, uint32_t *exists,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_effectiveness_update_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, uint32_t has_value, double value, uint32_t *domain_result,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -4301,6 +4497,34 @@ aimee_db2_key_exists_in_tier_pair_call(aimee_db2_call_fn call, void *call_contex
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_effectiveness_update_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                    uint64_t deadline_ns, uint64_t memory_id, uint32_t has_value,
+                                    double value, uint32_t *domain_result,
+                                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (!call || !domain_result)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_effectiveness_update_request_encode(memory_id, has_value, value, request,
+                                                     sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE,
+            AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_effectiveness_update_reply_decode(response, response_len, domain_result) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -4558,6 +4782,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     key_exists = catalog["operations"][15]
     find_id_by_key_kind = catalog["operations"][16]
     key_exists_in_tier_pair = catalog["operations"][17]
+    effectiveness_update = catalog["operations"][18]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -4584,6 +4809,7 @@ package db2
 import (
 \t"encoding/binary"
 \t"errors"
+\t"math"
 )
 
 const ContractSHA256 = "{fingerprint}"
@@ -4679,6 +4905,11 @@ const KeyExistsInTierPairKeyMax = {key_exists_in_tier_pair['request']['fields'][
 const KeyExistsInTierPairTierAMax = {key_exists_in_tier_pair['request']['fields'][1]['maximum_bytes']}
 const KeyExistsInTierPairTierBMax = {key_exists_in_tier_pair['request']['fields'][2]['maximum_bytes']}
 const KeyExistsInTierPairMax uint32 = {key_exists_in_tier_pair['reply']['field']['maximum']}
+const EventEffectivenessUpdate = EventMemory
+const StageEffectivenessUpdate = FamilyMemory
+const OperationEffectivenessUpdate uint32 = {effectiveness_update['id']}
+const EffectivenessUpdateMemoryIDMax uint64 = {effectiveness_update['request']['fields'][0]['maximum']}
+const EffectivenessUpdateHasValueMax uint32 = {effectiveness_update['request']['fields'][1]['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -5358,6 +5589,61 @@ func DecodeKeyExistsInTierPairReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return exists, nil
+}}
+
+// EncodeEffectivenessUpdateRequest emits a canonical nullable binary64 update.
+func EncodeEffectivenessUpdateRequest(memoryID uint64, hasValue uint32, value float64) ([]byte, error) {{
+	valueBits := math.Float64bits(value)
+	if memoryID == 0 || memoryID > EffectivenessUpdateMemoryIDMax ||
+		hasValue > EffectivenessUpdateHasValueMax || hasValue == 0 && valueBits != 0 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationEffectivenessUpdate, 0, 20)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 20)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], hasValue)
+	binary.LittleEndian.PutUint64(payload[12:], valueBits)
+	return request, nil
+}}
+
+// DecodeEffectivenessUpdateRequest validates and returns the nullable binary64 update.
+func DecodeEffectivenessUpdateRequest(request []byte) (uint64, uint32, float64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessUpdate || header.Flags != 0 ||
+		header.PayloadLen != 20 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	hasValue := binary.LittleEndian.Uint32(payload[8:])
+	valueBits := binary.LittleEndian.Uint64(payload[12:])
+	if memoryID == 0 || memoryID > EffectivenessUpdateMemoryIDMax ||
+		hasValue > EffectivenessUpdateHasValueMax || hasValue == 0 && valueBits != 0 {{
+		return 0, 0, 0, ErrMalformedEnvelope
+	}}
+	return memoryID, hasValue, math.Float64frombits(valueBits), nil
+}}
+
+// EncodeEffectivenessUpdateReply emits a closed success or invalid-state result.
+func EncodeEffectivenessUpdateReply(result uint32) ([]byte, error) {{
+	if result != ResultOK && result != ResultInvalidState {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return EncodeReplyHeader(OperationEffectivenessUpdate, result, 0)
+}}
+
+// DecodeEffectivenessUpdateReply validates the closed result.
+func DecodeEffectivenessUpdateReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessUpdate || header.PayloadLen != 0 ||
+		header.Result != ResultOK && header.Result != ResultInvalidState {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return header.Result, nil
 }}
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

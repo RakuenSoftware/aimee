@@ -1428,6 +1428,14 @@
       "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
     },
     {
+      "symbol": "db2_memory_health_clear_effectiveness",
+      "signature_sha256": "c82ea53ebcce66af7bc7cf3f96c6422aa84695e026530afae7b1f97a9bd8efb2",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.effectiveness_update operation carries the positive memory identifier and explicit clear state while DB2 owns the canonical nullable column update."
+    },
+    {
       "symbol": "db2_memory_health_count_memories",
       "signature_sha256": "1cdbda7edb35f3f13d108fc1a047fd561995e710c21c130f7fa878650543192d",
       "disposition": "private-db2",
@@ -1458,6 +1466,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Pruning old contradiction rows is one private half of the complete memory health-retention action and must run with health-snapshot pruning inside DB2."
+    },
+    {
+      "symbol": "db2_memory_health_set_effectiveness",
+      "signature_sha256": "4bf8c5f279d8ad36105f1bd8a928a0200acf561a29c8e9d136e666250a60aec8",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.effectiveness_update operation preserves the host-computed binary64 value while DB2 owns the canonical effectiveness column update."
     },
     {
       "symbol": "db2_memory_key_exists",

@@ -531,6 +531,33 @@
         "encoded_size_error": 24,
         "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
       }
+    },
+    {
+      "family": "memory",
+      "id": 9,
+      "name": "effectiveness_update",
+      "wire_format": "db2-envelope-u64-u32-f64-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Canonical memory effectiveness is relational DB2 state derived by the host from DB1 session outcomes and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_health_clear_effectiveness", "db2_memory_health_set_effectiveness"],
+      "request": {
+        "encoded_size": 44,
+        "fields": [
+          {"name": "memory_id", "type": "u64", "minimum": 1, "maximum": 9223372036854775807},
+          {"name": "has_value", "type": "u32", "minimum": 0, "maximum": 1},
+          {"name": "value", "type": "f64", "encoding": "ieee754-binary64-le"}
+        ],
+        "consistency": "has_value=0 requires value bits to be positive zero"
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
     }
   ]
 }
