@@ -474,7 +474,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_local_operator_upsert(field[0], field[1], parsed2, field[3]);
+      int produced = db1_local_operator_upsert(field[0], field[1], parsed2, field[3]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -539,7 +539,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_local_operator_set_active(field[0]);
+      int produced = db1_local_operator_set_active(field[0]);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -763,27 +763,35 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
       }
       db1_maintenance_state_t row;
       memset(&row, 0, sizeof row);
-      if (parse_int(field[1], &row.present) != 0)
+      int member_1 = 0;
+      if (parse_int(field[1], &member_1) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.present = member_1;
       snprintf(row.last_run_at, sizeof row.last_run_at, "%s", field[2]);
-      if (parse_int64(field[3], &row.last_memory_count) != 0)
+      int64_t member_3 = 0;
+      if (parse_int64(field[3], &member_3) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_int(field[4], &row.last_changes) != 0)
+      row.last_memory_count = member_3;
+      int member_4 = 0;
+      if (parse_int(field[4], &member_4) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (parse_double(field[5], &row.last_elapsed_ms) != 0)
+      row.last_changes = member_4;
+      double member_5 = 0;
+      if (parse_double(field[5], &member_5) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      row.last_elapsed_ms = member_5;
       snprintf(row.last_summary_json, sizeof row.last_summary_json, "%s", field[6]);
       rc = db1_maintenance_state_save(field[0], &row);
       break;
@@ -811,7 +819,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_model_catalog_is_fresh(field[0], parsed1);
+      int produced = db1_model_catalog_is_fresh(field[0], parsed1);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1043,7 +1051,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_working_profile_local_observe(field[0], field[1], parsed2, field[3], parsed4);
+      int produced = db1_working_profile_local_observe(field[0], field[1], parsed2, field[3], parsed4);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1377,7 +1385,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_context_snapshot_count_memories_with_min_samples(parsed0);
+      int produced = db1_context_snapshot_count_memories_with_min_samples(parsed0);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1473,7 +1481,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_context_snapshot_count_for_memory(parsed0);
+      int produced = db1_context_snapshot_count_for_memory(parsed0);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1564,7 +1572,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_context_snapshot_has_memory(parsed0);
+      int produced = db1_context_snapshot_has_memory(parsed0);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];
@@ -1777,7 +1785,7 @@ aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint3
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      int64_t produced = db1_fsnap_prune(field[0], parsed1);
+      int produced = db1_fsnap_prune(field[0], parsed1);
       rc = (produced >= 0) ? 0 : -1;
       snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
       row_slots[0] = row_text[0];

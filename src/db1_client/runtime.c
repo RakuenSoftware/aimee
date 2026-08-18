@@ -397,7 +397,7 @@ int db1_local_operator_upsert(const char *secret_ref, const char *operator_uuid,
    int wire_status = call_stage(AIMEE_DB1_OP_LOCAL_OPERATOR_UPSERT, fields, 4, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_local_operator_get(const char *secret_ref, db1_local_operator_t *out)
@@ -447,7 +447,7 @@ int db1_local_operator_set_active(const char *secret_ref)
    int wire_status = call_stage(AIMEE_DB1_OP_LOCAL_OPERATOR_SET_ACTIVE, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_local_operator_delete(const char *secret_ref)
@@ -626,7 +626,7 @@ int db1_model_catalog_is_fresh(const char *provider, int ttl_seconds)
    int wire_status = call_stage(AIMEE_DB1_OP_MODEL_CATALOG_IS_FRESH, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_model_catalog_get(const char *provider, provider_model_t **models_out, int *n_out)
@@ -711,7 +711,9 @@ int db1_model_catalog_replace(const char *provider, const provider_model_t *mode
       snprintf(wire_rendered[at * 4u + 3u], 32, "%d", models[at].deprecated);
       fields[1 + at * 6 + 5] = wire_rendered[at * 4u + 3u];
    }
-   return write_result(call_stage(AIMEE_DB1_OP_MODEL_CATALOG_REPLACE, fields, (uint32_t)(1 + n * 6), NULL, NULL, 0, NULL));
+   int wire_status = call_stage(AIMEE_DB1_OP_MODEL_CATALOG_REPLACE, fields, (uint32_t)(1 + n * 6), NULL, NULL, 0, NULL);
+   free(wire_rendered);
+   return write_result(wire_status);
 }
 
 int db1_model_price_get(const char *model, double *in_per_mtok, double *out_per_mtok)
@@ -768,7 +770,7 @@ int db1_working_profile_local_observe(const char *field, const char *value, doub
    int wire_status = call_stage(AIMEE_DB1_OP_WORKING_PROFILE_LOCAL_OBSERVE, fields, 5, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_working_profile_local_list(db1_working_profile_local_state_t *out, int max)
@@ -989,7 +991,7 @@ int db1_context_snapshot_count_memories_with_min_samples(int min_samples)
    int wire_status = call_stage(AIMEE_DB1_OP_CONTEXT_SNAPSHOT_COUNT_MIN_SAMPLES, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_context_snapshot_list_memory_ids_with_min_samples(int min_samples, int64_t *out, int max)
@@ -1049,7 +1051,7 @@ int db1_context_snapshot_count_for_memory(int64_t memory_id)
    int wire_status = call_stage(AIMEE_DB1_OP_CONTEXT_SNAPSHOT_COUNT_FOR_MEMORY, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_context_snapshot_list_sessions_for_memory(int64_t memory_id, char (*out)[DB1_CONTEXT_SNAPSHOT_SESSION_LEN], int max)
@@ -1101,7 +1103,7 @@ int db1_context_snapshot_has_memory(int64_t memory_id)
    int wire_status = call_stage(AIMEE_DB1_OP_CONTEXT_SNAPSHOT_HAS_MEMORY, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 char *db1_agent_cache_get(const char *role, const char *prompt)
@@ -1234,7 +1236,7 @@ int db1_fsnap_prune(const char *session_id, int keep)
    int wire_status = call_stage(AIMEE_DB1_OP_FSNAP_PRUNE, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_fsnap_list(const char *session_id, fsnap_info_t *out, int max)

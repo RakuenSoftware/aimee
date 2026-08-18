@@ -248,7 +248,7 @@ int db1_delegation_spawn_preempt(const char *delegation_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_PREEMPT, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_status(const char *delegation_id, char *out, size_t out_sz)
@@ -290,7 +290,7 @@ int db1_delegation_spawn_is_stopped(const char *delegation_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_IS_STOPPED, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_is_cancelled(const char *delegation_id)
@@ -304,7 +304,7 @@ int db1_delegation_spawn_is_cancelled(const char *delegation_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_IS_CANCELLED, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_is_active(const char *delegation_id)
@@ -318,7 +318,7 @@ int db1_delegation_spawn_is_active(const char *delegation_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_IS_ACTIVE, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_count_total(const char *session_id)
@@ -332,7 +332,7 @@ int db1_delegation_spawn_count_total(const char *session_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_COUNT_TOTAL, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_find_root(const char *delegation_id, char *out, size_t out_sz)
@@ -360,7 +360,7 @@ int db1_delegation_spawn_count_descendants(const char *root_delegation_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_COUNT_DESCENDANTS, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_list_active(int *out_ids, int max)
@@ -418,7 +418,7 @@ int db1_delegation_spawn_cancel_by_id(int spawn_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_BY_ID, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_cancel_recursive(int spawn_id)
@@ -432,7 +432,7 @@ int db1_delegation_spawn_cancel_recursive(int spawn_id)
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_RECURSIVE, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_spawn_cancel_stale()
@@ -444,7 +444,7 @@ int db1_delegation_spawn_cancel_stale()
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_STALE, fields, 0, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegate_reservation_get(const char *execution_key, int *out_job_id, char *participant, size_t participant_cap)
@@ -512,7 +512,7 @@ int db1_delegate_reservation_forget_if_matches(const char *execution_key, int jo
    int wire_status = call_stage(AIMEE_DB1_OP_DELEGATE_RESERVATION_FORGET_IF_MATCHES, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_delegation_checkpoint_save(const char *delegation_id, const char *job_id, int attempt, const char *steps_json, const char *last_output, const char *error)
@@ -551,7 +551,7 @@ int db1_agent_job_create(const char *role, const char *prompt, const char *agent
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_JOB_CREATE, fields, 4, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const char *result)
@@ -615,7 +615,7 @@ int db1_agent_job_is_cancelled(int job_id)
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_JOB_IS_CANCELLED, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_tool_threshold_secs, char *out_state, size_t out_state_cap)
@@ -759,7 +759,7 @@ int db1_agent_job_heartbeat_is_stale(const char *heartbeat_at, int stale_minutes
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT_IS_STALE, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_job_take_lease(int job_id, const char *owner)
@@ -963,7 +963,7 @@ int db1_agent_job_cancel_by_id(int job_id, const char *reason)
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_JOB_CANCEL_BY_ID, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_secs)
@@ -979,7 +979,7 @@ int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_JOB_CANCEL_UNASSIGNED, fields, 3, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_job_cancel_nonterminal_on_restart(const char *reason)
@@ -991,7 +991,7 @@ int db1_agent_job_cancel_nonterminal_on_restart(const char *reason)
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_JOB_CANCEL_NONTERMINAL_ON_RESTART, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_job_cancel_stale(int threshold_seconds, const char *reason)
@@ -1005,7 +1005,7 @@ int db1_agent_job_cancel_stale(int threshold_seconds, const char *reason)
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_JOB_CANCEL_STALE, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
-   return (int64_t)strtoll(slot0, NULL, 10);
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_log_list(const char *agent_filter, db1_agent_log_entry_t *out, int max)

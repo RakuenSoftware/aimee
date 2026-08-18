@@ -309,6 +309,58 @@
 #define AIMEE_DB1_OP_MCP_OSV_CACHE_LIST                   59u
 #define AIMEE_DB1_OP_MCP_OSV_AUDIT                        60u
 
+/* Family 8: what the system spent and what it noticed: token and cost ledgers,
+ * guardrail and interaction events, eval results and diagnoses. */
+
+#define AIMEE_DB1_EVENT_TELEMETRY 11784u
+#define AIMEE_DB1_STAGE_TELEMETRY 8u
+
+#define AIMEE_DB1_OP_TOKEN_AUDIT_INSERT                     1u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_ENSURE_IDEM_INDEX          2u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_COST_FOR_DELEGATION        3u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_COST_FOR_DELEGATION_EX     4u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_SESSION_SPLIT              5u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_TOTALS                     6u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_SPEND_BREAKDOWN            7u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_BY_ROLE                    8u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_BY_TOOL                    9u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_BY_MODEL                   10u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_BY_SOURCE                  11u
+#define AIMEE_DB1_OP_TOKEN_AUDIT_LIST_DASHBOARD             12u
+#define AIMEE_DB1_OP_INSIGHTS_BY_PLATFORM                   13u
+#define AIMEE_DB1_OP_INSIGHTS_TOP_SESSIONS                  14u
+#define AIMEE_DB1_OP_INSIGHTS_DELEGATES_BY_ROLE             15u
+#define AIMEE_DB1_OP_COST_FOLD_RECORD                       16u
+#define AIMEE_DB1_OP_COST_FOLD_TOTAL                        17u
+#define AIMEE_DB1_OP_INTERACTION_EVENT_RECORD               18u
+#define AIMEE_DB1_OP_INTERACTION_EVENT_LIST_UNREFLECTED     19u
+#define AIMEE_DB1_OP_INTERACTION_EVENT_LIST_FOR_SESSION     20u
+#define AIMEE_DB1_OP_INTERACTION_EVENT_LIST_PROMOTION_FEED  21u
+#define AIMEE_DB1_OP_INTERACTION_EVENT_MARK_REFLECTED       22u
+#define AIMEE_DB1_OP_INTERACTION_EVENT_MARK_PROMOTED        23u
+#define AIMEE_DB1_OP_INTERACTION_EVENT_EVICT_IF_NEEDED      24u
+#define AIMEE_DB1_OP_GUARDRAIL_EVENT_INSERT                 25u
+#define AIMEE_DB1_OP_GUARDRAIL_EVENT_COUNTS_7D              26u
+#define AIMEE_DB1_OP_GUARDRAIL_EVENT_SESSION_ADVISORY_COUNT 27u
+#define AIMEE_DB1_OP_GUARDRAIL_EVENT_LIST                   28u
+#define AIMEE_DB1_OP_EVAL_RESULT_INSERT                     29u
+#define AIMEE_DB1_OP_EVAL_FAILED_TASKS_RECENT               30u
+#define AIMEE_DB1_OP_EVAL_PASSED_TASKS_RECENT               31u
+#define AIMEE_DB1_OP_EVAL_RESULTS_LIST                      32u
+#define AIMEE_DB1_OP_DIAGNOSE_START                         33u
+#define AIMEE_DB1_OP_DIAGNOSE_ADD_OBSERVATION               34u
+#define AIMEE_DB1_OP_DIAGNOSE_ADD_HYPOTHESIS                35u
+#define AIMEE_DB1_OP_DIAGNOSE_ADD_EVIDENCE                  36u
+#define AIMEE_DB1_OP_DIAGNOSE_ADD_PROBE                     37u
+#define AIMEE_DB1_OP_DIAGNOSE_GET                           38u
+#define AIMEE_DB1_OP_DIAGNOSE_LIST                          39u
+#define AIMEE_DB1_OP_DIAGNOSE_LIST_ITEMS                    40u
+#define AIMEE_DB1_OP_DIAGNOSE_LIST_HYPOTHESES               41u
+#define AIMEE_DB1_OP_DIAGNOSE_RANK_HYPOTHESES               42u
+#define AIMEE_DB1_OP_DIAGNOSE_CONCLUDE                      43u
+#define AIMEE_DB1_OP_DIAGNOSE_ABANDON                       44u
+#define AIMEE_DB1_OP_DIAGNOSE_SUGGEST_PROBES                48u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

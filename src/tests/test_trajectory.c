@@ -15,12 +15,15 @@ static void test_export_normalizes_steps_and_outcome(const char *path)
 {
    platform_test_remove_sqlite(path);
    assert(db1_init(path) == 0);
-   assert(ie_record("traj-1", IE_USER_TURN, NULL, "{\"content\":\"build it\"}", "ok") == 0);
-   assert(ie_record("traj-1", IE_TOOL_CALL, NULL, "{\"name\":\"bash\",\"args\":{\"cmd\":\"make\"}}",
-                    "ok") == 0);
-   assert(ie_record("traj-1", IE_TOOL_OUTCOME, NULL, "{\"name\":\"bash\",\"result\":\"pass\"}",
-                    "ok") == 0);
-   assert(ie_record("traj-1", IE_AGENT_TURN, NULL, "{\"content\":\"done\"}", "ok") == 0);
+   assert(db1_interaction_event_record("traj-1", ie_event_type_name(IE_USER_TURN), NULL,
+                                       "{\"content\":\"build it\"}", "ok") == 0);
+   assert(db1_interaction_event_record("traj-1", ie_event_type_name(IE_TOOL_CALL), NULL,
+                                       "{\"name\":\"bash\",\"args\":{\"cmd\":\"make\"}}",
+                                       "ok") == 0);
+   assert(db1_interaction_event_record("traj-1", ie_event_type_name(IE_TOOL_OUTCOME), NULL,
+                                       "{\"name\":\"bash\",\"result\":\"pass\"}", "ok") == 0);
+   assert(db1_interaction_event_record("traj-1", ie_event_type_name(IE_AGENT_TURN), NULL,
+                                       "{\"content\":\"done\"}", "ok") == 0);
 
    trajectory_opts_t opts = {.compress = 1, .redact = 1, .max_tool_result_bytes = 64};
    char *json = NULL;
@@ -47,9 +50,9 @@ static void test_compresses_large_tool_result(const char *path)
 {
    platform_test_remove_sqlite(path);
    assert(db1_init(path) == 0);
-   assert(ie_record("traj-2", IE_TOOL_OUTCOME, NULL,
-                    "{\"name\":\"read_file\",\"result\":\"abcdefghijklmnopqrstuvwxyz\"}",
-                    "ok") == 0);
+   assert(db1_interaction_event_record(
+              "traj-2", ie_event_type_name(IE_TOOL_OUTCOME), NULL,
+              "{\"name\":\"read_file\",\"result\":\"abcdefghijklmnopqrstuvwxyz\"}", "ok") == 0);
 
    trajectory_opts_t opts = {.compress = 1, .redact = 1, .max_tool_result_bytes = 8};
    char *json = NULL;
@@ -69,8 +72,9 @@ static void test_redacts_exported_secret(const char *path)
 {
    platform_test_remove_sqlite(path);
    assert(db1_init(path) == 0);
-   assert(ie_record("traj-3", IE_USER_TURN, NULL,
-                    "{\"content\":\"api_key = sk-testtrajectorysecret\"}", "ok") == 0);
+   assert(db1_interaction_event_record("traj-3", ie_event_type_name(IE_USER_TURN), NULL,
+                                       "{\"content\":\"api_key = sk-testtrajectorysecret\"}",
+                                       "ok") == 0);
 
    trajectory_opts_t opts = {.compress = 1, .redact = 1, .max_tool_result_bytes = 64};
    char *json = NULL;
@@ -86,8 +90,9 @@ static void test_refuses_unresolved_secret(const char *path)
 {
    platform_test_remove_sqlite(path);
    assert(db1_init(path) == 0);
-   assert(ie_record("traj-4", IE_USER_TURN, NULL,
-                    "{\"content\":\"api_key = sk-testtrajectorysecret\"}", "ok") == 0);
+   assert(db1_interaction_event_record("traj-4", ie_event_type_name(IE_USER_TURN), NULL,
+                                       "{\"content\":\"api_key = sk-testtrajectorysecret\"}",
+                                       "ok") == 0);
 
    trajectory_opts_t opts = {
        .compress = 1, .redact = 1, .max_tool_result_bytes = 64, .redaction_buf_bytes = 8};

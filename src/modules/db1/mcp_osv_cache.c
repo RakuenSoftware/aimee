@@ -131,8 +131,9 @@ int db1_mcp_osv_audit(const char *client_name, const char *ecosystem, const char
    cJSON_Delete(payload);
    if (!json)
       return -1;
-   int rc = ie_record("", IE_MCP_PACKAGE_CHECK, "system", json,
-                      (action && strcmp(action, "block") == 0) ? "blocked" : "ok");
+   int rc =
+       db1_interaction_event_record("", "mcp_package_check", "system", json,
+                                    (action && strcmp(action, "block") == 0) ? "blocked" : "ok");
    free(json);
    return rc;
 }
