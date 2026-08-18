@@ -28,6 +28,13 @@ mkdir -p "$AIMEE_HOME"
 SOCKET="$AIMEE_HOME/aimee.sock"
 export AIMEE_SOCK="$SOCKET"
 HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
+# The client reaches a server ONLY through an explicitly configured endpoint —
+# it no longer finds a co-located one by probing the filesystem, because a stray
+# local server quietly answering for the wrong host is worse than an outage.
+# This harness deliberately runs both halves on one box, so it has to say so.
+# Without this every client assertion below fails as "aimee-server unavailable"
+# while the server it started is running perfectly well two lines away.
+export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 
 PASS=0
 FAIL=0
@@ -243,16 +250,20 @@ trap cleanup EXIT
 # ============================================================
 
 # ============================================================
-# 1. Auto-start (no server running)
+# 1. No server reachable
 # ============================================================
+# This used to be "auto-start", and asserted that a command failed *because
+# autostart was disabled*. There is no autostart now: the client starts no
+# server, ever, so an unreachable server is simply an outage.
 
 check_output "no server: version works" "aimee" $AIMEE version
 
-# Disable auto-start for all server tests (they manage the server explicitly)
-export AIMEE_NO_AUTOSTART=1
-
-# Pure clients do not run command handlers locally.
-check_output "no server: DB command fails without autostart" "server unavailable" $AIMEE memory list
+# A pure client runs no command handler locally, so this must fail rather than
+# answer from local state. It now fails one step earlier than it used to -- the
+# client cannot even learn that `memory list` exists without the server -- which
+# is the point: the command table lives server-side.
+check_output "no server: a command fails, naming the unreachable server" \
+    "cannot reach aimee-server" $AIMEE memory list
 
 # ============================================================
 # 2. Server lifecycle
@@ -322,7 +333,7 @@ TCP_BEARER="integ-tcp-bearer"
 printf 'aimee:\n  api:\n    http_port: %s\n    bearer_token: %s\n' \
     "$TCP_PORT" "$TCP_BEARER" >"$TCP_HOME/.config/aimee/aimee.yaml"
 env -u AIMEE_PROFILE HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
-    AIMEE_DISABLE_AUTOSTART=1 "$AIMEE_SERVER" --foreground >/dev/null 2>&1 &
+    "$AIMEE_SERVER" --foreground >/dev/null 2>&1 &
 TCP_SRV_PID=$!
 sleep 2
 UDS_BODY=$(HTTP_SOCK="$TCP_HOME/.config/aimee/aimee-http.sock" http_rpc '{"method":"provider.list"}')
