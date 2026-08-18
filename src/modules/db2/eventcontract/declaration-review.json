@@ -708,6 +708,14 @@
       "reason": "The typed memory.orphaned_l0_count operation replaces the bounded integrity diagnostic for unlinked short-term memories; canonical relational links remain DB2 authority."
     },
     {
+      "symbol": "db2_memory_count_versions",
+      "signature_sha256": "0e9657771c2772838c537e3c9c5739a336443a54250cda10fa23cd786fb605ac",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
+    },
+    {
       "symbol": "db2_memory_export_row_free",
       "signature_sha256": "ba729127864e108afffe9baf8c825923f9f857206dabcdac43769c09d121f0e1",
       "disposition": "private-db2",
@@ -754,6 +762,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
+    },
+    {
+      "symbol": "db2_memory_set_versioned_key",
+      "signature_sha256": "a1b55c1fd8914ff4b89841bda0d051b2f0d1b7a515c69fd71eeefe410d099e4f",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Renaming and closing the prior row is an internal step of the future composite memory.supersede transaction; callers cannot safely sequence this mutation across the event bus."
     },
     {
       "symbol": "db2_memory_workspace_matches",

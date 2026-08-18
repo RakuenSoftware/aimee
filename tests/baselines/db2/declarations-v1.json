@@ -15220,9 +15220,15 @@
           "line": 268
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
+      },
       "signature": "int db2_memory_count_versions ( const char * key_prefix )",
       "signature_sha256": "0e9657771c2772838c537e3c9c5739a336443a54250cda10fa23cd786fb605ac",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_count_versions"
     },
     {
@@ -17681,9 +17687,15 @@
           "line": 272
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Renaming and closing the prior row is an internal step of the future composite memory.supersede transaction; callers cannot safely sequence this mutation across the event bus."
+      },
       "signature": "int db2_memory_set_versioned_key ( int64_t memory_id , const char * versioned_key , const char * ts )",
       "signature_sha256": "a1b55c1fd8914ff4b89841bda0d051b2f0d1b7a515c69fd71eeefe410d099e4f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_set_versioned_key"
     },
     {
@@ -25056,15 +25068,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fb2f09e6f554f3a71ca881c20c5c77694086996a70a918e3fb90aec4b0915cc0",
+  "fingerprint": "346c1a58dbe017f4fafc685d601f9d9ad12eff66fe5f964361dbf2c2ff66ca32",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 786,
+    "audit_pending": 784,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 172
+    "reviewed": 174
   }
 }
