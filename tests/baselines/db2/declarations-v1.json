@@ -15165,9 +15165,15 @@
           "line": 572
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.level3_count operation replaces the bounded global corpus-count query; canonical relational memory rows remain DB2 authority."
+      },
       "signature": "int db2_memory_count_l3 ( void )",
       "signature_sha256": "ec77af304ef5e486914f4b45c1f568284bfb0df733d333bfa80d74efe0101862",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_count_l3"
     },
     {
@@ -25032,15 +25038,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4f08fece8e55e73fcce3d1c22fae3724f7d0af4f3abfc984ae02397fc4bec178",
+  "fingerprint": "7d98c18ed026b298d116427e08e077f3135a3384da2266ae1784c9f7ddd0f450",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 790,
+    "audit_pending": 789,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 168
+    "reviewed": 169
   }
 }

@@ -30,6 +30,7 @@ typedef struct
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
+   int (*level3_count)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -64,6 +65,7 @@ static int health_calls;
 static int kb_health_calls;
 static int initialized_calls;
 static int embedding_dimension_calls;
+static int level3_count_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -121,6 +123,18 @@ static int embedding_dimension(void)
 {
    embedding_dimension_calls++;
    return 384;
+}
+
+int db2_memory_count_l3(void)
+{
+   level3_count_calls++;
+   return 42;
+}
+
+static int level3_count(void)
+{
+   level3_count_calls++;
+   return 42;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -336,20 +350,20 @@ int main(void)
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
 
-   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH};
+   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = executable,
         .serve = served,
-        .serve_count = 1},
+        .serve_count = 2},
        {.principal_class = 1,
         .principal_ref = CALLER_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = executable,
         .request = served,
-        .request_count = 1},
+        .request_count = 2},
    };
    bus_host_config_t host_config = {.max_slots = 4,
                                     .slot_size = 256,
@@ -370,12 +384,14 @@ int main(void)
 
    static const aimee_module_stage_t stages[] = {
        {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_STAGE_HEALTH},
+       {AIMEE_DB2_EVENT_LEVEL3_COUNT, AIMEE_DB2_STAGE_LEVEL3_COUNT},
    };
    static const aimee_db2_module_backend_t backend = {
        .is_initialized = is_initialized,
        .health_probe = health_probe,
        .kb_health_probe = kb_health_probe,
        .embedding_dimension = embedding_dimension,
+       .level3_count = level3_count,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -391,7 +407,7 @@ int main(void)
                   .principal_class = 1,
                   .principal_ref = MODULE_REF,
                   .stages = stages,
-                  .stage_count = 1,
+                  .stage_count = 2,
                   .handler = aimee_module_handler,
                   .user_data = (void *)&backend},
    };
@@ -423,6 +439,11 @@ int main(void)
                                              &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && dimension == 384);
    assert(embedding_dimension_calls == 1);
+
+   uint32_t level3_total = 99;
+   assert(aimee_db2_level3_count_call(call_client, &client, 7020, 0, &level3_total, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(level3_total == 42 && level3_count_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

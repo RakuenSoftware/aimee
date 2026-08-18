@@ -10,6 +10,7 @@ typedef struct
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
+   int (*level3_count)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

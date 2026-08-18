@@ -3379,9 +3379,9 @@ $(TESTPREFIX)/unit-test-bus-db2-process: \
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 .PHONY: db2-replay
-db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2
+db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay
 	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
-	$< $(abspath $(OBJDIR)/aimee-module-db2)
+	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
 
 $(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
 $(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
@@ -5129,6 +5129,15 @@ $(OBJDIR)/aimee-module-db2:
 	@rm -rf $(OBJDIR)/db2-module-bundle
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-module-bundle --output $(abspath $(OBJDIR)) --placement kb >/dev/null
+
+# Replay cataloged inactive-family operations against the exact exported DB2
+# source closure without adding their grants to the production process contract.
+$(OBJDIR)/aimee-module-db2-replay: tests/support/db2_module_replay_main.c
+	@rm -rf $(OBJDIR)/db2-replay-bundle $(OBJDIR)/db2-replay-output
+	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-replay-bundle >/dev/null
+	@cp $< $(OBJDIR)/db2-replay-bundle/src/aimee-module-db2.c
+	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-replay-bundle --output $(abspath $(OBJDIR))/db2-replay-output --placement kb >/dev/null
+	@cp $(OBJDIR)/db2-replay-output/aimee-module-db2 $@
 
 .PHONY: check-db2-module-runtime
 check-db2-module-runtime: $(OBJDIR)/aimee-module-db2

@@ -4,6 +4,7 @@
 
 #include "c/db2.h"
 #include "c/db2_pool.h"
+#include "c/memory_query.h"
 
 static int production_pool_status(aimee_db2_pool_status_t *status)
 {
@@ -112,6 +113,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .health_probe = db2_health_probe,
        .kb_health_probe = db2_kb_health_probe,
        .embedding_dimension = db2_embedding_dim,
+       .level3_count = db2_memory_count_l3,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -131,8 +133,9 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 {
    if (response_len)
       *response_len = 0;
-   if (!invocation || !response_len || invocation->stage_id != AIMEE_DB2_STAGE_HEALTH ||
-       !response_body)
+   if (!invocation || !response_len || !response_body ||
+       (invocation->stage_id != AIMEE_DB2_STAGE_HEALTH &&
+        invocation->stage_id != AIMEE_DB2_STAGE_LEVEL3_COUNT))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -140,6 +143,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    const aimee_db2_module_backend_t *backend = user_data;
    if (!backend)
       backend = production_backend();
+
+   if (invocation->stage_id == AIMEE_DB2_STAGE_LEVEL3_COUNT)
+   {
+      if (aimee_db2_level3_count_request_decode(request_body, request_len) != 0)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (response_capacity < AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!backend || !backend->level3_count)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int raw_count = backend->level3_count();
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (raw_count < 0 || (uint32_t)raw_count > AIMEE_DB2_LEVEL3_COUNT_MAX)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      if (aimee_db2_level3_count_reply_encode((uint32_t)raw_count, response_body, response_capacity,
+                                              response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+
    if (aimee_db2_health_request_decode(request_body, request_len) == 0)
    {
       if (response_capacity < AIMEE_DB2_RESPONSE_LEN)

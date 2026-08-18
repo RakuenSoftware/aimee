@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "81af618a00a5748d1a803a28d3b60354d7ca43c4ce97faaf939a4143ea9f3247"
+#define AIMEE_DB2_CONTRACT_SHA256 "a59197c07188adf72fcd44d4a348a0f3b19ed5891643a5a6d0c2bcde2322aeec"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -109,6 +109,13 @@
 #define AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN         56u
 #define AIMEE_DB2_DIMENSION_RESET_ERROR_LEN            24u
 #define AIMEE_DB2_DIMENSION_RESET_TABLES_MAX           16u
+#define AIMEE_DB2_EVENT_LEVEL3_COUNT                   AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LEVEL3_COUNT                   AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LEVEL3_COUNT               1u
+#define AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN             24u
+#define AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN            28u
+#define AIMEE_DB2_LEVEL3_COUNT_ERROR_LEN               24u
+#define AIMEE_DB2_LEVEL3_COUNT_MAX                     2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -371,6 +378,57 @@ static inline int aimee_db2_embedding_dimension_reply_decode(const uint8_t *inpu
       return -1;
    *result = header.result;
    *dimension = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_level3_count_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LEVEL3_COUNT, 0u, 0u, output,
+                                           capacity);
+}
+
+static inline int aimee_db2_level3_count_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_LEVEL3_COUNT && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_level3_count_reply_encode(uint32_t count, uint8_t *output,
+                                                      size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_LEVEL3_COUNT_MAX ||
+       capacity < AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_LEVEL3_COUNT, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_level3_count_reply_decode(const uint8_t *input, size_t input_len,
+                                                      uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_LEVEL3_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_LEVEL3_COUNT_MAX)
+      return -1;
+   *count = decoded;
    return 0;
 }
 

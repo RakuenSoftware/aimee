@@ -19,6 +19,8 @@ static int health_calls;
 static int kb_health_calls;
 static int embedding_dimension_value;
 static int embedding_dimension_calls;
+static int level3_count_value;
+static int level3_count_calls;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -44,6 +46,7 @@ static uint8_t transport_response[AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN
 static uint32_t transport_response_len;
 static int transport_calls;
 static int transport_expect_dimension;
+static int transport_expect_level3_count;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -109,6 +112,18 @@ static int embedding_dimension(void)
 {
    embedding_dimension_calls++;
    return embedding_dimension_value;
+}
+
+int db2_memory_count_l3(void)
+{
+   level3_count_calls++;
+   return level3_count_value;
+}
+
+static int level3_count(void)
+{
+   level3_count_calls++;
+   return level3_count_value;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -250,6 +265,8 @@ static void reset(void)
    kb_health_calls = 0;
    embedding_dimension_value = 384;
    embedding_dimension_calls = 0;
+   level3_count_value = 42;
+   level3_count_calls = 0;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -272,6 +289,7 @@ static void reset(void)
    transport_response_len = AIMEE_DB2_RESPONSE_LEN;
    transport_calls = 0;
    transport_expect_dimension = 0;
+   transport_expect_level3_count = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -291,8 +309,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
           aimee_module_cancelled_fn cancelled_fn, void *cancel_context)
 {
    assert(context == (void *)0x1234);
-   uint32_t expected_event = transport_expect_dimension_reset ? AIMEE_DB2_EVENT_DIMENSION_RESET
-                             : transport_expect_serving_id    ? AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID
+   uint32_t expected_event = transport_expect_level3_count      ? AIMEE_DB2_EVENT_LEVEL3_COUNT
+                             : transport_expect_dimension_reset ? AIMEE_DB2_EVENT_DIMENSION_RESET
+                             : transport_expect_serving_id ? AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID
                              : transport_expect_reembed_maintenance
                                  ? AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR
                              : transport_expect_reembed_clear ? AIMEE_DB2_EVENT_REEMBED_CLEAR
@@ -302,8 +321,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
                              : transport_expect_pool          ? AIMEE_DB2_EVENT_POOL_STATUS
                              : transport_expect_dimension     ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                               : AIMEE_DB2_EVENT_HEALTH;
-   uint32_t expected_stage = transport_expect_dimension_reset ? AIMEE_DB2_STAGE_DIMENSION_RESET
-                             : transport_expect_serving_id    ? AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID
+   uint32_t expected_stage = transport_expect_level3_count      ? AIMEE_DB2_STAGE_LEVEL3_COUNT
+                             : transport_expect_dimension_reset ? AIMEE_DB2_STAGE_DIMENSION_RESET
+                             : transport_expect_serving_id ? AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID
                              : transport_expect_reembed_maintenance
                                  ? AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR
                              : transport_expect_reembed_clear ? AIMEE_DB2_STAGE_REEMBED_CLEAR
@@ -317,7 +337,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_dimension_reset)
+   if (transport_expect_level3_count)
+      assert(aimee_db2_level3_count_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_dimension_reset)
    {
       uint32_t target = 99, force = 99, dry_run = 99;
       assert(aimee_db2_dimension_reset_request_decode(request_body, request_len, &target, &force,
@@ -554,6 +576,33 @@ static void test_embedding_dimension_wire(void)
    assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, &result, &dimension) == -1);
    assert(aimee_db2_embedding_dimension_reply_decode(NULL, reply_len, &result, &dimension) == -1);
    assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, NULL, &dimension) == -1);
+}
+
+static void test_level3_count_wire(void)
+{
+   uint8_t request[AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN] = {0};
+   assert(aimee_db2_level3_count_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_level3_count_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_level3_count_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_level3_count_request_encode(NULL, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, count = 99;
+   assert(aimee_db2_level3_count_reply_encode(42, reply, sizeof(reply), &reply_len) == 0);
+   assert(reply_len == sizeof(reply));
+   assert(aimee_db2_level3_count_reply_decode(reply, reply_len, &count) == 0 && count == 42);
+   assert(aimee_db2_level3_count_reply_encode(AIMEE_DB2_LEVEL3_COUNT_MAX + 1u, reply, sizeof(reply),
+                                              &reply_len) == -1);
+   assert(reply_len == 0);
+   assert(aimee_db2_level3_count_reply_encode(42, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_level3_count_reply_encode(42, NULL, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_level3_count_reply_encode(42, reply, sizeof(reply), NULL) == -1);
+   assert(aimee_db2_level3_count_reply_encode(42, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_level3_count_reply_decode(reply, reply_len, &count) == -1 && count == 0);
+   assert(aimee_db2_level3_count_reply_decode(NULL, reply_len, &count) == -1);
+   assert(aimee_db2_level3_count_reply_decode(reply, reply_len, NULL) == -1);
 }
 
 static void test_pool_status_wire(void)
@@ -1002,6 +1051,42 @@ static void test_embedding_dimension_handler(void)
    assert(response_len == 0 && embedding_dimension_calls == prior_calls + 1);
 }
 
+static void test_level3_count_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.level3_count = level3_count};
+   uint8_t request[AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 99, count = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_LEVEL3_COUNT};
+   assert(aimee_db2_level3_count_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(level3_count_calls == 1);
+   assert(aimee_db2_level3_count_reply_decode(response, response_len, &count) == 0 && count == 42);
+
+   level3_count_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   level3_count_value = 42;
+   cancel_after = 2;
+   cancel_checks = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CANCELLED);
+   assert(response_len == 0);
+
+   cancel_after = 0;
+   invocation.stage_id = AIMEE_DB2_STAGE_HEALTH;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -1316,6 +1401,32 @@ static void test_embedding_dimension_typed_client(void)
    assert(domain_result == 0 && dimension == 0);
 }
 
+static void test_level3_count_typed_client(void)
+{
+   reset();
+   transport_expect_level3_count = 1;
+   uint32_t count = 99;
+   assert(aimee_db2_level3_count_call(NULL, NULL, 77, 88, &count, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(count == 0);
+   assert(aimee_db2_level3_count_reply_encode(42, transport_response, sizeof(transport_response),
+                                              &transport_response_len) == 0);
+   assert(aimee_db2_level3_count_call(transport, (void *)0x1234, 77, 88, &count, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(count == 42 && transport_calls == 1);
+
+   transport_result = AIMEE_MODULE_CALL_CANCELLED;
+   count = 99;
+   assert(aimee_db2_level3_count_call(transport, (void *)0x1234, 77, 88, &count, NULL, NULL) ==
+          AIMEE_MODULE_CALL_CANCELLED);
+   assert(count == 0);
+   transport_result = AIMEE_MODULE_CALL_OK;
+   transport_response[0] ^= 1u;
+   assert(aimee_db2_level3_count_call(transport, (void *)0x1234, 77, 88, &count, NULL, NULL) ==
+          AIMEE_MODULE_CALL_PROTOCOL);
+   assert(count == 0);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -1487,6 +1598,7 @@ int main(void)
    test_wire_contract();
    test_body_envelope();
    test_embedding_dimension_wire();
+   test_level3_count_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -1497,6 +1609,7 @@ int main(void)
    test_dimension_reset_wire();
    test_handler_success_and_failures();
    test_embedding_dimension_handler();
+   test_level3_count_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -1507,6 +1620,7 @@ int main(void)
    test_dimension_reset_handler();
    test_typed_client();
    test_embedding_dimension_typed_client();
+   test_level3_count_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

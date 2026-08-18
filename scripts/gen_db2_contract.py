@@ -487,14 +487,36 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != expected_reply_fields):
                 fail("dimension-reset-reply",
                      "actionable results must contain the bounded reset-plan snapshot")
+        elif key == ("memory", 1) and name == "level3_count" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_count_l3"]:
+                fail("operation-c-symbols",
+                     "level3_count C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "level3_count results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "level3_count.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "level3_count.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "level3_count.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("level3-count-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("level3-count-reply", "reply must contain one bounded u32 count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 10 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 11 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
-            "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset"]:
+            "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
+            "level3_count"]:
         fail("unsupported-operation",
-             "the partial generator requires the ten supported lifecycle operations exactly once")
+             "the partial generator requires the eleven supported operations exactly once")
     return catalog
 
 
@@ -617,6 +639,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     reembed_clear_maintenance = catalog["operations"][7]
     embedder_serving_id = catalog["operations"][8]
     dimension_reset = catalog["operations"][9]
+    level3_count = catalog["operations"][10]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -763,6 +786,12 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     reset_invalid = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(dimension_reset["id"]), 5, b"",
+    )
+    level3_count_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(level3_count["id"]), 0, b"",
+    )
+    level3_count_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(level3_count["id"]), 0, _put_u32(42),
     )
 
     value = {
@@ -1244,6 +1273,39 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (reset_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": level3_count["family"],
+            "id": level3_count["id"],
+            "name": level3_count["name"],
+            "request": {
+                "positive": level3_count_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(level3_count_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(level3_count_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": level3_count_request[:-1].hex()},
+                    {"mutation": "long", "hex": (level3_count_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "count": 42, "hex": level3_count_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(level3_count_ok, 8, 2).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(level3_count_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(level3_count["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (level3_count_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": level3_count_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (level3_count_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -1266,6 +1328,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     reembed_clear_maintenance = catalog["operations"][7]
     embedder_serving_id = catalog["operations"][8]
     dimension_reset = catalog["operations"][9]
+    level3_count = catalog["operations"][10]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -1388,6 +1451,17 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_DIMENSION_RESET_ERROR_LEN",
          f"{dimension_reset['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_DIMENSION_RESET_TABLES_MAX", "16u"),
+        ("AIMEE_DB2_EVENT_LEVEL3_COUNT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_LEVEL3_COUNT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_LEVEL3_COUNT", f"{level3_count['id']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN",
+         f"{level3_count['request']['encoded_size']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN",
+         f"{level3_count['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_ERROR_LEN",
+         f"{level3_count['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_LEVEL3_COUNT_MAX",
+         f"{level3_count['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -1676,6 +1750,57 @@ static inline int aimee_db2_embedding_dimension_reply_decode(const uint8_t *inpu
       return -1;
    *result = header.result;
    *dimension = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_level3_count_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LEVEL3_COUNT, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_level3_count_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_LEVEL3_COUNT && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_level3_count_reply_encode(uint32_t count, uint8_t *output,
+                                                      size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_LEVEL3_COUNT_MAX ||
+       capacity < AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_LEVEL3_COUNT, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_level3_count_reply_decode(const uint8_t *input, size_t input_len,
+                                                      uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_LEVEL3_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_LEVEL3_COUNT_MAX)
+      return -1;
+   *count = decoded;
    return 0;
 }}
 
@@ -2536,6 +2661,10 @@ extern "C"
        uint32_t *domain_result, uint32_t *dimension,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_level3_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -2648,6 +2777,33 @@ aimee_db2_embedding_dimension_call(aimee_db2_call_fn call, void *call_context, u
       return transport;
    if (aimee_db2_embedding_dimension_reply_decode(response, response_len, domain_result,
                                                   dimension) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_level3_count_call(aimee_db2_call_fn call, void *call_context,
+                                                       uint64_t trace_id, uint64_t deadline_ns,
+                                                       uint32_t *count,
+                                                       aimee_module_cancelled_fn cancelled,
+                                                       void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_level3_count_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LEVEL3_COUNT, AIMEE_DB2_STAGE_LEVEL3_COUNT, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_level3_count_reply_decode(response, response_len, count) != 0)
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
@@ -2901,6 +3057,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     reembed_clear_maintenance = catalog["operations"][7]
     embedder_serving_id = catalog["operations"][8]
     dimension_reset = catalog["operations"][9]
+    level3_count = catalog["operations"][10]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -2982,6 +3139,10 @@ const EventDimensionReset = EventLifecycle
 const StageDimensionReset = FamilyLifecycle
 const OperationDimensionReset uint32 = {dimension_reset['id']}
 const DimensionResetTablesMax uint32 = 16
+const EventLevel3Count = EventMemory
+const StageLevel3Count = FamilyMemory
+const OperationLevel3Count uint32 = {level3_count['id']}
+const Level3CountMax uint32 = {level3_count['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -3140,6 +3301,53 @@ func DecodeEmbeddingDimensionReply(reply []byte) (uint32, uint32, error) {{
 		return 0, 0, ErrMalformedEnvelope
 	}}
 	return header.Result, dimension, nil
+}}
+
+// EncodeLevel3CountRequest emits the empty request envelope for the global L3 count.
+func EncodeLevel3CountRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationLevel3Count, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeLevel3CountRequest validates the exact memory-family operation envelope.
+func DecodeLevel3CountRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLevel3Count ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeLevel3CountReply emits one bounded u32 success payload.
+func EncodeLevel3CountReply(count uint32) ([]byte, error) {{
+	if count > Level3CountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationLevel3Count, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}}
+
+// DecodeLevel3CountReply validates the operation and bounded count.
+func DecodeLevel3CountReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationLevel3Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > Level3CountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return count, nil
 }}
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

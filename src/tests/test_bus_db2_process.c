@@ -109,20 +109,20 @@ int main(int argc, char **argv)
    char socket_path[512];
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
 
-   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH};
+   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = module_executable,
         .serve = served,
-        .serve_count = 1},
+        .serve_count = 2},
        {.principal_class = 1,
         .principal_ref = CALLER_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = caller_executable,
         .request = served,
-        .request_count = 1},
+        .request_count = 2},
    };
    bus_host_config_t host_config = {.max_slots = 4,
                                     .slot_size = 256,
@@ -185,6 +185,11 @@ int main(int argc, char **argv)
    assert(aimee_db2_embedding_dimension_call(call_client, &client, 9010, 0, &domain_result,
                                              &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && dimension == 384);
+
+   uint32_t level3_total = 99;
+   assert(aimee_db2_level3_count_call(call_client, &client, 9021, 0, &level3_total, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(level3_total == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

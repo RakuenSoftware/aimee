@@ -483,7 +483,7 @@ jobs:
           echo "Postgres did not become ready in time"
           docker logs aimee-db2-process-pg || true
           exit 1
-      - name: Replay packaged DB2 health through the event bus
+      - name: Replay packaged DB2 operations through the event bus
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay
       - name: Verify durable schema effect
         run: |

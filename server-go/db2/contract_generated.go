@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "81af618a00a5748d1a803a28d3b60354d7ca43c4ce97faaf939a4143ea9f3247"
+const ContractSHA256 = "a59197c07188adf72fcd44d4a348a0f3b19ed5891643a5a6d0c2bcde2322aeec"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -80,6 +80,10 @@ const EventDimensionReset = EventLifecycle
 const StageDimensionReset = FamilyLifecycle
 const OperationDimensionReset uint32 = 10
 const DimensionResetTablesMax uint32 = 16
+const EventLevel3Count = EventMemory
+const StageLevel3Count = FamilyMemory
+const OperationLevel3Count uint32 = 1
+const Level3CountMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -240,6 +244,53 @@ func DecodeEmbeddingDimensionReply(reply []byte) (uint32, uint32, error) {
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return header.Result, dimension, nil
+}
+
+// EncodeLevel3CountRequest emits the empty request envelope for the global L3 count.
+func EncodeLevel3CountRequest() []byte {
+	header, err := EncodeRequestHeader(OperationLevel3Count, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeLevel3CountRequest validates the exact memory-family operation envelope.
+func DecodeLevel3CountRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLevel3Count ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeLevel3CountReply emits one bounded u32 success payload.
+func EncodeLevel3CountReply(count uint32) ([]byte, error) {
+	if count > Level3CountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationLevel3Count, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeLevel3CountReply validates the operation and bounded count.
+func DecodeLevel3CountReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationLevel3Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > Level3CountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return count, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.
