@@ -42,6 +42,9 @@ static int touch_calls;
 static int64_t touch_last;
 static int link_delete_value;
 static int link_delete_calls;
+static int valid_at_value;
+static int valid_at_calls;
+static char valid_at_last[64];
 static int64_t link_delete_last;
 static int64_t workspace_tag_last;
 static int64_t total_count_value;
@@ -359,6 +362,21 @@ static int link_delete(int64_t link_id)
    link_delete_calls++;
    link_delete_last = link_id;
    return link_delete_value;
+}
+
+int db2_memory_valid_at(int64_t memory_id, const char *as_of)
+{
+   (void)memory_id;
+   (void)as_of;
+   return -1;
+}
+
+static int valid_at(int64_t memory_id, const char *as_of)
+{
+   (void)memory_id;
+   valid_at_calls++;
+   snprintf(valid_at_last, sizeof(valid_at_last), "%s", as_of);
+   return valid_at_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1023,6 +1041,9 @@ static void reset(void)
    link_delete_value = 0;
    link_delete_calls = 0;
    link_delete_last = 0;
+   valid_at_value = 1;
+   valid_at_calls = 0;
+   valid_at_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2312,6 +2333,52 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_valid_at_wire(void)
+{
+   static uint8_t request[AIMEE_DB2_VALID_AT_REQUEST_MAX_LEN];
+   uint32_t request_len = 99;
+   uint64_t memory_id = 99;
+   char as_of[AIMEE_DB2_VALID_AT_AS_OF_MAX + 1] = "";
+   assert(aimee_db2_valid_at_request_encode(42u, "2026-08-18 12:00:00", request, sizeof(request),
+                                            &request_len) == 0);
+   assert(aimee_db2_valid_at_request_decode(request, request_len, &memory_id, as_of,
+                                            sizeof(as_of)) == 0);
+   assert(memory_id == 42 && strcmp(as_of, "2026-08-18 12:00:00") == 0);
+
+   assert(aimee_db2_valid_at_request_encode(0u, "2026-08-18", request, sizeof(request),
+                                            &request_len) == -1);
+   /* An instant is required: "valid at no particular time" is not a question. */
+   assert(aimee_db2_valid_at_request_encode(42u, "", request, sizeof(request), &request_len) == -1);
+   char too_long[AIMEE_DB2_VALID_AT_AS_OF_MAX + 2];
+   memset(too_long, 'x', sizeof(too_long) - 1);
+   too_long[sizeof(too_long) - 1] = '\0';
+   assert(aimee_db2_valid_at_request_encode(42u, too_long, request, sizeof(request),
+                                            &request_len) == -1);
+
+   uint8_t reply[AIMEE_DB2_VALID_AT_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, result = 99, in_force = 99;
+   assert(aimee_db2_valid_at_reply_encode(AIMEE_DB2_RESULT_OK, 1, reply, sizeof(reply),
+                                          &reply_len) == 0);
+   assert(aimee_db2_valid_at_reply_decode(reply, reply_len, &result, &in_force) == 0 &&
+          result == AIMEE_DB2_RESULT_OK && in_force == 1);
+   assert(aimee_db2_valid_at_reply_encode(AIMEE_DB2_RESULT_OK, 0, reply, sizeof(reply),
+                                          &reply_len) == 0);
+   assert(aimee_db2_valid_at_reply_decode(reply, reply_len, &result, &in_force) == 0 &&
+          result == AIMEE_DB2_RESULT_OK && in_force == 0);
+
+   /* "Could not evaluate" carries no verdict at all, and must not be
+    * encodable alongside one. */
+   assert(aimee_db2_valid_at_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 0, reply, sizeof(reply),
+                                          &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_VALID_AT_ERROR_LEN);
+   assert(aimee_db2_valid_at_reply_decode(reply, reply_len, &result, &in_force) == 0 &&
+          result == AIMEE_DB2_RESULT_INVALID_STATE && in_force == 0);
+   assert(aimee_db2_valid_at_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 1, reply, sizeof(reply),
+                                          &reply_len) == -1);
+   assert(aimee_db2_valid_at_reply_encode(AIMEE_DB2_RESULT_OK, 2, reply, sizeof(reply),
+                                          &reply_len) == -1);
 }
 
 static void test_link_delete_wire(void)
@@ -3802,6 +3869,45 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_valid_at_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.valid_at = valid_at};
+   static uint8_t request[AIMEE_DB2_VALID_AT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_VALID_AT_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99, result = 99, in_force = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_VALID_AT};
+   assert(aimee_db2_valid_at_request_encode(42u, "2026-08-18 12:00:00", request, sizeof(request),
+                                            &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(valid_at_calls == 1 && strcmp(valid_at_last, "2026-08-18 12:00:00") == 0);
+   assert(aimee_db2_valid_at_reply_decode(response, response_len, &result, &in_force) == 0 &&
+          result == AIMEE_DB2_RESULT_OK && in_force == 1);
+
+   valid_at_value = 0;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_valid_at_reply_decode(response, response_len, &result, &in_force) == 0 &&
+          result == AIMEE_DB2_RESULT_OK && in_force == 0);
+
+   /* THE POINT OF THIS OPERATION. A backend that could not evaluate the bounds
+    * must not arrive as "not in force": the two are different claims and the
+    * backend deliberately distinguishes them. */
+   valid_at_value = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_valid_at_reply_decode(response, response_len, &result, &in_force) == 0 &&
+          result == AIMEE_DB2_RESULT_INVALID_STATE && in_force == 0);
+   valid_at_value = 1;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_link_delete_handler(void)
 {
    reset();
@@ -4965,6 +5071,7 @@ int main(void)
    test_delete_row_wire();
    test_touch_wire();
    test_link_delete_wire();
+   test_valid_at_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5004,6 +5111,7 @@ int main(void)
    test_delete_row_handler();
    test_touch_handler();
    test_link_delete_handler();
+   test_valid_at_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

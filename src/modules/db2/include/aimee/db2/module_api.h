@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "f47bbf6e3863fbeeb888b724acc73a2a10077a6c27a6e77e611bb7bb8caa6f07"
+#define AIMEE_DB2_CONTRACT_SHA256 "de38a9df125bcfffadca373c50cc55dfa47d97ea6cb23d76fd86e33d628a2ba8"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -372,6 +372,16 @@
 #define AIMEE_DB2_LINK_DELETE_RESPONSE_LEN                24u
 #define AIMEE_DB2_LINK_DELETE_ERROR_LEN                   24u
 #define AIMEE_DB2_LINK_DELETE_LINK_ID_MAX                 9223372036854775807ull
+#define AIMEE_DB2_EVENT_VALID_AT                          AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_VALID_AT                          AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_VALID_AT                      30u
+#define AIMEE_DB2_VALID_AT_REQUEST_MIN_LEN                37u
+#define AIMEE_DB2_VALID_AT_REQUEST_MAX_LEN                99u
+#define AIMEE_DB2_VALID_AT_RESPONSE_LEN                   28u
+#define AIMEE_DB2_VALID_AT_ERROR_LEN                      24u
+#define AIMEE_DB2_VALID_AT_MEMORY_ID_MAX                  9223372036854775807ull
+#define AIMEE_DB2_VALID_AT_AS_OF_MAX                      63u
+#define AIMEE_DB2_VALID_AT_MAX                            1u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2285,6 +2295,121 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_valid_at_request_encode(uint64_t memory_id, const char *as_of,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!as_of || !output || !output_len)
+      return -1;
+   size_t as_of_len = 0u;
+   while (as_of_len <= AIMEE_DB2_VALID_AT_AS_OF_MAX && as_of[as_of_len])
+      ++as_of_len;
+   size_t payload_len = 12u + as_of_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_VALID_AT_MEMORY_ID_MAX || as_of_len == 0u ||
+       as_of_len > AIMEE_DB2_VALID_AT_AS_OF_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_VALID_AT, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)as_of_len);
+   memcpy(payload + 12u, as_of, as_of_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_valid_at_request_decode(const uint8_t *input, size_t input_len,
+                                                    uint64_t *memory_id, char *as_of,
+                                                    size_t as_of_capacity)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (as_of && as_of_capacity)
+      as_of[0] = '\0';
+   if (!memory_id || !as_of || as_of_capacity < (size_t)AIMEE_DB2_VALID_AT_AS_OF_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_VALID_AT || header.payload_len < 13u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t as_of_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u || decoded_memory_id > AIMEE_DB2_VALID_AT_MEMORY_ID_MAX ||
+       as_of_len == 0u || as_of_len > AIMEE_DB2_VALID_AT_AS_OF_MAX ||
+       (uint32_t)12u + as_of_len != header.payload_len)
+      return -1;
+   /* An embedded NUL would truncate the instant on the way into the statement,
+    * so the row would be compared against a different moment than the caller
+    * asked about. */
+   for (uint32_t index = 0u; index < as_of_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   memcpy(as_of, payload + 12u, as_of_len);
+   as_of[as_of_len] = '\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}
+
+static inline int aimee_db2_valid_at_reply_encode(uint32_t result, uint32_t in_force,
+                                                  uint8_t *output, size_t capacity,
+                                                  uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {
+      if (in_force > AIMEE_DB2_VALID_AT_MAX || capacity < AIMEE_DB2_VALID_AT_RESPONSE_LEN)
+         return -1;
+      payload_len = 4u;
+   }
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || in_force != 0u ||
+            capacity < AIMEE_DB2_VALID_AT_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_VALID_AT, result, payload_len, output,
+                                     capacity) != 0)
+      return -1;
+   if (payload_len != 0u)
+      aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, in_force);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_valid_at_reply_decode(const uint8_t *input, size_t input_len,
+                                                  uint32_t *result, uint32_t *in_force)
+{
+   if (result)
+      *result = 0u;
+   if (in_force)
+      *in_force = 0u;
+   if (!result || !in_force)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_VALID_AT)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_VALID_AT_MAX)
+      return -1;
+   *result = header.result;
+   *in_force = decoded;
    return 0;
 }
 

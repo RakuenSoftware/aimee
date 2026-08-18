@@ -1428,9 +1428,46 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != []):
                 fail("link-delete-reply",
                      "reply must acknowledge the delete without a payload")
+        elif key == ("memory", 30) and name == "valid_at" and \
+                operation["wire_format"] == "db2-envelope-u64-string-u32-v1":
+            # The only operation so far whose backend distinguishes a false
+            # answer from an unanswerable one, and the only one carrying
+            # invalid_state for that reason rather than for an unusable module.
+            if operation["c_symbols"] != ["db2_memory_valid_at"]:
+                fail("operation-c-symbols", "valid_at C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "valid_at must be able to report that it could not evaluate the bounds")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "valid_at.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 2:
+                fail("valid-at-request", "request must carry the memory and the instant")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "valid_at.request.fields[0]")
+            as_of_field = _keys(request_fields[1],
+                                {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                "valid_at.request.fields[1]")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 13 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 63 or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    as_of_field != {"name": "as_of", "type": "utf8", "minimum_bytes": 1,
+                                    "maximum_bytes": 63}):
+                fail("valid-at-request",
+                     "request must name one positive memory and one non-empty bounded instant")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"}, "valid_at.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "valid_at.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "in_force", "type": "u32", "minimum": 0, "maximum": 1}):
+                fail("valid-at-reply", "reply must contain one Boolean validity verdict")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 39 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 40 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1441,9 +1478,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "health_record", "health_retention", "health_counters", "stats_counts",
             "expire", "demote", "promote_stable", "reclassify_directives",
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
-            "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete"]:
+            "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
+            "valid_at"]:
         fail("unsupported-operation",
-             "the partial generator requires the thirty-nine supported operations exactly once")
+             "the partial generator requires the forty supported operations exactly once")
     return catalog
 
 
@@ -1606,6 +1644,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     delete_row = catalog["operations"][36]
     touch = catalog["operations"][37]
     link_delete = catalog["operations"][38]
+    valid_at = catalog["operations"][39]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1809,6 +1848,17 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
         catalog, ENVELOPE_REQUEST_MAGIC, int(link_delete["id"]), 0, _put_u64(7),
     )
     link_delete_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(link_delete["id"]), 0, b"")
+    valid_at_as_of = b"2026-08-18 12:00:00"
+    valid_at_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(valid_at["id"]), 0,
+        _put_u64(42) + _put_u32(len(valid_at_as_of)) + valid_at_as_of,
+    )
+    valid_at_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(valid_at["id"]), 0, _put_u32(1),
+    )
+    valid_at_unevaluated = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(valid_at["id"]), 5, b"",
+    )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
     )
@@ -3701,6 +3751,60 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (link_delete_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": valid_at["family"],
+            "id": valid_at["id"],
+            "name": valid_at["name"],
+            "request": {
+                "positive": valid_at_request.hex(),
+                "memory_id": 42,
+                "as_of": valid_at_as_of.decode("ascii"),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(valid_at_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(valid_at_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(valid_at["id"]), 0,
+                               _put_u64(0) + _put_u32(len(valid_at_as_of)) +
+                               valid_at_as_of).hex()},
+                    {"mutation": "empty_as_of", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(valid_at["id"]), 0,
+                               _put_u64(42) + _put_u32(0)).hex()},
+                    {"mutation": "as_of_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(valid_at["id"]), 0,
+                               _put_u64(42) + _put_u32(len(valid_at_as_of) + 1) +
+                               valid_at_as_of).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(valid_at["id"]), 0,
+                               _put_u64(42) + _put_u32(len(valid_at_as_of)) +
+                               valid_at_as_of[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": valid_at_request[:-1].hex()},
+                    {"mutation": "long", "hex": (valid_at_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "in_force": 1, "hex": valid_at_ok.hex()},
+                    {"result": 5, "in_force": 0, "hex": valid_at_unevaluated.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(valid_at_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(valid_at_ok, 12, 3).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(valid_at["id"]), 0, b"").hex()},
+                    {"mutation": "unevaluated_with_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(valid_at["id"]), 5,
+                               _put_u32(0)).hex()},
+                    {"mutation": "verdict_too_large", "hex":
+                     (valid_at_ok[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex": valid_at_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (valid_at_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -3752,6 +3856,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     delete_row = catalog["operations"][36]
     touch = catalog["operations"][37]
     link_delete = catalog["operations"][38]
+    valid_at = catalog["operations"][39]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -4295,6 +4400,23 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{link_delete['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_LINK_DELETE_LINK_ID_MAX",
          f"{link_delete['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_VALID_AT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_VALID_AT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_VALID_AT", f"{valid_at['id']}u"),
+        ("AIMEE_DB2_VALID_AT_REQUEST_MIN_LEN",
+         f"{valid_at['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_VALID_AT_REQUEST_MAX_LEN",
+         f"{valid_at['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_VALID_AT_RESPONSE_LEN",
+         f"{valid_at['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_VALID_AT_ERROR_LEN",
+         f"{valid_at['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_VALID_AT_MEMORY_ID_MAX",
+         f"{valid_at['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_VALID_AT_AS_OF_MAX",
+         f"{valid_at['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_VALID_AT_MAX",
+         f"{valid_at['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -6237,6 +6359,121 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    return 0;
 }}
 
+static inline int aimee_db2_valid_at_request_encode(uint64_t memory_id, const char *as_of,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!as_of || !output || !output_len)
+      return -1;
+   size_t as_of_len = 0u;
+   while (as_of_len <= AIMEE_DB2_VALID_AT_AS_OF_MAX && as_of[as_of_len])
+      ++as_of_len;
+   size_t payload_len = 12u + as_of_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_VALID_AT_MEMORY_ID_MAX || as_of_len == 0u ||
+       as_of_len > AIMEE_DB2_VALID_AT_AS_OF_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_VALID_AT, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)as_of_len);
+   memcpy(payload + 12u, as_of, as_of_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_valid_at_request_decode(const uint8_t *input, size_t input_len,
+                                                    uint64_t *memory_id, char *as_of,
+                                                    size_t as_of_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (as_of && as_of_capacity)
+      as_of[0] = '\\0';
+   if (!memory_id || !as_of || as_of_capacity < (size_t)AIMEE_DB2_VALID_AT_AS_OF_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_VALID_AT || header.payload_len < 13u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t as_of_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u || decoded_memory_id > AIMEE_DB2_VALID_AT_MEMORY_ID_MAX ||
+       as_of_len == 0u || as_of_len > AIMEE_DB2_VALID_AT_AS_OF_MAX ||
+       (uint32_t)12u + as_of_len != header.payload_len)
+      return -1;
+   /* An embedded NUL would truncate the instant on the way into the statement,
+    * so the row would be compared against a different moment than the caller
+    * asked about. */
+   for (uint32_t index = 0u; index < as_of_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   memcpy(as_of, payload + 12u, as_of_len);
+   as_of[as_of_len] = '\\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}}
+
+static inline int aimee_db2_valid_at_reply_encode(uint32_t result, uint32_t in_force,
+                                                  uint8_t *output, size_t capacity,
+                                                  uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (in_force > AIMEE_DB2_VALID_AT_MAX || capacity < AIMEE_DB2_VALID_AT_RESPONSE_LEN)
+         return -1;
+      payload_len = 4u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || in_force != 0u ||
+            capacity < AIMEE_DB2_VALID_AT_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_VALID_AT, result, payload_len, output,
+                                     capacity) != 0)
+      return -1;
+   if (payload_len != 0u)
+      aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, in_force);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_valid_at_reply_decode(const uint8_t *input, size_t input_len,
+                                                  uint32_t *result, uint32_t *in_force)
+{{
+   if (result)
+      *result = 0u;
+   if (in_force)
+      *in_force = 0u;
+   if (!result || !in_force)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_VALID_AT)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_VALID_AT_MAX)
+      return -1;
+   *result = header.result;
+   *in_force = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_link_delete_request_encode(uint64_t link_id, uint8_t *output,
                                                       size_t capacity)
 {{
@@ -7584,6 +7821,11 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t link_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_valid_at_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *as_of, uint32_t *domain_result, uint32_t *in_force,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -8479,6 +8721,34 @@ aimee_module_call_result_t aimee_db2_link_delete_call(aimee_db2_call_fn call, vo
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_valid_at_call(aimee_db2_call_fn call, void *call_context,
+                                                   uint64_t trace_id, uint64_t deadline_ns,
+                                                   uint64_t memory_id, const char *as_of,
+                                                   uint32_t *domain_result, uint32_t *in_force,
+                                                   aimee_module_cancelled_fn cancelled,
+                                                   void *cancel_context)
+{
+   if (!call || !domain_result || !in_force)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *domain_result = 0u;
+   *in_force = 0u;
+   uint8_t request[AIMEE_DB2_VALID_AT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_VALID_AT_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_valid_at_request_encode(memory_id, as_of, request, sizeof(request),
+                                         &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_VALID_AT, AIMEE_DB2_STAGE_VALID_AT, trace_id, deadline_ns,
+       request, request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_valid_at_reply_decode(response, response_len, domain_result, in_force) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -8757,6 +9027,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     delete_row = catalog["operations"][36]
     touch = catalog["operations"][37]
     link_delete = catalog["operations"][38]
+    valid_at = catalog["operations"][39]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -9009,6 +9280,12 @@ const EventLinkDelete = EventMemory
 const StageLinkDelete = FamilyMemory
 const OperationLinkDelete uint32 = {link_delete['id']}
 const LinkDeleteLinkIDMax uint64 = {link_delete['request']['field']['maximum']}
+const EventValidAt = EventMemory
+const StageValidAt = FamilyMemory
+const OperationValidAt uint32 = {valid_at['id']}
+const ValidAtMemoryIDMax uint64 = {valid_at['request']['fields'][0]['maximum']}
+const ValidAtAsOfMax = {valid_at['request']['fields'][1]['maximum_bytes']}
+const ValidAtMax uint32 = {valid_at['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -9667,6 +9944,90 @@ func DecodeLinkDeleteReply(reply []byte) error {{
 		return ErrMalformedEnvelope
 	}}
 	return nil
+}}
+
+// EncodeValidAtRequest emits the memory and the instant to test it against.
+func EncodeValidAtRequest(memoryID uint64, asOf string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > ValidAtMemoryIDMax || len(asOf) == 0 ||
+		len(asOf) > ValidAtAsOfMax || hasNUL(asOf) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 12 + len(asOf)
+	header, err := EncodeRequestHeader(OperationValidAt, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(asOf)))
+	copy(payload[12:], asOf)
+	return request, nil
+}}
+
+// DecodeValidAtRequest validates the envelope, the memory, and the instant.
+func DecodeValidAtRequest(request []byte) (uint64, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationValidAt || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	asOfLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > ValidAtMemoryIDMax || asOfLen == 0 ||
+		asOfLen > uint32(ValidAtAsOfMax) || 12+asOfLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	asOf := string(payload[12 : 12+asOfLen])
+	if hasNUL(asOf) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return memoryID, asOf, nil
+}}
+
+// EncodeValidAtReply emits the verdict, or the refusal to reach one.
+func EncodeValidAtReply(result uint32, inForce uint32) ([]byte, error) {{
+	if result == ResultInvalidState {{
+		if inForce != 0 {{
+			return nil, ErrMalformedEnvelope
+		}}
+		header, err := EncodeReplyHeader(OperationValidAt, result, 0)
+		if err != nil {{
+			return nil, ErrMalformedEnvelope
+		}}
+		return header, nil
+	}}
+	if result != ResultOK || inForce > ValidAtMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationValidAt, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], inForce)
+	return reply, nil
+}}
+
+// DecodeValidAtReply keeps "could not evaluate" distinct from "not in force".
+func DecodeValidAtReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationValidAt {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, 0, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	inForce := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if inForce > ValidAtMax {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return header.Result, inForce, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

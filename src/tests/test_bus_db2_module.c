@@ -74,6 +74,7 @@ typedef struct
    int (*delete_row)(int64_t memory_id);
    int (*touch)(int64_t memory_id);
    int (*link_delete)(int64_t link_id);
+   int (*valid_at)(int64_t memory_id, const char *as_of);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -121,6 +122,8 @@ static int touch_calls;
 static int64_t touch_last;
 static int link_delete_calls;
 static int64_t link_delete_last;
+static int valid_at_calls;
+static char valid_at_last[64];
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -761,6 +764,24 @@ static int link_delete(int64_t link_id)
    return link_id == 7 ? 0 : -1;
 }
 
+int db2_memory_valid_at(int64_t memory_id, const char *as_of)
+{
+   (void)memory_id;
+   (void)as_of;
+   return -1;
+}
+
+static int valid_at(int64_t memory_id, const char *as_of)
+{
+   valid_at_calls++;
+   snprintf(valid_at_last, sizeof(valid_at_last), "%s", as_of);
+   if (memory_id == 42)
+      return 1;
+   if (memory_id == 43)
+      return 0;
+   return -1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1089,6 +1110,7 @@ int main(void)
        .delete_row = delete_row,
        .touch = touch,
        .link_delete = link_delete,
+       .valid_at = valid_at,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1308,6 +1330,19 @@ int main(void)
    assert(link_delete_calls == 1 && link_delete_last == 7);
    assert(aimee_db2_link_delete_call(call_client, &client, 7053, 0, 8u, NULL, NULL) ==
           AIMEE_MODULE_CALL_INTERNAL);
+
+   uint32_t valid_result = 99u, in_force = 99u;
+   assert(aimee_db2_valid_at_call(call_client, &client, 7054, 0, 42u, "2026-08-18 12:00:00",
+                                  &valid_result, &in_force, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(valid_result == AIMEE_DB2_RESULT_OK && in_force == 1 && valid_at_calls == 1);
+   assert(strcmp(valid_at_last, "2026-08-18 12:00:00") == 0);
+   assert(aimee_db2_valid_at_call(call_client, &client, 7055, 0, 43u, "2026-08-18 12:00:00",
+                                  &valid_result, &in_force, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(valid_result == AIMEE_DB2_RESULT_OK && in_force == 0);
+   /* Could not evaluate is its own answer, not a negative verdict. */
+   assert(aimee_db2_valid_at_call(call_client, &client, 7056, 0, 44u, "2026-08-18 12:00:00",
+                                  &valid_result, &in_force, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(valid_result == AIMEE_DB2_RESULT_INVALID_STATE && in_force == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -1091,6 +1091,33 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 30,
+      "name": "valid_at",
+      "wire_format": "db2-envelope-u64-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Validity bounds are canonical relational columns on the memory row and the comparison is a DB2 statement, not a portable ANN concern.",
+      "c_symbols": ["db2_memory_valid_at"],
+      "request": {
+        "encoded_size_min": 37,
+        "encoded_size_max": 99,
+        "fields": [
+          {"name": "memory_id", "type": "u64", "minimum": 1,
+           "maximum": 9223372036854775807},
+          {"name": "as_of", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 63}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "in_force", "type": "u32", "minimum": 0, "maximum": 1}
+      }
     }
   ]
 }

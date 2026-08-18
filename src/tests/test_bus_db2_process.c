@@ -403,6 +403,22 @@ int main(int argc, char **argv)
    assert(aimee_db2_link_delete_call(call_client, &client, 9060, 0, 0u, NULL, NULL) ==
           AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 does not exist, so the statement completes with no row: the
+    * memory is not in force, and that is a real answer rather than a failure
+    * to evaluate. Pinning ok/zero here is what keeps the invalid_state path
+    * meaning "could not tell" instead of collecting every empty result. */
+   uint32_t valid_result = 99, in_force = 99;
+   assert(aimee_db2_valid_at_call(call_client, &client, 9061, 0, 42u, "2026-08-18 12:00:00",
+                                  &valid_result, &in_force, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(valid_result == AIMEE_DB2_RESULT_OK && in_force == 0);
+   valid_result = 99;
+   in_force = 99;
+   assert(aimee_db2_valid_at_call(call_client, &client, 9062, 0, 42u, "2026-08-18 12:00:00",
+                                  &valid_result, &in_force, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(valid_result == AIMEE_DB2_RESULT_OK && in_force == 0);
+   assert(aimee_db2_valid_at_call(call_client, &client, 9063, 0, 42u, "", &valid_result, &in_force,
+                                  NULL, NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

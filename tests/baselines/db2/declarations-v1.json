@@ -18807,9 +18807,15 @@
           "line": 96
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.valid_at operation preserves the backend's three-way answer: in force, not in force, or could not be evaluated. The third is carried as invalid_state rather than folded into a negative verdict, because an unevaluated comparison is not the same claim as one that came back false."
+      },
       "signature": "int db2_memory_valid_at ( int64_t memory_id , const char * as_of )",
       "signature_sha256": "30ac433991f28055c0180963e01ef95786d77a1300b1d429f697d667d235567f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_valid_at"
     },
     {
@@ -25830,15 +25836,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f7aa0a47bc2eb16019a6ad0795f8044ef358096f51b347bba8739a27813e6e1d",
+  "fingerprint": "d8112c5a6bb5b2b23cb6556007f0f0eb531859d8279079c2ec5ffcb1c798779f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 657,
+    "audit_pending": 656,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 301
+    "reviewed": 302
   }
 }

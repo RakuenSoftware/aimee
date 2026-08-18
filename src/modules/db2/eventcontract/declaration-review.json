@@ -1788,6 +1788,14 @@
       "reason": "The typed memory.touch operation replaces the retrieval-accounting bump; the increment and the stamp are fixed policy behind the handler so a caller can record that a memory was used but cannot choose by how much or when."
     },
     {
+      "symbol": "db2_memory_valid_at",
+      "signature_sha256": "30ac433991f28055c0180963e01ef95786d77a1300b1d429f697d667d235567f",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.valid_at operation preserves the backend's three-way answer: in force, not in force, or could not be evaluated. The third is carried as invalid_state rather than folded into a negative verdict, because an unevaluated comparison is not the same claim as one that came back false."
+    },
+    {
       "symbol": "db2_memory_workspace_matches",
       "signature_sha256": "20497944db190512bcd0cfe009a9d24fb48a73d301cb1d4ad2c9bee4dbb21732",
       "disposition": "private-db2",

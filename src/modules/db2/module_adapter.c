@@ -277,6 +277,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .delete_row = db2_memory_delete_row,
        .touch = db2_memory_touch,
        .link_delete = db2_memory_link_delete,
+       .valid_at = db2_memory_valid_at,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -940,6 +941,28 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_link_delete_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_LINK_DELETE_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t valid_memory_id = 0u;
+      char valid_as_of[AIMEE_DB2_VALID_AT_AS_OF_MAX + 1];
+      if (aimee_db2_valid_at_request_decode(request_body, request_len, &valid_memory_id,
+                                            valid_as_of, sizeof(valid_as_of)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_VALID_AT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->valid_at)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int verdict = backend->valid_at((int64_t)valid_memory_id, valid_as_of);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         /* A negative verdict means the comparison could not be evaluated, not
+          * that the memory was out of force. It is carried as invalid_state so
+          * a caller cannot read an unanswered question as a "no". */
+         uint32_t domain = (verdict < 0) ? AIMEE_DB2_RESULT_INVALID_STATE : AIMEE_DB2_RESULT_OK;
+         uint32_t in_force = (verdict > 0) ? 1u : 0u;
+         if (aimee_db2_valid_at_reply_encode(domain, in_force, response_body, response_capacity,
+                                             response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

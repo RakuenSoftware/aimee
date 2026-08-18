@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "f47bbf6e3863fbeeb888b724acc73a2a10077a6c27a6e77e611bb7bb8caa6f07"
+const ContractSHA256 = "de38a9df125bcfffadca373c50cc55dfa47d97ea6cb23d76fd86e33d628a2ba8"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -251,6 +251,12 @@ const EventLinkDelete = EventMemory
 const StageLinkDelete = FamilyMemory
 const OperationLinkDelete uint32 = 29
 const LinkDeleteLinkIDMax uint64 = 9223372036854775807
+const EventValidAt = EventMemory
+const StageValidAt = FamilyMemory
+const OperationValidAt uint32 = 30
+const ValidAtMemoryIDMax uint64 = 9223372036854775807
+const ValidAtAsOfMax = 63
+const ValidAtMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -911,6 +917,90 @@ func DecodeLinkDeleteReply(reply []byte) error {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+// EncodeValidAtRequest emits the memory and the instant to test it against.
+func EncodeValidAtRequest(memoryID uint64, asOf string) ([]byte, error) {
+	if memoryID == 0 || memoryID > ValidAtMemoryIDMax || len(asOf) == 0 ||
+		len(asOf) > ValidAtAsOfMax || hasNUL(asOf) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 12 + len(asOf)
+	header, err := EncodeRequestHeader(OperationValidAt, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(asOf)))
+	copy(payload[12:], asOf)
+	return request, nil
+}
+
+// DecodeValidAtRequest validates the envelope, the memory, and the instant.
+func DecodeValidAtRequest(request []byte) (uint64, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationValidAt || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	asOfLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > ValidAtMemoryIDMax || asOfLen == 0 ||
+		asOfLen > uint32(ValidAtAsOfMax) || 12+asOfLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	asOf := string(payload[12 : 12+asOfLen])
+	if hasNUL(asOf) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return memoryID, asOf, nil
+}
+
+// EncodeValidAtReply emits the verdict, or the refusal to reach one.
+func EncodeValidAtReply(result uint32, inForce uint32) ([]byte, error) {
+	if result == ResultInvalidState {
+		if inForce != 0 {
+			return nil, ErrMalformedEnvelope
+		}
+		header, err := EncodeReplyHeader(OperationValidAt, result, 0)
+		if err != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		return header, nil
+	}
+	if result != ResultOK || inForce > ValidAtMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationValidAt, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], inForce)
+	return reply, nil
+}
+
+// DecodeValidAtReply keeps "could not evaluate" distinct from "not in force".
+func DecodeValidAtReply(reply []byte) (uint32, uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationValidAt {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, 0, nil
+	}
+	if header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	inForce := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if inForce > ValidAtMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return header.Result, inForce, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.
