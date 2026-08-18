@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "9246b86c231971b643e80efbe762ddd35b8e15b3a43fcfd7d54c245e5f3beecf"
+#define AIMEE_DB2_CONTRACT_SHA256 "dde679d48e544006fca714bd9386b7ecee3c491db7521d9ad23d8863a253b0db"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -204,6 +204,17 @@
 #define AIMEE_DB2_EFFECTIVENESS_DEMOTE_ERROR_LEN          24u
 #define AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD          0.3
 #define AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX                2147483647u
+#define AIMEE_DB2_EVENT_EFFECTIVENESS_STATS               AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EFFECTIVENESS_STATS               AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS           12u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN         24u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN        40u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_ERROR_LEN           24u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD       0.3
+#define AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN             0.0
+#define AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX             1.0
+#define AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX             2147483647u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX            2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1241,6 +1252,88 @@ static inline int aimee_db2_effectiveness_demote_reply_decode(const uint8_t *inp
    if (decoded > AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX)
       return -1;
    *demoted_count = decoded;
+   return 0;
+}
+
+typedef struct
+{
+   double avg_effectiveness;
+   uint32_t low_effectiveness_count;
+   uint32_t high_impact_count;
+} aimee_db2_effectiveness_stats_t;
+
+static inline int aimee_db2_effectiveness_stats_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_effectiveness_stats_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_effectiveness_stats_reply_encode(
+    const aimee_db2_effectiveness_stats_t *stats, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   uint64_t average_bits = 0u;
+   if (!stats || !output || !output_len ||
+       sizeof(stats->avg_effectiveness) != sizeof(average_bits))
+      return -1;
+   if (!(stats->avg_effectiveness >= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN) ||
+       !(stats->avg_effectiveness <= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX) ||
+       stats->low_effectiveness_count > AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX ||
+       stats->high_impact_count > AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS,
+                                     AIMEE_DB2_RESULT_OK, 16u, output, capacity) != 0)
+      return -1;
+   memcpy(&average_bits, &stats->avg_effectiveness, sizeof(average_bits));
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, average_bits);
+   aimee_db2_put_u32(payload + 8u, stats->low_effectiveness_count);
+   aimee_db2_put_u32(payload + 12u, stats->high_impact_count);
+   *output_len = AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_effectiveness_stats_reply_decode(
+    const uint8_t *input, size_t input_len, aimee_db2_effectiveness_stats_t *stats)
+{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!stats || sizeof(stats->avg_effectiveness) != sizeof(uint64_t))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 16u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t average_bits = aimee_db2_get_u64(payload);
+   uint32_t low = aimee_db2_get_u32(payload + 8u);
+   uint32_t high = aimee_db2_get_u32(payload + 12u);
+   double average = 0.0;
+   memcpy(&average, &average_bits, sizeof(average_bits));
+   if (!(average >= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN) ||
+       !(average <= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX) ||
+       low > AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX ||
+       high > AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX)
+      return -1;
+   stats->avg_effectiveness = average;
+   stats->low_effectiveness_count = low;
+   stats->high_impact_count = high;
    return 0;
 }
 

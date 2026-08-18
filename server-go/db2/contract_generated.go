@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "9246b86c231971b643e80efbe762ddd35b8e15b3a43fcfd7d54c245e5f3beecf"
+const ContractSHA256 = "dde679d48e544006fca714bd9386b7ecee3c491db7521d9ad23d8863a253b0db"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -139,6 +139,14 @@ const StageEffectivenessDemote = FamilyMemory
 const OperationEffectivenessDemote uint32 = 11
 const EffectivenessDemoteThresholdBits uint64 = 4599075939470750515
 const EffectivenessDemoteMax uint32 = 2147483647
+const EventEffectivenessStats = EventMemory
+const StageEffectivenessStats = FamilyMemory
+const OperationEffectivenessStats uint32 = 12
+const EffectivenessStatsLowThresholdBits uint64 = 4599075939470750515
+const EffectivenessStatsAvgMin = 0.0
+const EffectivenessStatsAvgMax = 1.0
+const EffectivenessStatsLowMax uint32 = 2147483647
+const EffectivenessStatsHighMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -969,6 +977,77 @@ func DecodeEffectivenessDemoteReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return demotedCount, nil
+}
+
+// EffectivenessStats is the bounded aggregate effectiveness summary over the memory corpus.
+type EffectivenessStats struct {
+	AvgEffectiveness      float64
+	LowEffectivenessCount uint32
+	HighImpactCount       uint32
+}
+
+// EncodeEffectivenessStatsRequest emits the empty request for the fixed low-threshold policy.
+func EncodeEffectivenessStatsRequest() []byte {
+	header, err := EncodeRequestHeader(OperationEffectivenessStats, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeEffectivenessStatsRequest validates the exact empty operation envelope.
+func DecodeEffectivenessStatsRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessStats || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	if len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeEffectivenessStatsReply emits the bounded average and the two bounded counts.
+func EncodeEffectivenessStatsReply(stats EffectivenessStats) ([]byte, error) {
+	if !(stats.AvgEffectiveness >= EffectivenessStatsAvgMin) ||
+		!(stats.AvgEffectiveness <= EffectivenessStatsAvgMax) ||
+		stats.LowEffectivenessCount > EffectivenessStatsLowMax ||
+		stats.HighImpactCount > EffectivenessStatsHighMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEffectivenessStats, ResultOK, 16)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 16)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, math.Float64bits(stats.AvgEffectiveness))
+	binary.LittleEndian.PutUint32(payload[8:], stats.LowEffectivenessCount)
+	binary.LittleEndian.PutUint32(payload[12:], stats.HighImpactCount)
+	return reply, nil
+}
+
+// DecodeEffectivenessStatsReply validates the operation and the bounded summary fields.
+func DecodeEffectivenessStatsReply(reply []byte) (EffectivenessStats, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessStats ||
+		header.Result != ResultOK || header.PayloadLen != 16 {
+		return EffectivenessStats{}, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	stats := EffectivenessStats{
+		AvgEffectiveness:      math.Float64frombits(binary.LittleEndian.Uint64(payload)),
+		LowEffectivenessCount: binary.LittleEndian.Uint32(payload[8:]),
+		HighImpactCount:       binary.LittleEndian.Uint32(payload[12:]),
+	}
+	if !(stats.AvgEffectiveness >= EffectivenessStatsAvgMin) ||
+		!(stats.AvgEffectiveness <= EffectivenessStatsAvgMax) ||
+		stats.LowEffectivenessCount > EffectivenessStatsLowMax ||
+		stats.HighImpactCount > EffectivenessStatsHighMax {
+		return EffectivenessStats{}, ErrMalformedEnvelope
+	}
+	return stats, nil
 }
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

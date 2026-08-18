@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import struct
 import sys
 from typing import NoReturn
 
@@ -808,18 +809,58 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply_field != {"name": "demoted_count", "type": "u32", "minimum": 0,
                                     "maximum": 0x7fffffff}):
                 fail("effectiveness-demote-reply", "reply must contain one bounded demotion count")
+        elif key == ("memory", 12) and name == "effectiveness_stats" and \
+                operation["wire_format"] == "db2-envelope-f64-u32-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_health_effectiveness_stats"]:
+                fail("operation-c-symbols",
+                     "effectiveness_stats C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "effectiveness_stats results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "effectiveness_stats.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"low_threshold_binary64_bits": 0x3fd3333333333333}):
+                fail("effectiveness-stats-request",
+                     "request must carry no payload and use the fixed canonical low threshold")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "effectiveness_stats.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 3:
+                fail("effectiveness-stats-reply", "reply must contain exactly three fields")
+            average = _keys(reply_fields[0],
+                            {"name", "type", "encoding", "minimum_binary64_bits",
+                             "maximum_binary64_bits"},
+                            "effectiveness_stats.reply.fields[0]")
+            low = _keys(reply_fields[1], {"name", "type", "minimum", "maximum"},
+                        "effectiveness_stats.reply.fields[1]")
+            high = _keys(reply_fields[2], {"name", "type", "minimum", "maximum"},
+                         "effectiveness_stats.reply.fields[2]")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 16 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    average != {"name": "avg_effectiveness", "type": "f64",
+                                "encoding": "ieee754-binary64-le",
+                                "minimum_binary64_bits": 0,
+                                "maximum_binary64_bits": 0x3ff0000000000000} or
+                    low != {"name": "low_effectiveness_count", "type": "u32", "minimum": 0,
+                            "maximum": 0x7fffffff} or
+                    high != {"name": "high_impact_count", "type": "u32", "minimum": 0,
+                             "maximum": 0x7fffffff}):
+                fail("effectiveness-stats-reply",
+                     "reply must contain the bounded average and the two bounded counts")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 21 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 22 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
             "level3_count", "level2_count", "orphaned_l0_count", "total_count",
             "session_l2_count", "key_exists", "find_id_by_key_kind",
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
-            "effectiveness_demote"]:
+            "effectiveness_demote", "effectiveness_stats"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-one supported operations exactly once")
+             "the partial generator requires the twenty-two supported operations exactly once")
     return catalog
 
 
@@ -922,6 +963,17 @@ def _put_u64(value: int) -> bytes:
     return value.to_bytes(8, "little")
 
 
+def _binary64_literal(bits: int) -> str:
+    """Render a catalog binary64 bit pattern as a finite C and Go floating literal."""
+    if not isinstance(bits, int) or isinstance(bits, bool) or not 0 <= bits <= 0xFFFFFFFFFFFFFFFF:
+        fail("binary64-literal", "binary64 bound must be an unsigned 64-bit bit pattern")
+    value = struct.unpack("<d", _put_u64(bits))[0]
+    if value != value or value in (float("inf"), float("-inf")):
+        fail("binary64-literal", "binary64 bound must be finite")
+    text = repr(value)
+    return text if ("." in text or "e" in text or "E" in text) else text + ".0"
+
+
 def _envelope(
         catalog: dict[str, object], magic: int, operation: int, code: int, payload: bytes) -> bytes:
     return (
@@ -953,6 +1005,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_update = catalog["operations"][18]
     retention_enforce = catalog["operations"][19]
     effectiveness_demote = catalog["operations"][20]
+    effectiveness_stats = catalog["operations"][21]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1183,6 +1236,14 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     effectiveness_demote_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_demote["id"]), 0, _put_u32(2),
+    )
+    effectiveness_stats_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(effectiveness_stats["id"]), 0, b"",
+    )
+    effectiveness_stats_average_bits = 0x3fe0000000000000
+    effectiveness_stats_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(effectiveness_stats["id"]), 0,
+        _put_u64(effectiveness_stats_average_bits) + _put_u32(3) + _put_u32(1),
     )
 
     value = {
@@ -2166,6 +2227,60 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                      (effectiveness_demote_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": effectiveness_stats["family"],
+            "id": effectiveness_stats["id"],
+            "name": effectiveness_stats["name"],
+            "request": {
+                "positive": effectiveness_stats_request.hex(),
+                "low_threshold_bits": 0x3fd3333333333333,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(effectiveness_stats_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(effectiveness_stats_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": effectiveness_stats_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_stats_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "avg_effectiveness_bits": effectiveness_stats_average_bits,
+                     "low_effectiveness_count": 3, "high_impact_count": 1,
+                     "hex": effectiveness_stats_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(effectiveness_stats_ok, 8, 11).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(effectiveness_stats_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(effectiveness_stats["id"]), 0, b"").hex()},
+                    {"mutation": "average_above_maximum", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0x3ff0000000000001) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "average_negative", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0xbfe0000000000000) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "average_not_a_number", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN] +
+                      _put_u64(0x7ff8000000000000) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                    {"mutation": "low_effectiveness_count_too_large", "hex":
+                     (effectiveness_stats_ok[:ENVELOPE_HEADER_LEN + 8] +
+                      _put_u32(0x80000000) +
+                      effectiveness_stats_ok[ENVELOPE_HEADER_LEN + 12:]).hex()},
+                    {"mutation": "high_impact_count_too_large", "hex":
+                     (effectiveness_stats_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": effectiveness_stats_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (effectiveness_stats_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2199,6 +2314,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_update = catalog["operations"][18]
     retention_enforce = catalog["operations"][19]
     effectiveness_demote = catalog["operations"][20]
+    effectiveness_stats = catalog["operations"][21]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -2476,6 +2592,24 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD", "0.3"),
         ("AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX",
          f"{effectiveness_demote['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_EFFECTIVENESS_STATS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_EFFECTIVENESS_STATS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS", f"{effectiveness_stats['id']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN",
+         f"{effectiveness_stats['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN",
+         f"{effectiveness_stats['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_ERROR_LEN",
+         f"{effectiveness_stats['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD", "0.3"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN",
+         _binary64_literal(effectiveness_stats["reply"]["fields"][0]["minimum_binary64_bits"])),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX",
+         _binary64_literal(effectiveness_stats["reply"]["fields"][0]["maximum_binary64_bits"])),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX",
+         f"{effectiveness_stats['reply']['fields'][1]['maximum']}u"),
+        ("AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX",
+         f"{effectiveness_stats['reply']['fields'][2]['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -3542,6 +3676,88 @@ static inline int aimee_db2_effectiveness_demote_reply_decode(const uint8_t *inp
    return 0;
 }}
 
+typedef struct
+{{
+   double avg_effectiveness;
+   uint32_t low_effectiveness_count;
+   uint32_t high_impact_count;
+}} aimee_db2_effectiveness_stats_t;
+
+static inline int aimee_db2_effectiveness_stats_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_effectiveness_stats_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_effectiveness_stats_reply_encode(
+    const aimee_db2_effectiveness_stats_t *stats, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   uint64_t average_bits = 0u;
+   if (!stats || !output || !output_len ||
+       sizeof(stats->avg_effectiveness) != sizeof(average_bits))
+      return -1;
+   if (!(stats->avg_effectiveness >= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN) ||
+       !(stats->avg_effectiveness <= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX) ||
+       stats->low_effectiveness_count > AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX ||
+       stats->high_impact_count > AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX ||
+       capacity < AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS,
+                                     AIMEE_DB2_RESULT_OK, 16u, output, capacity) != 0)
+      return -1;
+   memcpy(&average_bits, &stats->avg_effectiveness, sizeof(average_bits));
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, average_bits);
+   aimee_db2_put_u32(payload + 8u, stats->low_effectiveness_count);
+   aimee_db2_put_u32(payload + 12u, stats->high_impact_count);
+   *output_len = AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_effectiveness_stats_reply_decode(
+    const uint8_t *input, size_t input_len, aimee_db2_effectiveness_stats_t *stats)
+{{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!stats || sizeof(stats->avg_effectiveness) != sizeof(uint64_t))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 16u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t average_bits = aimee_db2_get_u64(payload);
+   uint32_t low = aimee_db2_get_u32(payload + 8u);
+   uint32_t high = aimee_db2_get_u32(payload + 12u);
+   double average = 0.0;
+   memcpy(&average, &average_bits, sizeof(average_bits));
+   if (!(average >= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN) ||
+       !(average <= AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX) ||
+       low > AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX ||
+       high > AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX)
+      return -1;
+   stats->avg_effectiveness = average;
+   stats->low_effectiveness_count = low;
+   stats->high_impact_count = high;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -4448,6 +4664,11 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *demoted_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_effectiveness_stats_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_effectiveness_stats_t *stats, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -4863,6 +5084,32 @@ aimee_db2_effectiveness_demote_call(aimee_db2_call_fn call, void *call_context, 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_effectiveness_stats_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, aimee_db2_effectiveness_stats_t *stats,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!call || !stats)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_effectiveness_stats_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EFFECTIVENESS_STATS, AIMEE_DB2_STAGE_EFFECTIVENESS_STATS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_effectiveness_stats_reply_decode(response, response_len, stats) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -5123,6 +5370,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     effectiveness_update = catalog["operations"][18]
     retention_enforce = catalog["operations"][19]
     effectiveness_demote = catalog["operations"][20]
+    effectiveness_stats = catalog["operations"][21]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -5263,6 +5511,14 @@ const StageEffectivenessDemote = FamilyMemory
 const OperationEffectivenessDemote uint32 = {effectiveness_demote['id']}
 const EffectivenessDemoteThresholdBits uint64 = {effectiveness_demote['request']['policy']['threshold_binary64_bits']}
 const EffectivenessDemoteMax uint32 = {effectiveness_demote['reply']['field']['maximum']}
+const EventEffectivenessStats = EventMemory
+const StageEffectivenessStats = FamilyMemory
+const OperationEffectivenessStats uint32 = {effectiveness_stats['id']}
+const EffectivenessStatsLowThresholdBits uint64 = {effectiveness_stats['request']['policy']['low_threshold_binary64_bits']}
+const EffectivenessStatsAvgMin = {_binary64_literal(effectiveness_stats['reply']['fields'][0]['minimum_binary64_bits'])}
+const EffectivenessStatsAvgMax = {_binary64_literal(effectiveness_stats['reply']['fields'][0]['maximum_binary64_bits'])}
+const EffectivenessStatsLowMax uint32 = {effectiveness_stats['reply']['fields'][1]['maximum']}
+const EffectivenessStatsHighMax uint32 = {effectiveness_stats['reply']['fields'][2]['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -6091,6 +6347,77 @@ func DecodeEffectivenessDemoteReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return demotedCount, nil
+}}
+
+// EffectivenessStats is the bounded aggregate effectiveness summary over the memory corpus.
+type EffectivenessStats struct {{
+	AvgEffectiveness      float64
+	LowEffectivenessCount uint32
+	HighImpactCount       uint32
+}}
+
+// EncodeEffectivenessStatsRequest emits the empty request for the fixed low-threshold policy.
+func EncodeEffectivenessStatsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEffectivenessStats, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeEffectivenessStatsRequest validates the exact empty operation envelope.
+func DecodeEffectivenessStatsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEffectivenessStats || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	if len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeEffectivenessStatsReply emits the bounded average and the two bounded counts.
+func EncodeEffectivenessStatsReply(stats EffectivenessStats) ([]byte, error) {{
+	if !(stats.AvgEffectiveness >= EffectivenessStatsAvgMin) ||
+		!(stats.AvgEffectiveness <= EffectivenessStatsAvgMax) ||
+		stats.LowEffectivenessCount > EffectivenessStatsLowMax ||
+		stats.HighImpactCount > EffectivenessStatsHighMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEffectivenessStats, ResultOK, 16)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 16)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, math.Float64bits(stats.AvgEffectiveness))
+	binary.LittleEndian.PutUint32(payload[8:], stats.LowEffectivenessCount)
+	binary.LittleEndian.PutUint32(payload[12:], stats.HighImpactCount)
+	return reply, nil
+}}
+
+// DecodeEffectivenessStatsReply validates the operation and the bounded summary fields.
+func DecodeEffectivenessStatsReply(reply []byte) (EffectivenessStats, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEffectivenessStats ||
+		header.Result != ResultOK || header.PayloadLen != 16 {{
+		return EffectivenessStats{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	stats := EffectivenessStats{{
+		AvgEffectiveness:      math.Float64frombits(binary.LittleEndian.Uint64(payload)),
+		LowEffectivenessCount: binary.LittleEndian.Uint32(payload[8:]),
+		HighImpactCount:       binary.LittleEndian.Uint32(payload[12:]),
+	}}
+	if !(stats.AvgEffectiveness >= EffectivenessStatsAvgMin) ||
+		!(stats.AvgEffectiveness <= EffectivenessStatsAvgMax) ||
+		stats.LowEffectivenessCount > EffectivenessStatsLowMax ||
+		stats.HighImpactCount > EffectivenessStatsHighMax {{
+		return EffectivenessStats{{}}, ErrMalformedEnvelope
+	}}
+	return stats, nil
 }}
 
 // PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.

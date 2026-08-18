@@ -127,6 +127,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .set_effectiveness = db2_memory_health_set_effectiveness,
        .retention_delete = db2_memory_health_delete_by_sensitivity,
        .demote_effectiveness = db2_memory_health_demote_low_effectiveness,
+       .effectiveness_stats = db2_memory_health_effectiveness_stats,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -362,6 +363,34 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_effectiveness_demote_reply_encode((uint32_t)demoted_count, response_body,
                                                          response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_effectiveness_stats_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->effectiveness_stats)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         double average = 0.0;
+         int low_effectiveness = 0;
+         int high_impact = 0;
+         if (backend->effectiveness_stats(AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD, &average,
+                                          &low_effectiveness, &high_impact) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (low_effectiveness < 0 ||
+             low_effectiveness > (int)AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX || high_impact < 0 ||
+             high_impact > (int)AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         aimee_db2_effectiveness_stats_t stats = {
+             .avg_effectiveness = average,
+             .low_effectiveness_count = (uint32_t)low_effectiveness,
+             .high_impact_count = (uint32_t)high_impact,
+         };
+         if (aimee_db2_effectiveness_stats_reply_encode(&stats, response_body, response_capacity,
+                                                        response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

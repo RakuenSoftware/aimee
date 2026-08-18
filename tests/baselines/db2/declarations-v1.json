@@ -16454,9 +16454,15 @@
           "line": 41
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_stats operation returns the aggregate effectiveness summary under the fixed host low-effectiveness threshold while DB2 owns the canonical relational memory corpus."
+      },
       "signature": "int db2_memory_health_effectiveness_stats ( double low_threshold , double * avg_effectiveness , int * low_effectiveness , int * high_impact )",
       "signature_sha256": "0abdaf5a98171ba75b9c8b6bd65670f7737843d0ef54d02fc459c831aa81a2ff",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_effectiveness_stats"
     },
     {
@@ -25692,15 +25698,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "cfdd877e0c8e22283c5ae0a5daa3a4f8ce8dd2898875b58de031ddfe472e3453",
+  "fingerprint": "030156f4c7105e5d8024d3551c0b6094cdf7792d5612c8dd279977b1580d94da",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 680,
+    "audit_pending": 679,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 278
+    "reviewed": 279
   }
 }

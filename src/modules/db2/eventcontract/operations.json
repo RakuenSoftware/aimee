@@ -607,6 +607,34 @@
         "encoded_size_error": 24,
         "field": {"name": "demoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
       }
+    },
+    {
+      "family": "memory",
+      "id": 12,
+      "name": "effectiveness_stats",
+      "wire_format": "db2-envelope-f64-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Aggregate effectiveness over the canonical relational memory corpus is DB2 authority and does not depend on portable ANN state.",
+      "c_symbols": ["db2_memory_health_effectiveness_stats"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"low_threshold_binary64_bits": 4599075939470750515}
+      },
+      "reply": {
+        "encoded_size_ok": 40,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "avg_effectiveness", "type": "f64", "encoding": "ieee754-binary64-le",
+           "minimum_binary64_bits": 0, "maximum_binary64_bits": 4607182418800017408},
+          {"name": "low_effectiveness_count", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "high_impact_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        ]
+      }
     }
   ]
 }

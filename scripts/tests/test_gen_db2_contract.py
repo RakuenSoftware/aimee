@@ -22,6 +22,13 @@ generator = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(generator)
 
 
+def _first_memory_index(catalog: dict[str, object]) -> int:
+    """Position of the first memory operation, so family-boundary mutations stay
+    anchored as later operations are appended to the catalog."""
+    return next(index for index, operation in enumerate(catalog["operations"])
+                if operation["family"] == "memory")
+
+
 class ContractTests(unittest.TestCase):
     def catalog(self) -> dict[str, object]:
         return json.loads((REPO_ROOT / generator.CATALOG).read_text(encoding="utf-8"))
@@ -347,6 +354,29 @@ class ContractTests(unittest.TestCase):
              "demoted_count_too_large", "short", "long"],
         )
 
+    def test_effectiveness_stats_vectors_cover_fixed_threshold_summary(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][21]
+        self.assertEqual(operation["name"], "effectiveness_stats")
+        self.assertEqual(operation["request"]["low_threshold_bits"], 0x3fd3333333333333)
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["avg_effectiveness_bits"], row["low_effectiveness_count"],
+              row["high_impact_count"])
+             for row in operation["reply"]["positive"]],
+            [(0, 0x3fe0000000000000, 3, 1)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "average_above_maximum", "average_negative", "average_not_a_number",
+             "low_effectiveness_count_too_large", "high_impact_count_too_large",
+             "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -535,7 +565,7 @@ class ContractTests(unittest.TestCase):
             "operation-duplicate",
         )
         self.assert_rule(
-            lambda value: value["operations"].insert(-11, {
+            lambda value: value["operations"].insert(_first_memory_index(value), {
                 **copy.deepcopy(value["operations"][0]),
                 "id": 11,
                 "name": "health_second",
@@ -753,6 +783,29 @@ class ContractTests(unittest.TestCase):
             (lambda value: value["operations"][20]["reply"]["field"].__setitem__(
                 "maximum", 0xffffffff), "effectiveness-demote-reply"),
             (lambda value: value["operations"][20].__setitem__("transaction", "none"),
+             "operation-semantics"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_effectiveness_stats_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][21].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][21].__setitem__("results", ["ok", "invalid_state"]),
+             "operation-results"),
+            (lambda value: value["operations"][21]["request"]["policy"].__setitem__(
+                "low_threshold_binary64_bits", 0), "effectiveness-stats-request"),
+            (lambda value: value["operations"][21]["reply"]["fields"][0].__setitem__(
+                "maximum_binary64_bits", 0x7ff8000000000000), "effectiveness-stats-reply"),
+            (lambda value: value["operations"][21]["reply"]["fields"][1].__setitem__(
+                "maximum", 0xffffffff), "effectiveness-stats-reply"),
+            (lambda value: value["operations"][21]["reply"]["fields"][2].__setitem__(
+                "maximum", 0xffffffff), "effectiveness-stats-reply"),
+            (lambda value: value["operations"][21]["reply"]["fields"].pop(),
+             "effectiveness-stats-reply"),
+            (lambda value: value["operations"][21].__setitem__("transaction", "single-statement"),
              "operation-semantics"),
         )
         for mutate, rule in cases:

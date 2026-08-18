@@ -42,6 +42,8 @@ typedef struct
    int (*set_effectiveness)(int64_t memory_id, double value);
    int (*retention_delete)(const char *sensitivity, int days);
    int (*demote_effectiveness)(double threshold);
+   int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
+                              int *low_effectiveness, int *high_impact);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -88,6 +90,7 @@ static int clear_effectiveness_calls;
 static int set_effectiveness_calls;
 static int retention_delete_calls;
 static int demote_effectiveness_calls;
+static int effectiveness_stats_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -303,6 +306,35 @@ int db2_memory_health_demote_low_effectiveness(double threshold)
 static int demote_effectiveness(double threshold)
 {
    return demote_effectiveness_impl(threshold);
+}
+
+static int effectiveness_stats_impl(double low_threshold, double *avg_effectiveness,
+                                    int *low_effectiveness, int *high_impact)
+{
+   effectiveness_stats_calls++;
+   if (low_threshold != AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD)
+      return -1;
+   if (avg_effectiveness)
+      *avg_effectiveness = 0.5;
+   if (low_effectiveness)
+      *low_effectiveness = 3;
+   if (high_impact)
+      *high_impact = 1;
+   return 0;
+}
+
+int db2_memory_health_effectiveness_stats(double low_threshold, double *avg_effectiveness,
+                                          int *low_effectiveness, int *high_impact)
+{
+   return effectiveness_stats_impl(low_threshold, avg_effectiveness, low_effectiveness,
+                                   high_impact);
+}
+
+static int effectiveness_stats(double low_threshold, double *avg_effectiveness,
+                               int *low_effectiveness, int *high_impact)
+{
+   return effectiveness_stats_impl(low_threshold, avg_effectiveness, low_effectiveness,
+                                   high_impact);
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -571,6 +603,7 @@ int main(void)
        .set_effectiveness = set_effectiveness,
        .retention_delete = retention_delete,
        .demote_effectiveness = demote_effectiveness,
+       .effectiveness_stats = effectiveness_stats,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -676,6 +709,12 @@ int main(void)
    assert(aimee_db2_effectiveness_demote_call(call_client, &client, 7030, 0, &demoted_count, NULL,
                                               NULL) == AIMEE_MODULE_CALL_OK);
    assert(demoted_count == 2 && demote_effectiveness_calls == 1);
+
+   aimee_db2_effectiveness_stats_t stats = {0};
+   assert(aimee_db2_effectiveness_stats_call(call_client, &client, 7031, 0, &stats, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(stats.avg_effectiveness == 0.5 && stats.low_effectiveness_count == 3 &&
+          stats.high_impact_count == 1 && effectiveness_stats_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -22,6 +22,8 @@ typedef struct
    int (*set_effectiveness)(int64_t memory_id, double value);
    int (*retention_delete)(const char *sensitivity, int days);
    int (*demote_effectiveness)(double threshold);
+   int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
+                              int *low_effectiveness, int *high_impact);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

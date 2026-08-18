@@ -46,6 +46,12 @@ static int retention_delete_calls;
 static int demote_effectiveness_value;
 static int demote_effectiveness_calls;
 static double demote_effectiveness_threshold;
+static int effectiveness_stats_result;
+static int effectiveness_stats_calls;
+static double effectiveness_stats_low_threshold;
+static double effectiveness_stats_average_value;
+static int effectiveness_stats_low_value;
+static int effectiveness_stats_high_value;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -82,6 +88,7 @@ static int transport_expect_key_exists_in_tier_pair;
 static int transport_expect_effectiveness_update;
 static int transport_expect_retention_enforce;
 static int transport_expect_effectiveness_demote;
+static int transport_expect_effectiveness_stats;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -326,6 +333,34 @@ static int demote_effectiveness(double threshold)
    return demote_effectiveness_value;
 }
 
+static int effectiveness_stats_impl(double low_threshold, double *avg_effectiveness,
+                                    int *low_effectiveness, int *high_impact)
+{
+   effectiveness_stats_calls++;
+   effectiveness_stats_low_threshold = low_threshold;
+   if (avg_effectiveness)
+      *avg_effectiveness = effectiveness_stats_average_value;
+   if (low_effectiveness)
+      *low_effectiveness = effectiveness_stats_low_value;
+   if (high_impact)
+      *high_impact = effectiveness_stats_high_value;
+   return effectiveness_stats_result;
+}
+
+int db2_memory_health_effectiveness_stats(double low_threshold, double *avg_effectiveness,
+                                          int *low_effectiveness, int *high_impact)
+{
+   return effectiveness_stats_impl(low_threshold, avg_effectiveness, low_effectiveness,
+                                   high_impact);
+}
+
+static int effectiveness_stats(double low_threshold, double *avg_effectiveness,
+                               int *low_effectiveness, int *high_impact)
+{
+   return effectiveness_stats_impl(low_threshold, avg_effectiveness, low_effectiveness,
+                                   high_impact);
+}
+
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
                     long *stuck, long *poisoned)
 {
@@ -492,6 +527,12 @@ static void reset(void)
    demote_effectiveness_value = 2;
    demote_effectiveness_calls = 0;
    demote_effectiveness_threshold = 0.0;
+   effectiveness_stats_result = 0;
+   effectiveness_stats_calls = 0;
+   effectiveness_stats_low_threshold = 0.0;
+   effectiveness_stats_average_value = 0.5;
+   effectiveness_stats_low_value = 3;
+   effectiveness_stats_high_value = 1;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -525,6 +566,7 @@ static void reset(void)
    transport_expect_effectiveness_update = 0;
    transport_expect_retention_enforce = 0;
    transport_expect_effectiveness_demote = 0;
+   transport_expect_effectiveness_stats = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -545,7 +587,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_effectiveness_demote      ? AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE
+       transport_expect_effectiveness_stats       ? AIMEE_DB2_EVENT_EFFECTIVENESS_STATS
+       : transport_expect_effectiveness_demote    ? AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE
        : transport_expect_retention_enforce       ? AIMEE_DB2_EVENT_RETENTION_ENFORCE
        : transport_expect_effectiveness_update    ? AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE
        : transport_expect_key_exists_in_tier_pair ? AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR
@@ -567,7 +610,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_effectiveness_demote      ? AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE
+       transport_expect_effectiveness_stats       ? AIMEE_DB2_STAGE_EFFECTIVENESS_STATS
+       : transport_expect_effectiveness_demote    ? AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE
        : transport_expect_retention_enforce       ? AIMEE_DB2_STAGE_RETENTION_ENFORCE
        : transport_expect_effectiveness_update    ? AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE
        : transport_expect_key_exists_in_tier_pair ? AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR
@@ -592,7 +636,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_effectiveness_demote)
+   if (transport_expect_effectiveness_stats)
+      assert(aimee_db2_effectiveness_stats_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_effectiveness_demote)
       assert(aimee_db2_effectiveness_demote_request_decode(request_body, request_len) == 0);
    else if (transport_expect_retention_enforce)
       assert(aimee_db2_retention_enforce_request_decode(request_body, request_len) == 0);
@@ -1217,6 +1263,66 @@ static void test_effectiveness_demote_wire(void)
    assert(aimee_db2_effectiveness_demote_reply_encode(AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX + 1u,
                                                       reply, sizeof(reply), &reply_len) == -1);
    assert(reply_len == 0);
+}
+
+static void test_effectiveness_stats_wire(void)
+{
+   uint64_t threshold_bits = 0;
+   double threshold = AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD;
+   memcpy(&threshold_bits, &threshold, sizeof(threshold_bits));
+   assert(threshold_bits == 0x3fd3333333333333ULL);
+   uint8_t request[AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN] = {0};
+   assert(aimee_db2_effectiveness_stats_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_effectiveness_stats_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12u, 1u);
+   assert(aimee_db2_effectiveness_stats_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99;
+   aimee_db2_effectiveness_stats_t stats = {
+       .avg_effectiveness = 0.5, .low_effectiveness_count = 3, .high_impact_count = 1};
+   aimee_db2_effectiveness_stats_t decoded = {0};
+   assert(aimee_db2_effectiveness_stats_reply_encode(&stats, reply, sizeof(reply), &reply_len) ==
+          0);
+   assert(reply_len == AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN);
+   assert(aimee_db2_effectiveness_stats_reply_decode(reply, reply_len, &decoded) == 0 &&
+          decoded.avg_effectiveness == 0.5 && decoded.low_effectiveness_count == 3 &&
+          decoded.high_impact_count == 1);
+
+   /* The average is a probability: both bounds hold, and NaN is rejected. */
+   aimee_db2_effectiveness_stats_t bounds = stats;
+   bounds.avg_effectiveness = 0.0;
+   assert(aimee_db2_effectiveness_stats_reply_encode(&bounds, reply, sizeof(reply), &reply_len) ==
+          0);
+   bounds.avg_effectiveness = 1.0;
+   assert(aimee_db2_effectiveness_stats_reply_encode(&bounds, reply, sizeof(reply), &reply_len) ==
+          0);
+   bounds.avg_effectiveness = -0.5;
+   assert(aimee_db2_effectiveness_stats_reply_encode(&bounds, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(reply_len == 0);
+   bounds.avg_effectiveness = 1.5;
+   assert(aimee_db2_effectiveness_stats_reply_encode(&bounds, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(reply_len == 0);
+
+   aimee_db2_effectiveness_stats_t overflow = stats;
+   overflow.low_effectiveness_count = AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX + 1u;
+   assert(aimee_db2_effectiveness_stats_reply_encode(&overflow, reply, sizeof(reply), &reply_len) ==
+          -1);
+   overflow = stats;
+   overflow.high_impact_count = AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX + 1u;
+   assert(aimee_db2_effectiveness_stats_reply_encode(&overflow, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(reply_len == 0);
+
+   /* A NaN average on the wire must not survive decoding. */
+   assert(aimee_db2_effectiveness_stats_reply_encode(&stats, reply, sizeof(reply), &reply_len) ==
+          0);
+   aimee_db2_put_u64(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 0x7ff8000000000000ULL);
+   assert(aimee_db2_effectiveness_stats_reply_decode(reply, reply_len, &decoded) == -1);
+   aimee_db2_put_u64(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 0x3ff0000000000001ULL);
+   assert(aimee_db2_effectiveness_stats_reply_decode(reply, reply_len, &decoded) == -1);
 }
 
 static void test_pool_status_wire(void)
@@ -1964,6 +2070,52 @@ static void test_effectiveness_demote_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_effectiveness_stats_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.effectiveness_stats = effectiveness_stats};
+   uint8_t request[AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_db2_effectiveness_stats_t decoded = {0};
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_EFFECTIVENESS_STATS};
+   assert(aimee_db2_effectiveness_stats_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(effectiveness_stats_calls == 1 &&
+          effectiveness_stats_low_threshold == AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD);
+   assert(aimee_db2_effectiveness_stats_reply_decode(response, response_len, &decoded) == 0 &&
+          decoded.avg_effectiveness == 0.5 && decoded.low_effectiveness_count == 3 &&
+          decoded.high_impact_count == 1);
+
+   effectiveness_stats_result = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   /* Counts outside the declared bound never reach the wire. */
+   effectiveness_stats_result = 0;
+   effectiveness_stats_low_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   effectiveness_stats_low_value = 3;
+   effectiveness_stats_high_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   effectiveness_stats_high_value = 1;
+
+   /* An average outside the declared probability range is refused, not truncated. */
+   effectiveness_stats_average_value = 1.5;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   effectiveness_stats_average_value = 0.5;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -2479,6 +2631,27 @@ static void test_effectiveness_demote_typed_client(void)
    assert(demoted_count == 2 && transport_calls == 1);
 }
 
+static void test_effectiveness_stats_typed_client(void)
+{
+   reset();
+   transport_expect_effectiveness_stats = 1;
+   aimee_db2_effectiveness_stats_t stats = {
+       .avg_effectiveness = 0.5, .low_effectiveness_count = 3, .high_impact_count = 1};
+   aimee_db2_effectiveness_stats_t received = {
+       .avg_effectiveness = 9.0, .low_effectiveness_count = 99, .high_impact_count = 99};
+   assert(aimee_db2_effectiveness_stats_call(NULL, NULL, 77, 88, &received, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(received.avg_effectiveness == 0.0 && received.low_effectiveness_count == 0 &&
+          received.high_impact_count == 0);
+   assert(aimee_db2_effectiveness_stats_reply_encode(&stats, transport_response,
+                                                     sizeof(transport_response),
+                                                     &transport_response_len) == 0);
+   assert(aimee_db2_effectiveness_stats_call(transport, (void *)0x1234, 77, 88, &received, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(received.avg_effectiveness == 0.5 && received.low_effectiveness_count == 3 &&
+          received.high_impact_count == 1 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -2661,6 +2834,7 @@ int main(void)
    test_effectiveness_update_wire();
    test_retention_enforce_wire();
    test_effectiveness_demote_wire();
+   test_effectiveness_stats_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -2682,6 +2856,7 @@ int main(void)
    test_effectiveness_update_handler();
    test_retention_enforce_handler();
    test_effectiveness_demote_handler();
+   test_effectiveness_stats_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -2703,6 +2878,7 @@ int main(void)
    test_effectiveness_update_typed_client();
    test_retention_enforce_typed_client();
    test_effectiveness_demote_typed_client();
+   test_effectiveness_stats_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

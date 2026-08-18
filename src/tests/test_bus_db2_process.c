@@ -248,6 +248,12 @@ int main(int argc, char **argv)
                                               NULL) == AIMEE_MODULE_CALL_OK);
    assert(demoted_count == 0);
 
+   aimee_db2_effectiveness_stats_t stats = {0};
+   assert(aimee_db2_effectiveness_stats_call(call_client, &client, 9033, 0, &stats, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(stats.avg_effectiveness == 0.0 && stats.low_effectiveness_count == 0 &&
+          stats.high_impact_count == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
