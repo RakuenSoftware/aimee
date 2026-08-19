@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "31db053255446cbb210b72fbb3ddf5a5973e4e9581d0d4fc421d491c6b9ac45a"
+const ContractSHA256 = "0d49e70d19d8cca786a507858f82119cd94be0df050d9b04bd460d58a67a4b39"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -290,6 +290,11 @@ const StageSetCognifiedKind = FamilyMemory
 const OperationSetCognifiedKind uint32 = 36
 const SetCognifiedKindMemoryIDMax uint64 = 9223372036854775807
 const SetCognifiedKindKindMax = 15
+const EventSetSourceSession = EventMemory
+const StageSetSourceSession = FamilyMemory
+const OperationSetSourceSession uint32 = 37
+const SetSourceSessionMemoryIDMax uint64 = 9223372036854775807
+const SetSourceSessionSessionMax = 127
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1386,6 +1391,69 @@ func EncodeSetCognifiedKindReply() ([]byte, error) {
 func DecodeSetCognifiedKindReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationSetCognifiedKind ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeSetSourceSessionRequest emits the memory and its session. An empty
+// session is accepted and clears the column.
+func EncodeSetSourceSessionRequest(memoryID uint64, sessionID string) ([]byte, error) {
+	if memoryID == 0 || memoryID > SetSourceSessionMemoryIDMax ||
+		len(sessionID) > SetSourceSessionSessionMax || hasNUL(sessionID) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 12 + len(sessionID)
+	header, err := EncodeRequestHeader(OperationSetSourceSession, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(sessionID)))
+	copy(payload[12:], sessionID)
+	return request, nil
+}
+
+// DecodeSetSourceSessionRequest validates the envelope, memory, and session.
+func DecodeSetSourceSessionRequest(request []byte) (uint64, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSetSourceSession || header.Flags != 0 ||
+		header.PayloadLen < 12 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	sessionLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > SetSourceSessionMemoryIDMax ||
+		sessionLen > uint32(SetSourceSessionSessionMax) ||
+		12+sessionLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	sessionID := string(payload[12 : 12+sessionLen])
+	if hasNUL(sessionID) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return memoryID, sessionID, nil
+}
+
+// EncodeSetSourceSessionReply acknowledges the write without a payload.
+func EncodeSetSourceSessionReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationSetSourceSession, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeSetSourceSessionReply validates it and refuses any payload.
+func DecodeSetSourceSessionReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSetSourceSession ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != int(EnvelopeHeaderLen) {
 		return ErrMalformedEnvelope

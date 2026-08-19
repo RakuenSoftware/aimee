@@ -1836,6 +1836,14 @@
       "reason": "The typed memory.set_cognified_kind operation replaces the cognified-kind write, bounded to the memory record's own kind width. The backend refuses an empty kind and returns void, so the wire refuses it too and acknowledges rather than inventing a count."
     },
     {
+      "symbol": "db2_memory_set_source_session",
+      "signature_sha256": "091af59361b0b17f8f520fbec34d57184b49c1012b850b4f836a19fe052df30e",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.set_source_session operation replaces the session attribution write, bounded to the memory record's own session width. The backend accepts an empty session, which clears the column, so the wire carries a zero minimum rather than borrowing the non-empty minimum of the neighbouring setters."
+    },
+    {
       "symbol": "db2_memory_set_valid_from",
       "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
       "disposition": "private-db2",

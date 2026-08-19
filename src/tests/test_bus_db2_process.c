@@ -485,6 +485,15 @@ int main(int argc, char **argv)
    assert(aimee_db2_set_cognified_kind_call(call_client, &client, 9079, 0, 42u, "", NULL, NULL) ==
           AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 does not exist, so the update matches no row and the void
+    * backend swallows it. The clear is exercised against the real process too,
+    * because an empty session is a request this operation must accept rather
+    * than refuse -- the boundary between the two setters sharing this format. */
+   assert(aimee_db2_set_source_session_call(call_client, &client, 9080, 0, 42u, "sess-1", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_set_source_session_call(call_client, &client, 9081, 0, 42u, "", NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "31db053255446cbb210b72fbb3ddf5a5973e4e9581d0d4fc421d491c6b9ac45a"
+#define AIMEE_DB2_CONTRACT_SHA256 "0d49e70d19d8cca786a507858f82119cd94be0df050d9b04bd460d58a67a4b39"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -437,6 +437,15 @@
 #define AIMEE_DB2_SET_COGNIFIED_KIND_ERROR_LEN            24u
 #define AIMEE_DB2_SET_COGNIFIED_KIND_MEMORY_ID_MAX        9223372036854775807ull
 #define AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX             15u
+#define AIMEE_DB2_EVENT_SET_SOURCE_SESSION                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SET_SOURCE_SESSION                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SET_SOURCE_SESSION            37u
+#define AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MIN_LEN      36u
+#define AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN      163u
+#define AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN         24u
+#define AIMEE_DB2_SET_SOURCE_SESSION_ERROR_LEN            24u
+#define AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX        9223372036854775807ull
+#define AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX          127u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2351,6 +2360,92 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}
+
+static inline int aimee_db2_set_source_session_request_encode(uint64_t memory_id,
+                                                             const char *session_id,
+                                                             uint8_t *output, size_t capacity,
+                                                             uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!session_id || !output || !output_len)
+      return -1;
+   size_t session_len = 0u;
+   while (session_len <= AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX && session_id[session_len])
+      ++session_len;
+   size_t payload_len = 12u + session_len;
+   /* No lower bound on the session: an empty value clears the column, which
+    * is a real operation rather than a malformed request. */
+   if (memory_id == 0u || memory_id > AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX ||
+       session_len > AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_SET_SOURCE_SESSION, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)session_len);
+   if (session_len != 0u)
+      memcpy(payload + 12u, session_id, session_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_set_source_session_request_decode(const uint8_t *input,
+                                                              size_t input_len,
+                                                              uint64_t *memory_id,
+                                                              char *session_id,
+                                                              size_t session_capacity)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (session_id && session_capacity)
+      session_id[0] = '\0';
+   if (!memory_id || !session_id ||
+       session_capacity < (size_t)AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_SET_SOURCE_SESSION || header.payload_len < 12u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t session_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u ||
+       decoded_memory_id > AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX ||
+       session_len > AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX ||
+       (uint32_t)12u + session_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < session_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   if (session_len != 0u)
+      memcpy(session_id, payload + 12u, session_len);
+   session_id[session_len] = '\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}
+
+static inline int aimee_db2_set_source_session_reply_encode(uint8_t *output, size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_SET_SOURCE_SESSION,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}
+
+static inline int aimee_db2_set_source_session_reply_decode(const uint8_t *input,
+                                                            size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_SET_SOURCE_SESSION &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }
 
 static inline int aimee_db2_set_cognified_kind_request_encode(uint64_t memory_id,

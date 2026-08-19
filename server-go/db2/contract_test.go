@@ -40,6 +40,8 @@ type wireBaseline struct {
 			SourceSession              string   `json:"source_session"`
 			Key                        string   `json:"key"`
 			Kind                       string   `json:"kind"`
+			SessionID                  string   `json:"session_id"`
+			Cleared                    string   `json:"cleared"`
 			TierA                      string   `json:"tier_a"`
 			TierB                      string   `json:"tier_b"`
 			MemoryID                   uint64   `json:"memory_id"`
@@ -229,7 +231,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 46 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 47 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -274,7 +276,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[42].Name != "update_content" ||
 		baseline.Operations[43].Name != "decay_confidence" ||
 		baseline.Operations[44].Name != "workspace_tag_insert" ||
-		baseline.Operations[45].Name != "set_cognified_kind" {
+		baseline.Operations[45].Name != "set_cognified_kind" ||
+		baseline.Operations[46].Name != "set_source_session" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -471,6 +474,56 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestSetSourceSessionMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[46]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeSetSourceSessionRequest(operation.Request.MemoryID, operation.Request.SessionID)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, sessionID, err := DecodeSetSourceSessionRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID || sessionID != operation.Request.SessionID {
+		t.Fatalf("positive request = (%d, %q, %v)", memoryID, sessionID, err)
+	}
+	// The clear is a positive vector, not a negative one: an empty session is
+	// a real request that unsets the column.
+	wantCleared := decodeHex(t, operation.Request.Cleared)
+	gotCleared, err := EncodeSetSourceSessionRequest(operation.Request.MemoryID, "")
+	if err != nil || string(gotCleared) != string(wantCleared) {
+		t.Fatalf("cleared request = (%x, %v), want %x", gotCleared, err, wantCleared)
+	}
+	memoryID, sessionID, err = DecodeSetSourceSessionRequest(wantCleared)
+	if err != nil || memoryID != operation.Request.MemoryID || sessionID != "" {
+		t.Fatalf("cleared request decode = (%d, %q, %v)", memoryID, sessionID, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeSetSourceSessionRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeSetSourceSessionReply()
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		if err := DecodeSetSourceSessionReply(got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeSetSourceSessionReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	atBound := strings.Repeat("s", SetSourceSessionSessionMax)
+	if _, err := EncodeSetSourceSessionRequest(42, atBound); err != nil {
+		t.Fatalf("session at the bound refused: %v", err)
+	}
+	if _, err := EncodeSetSourceSessionRequest(42, atBound+"s"); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("session past the bound encoded: %v", err)
 	}
 }
 

@@ -18461,9 +18461,15 @@
           "line": 192
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.set_source_session operation replaces the session attribution write, bounded to the memory record's own session width. The backend accepts an empty session, which clears the column, so the wire carries a zero minimum rather than borrowing the non-empty minimum of the neighbouring setters."
+      },
       "signature": "void db2_memory_set_source_session ( int64_t memory_id , const char * session_id )",
       "signature_sha256": "091af59361b0b17f8f520fbec34d57184b49c1012b850b4f836a19fe052df30e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_set_source_session"
     },
     {
@@ -25932,15 +25938,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8b6fff79133738d0aeb86d611eb877ba5aab039e60ff682580a887155464c847",
+  "fingerprint": "e5582bdb88da27a9ea7b1792b3297e4e3e328817a07d7a5115ac2e437af7e064",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 640,
+    "audit_pending": 639,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 318
+    "reviewed": 319
   }
 }

@@ -81,6 +81,7 @@ typedef struct
    void (*decay_confidence)(int64_t memory_id);
    void (*workspace_tag_insert)(int64_t memory_id, const char *workspace);
    void (*set_cognified_kind)(int64_t memory_id, const char *kind);
+   void (*set_source_session)(int64_t memory_id, const char *session_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -142,6 +143,8 @@ static int workspace_tag_insert_calls;
 static char workspace_tag_insert_last[512];
 static int cognified_kind_calls;
 static char cognified_kind_last[32];
+static int source_session_calls;
+static char source_session_last[160];
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -880,6 +883,19 @@ static void set_cognified_kind(int64_t memory_id, const char *kind)
    snprintf(cognified_kind_last, sizeof(cognified_kind_last), "%s", kind);
 }
 
+void db2_memory_set_source_session(int64_t memory_id, const char *session_id)
+{
+   (void)memory_id;
+   (void)session_id;
+}
+
+static void set_source_session(int64_t memory_id, const char *session_id)
+{
+   (void)memory_id;
+   source_session_calls++;
+   snprintf(source_session_last, sizeof(source_session_last), "%s", session_id);
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1215,6 +1231,7 @@ int main(void)
        .decay_confidence = decay_confidence,
        .workspace_tag_insert = workspace_tag_insert,
        .set_cognified_kind = set_cognified_kind,
+       .set_source_session = set_source_session,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1482,6 +1499,14 @@ int main(void)
    assert(aimee_db2_set_cognified_kind_call(call_client, &client, 7065, 0, 42u, "preference", NULL,
                                             NULL) == AIMEE_MODULE_CALL_OK);
    assert(cognified_kind_calls == 1 && strcmp(cognified_kind_last, "preference") == 0);
+
+   assert(aimee_db2_set_source_session_call(call_client, &client, 7066, 0, 42u, "sess-1", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(source_session_calls == 1 && strcmp(source_session_last, "sess-1") == 0);
+   /* Clearing is a real call, and the empty value must reach the backend. */
+   assert(aimee_db2_set_source_session_call(call_client, &client, 7067, 0, 42u, "", NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(source_session_calls == 2 && source_session_last[0] == '\0');
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

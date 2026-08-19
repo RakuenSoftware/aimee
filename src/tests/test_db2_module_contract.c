@@ -58,6 +58,8 @@ static int workspace_tag_insert_calls;
 static char workspace_tag_insert_last[512];
 static int cognified_kind_calls;
 static char cognified_kind_last[32];
+static int source_session_calls;
+static char source_session_last[160];
 static char update_content_last[2048];
 static char scope_type_last[64];
 static int64_t link_delete_last;
@@ -473,6 +475,19 @@ static void set_cognified_kind(int64_t memory_id, const char *kind)
    (void)memory_id;
    cognified_kind_calls++;
    snprintf(cognified_kind_last, sizeof(cognified_kind_last), "%s", kind);
+}
+
+void db2_memory_set_source_session(int64_t memory_id, const char *session_id)
+{
+   (void)memory_id;
+   (void)session_id;
+}
+
+static void set_source_session(int64_t memory_id, const char *session_id)
+{
+   (void)memory_id;
+   source_session_calls++;
+   snprintf(source_session_last, sizeof(source_session_last), "%s", session_id);
 }
 
 int64_t db2_memory_count(void)
@@ -1154,6 +1169,8 @@ static void reset(void)
    workspace_tag_insert_last[0] = '\0';
    cognified_kind_calls = 0;
    cognified_kind_last[0] = '\0';
+   source_session_calls = 0;
+   source_session_last[0] = '\0';
    update_content_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
@@ -2444,6 +2461,50 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_set_source_session_wire(void)
+{
+   uint8_t request[AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN];
+   char session_id[AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX + 1];
+   uint32_t request_len = 99;
+   uint64_t memory_id = 99;
+   assert(aimee_db2_set_source_session_request_encode(42u, "sess-2026-08-19", request,
+                                                      sizeof(request), &request_len) == 0);
+   assert(aimee_db2_set_source_session_request_decode(request, request_len, &memory_id, session_id,
+                                                      sizeof(session_id)) == 0);
+   assert(memory_id == 42 && strcmp(session_id, "sess-2026-08-19") == 0);
+
+   /* THE DIFFERENCE FROM set_cognified_kind, WHICH SHARES THIS WIRE FORMAT.
+    * An empty session is a real request: it clears the column. It must encode,
+    * decode, and arrive as an empty string rather than being refused. */
+   assert(aimee_db2_set_source_session_request_encode(42u, "", request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(request_len == AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MIN_LEN);
+   assert(aimee_db2_set_source_session_request_decode(request, request_len, &memory_id, session_id,
+                                                      sizeof(session_id)) == 0);
+   assert(memory_id == 42 && session_id[0] == '\0');
+
+   assert(aimee_db2_set_source_session_request_encode(0u, "sess-1", request, sizeof(request),
+                                                      &request_len) == -1);
+   char at_bound[AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX + 2];
+   memset(at_bound, 's', AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX);
+   at_bound[AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX] = '\0';
+   assert(aimee_db2_set_source_session_request_encode(42u, at_bound, request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(request_len == AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN);
+   at_bound[AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX] = 's';
+   at_bound[AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX + 1] = '\0';
+   assert(aimee_db2_set_source_session_request_encode(42u, at_bound, request, sizeof(request),
+                                                      &request_len) == -1);
+
+   uint8_t reply[AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN] = {0};
+   assert(aimee_db2_set_source_session_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_set_source_session_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_set_source_session_reply_encode(reply, sizeof(reply) - 1) == -1);
+   assert(aimee_db2_set_source_session_reply_encode(reply, sizeof(reply)) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_set_source_session_reply_decode(reply, sizeof(reply)) == -1);
 }
 
 static void test_set_cognified_kind_wire(void)
@@ -4212,6 +4273,37 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_set_source_session_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.set_source_session = set_source_session};
+   uint8_t request[AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_SET_SOURCE_SESSION};
+   assert(aimee_db2_set_source_session_request_encode(42u, "sess-1", request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(source_session_calls == 1 && strcmp(source_session_last, "sess-1") == 0);
+   assert(aimee_db2_set_source_session_reply_decode(response, response_len) == 0);
+
+   /* The clear must reach the backend as an empty string, not be dropped by
+    * the handler: dropping it would leave the old session in place while the
+    * caller was told the write succeeded. */
+   assert(aimee_db2_set_source_session_request_encode(42u, "", request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(source_session_calls == 2 && source_session_last[0] == '\0');
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_set_cognified_kind_handler(void)
 {
    reset();
@@ -5613,6 +5705,7 @@ int main(void)
    test_decay_confidence_wire();
    test_workspace_tag_insert_wire();
    test_set_cognified_kind_wire();
+   test_set_source_session_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5659,6 +5752,7 @@ int main(void)
    test_decay_confidence_handler();
    test_workspace_tag_insert_handler();
    test_set_cognified_kind_handler();
+   test_set_source_session_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

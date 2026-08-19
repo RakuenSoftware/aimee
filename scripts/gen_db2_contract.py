@@ -234,7 +234,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "update_content",
                                                                 "decay_confidence",
                                                                 "workspace_tag_insert",
-                                                                "set_cognified_kind") else
+                                                                "set_cognified_kind",
+                                                                "set_source_session") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1680,9 +1681,47 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != []):
                 fail("set-cognified-kind-reply",
                      "reply must acknowledge the write without a payload")
+        elif key == ("memory", 37) and name == "set_source_session" and \
+                operation["wire_format"] == "db2-envelope-u64-string-ack-v1":
+            if operation["c_symbols"] != ["db2_memory_set_source_session"]:
+                fail("operation-c-symbols",
+                     "set_source_session C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "set_source_session results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "set_source_session.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 2:
+                fail("set-source-session-request",
+                     "request must carry the memory and the session")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "set_source_session.request.fields[0]")
+            session_field = _keys(request_fields[1],
+                                  {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                  "set_source_session.request.fields[1]")
+            # Minimum zero, unlike set_cognified_kind on the same wire format:
+            # the backend accepts an empty session and that clears the column.
+            # Refusing it here would silently remove the ability to unset.
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 12 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 127 or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    session_field != {"name": "session_id", "type": "utf8",
+                                      "minimum_bytes": 0, "maximum_bytes": 127}):
+                fail("set-source-session-request",
+                     "request must name one positive memory and one clearable bounded session")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "set_source_session.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("set-source-session-reply",
+                     "reply must acknowledge the write without a payload")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 46 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 47 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1695,9 +1734,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
             "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
             "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
-            "workspace_tag_insert", "set_cognified_kind"]:
+            "workspace_tag_insert", "set_cognified_kind", "set_source_session"]:
         fail("unsupported-operation",
-             "the partial generator requires the forty-six supported operations exactly once")
+             "the partial generator requires the forty-seven supported operations exactly once")
     return catalog
 
 
@@ -1867,6 +1906,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     decay_confidence = catalog["operations"][43]
     workspace_tag_insert = catalog["operations"][44]
     set_cognified_kind = catalog["operations"][45]
+    set_source_session = catalog["operations"][46]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2122,6 +2162,18 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     set_cognified_kind_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(set_cognified_kind["id"]), 0, b"",
+    )
+    source_session_value = b"sess-2026-08-19"
+    set_source_session_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(set_source_session["id"]), 0,
+        _put_u64(42) + _put_u32(len(source_session_value)) + source_session_value,
+    )
+    set_source_session_cleared = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(set_source_session["id"]), 0,
+        _put_u64(42) + _put_u32(0),
+    )
+    set_source_session_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(set_source_session["id"]), 0, b"",
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -4350,6 +4402,55 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (set_cognified_kind_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": set_source_session["family"],
+            "id": set_source_session["id"],
+            "name": set_source_session["name"],
+            "request": {
+                "positive": set_source_session_request.hex(),
+                "memory_id": 42,
+                "session_id": source_session_value.decode("ascii"),
+                "cleared": set_source_session_cleared.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(set_source_session_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(set_source_session_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(set_source_session["id"]), 0,
+                               _put_u64(0) + _put_u32(len(source_session_value)) +
+                               source_session_value).hex()},
+                    {"mutation": "session_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(set_source_session["id"]), 0,
+                               _put_u64(42) + _put_u32(len(source_session_value) + 1) +
+                               source_session_value).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(set_source_session["id"]), 0,
+                               _put_u64(42) + _put_u32(len(source_session_value)) +
+                               source_session_value[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": set_source_session_request[:-1].hex()},
+                    {"mutation": "long", "hex": (set_source_session_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": set_source_session_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(set_source_session_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(set_source_session_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(set_source_session["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": set_source_session_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (set_source_session_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -4408,6 +4509,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     decay_confidence = catalog["operations"][43]
     workspace_tag_insert = catalog["operations"][44]
     set_cognified_kind = catalog["operations"][45]
+    set_source_session = catalog["operations"][46]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -5058,6 +5160,21 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{set_cognified_kind['request']['fields'][0]['maximum']}ull"),
         ("AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX",
          f"{set_cognified_kind['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_EVENT_SET_SOURCE_SESSION", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_SET_SOURCE_SESSION", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_SET_SOURCE_SESSION", f"{set_source_session['id']}u"),
+        ("AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MIN_LEN",
+         f"{set_source_session['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN",
+         f"{set_source_session['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN",
+         f"{set_source_session['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_SET_SOURCE_SESSION_ERROR_LEN",
+         f"{set_source_session['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX",
+         f"{set_source_session['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX",
+         f"{set_source_session['request']['fields'][1]['maximum_bytes']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -6998,6 +7115,92 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}}
+
+static inline int aimee_db2_set_source_session_request_encode(uint64_t memory_id,
+                                                             const char *session_id,
+                                                             uint8_t *output, size_t capacity,
+                                                             uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!session_id || !output || !output_len)
+      return -1;
+   size_t session_len = 0u;
+   while (session_len <= AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX && session_id[session_len])
+      ++session_len;
+   size_t payload_len = 12u + session_len;
+   /* No lower bound on the session: an empty value clears the column, which
+    * is a real operation rather than a malformed request. */
+   if (memory_id == 0u || memory_id > AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX ||
+       session_len > AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_SET_SOURCE_SESSION, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)session_len);
+   if (session_len != 0u)
+      memcpy(payload + 12u, session_id, session_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_set_source_session_request_decode(const uint8_t *input,
+                                                              size_t input_len,
+                                                              uint64_t *memory_id,
+                                                              char *session_id,
+                                                              size_t session_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (session_id && session_capacity)
+      session_id[0] = '\\0';
+   if (!memory_id || !session_id ||
+       session_capacity < (size_t)AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_SET_SOURCE_SESSION || header.payload_len < 12u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t session_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u ||
+       decoded_memory_id > AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX ||
+       session_len > AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX ||
+       (uint32_t)12u + session_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < session_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   if (session_len != 0u)
+      memcpy(session_id, payload + 12u, session_len);
+   session_id[session_len] = '\\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}}
+
+static inline int aimee_db2_set_source_session_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_SET_SOURCE_SESSION,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_set_source_session_reply_decode(const uint8_t *input,
+                                                            size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_SET_SOURCE_SESSION &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }}
 
 static inline int aimee_db2_set_cognified_kind_request_encode(uint64_t memory_id,
@@ -8951,6 +9154,11 @@ extern "C"
        uint64_t memory_id, const char *kind, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_set_source_session_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *session_id, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -10029,6 +10237,31 @@ aimee_db2_set_cognified_kind_call(aimee_db2_call_fn call, void *call_context, ui
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_set_source_session_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t memory_id, const char *session_id,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_set_source_session_request_encode(memory_id, session_id, request, sizeof(request),
+                                                   &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SET_SOURCE_SESSION, AIMEE_DB2_STAGE_SET_SOURCE_SESSION,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_set_source_session_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -10314,6 +10547,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     decay_confidence = catalog["operations"][43]
     workspace_tag_insert = catalog["operations"][44]
     set_cognified_kind = catalog["operations"][45]
+    set_source_session = catalog["operations"][46]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -10605,6 +10839,11 @@ const StageSetCognifiedKind = FamilyMemory
 const OperationSetCognifiedKind uint32 = {set_cognified_kind['id']}
 const SetCognifiedKindMemoryIDMax uint64 = {set_cognified_kind['request']['fields'][0]['maximum']}
 const SetCognifiedKindKindMax = {set_cognified_kind['request']['fields'][1]['maximum_bytes']}
+const EventSetSourceSession = EventMemory
+const StageSetSourceSession = FamilyMemory
+const OperationSetSourceSession uint32 = {set_source_session['id']}
+const SetSourceSessionMemoryIDMax uint64 = {set_source_session['request']['fields'][0]['maximum']}
+const SetSourceSessionSessionMax = {set_source_session['request']['fields'][1]['maximum_bytes']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -11699,6 +11938,69 @@ func EncodeSetCognifiedKindReply() ([]byte, error) {{
 func DecodeSetCognifiedKindReply(reply []byte) error {{
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationSetCognifiedKind ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeSetSourceSessionRequest emits the memory and its session. An empty
+// session is accepted and clears the column.
+func EncodeSetSourceSessionRequest(memoryID uint64, sessionID string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > SetSourceSessionMemoryIDMax ||
+		len(sessionID) > SetSourceSessionSessionMax || hasNUL(sessionID) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 12 + len(sessionID)
+	header, err := EncodeRequestHeader(OperationSetSourceSession, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(sessionID)))
+	copy(payload[12:], sessionID)
+	return request, nil
+}}
+
+// DecodeSetSourceSessionRequest validates the envelope, memory, and session.
+func DecodeSetSourceSessionRequest(request []byte) (uint64, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSetSourceSession || header.Flags != 0 ||
+		header.PayloadLen < 12 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	sessionLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > SetSourceSessionMemoryIDMax ||
+		sessionLen > uint32(SetSourceSessionSessionMax) ||
+		12+sessionLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	sessionID := string(payload[12 : 12+sessionLen])
+	if hasNUL(sessionID) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return memoryID, sessionID, nil
+}}
+
+// EncodeSetSourceSessionReply acknowledges the write without a payload.
+func EncodeSetSourceSessionReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationSetSourceSession, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeSetSourceSessionReply validates it and refuses any payload.
+func DecodeSetSourceSessionReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSetSourceSession ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != int(EnvelopeHeaderLen) {{
 		return ErrMalformedEnvelope
