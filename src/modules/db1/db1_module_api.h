@@ -570,6 +570,19 @@
 #define AIMEE_DB1_OP_MGMT_JWKS_GENERATION 2u
 #define AIMEE_DB1_OP_MGMT_JWKS_INSTALL    3u
 
+/* Family 18: management challenge nonces and the revocation high-water mark:
+ * issued once, consumed once, and the counter that stops a replayed status
+ * report rolling the server backwards. */
+
+#define AIMEE_DB1_EVENT_MGMT_NONCE 11794u
+#define AIMEE_DB1_STAGE_MGMT_NONCE 18u
+
+#define AIMEE_DB1_OP_MGMT_NONCE_CLEAR     1u
+#define AIMEE_DB1_OP_MGMT_NONCE_ISSUE     2u
+#define AIMEE_DB1_OP_MGMT_NONCE_CONSUME   3u
+#define AIMEE_DB1_OP_MGMT_STATUS_HWM_READ 4u
+#define AIMEE_DB1_OP_MGMT_STATUS_HWM_SET  5u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

@@ -43,6 +43,7 @@
 #include "remote_client_grant.h"
 #include "server_identity_jti.h"
 #include "mgmt_jwks_cache.h"
+#include "mgmt_nonce.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -84,6 +85,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_WORKFLOW,         AIMEE_DB1_EVENT_ROUNDTABLE,
     AIMEE_DB1_EVENT_IDENTITY,         AIMEE_DB1_EVENT_CHECKPOINTS,
     AIMEE_DB1_EVENT_JTI_REPLAY,       AIMEE_DB1_EVENT_MGMT_JWKS,
+    AIMEE_DB1_EVENT_MGMT_NONCE,
 };
 
 static pid_t g_module = -1;
@@ -1532,6 +1534,82 @@ static void test_a_digest_with_a_zero_byte_survives_the_wire(void)
    printf("  PASS: a digest with a zero byte survives the wire\n");
 }
 
+/* A challenge is spent once or it is not a challenge. The answers have to stay
+   apart too: a mismatch is an attacker presenting somebody else's nonce, an
+   expiry is a slow client, and a rollback is a replayed status report -- and
+   the caller does something different with each. */
+static void test_a_challenge_is_spent_once(void)
+{
+   const char *nonce = "0011223344556677889900aabbccddee"
+                       "ff0011223344556677889900aabbccdd";
+   db1_mgmt_nonce_issue_t issue;
+   memset(&issue, 0, sizeof issue);
+   snprintf(issue.nonce, sizeof issue.nonce, "%s", nonce);
+   snprintf(issue.peer_issuer, sizeof issue.peer_issuer, "%s", "CN=issuer");
+   snprintf(issue.peer_serial_norm, sizeof issue.peer_serial_norm, "%s", "0a0b0c");
+   snprintf(issue.peer_fingerprint, sizeof issue.peer_fingerprint, "%s", "fp");
+   snprintf(issue.channel_binding, sizeof issue.channel_binding, "%s", "cb");
+   snprintf(issue.target_server_id, sizeof issue.target_server_id, "%s", "srv-1");
+   snprintf(issue.purpose, sizeof issue.purpose, "%s", "management.health.v1");
+   issue.now = 1000;
+   must(db1_mgmt_nonce_issue(&issue) == DB1_MGMT_NONCE_OK, "issued a challenge");
+
+   db1_mgmt_nonce_consume_t use;
+   memset(&use, 0, sizeof use);
+   snprintf(use.nonce, sizeof use.nonce, "%s", nonce);
+   snprintf(use.peer_issuer, sizeof use.peer_issuer, "%s", "CN=issuer");
+   snprintf(use.peer_serial_norm, sizeof use.peer_serial_norm, "%s", "0a0b0c");
+   snprintf(use.peer_fingerprint, sizeof use.peer_fingerprint, "%s", "fp");
+   snprintf(use.channel_binding, sizeof use.channel_binding, "%s", "cb");
+   snprintf(use.target_server_id, sizeof use.target_server_id, "%s", "srv-1");
+   snprintf(use.purpose, sizeof use.purpose, "%s", "management.health.v1");
+   use.now = 1001;
+   use.revocation_generation = 5;
+   use.valid = 1;
+
+   must(db1_mgmt_nonce_consume(&use) == DB1_MGMT_NONCE_OK, "consumed it");
+   must(db1_mgmt_nonce_consume(&use) == DB1_MGMT_NONCE_NOT_FOUND,
+        "and the second attempt finds nothing, which is what spent-once means");
+
+   int64_t hwm = 0;
+   must(db1_mgmt_status_hwm_read(&hwm) == 0, "read the high-water mark");
+   must(hwm == 5, "which the consume advanced");
+
+   /* A replayed report carrying an OLDER generation must not roll it back. */
+   memset(&issue.nonce, 0, sizeof issue.nonce);
+   snprintf(issue.nonce, sizeof issue.nonce, "%s",
+            "aabbccddeeff00112233445566778899aabbccddeeff001122334455667788ff");
+   issue.now = 1002;
+   must(db1_mgmt_nonce_issue(&issue) == DB1_MGMT_NONCE_OK, "issued another");
+   snprintf(use.nonce, sizeof use.nonce, "%s",
+            "aabbccddeeff00112233445566778899aabbccddeeff001122334455667788ff");
+   use.now = 1003;
+   use.revocation_generation = 2;
+   must(db1_mgmt_nonce_consume(&use) == DB1_MGMT_NONCE_ROLLBACK,
+        "an older generation is a rollback, not an ok");
+   must(db1_mgmt_status_hwm_read(&hwm) == 0 && hwm == 5, "and the mark did not move");
+
+   /* A nonce presented by the wrong peer. */
+   issue.now = 1004;
+   snprintf(issue.nonce, sizeof issue.nonce, "%s",
+            "1122334455667788991122334455667788112233445566778899112233445566");
+   must(db1_mgmt_nonce_issue(&issue) == DB1_MGMT_NONCE_OK, "issued a third");
+   snprintf(use.nonce, sizeof use.nonce, "%s",
+            "1122334455667788991122334455667788112233445566778899112233445566");
+   snprintf(use.peer_fingerprint, sizeof use.peer_fingerprint, "%s", "someone-else");
+   use.now = 1005;
+   use.revocation_generation = 9;
+   must(db1_mgmt_nonce_consume(&use) == DB1_MGMT_NONCE_MISMATCH,
+        "the wrong peer is a mismatch, told apart from not-found");
+   must(db1_mgmt_status_hwm_read(&hwm) == 0 && hwm == 5, "and a mismatch advances nothing");
+
+   must(db1_mgmt_nonce_clear() == 0, "cleared the outstanding challenges");
+   must(db1_mgmt_status_hwm_read(&hwm) == 0 && hwm == 5,
+        "which keeps the generation: a restart drops challenges, not history");
+
+   printf("  PASS: a challenge is spent once\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1587,6 +1665,7 @@ int main(int argc, char **argv)
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();
+   test_a_challenge_is_spent_once();
 
    stop_module();
    obs_bus_stop();

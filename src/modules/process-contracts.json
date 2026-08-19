@@ -734,6 +734,11 @@
           "id": 17,
           "name": "db1-mgmt-jwks",
           "event_kind": 11793
+        },
+        {
+          "id": 18,
+          "name": "db1-mgmt-nonce",
+          "event_kind": 11794
         }
       ]
     }

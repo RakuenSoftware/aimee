@@ -360,6 +360,21 @@
    "retired_sources": [
     "mgmt_jwks_cache.c"
    ]
+  },
+  {
+   "id": 18,
+   "name": "mgmt_nonce",
+   "event_kind": 11794,
+   "active": true,
+   "doc": "management challenge nonces and the revocation high-water mark: issued once, consumed once, and the counter that stops a replayed status report rolling the server backwards.",
+   "client_doc": "",
+   "covers": "mgmt_nonce",
+   "sources": [
+    "mgmt_nonce"
+   ],
+   "retired_sources": [
+    "mgmt_nonce.c"
+   ]
   }
  ],
  "result_codes": [
@@ -23783,6 +23798,247 @@
      }
     ],
     "max_bytes": 32
+   }
+  },
+  {
+   "family": "mgmt_nonce",
+   "id": 1,
+   "name": "mgmt_nonce_clear",
+   "c_name": "db1_mgmt_nonce_clear",
+   "c_params": [],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "mgmt_nonce",
+   "id": 2,
+   "name": "mgmt_nonce_issue",
+   "c_name": "db1_mgmt_nonce_issue",
+   "c_params": [
+    "in"
+   ],
+   "c_returns": "int64",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_mgmt_nonce_issue_t",
+    "fields": [
+     {
+      "name": "nonce",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "peer_issuer",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "peer_serial_norm",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "peer_fingerprint",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "channel_binding",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "target_server_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "purpose",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "now",
+      "type": "int64",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "result",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "mgmt_nonce",
+   "id": 3,
+   "name": "mgmt_nonce_consume",
+   "c_name": "db1_mgmt_nonce_consume",
+   "c_params": [
+    "in"
+   ],
+   "c_returns": "int64",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_mgmt_nonce_consume_t",
+    "fields": [
+     {
+      "name": "nonce",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "peer_issuer",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "peer_serial_norm",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "peer_fingerprint",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "channel_binding",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "target_server_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "purpose",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "now",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "revocation_generation",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "valid",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "result",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "mgmt_nonce",
+   "id": 4,
+   "name": "mgmt_status_hwm_read",
+   "c_name": "db1_mgmt_status_hwm_read",
+   "c_params": [
+    "generation"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "generation",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "mgmt_nonce",
+   "id": 5,
+   "name": "mgmt_status_hwm_set",
+   "c_name": "db1_mgmt_status_hwm_set",
+   "c_params": [
+    "generation"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "generation",
+      "type": "int64",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
    }
   }
  ]

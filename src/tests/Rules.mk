@@ -2491,6 +2491,7 @@ $(TESTPREFIX)/unit-test-kb-mgmt-status-listener: \
 
 $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_status.o \
                                             $(OBJDIR)/server/server_mgmt_status.o \
+                                            $(OBJDIR)/modules/db1/mgmt_nonce.o \
                                             $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db.o \
                                             $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2527,6 +2528,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-read-endpoint: \
 $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
     $(OBJDIR)/tests/test_server_mgmt_checkpoint_client.o \
     $(OBJDIR)/server/server_mgmt_checkpoint_client.o $(OBJDIR)/server/server_mgmt_status.o \
+    $(OBJDIR)/modules/db1/mgmt_nonce.o \
     $(OBJDIR)/modules/vault/runtime_secret.o \
     $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db.o \
     $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/cJSON.o
@@ -5313,6 +5315,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/lifecycle_stage.o \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_stage.o \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_cache.o \
+                                       $(OBJDIR)/modules/db1/mgmt_nonce_stage.o \
+                                       $(OBJDIR)/modules/db1/mgmt_nonce.o \
                                        $(OBJDIR)/modules/db1/server_identity_jti.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/wfe_store_lists.o \
                      $(OBJDIR)/modules/db1/server_management_jti.o \
@@ -6157,6 +6161,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                      $(OBJDIR)/server/server_runtime_identity.o \
                      $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o $(OBJDIR)/server/cli_marshal_defs.o $(OBJDIR)/server/cli_argspec_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
+                           $(OBJDIR)/modules/db1/mgmt_nonce.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                            $(OBJDIR)/modules/git/forge_credentials.o \

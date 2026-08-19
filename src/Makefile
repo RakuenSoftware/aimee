@@ -329,7 +329,7 @@ DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 # client rather than the domain. The domain itself still builds -- the module
 # process compiles it from the descriptor -- it just no longer sits inside this
 # binary. See src/db1_client/git_ownership.c.
-DB1_CLIENT_SRCS = db1_client/checkpoints.c db1_client/jti_replay.c db1_client/lifecycle.c db1_client/mgmt_jwks.c db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c db1_client/guardrail_state.c db1_client/ensemble.c db1_client/workflow.c db1_client/roundtable.c db1_client/identity.c
+DB1_CLIENT_SRCS = db1_client/checkpoints.c db1_client/jti_replay.c db1_client/lifecycle.c db1_client/mgmt_jwks.c db1_client/mgmt_nonce.c db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c db1_client/guardrail_state.c db1_client/ensemble.c db1_client/workflow.c db1_client/roundtable.c db1_client/identity.c
 
 DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 
