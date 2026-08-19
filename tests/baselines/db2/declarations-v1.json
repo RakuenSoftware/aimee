@@ -10633,9 +10633,15 @@
           "line": 359
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "maintenance",
+        "reason": "The one declaration in a DB2 header implemented outside the module: it resolves the host executable and spawns a drain worker, issuing no statement. It must not become a wire operation. A bus caller able to reach it could ask the DB2 module to start a process on the host, which is exactly the authority the module boundary exists to withhold. The declaration belongs in the KB service headers."
+      },
       "signature": "int db2_kb_service_async_queue_spawn_worker ( void )",
       "signature_sha256": "c0680308a865304631e5ecd404a242f2a36a7cde44bcfdd9a2db3f92dabef1b8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_async_queue_spawn_worker"
     },
     {
@@ -24035,9 +24041,15 @@
           "line": 39
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "This reads a process configuration flag and issues no statement: it reports whether DB2 was started ephemeral. On the bus it would let one process ask another about its startup configuration, which is not a fact DB2 owns on the caller's behalf. A caller that needs it is asking about its own runtime and should read its own configuration."
+      },
       "signature": "int db2_vector_index_sync_suppressed ( void )",
       "signature_sha256": "37c358e622746945efce1903c0dcec2fb44ae587c8b38c9ae07f7abfb4c4635e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_vector_index_sync_suppressed"
     },
     {
@@ -26208,15 +26220,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "53beca6d37b87ad02acbbd72a204ef59d1b6034104413ce587a9a117f0955c8f",
+  "fingerprint": "209c3d78a3be3fa785f5b9a94afd8632659f2ca3f0bb5e3f4db0908718fb594c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 594,
+    "audit_pending": 592,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 364
+    "reviewed": 366
   }
 }

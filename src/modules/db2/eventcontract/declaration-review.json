@@ -436,6 +436,14 @@
       "reason": "The cJSON list builder cannot be the stable wire shape; DB2 returns a bounded typed anti-pattern record set for caller serialization."
     },
     {
+      "symbol": "db2_kb_service_async_queue_spawn_worker",
+      "signature_sha256": "c0680308a865304631e5ecd404a242f2a36a7cde44bcfdd9a2db3f92dabef1b8",
+      "disposition": "private-db2",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The one declaration in a DB2 header implemented outside the module: it resolves the host executable and spawns a drain worker, issuing no statement. It must not become a wire operation. A bus caller able to reach it could ask the DB2 module to start a process on the host, which is exactly the authority the module boundary exists to withhold. The declaration belongs in the KB service headers."
+    },
+    {
       "symbol": "db2_kb_service_code_audit_json",
       "signature_sha256": "2964a7afe61762f8027967928fa4f660b1a871c4e33052519fad2432c31b3670",
       "disposition": "private-db2",
@@ -2426,6 +2434,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.trace_mining_last_id operation reads the high-water mark the next mining pass resumes from. A never-mined corpus and a failed read are both zero, and the consequence is worth naming: a zero sends the next pass back to the beginning, so a read failure costs a full rescan rather than losing anything. That is recorded because it makes the collapse cheap in one direction and expensive in the other."
+    },
+    {
+      "symbol": "db2_vector_index_sync_suppressed",
+      "signature_sha256": "37c358e622746945efce1903c0dcec2fb44ae587c8b38c9ae07f7abfb4c4635e",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "This reads a process configuration flag and issues no statement: it reports whether DB2 was started ephemeral. On the bus it would let one process ask another about its startup configuration, which is not a fact DB2 owns on the caller's behalf. A caller that needs it is asking about its own runtime and should read its own configuration."
     },
     {
       "symbol": "pgvec_code_delete_project",
