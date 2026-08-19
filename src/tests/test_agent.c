@@ -540,11 +540,25 @@ static void test_route_authority_refuses_without_provider(void)
    agent_set_route_selection_provider(test_route_selector);
    agent_set_route_selection_provider(NULL);
    assert(agent_route(&cfg, "review") == NULL);
-   /* The role picker is the second seam with the same shape and must refuse too. */
-   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   /* The refusal must be legible as a routing fault, not as an empty roster:
+    * that distinction is the whole reason the flag exists. */
+   assert(agent_route_last_was_module_fault());
+   /* Dropping the authority drops the fault with it: a later empty roster must
+    * not inherit this outage and be reported as one. */
    agent_reset_route_selection_authority();
+   assert(!agent_route_last_was_module_fault());
    assert(agent_route(&cfg, "review") != NULL);
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) != -1);
+   /* The role picker is the second seam with the same shape. Exercise it from a
+    * cleared flag so this asserts the picker's own bookkeeping and not a fault
+    * left behind by agent_route above -- a delegate that routes through here
+    * would otherwise still be told the roster was empty. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(!agent_route_last_was_module_fault());
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   assert(agent_route_last_was_module_fault());
+   agent_reset_route_selection_authority();
 }
 
 static void test_agent_route_selection_provider(void)
@@ -577,7 +591,15 @@ static void test_agent_route_selection_provider(void)
     * or invalid reply cannot silently resurrect the old in-process decision. */
    g_route_selector_fail = 1;
    assert(agent_route(&cfg, "review") == NULL);
+   assert(agent_route_last_was_module_fault());
+   /* Clear via a successful pick, so the role-picker assertion below is about
+    * that seam rather than the fault agent_route just recorded. */
+   g_route_selector_fail = 0;
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) >= 0);
+   assert(!agent_route_last_was_module_fault());
+   g_route_selector_fail = 1;
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   assert(agent_route_last_was_module_fault());
 
    g_route_selector_fail = 0;
    g_route_selector_pick = 2;

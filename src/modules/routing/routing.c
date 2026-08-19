@@ -21,6 +21,8 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include "log.h"
+
+#include <stdatomic.h>
 #include <unistd.h>
 
 /* --- Routing --- */
@@ -337,16 +339,19 @@ static int agent_is_local(const agent_t *ag)
    return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
 }
 
-/* Set whenever a selection is refused because the module authority could not be
- * consulted, and cleared at the start of each routing attempt. Without it the
- * refusal reaches the caller as a bare NULL, which every caller already renders
- * as "no agent available for role" -- sending an operator to audit the roster
- * while the routing module is what is broken. */
-static _Thread_local int g_route_last_fault;
+/* Non-zero while the selection authority is failing. Process-wide and atomic
+ * rather than thread-local on purpose: a delegate job routes on one thread and
+ * composes its error on another, so a per-thread flag was silently lost exactly
+ * where the diagnostic mattered most. Cleared by the first successful selection.
+ *
+ * Without it the refusal reaches the caller as a bare NULL, which every caller
+ * renders as "no agent available for role" -- sending an operator to audit the
+ * roster while the routing module is what is broken. */
+static atomic_int g_route_module_faults;
 
 int agent_route_last_was_module_fault(void)
 {
-   return g_route_last_fault;
+   return atomic_load_explicit(&g_route_module_faults, memory_order_relaxed) != 0;
 }
 
 static agent_route_selection_fn g_route_selection_provider;
@@ -370,12 +375,14 @@ void agent_reset_route_selection_authority(void)
 {
    g_route_selection_provider = NULL;
    g_route_selection_authority = 0;
+   /* No authority means no pending authority fault; leaving it latched would
+    * mislabel a genuinely empty roster as a module outage. */
+   atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
 }
 
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
 {
    static unsigned cursor;
-   g_route_last_fault = 0;
    if (count <= 0)
       return NULL;
    if (count == 1)
@@ -386,9 +393,10 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
       if (g_route_selection_provider(0, (uint32_t)count, &selected) != 0 ||
           selected >= (uint32_t)count)
       {
-         g_route_last_fault = 1;
+         atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
          return NULL;
       }
+      atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
       return candidates[selected];
    }
    if (g_route_selection_authority)
@@ -400,7 +408,7 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
                 "selection authority declared but no provider is installed; refusing to route "
                 "%d candidates rather than fall back to the built-in balancer",
                 count);
-      g_route_last_fault = 1;
+      atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
       return NULL;
    }
    unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
@@ -503,7 +511,11 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
       uint32_t selected = 0;
       if (g_route_selection_provider(1, (uint32_t)pool_n, &selected) != 0 ||
           selected >= (uint32_t)pool_n)
+      {
+         atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
          return -1;
+      }
+      atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
       return pool[selected];
    }
    if (g_route_selection_authority)
@@ -514,6 +526,7 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
                 "selection authority declared but no provider is installed; refusing to pick "
                 "among %d role candidates",
                 pool_n);
+      atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
       return -1;
    }
    return pool[delegate_role_rand() % (unsigned)pool_n];
