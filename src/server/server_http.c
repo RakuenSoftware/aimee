@@ -1148,31 +1148,13 @@ int server_http_sse_event_format(const char *event, const char *data_json, char 
    return (int)pos;
 }
 
-/* Typed-event emit for the Responses API: `event: <name>\ndata: <json>\n\n`. */
-static void sse_event_emit(void *ctx, const char *event, const char *data_json)
-{
-   int fd = *(int *)ctx;
-   int need;
-   char *frame;
-
-   if (!data_json)
-      return;
-   need = server_http_sse_event_format(event, data_json, NULL, 0);
-   frame = malloc((size_t)need + 1);
-   if (!frame)
-      return;
-   server_http_sse_event_format(event, data_json, frame, (size_t)need + 1);
-   write_all_fd(fd, frame, need);
-   free(frame);
-}
-
 /* Run a streaming /v1/responses request: write event-stream headers, let the
  * handler emit typed events; the Responses protocol has no `data: [DONE]`
  * terminator (it ends with the handler's `response.completed`). */
 static void handle_responses_stream(int fd, const char *body, const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   g_responses_stream_handler(body ? body : "", sse_event_emit, &fd);
+   server_http_sse_live_run(fd, body, g_responses_stream_handler);
 }
 
 /* SSE for POST /v1/messages (Anthropic Messages API, stream:true). Emits the
@@ -1182,7 +1164,7 @@ static void handle_responses_stream(int fd, const char *body, const char *reques
 static void handle_messages_stream(int fd, const char *body, const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   g_messages_stream_handler(body ? body : "", sse_event_emit, &fd);
+   server_http_sse_live_run(fd, body, g_messages_stream_handler);
 }
 
 static void handle_cli_session_stream(int fd, const char *id, const char *request_id)

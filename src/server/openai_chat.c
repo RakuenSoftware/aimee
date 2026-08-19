@@ -160,6 +160,41 @@ static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
+static int openai_request_has_assistant(const char *body)
+{
+   cJSON *root = body ? cJSON_Parse(body) : NULL;
+   cJSON *items = root ? cJSON_GetObjectItemCaseSensitive(root, "messages") : NULL;
+   if (!cJSON_IsArray(items))
+      items = root ? cJSON_GetObjectItemCaseSensitive(root, "input") : NULL;
+   int found = 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, items)
+   {
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "role"));
+      if (role && strcmp(role, "assistant") == 0)
+      {
+         found = 1;
+         break;
+      }
+   }
+   cJSON_Delete(root);
+   return found;
+}
+
+/* Persona for the LEGACY chat path only.
+ *
+ * When the IR path is live it owns persona placement (ir_stage_persona_instructions
+ * puts it on the first user message), and both share one per-session delivery
+ * claim -- so calling this unguarded would let the flat path win the claim and
+ * silently move placement off the IR on the DEFAULT path. Guarding keeps each
+ * mode delivering through its own seam, still exactly once. */
+static char *legacy_persona_text(const char *text, int conversation_established)
+{
+   if (aimee_ir_path_enabled())
+      return NULL;
+   return aimee_ir_prepend_active_persona_text(text, conversation_established);
+}
+
 static int run_completion(int chat, const char *body, char *resp, int cap)
 {
    char model[64] = "";
@@ -186,7 +221,14 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * so the §4 dedup key must hash it (a stale reply must not be replayed after
     * the injected memory/context changes). On a cache miss it is reused for the
     * provider call below; on a hit it is freed unused. */
+   int first_turn = !chat || !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
 
    /* Resolve the backend BEFORE dedup so the key carries the resolved
     * provider/model — two requests resolving to a different backend must not
@@ -734,10 +776,17 @@ static int responses_handler(const char *body, char *resp, int cap)
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   int first_turn = !prev_id[0] && !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(full);
-   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, full, max_tokens, temperature,
-                                0 /* use_tools: plain chat completion */, &result);
+   /* `full` aliases `prompt` or `combined`, both freed on the exit paths below,
+    * so it must NOT be freed here. Pass the persona-prefixed copy when there is
+    * one and free only that. */
+   char *persona_txt = legacy_persona_text(full, !first_turn);
+   int erc =
+       agent_dispatch_one(ag, NULL, NULL, pi_env, persona_txt ? persona_txt : full, max_tokens,
+                          temperature, 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
+   free(persona_txt);
 
    if (erc != 0 || !result.response)
    {
@@ -911,7 +960,14 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   int first_turn = !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
    int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
                                 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
@@ -985,6 +1041,12 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, 0);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
    int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
                                 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);

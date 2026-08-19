@@ -191,13 +191,6 @@ char *gw_memory_system_prompt(const char *query)
    return ingress_preinject_build(query, 0);
 }
 
-/* Legacy plain-chat adapter, kept until those handlers parse into the IR. */
-char *gw_memory_system_prompt_for_session(const char *query, int session_start)
-{
-   (void)session_start;
-   return gw_memory_system_prompt(query);
-}
-
 int gw_stage_memory_enabled(void)
 {
    /* Default-ON: memory injection runs unless AIMEE_STAGE_MEMORY is an explicit
