@@ -1643,6 +1643,34 @@
       }
     },
     {
+      "family": "learning",
+      "id": 1,
+      "name": "rules_decay",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rule weights and their reinforcement history are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_rules_decay"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"decay_amount": 5, "soft_interval_days": 14,
+                   "hard_interval_days": 42, "archive_threshold": 10,
+                   "archive_grace_days": 30, "weight_floor": 0,
+                   "clock": "database"}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "rules_touched", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647},
+        "count_source": "summed-statements"
+      }
+    },
+    {
       "family": "maintenance",
       "id": 1,
       "name": "prospective_sweep_expired",

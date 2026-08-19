@@ -18,6 +18,7 @@
 #include "c/epistemic_directives.h"
 #include "c/evidence_vectors.h"
 #include "c/prospective_memories.h"
+#include "c/rules.h"
 #include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
@@ -322,6 +323,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .cross_repo_rebuild_routes = db2_cross_repo_rebuild_routes,
        .cross_repo_rebuild_identities = db2_cross_repo_rebuild_identities,
        .cross_repo_rebuild_build_deps = db2_cross_repo_rebuild_build_deps,
+       .rules_decay = db2_rules_decay,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        .directive_sweep_expired = db2_directive_sweep_expired,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
@@ -365,6 +367,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS &&
+        invocation->stage_id != AIMEE_DB2_STAGE_RULES_DECAY &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1458,6 +1461,33 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_cross_repo_rebuild_build_deps_reply_encode(
                  (uint32_t)build_deps_written, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   }
+
+   if (invocation->stage_id == AIMEE_DB2_STAGE_RULES_DECAY)
+   {
+      if (aimee_db2_rules_decay_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_RULES_DECAY_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->rules_decay)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The learning family's first stage. Every decay constant stays here:
+          * the amount, the two intervals, the archive threshold and its grace
+          * period. A caller able to send any of them could age a hard
+          * directive out in one call, or delete rules still in force. The
+          * number sums three statements, so a decayed rule and an archived one
+          * are not separable in it. */
+         int rules_touched = backend->rules_decay();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (rules_touched < 0 || (uint32_t)rules_touched > AIMEE_DB2_RULES_DECAY_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_rules_decay_reply_encode((uint32_t)rules_touched, response_body,
+                                                response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

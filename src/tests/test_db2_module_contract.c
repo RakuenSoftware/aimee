@@ -87,6 +87,8 @@ static int rebuild_identities_value;
 static int rebuild_identities_calls;
 static int rebuild_build_deps_value;
 static int rebuild_build_deps_calls;
+static int rules_decay_value;
+static int rules_decay_calls;
 static int prospective_sweep_value;
 static int prospective_sweep_calls;
 static int directive_sweep_value;
@@ -709,6 +711,17 @@ static int cross_repo_rebuild_build_deps(void)
 {
    rebuild_build_deps_calls++;
    return rebuild_build_deps_value;
+}
+
+int db2_rules_decay(void)
+{
+   return 0;
+}
+
+static int rules_decay(void)
+{
+   rules_decay_calls++;
+   return rules_decay_value;
 }
 
 int db2_prospective_sweep_expired(void)
@@ -1507,6 +1520,8 @@ static void reset(void)
    rebuild_identities_calls = 0;
    rebuild_build_deps_value = 17;
    rebuild_build_deps_calls = 0;
+   rules_decay_value = 18;
+   rules_decay_calls = 0;
    prospective_sweep_value = 7;
    prospective_sweep_calls = 0;
    directive_sweep_value = 8;
@@ -3073,6 +3088,37 @@ static void test_prospective_sweep_expired_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prospective_sweep_expired_reply_decode(reply, reply_len, &expired) == -1 &&
           expired == 0);
+}
+
+static void test_rules_decay_wire(void)
+{
+   uint8_t request[AIMEE_DB2_RULES_DECAY_REQUEST_LEN] = {0};
+   assert(aimee_db2_rules_decay_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_rules_decay_request_decode(request, sizeof(request)) == 0);
+   /* First operation of the learning family. It carries operation number 1,
+    * which every family's first operation carries, so the byte-identical
+    * empty-payload envelopes of index.entity_edge_prune_orphans and
+    * maintenance.prospective_sweep_expired decode here too. The stage the
+    * invocation arrives on is what separates them; the handler test pins it. */
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == 0);
+   assert(aimee_db2_prospective_sweep_expired_request_decode(request, sizeof(request)) == 0);
+   /* Later operations in any of those families are still refused. */
+   assert(aimee_db2_cross_repo_rebuild_build_deps_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_rules_decay_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_RULES_DECAY_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, touched = 99;
+   assert(aimee_db2_rules_decay_reply_encode(18, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_rules_decay_reply_decode(reply, reply_len, &touched) == 0 && touched == 18);
+   assert(aimee_db2_rules_decay_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_rules_decay_reply_decode(reply, reply_len, &touched) == 0 && touched == 0);
+   assert(aimee_db2_rules_decay_reply_encode(AIMEE_DB2_RULES_DECAY_MAX + 1u, reply, sizeof(reply),
+                                             &reply_len) == -1);
+   assert(aimee_db2_rules_decay_reply_encode(18, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_rules_decay_reply_encode(18, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_rules_decay_reply_decode(reply, reply_len, &touched) == -1 && touched == 0);
 }
 
 static void test_cross_repo_rebuild_build_deps_wire(void)
@@ -5698,6 +5744,54 @@ static void test_prospective_sweep_expired_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_rules_decay_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.rules_decay = rules_decay};
+   uint8_t request[AIMEE_DB2_RULES_DECAY_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RULES_DECAY_RESPONSE_LEN];
+   uint32_t response_len = 99, touched = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_RULES_DECAY};
+   assert(aimee_db2_rules_decay_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(rules_decay_calls == 1);
+   assert(aimee_db2_rules_decay_reply_decode(response, response_len, &touched) == 0 &&
+          touched == 18);
+
+   /* Three families now share operation number 1 and produce identical request
+    * bytes. Sent on the index or maintenance stage these same bytes reach
+    * those backends, absent here, so the answer is capability-absent rather
+    * than a decay pass. That is the whole of the separation. */
+   aimee_module_invocation_t as_index = {.stage_id = AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS};
+   assert(invoke(&backend, &as_index, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   aimee_module_invocation_t as_maintenance = {.stage_id =
+                                                   AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED};
+   assert(invoke(&backend, &as_maintenance, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(rules_decay_calls == 1);
+
+   /* Nothing due for decay is zero, and so is a failed statement. The number
+    * also sums three statements, so a decayed rule and an archived one cannot
+    * be told apart in it. Both limitations pinned. */
+   rules_decay_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_rules_decay_reply_decode(response, response_len, &touched) == 0 &&
+          touched == 0);
+   rules_decay_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   rules_decay_value = 18;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_cross_repo_rebuild_build_deps_handler(void)
 {
    reset();
@@ -7669,6 +7763,7 @@ int main(void)
    test_cross_repo_rebuild_routes_wire();
    test_cross_repo_rebuild_identities_wire();
    test_cross_repo_rebuild_build_deps_wire();
+   test_rules_decay_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
    test_mark_revisit_due_wire();
@@ -7737,6 +7832,7 @@ int main(void)
    test_cross_repo_rebuild_routes_handler();
    test_cross_repo_rebuild_identities_handler();
    test_cross_repo_rebuild_build_deps_handler();
+   test_rules_decay_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
    test_mark_revisit_due_handler();

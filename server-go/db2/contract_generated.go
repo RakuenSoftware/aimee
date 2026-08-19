@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "0e855a1eee2c4eab3cf5d1937626e406ce8b3e29ee4b2b4b2b2e1755b9ed4c72"
+const ContractSHA256 = "12d4ef47df47ec9d04f4f95f632ae7fbbda5d3f0a5d5460c098a4e0eb45ebbb0"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -353,6 +353,10 @@ const EventCrossRepoRebuildBuildDeps = EventIndex
 const StageCrossRepoRebuildBuildDeps = FamilyIndex
 const OperationCrossRepoRebuildBuildDeps uint32 = 8
 const CrossRepoRebuildBuildDepsMax uint32 = 2147483647
+const EventRulesDecay = EventLearning
+const StageRulesDecay = FamilyLearning
+const OperationRulesDecay uint32 = 1
+const RulesDecayMax uint32 = 2147483647
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2338,6 +2342,57 @@ func DecodeCrossRepoRebuildBuildDepsReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return buildDepsWritten, nil
+}
+
+// EncodeRulesDecayRequest emits the empty request envelope. Every decay
+// constant is policy and never travels.
+func EncodeRulesDecayRequest() []byte {
+	header, err := EncodeRequestHeader(OperationRulesDecay, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeRulesDecayRequest validates the exact learning-family envelope. It is
+// the first operation of that family on the wire.
+func DecodeRulesDecayRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesDecay ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeRulesDecayReply emits one bounded u32 row count summed over the decay
+// and archive statements. A decayed rule and a deleted one are not separable
+// in it.
+func EncodeRulesDecayReply(rulesTouched uint32) ([]byte, error) {
+	if rulesTouched > RulesDecayMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationRulesDecay, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], rulesTouched)
+	return reply, nil
+}
+
+// DecodeRulesDecayReply validates the operation and bounded count.
+func DecodeRulesDecayReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRulesDecay || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	rulesTouched := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if rulesTouched > RulesDecayMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return rulesTouched, nil
 }
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

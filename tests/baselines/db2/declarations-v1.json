@@ -20638,9 +20638,15 @@
           "line": 94
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.rules_decay operation replaces the pass that ages rule weights and archives the ones that fall through the floor. Every constant is fixed policy: a caller able to send the decay amount or the intervals could age a hard directive out in a single call, and one able to send the archive threshold could delete rules that are still in force."
+      },
       "signature": "int db2_rules_decay ( void )",
       "signature_sha256": "146869aae9e72b950bbc51634d23fe92ed7cadcaff63e8f59ab3c320366f0ae6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_decay"
     },
     {
@@ -26142,15 +26148,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "11f9c00d5caaae34426df81884cac7584a14e5a1db1d4a3ac1bf89f5748b57bf",
+  "fingerprint": "8ee9cccb9eb5abad3ef4b3b6e67a75eadfca070c6201347270d1d664ad1c81f7",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 605,
+    "audit_pending": 604,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 353
+    "reviewed": 354
   }
 }

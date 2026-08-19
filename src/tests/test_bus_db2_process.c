@@ -111,7 +111,8 @@ int main(int argc, char **argv)
 
    const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT,
                               AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
-                              AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED};
+                              AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
+                              AIMEE_DB2_EVENT_RULES_DECAY};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -610,6 +611,14 @@ int main(int argc, char **argv)
                                                        &build_deps_written, NULL,
                                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(build_deps_written == 0);
+
+   /* The learning family reaching the real process for the first time. No rule
+    * has ever been reinforced on a fresh schema, so nothing is due for decay
+    * and nothing falls through the archive threshold. */
+   uint32_t rules_touched = 99;
+   assert(aimee_db2_rules_decay_call(call_client, &client, 9110, 0, &rules_touched, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(rules_touched == 0);
 
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and

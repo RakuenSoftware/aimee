@@ -2252,6 +2252,14 @@
       "reason": "The typed lifecycle.reembed_status operation replaces direct reads of the canonical maintenance marker while retaining DB2 schema and rebuild authority."
     },
     {
+      "symbol": "db2_rules_decay",
+      "signature_sha256": "146869aae9e72b950bbc51634d23fe92ed7cadcaff63e8f59ab3c320366f0ae6",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_decay operation replaces the pass that ages rule weights and archives the ones that fall through the floor. Every constant is fixed policy: a caller able to send the decay amount or the intervals could age a hard directive out in a single call, and one able to send the archive threshold could delete rules that are still in force."
+    },
+    {
       "symbol": "db2_set_embedder_model_id",
       "signature_sha256": "d2b66b580397baf047e9df90d812a1db222a1c4a8ba00e30e90122b5051b4bf8",
       "disposition": "private-db2",

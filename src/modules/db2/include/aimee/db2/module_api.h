@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "0e855a1eee2c4eab3cf5d1937626e406ce8b3e29ee4b2b4b2b2e1755b9ed4c72"
+#define AIMEE_DB2_CONTRACT_SHA256 "12d4ef47df47ec9d04f4f95f632ae7fbbda5d3f0a5d5460c098a4e0eb45ebbb0"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -548,6 +548,13 @@
 #define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN 28u
 #define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_ERROR_LEN    24u
 #define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX          2147483647u
+#define AIMEE_DB2_EVENT_RULES_DECAY                          AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_RULES_DECAY                          AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_RULES_DECAY                      1u
+#define AIMEE_DB2_RULES_DECAY_REQUEST_LEN                    24u
+#define AIMEE_DB2_RULES_DECAY_RESPONSE_LEN                   28u
+#define AIMEE_DB2_RULES_DECAY_ERROR_LEN                      24u
+#define AIMEE_DB2_RULES_DECAY_MAX                            2147483647u
 #define AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_EVENT_MAINTENANCE
 #define AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_FAMILY_MAINTENANCE
 #define AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED        1u
@@ -2955,6 +2962,57 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
    if (decoded > AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX)
       return -1;
    *expired_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_rules_decay_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RULES_DECAY, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_rules_decay_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RULES_DECAY_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RULES_DECAY && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_rules_decay_reply_encode(uint32_t rules_touched, uint8_t *output,
+                                                     size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || rules_touched > AIMEE_DB2_RULES_DECAY_MAX ||
+       capacity < AIMEE_DB2_RULES_DECAY_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RULES_DECAY, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, rules_touched);
+   *output_len = AIMEE_DB2_RULES_DECAY_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_rules_decay_reply_decode(const uint8_t *input, size_t input_len,
+                                                     uint32_t *rules_touched)
+{
+   if (rules_touched)
+      *rules_touched = 0u;
+   if (!rules_touched)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RULES_DECAY ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RULES_DECAY_MAX)
+      return -1;
+   *rules_touched = decoded;
    return 0;
 }
 

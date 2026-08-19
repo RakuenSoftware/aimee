@@ -257,7 +257,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 # `single`: there is no surrounding transaction,
                                 # so a concurrent reader can see between them.
                                 "multi-statement"
-                                if name in ("curator_reenqueue_extract_all",) else "none")
+                                if name in ("curator_reenqueue_extract_all",
+                                            "rules_decay") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
         # observationally neutral the way every other operation here is.
         expected_idempotency = ("unsafe"
@@ -2183,6 +2184,46 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("cross-repo-rebuild-build-deps-reply",
                      "reply must contain one bounded u32 attempt count")
+        elif key == ("learning", 1) and name == "rules_decay" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # Every constant here is the difference between ageing a rule and
+            # deleting one. A caller able to send the decay amount or the
+            # intervals could age a hard directive out in a single call; one
+            # able to send the archive threshold could delete rules still in
+            # force. The count sums three statements, so a decayed rule and a
+            # deleted one are indistinguishable in it.
+            if operation["c_symbols"] != ["db2_rules_decay"]:
+                fail("operation-c-symbols",
+                     "rules_decay C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "rules_decay results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "rules_decay.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"decay_amount": 5, "soft_interval_days": 14,
+                                          "hard_interval_days": 42,
+                                          "archive_threshold": 10,
+                                          "archive_grace_days": 30, "weight_floor": 0,
+                                          "clock": "database"}):
+                fail("rules-decay-request",
+                     "request must carry no payload and fix every decay constant")
+            if request["policy"]["hard_interval_days"] <= \
+                    request["policy"]["soft_interval_days"]:
+                fail("rules-decay-intervals",
+                     "hard directives must decay more slowly than soft ones")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field", "count_source"},
+                          "rules_decay.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "rules_decay.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["count_source"] != "summed-statements" or
+                    field != {"name": "rules_touched", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("rules-decay-reply",
+                     "reply must contain one bounded u32 summed row count")
         elif key == ("maintenance", 1) and name == "prospective_sweep_expired" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # The clock is the database's, not the caller's. A caller-supplied
@@ -2438,7 +2479,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 68 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 69 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2457,12 +2498,12 @@ def validate_catalog(value: object) -> dict[str, object]:
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
-            "prospective_sweep_expired",
+            "rules_decay", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the sixty-eight supported operations exactly once")
+             "the partial generator requires the sixty-nine supported operations exactly once")
     return catalog
 
 
@@ -2646,14 +2687,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_routes = catalog["operations"][57]
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
-    prospective_sweep_expired = catalog["operations"][60]
-    directive_sweep_expired = catalog["operations"][61]
-    mark_revisit_due = catalog["operations"][62]
-    ingest_queue_reset_running = catalog["operations"][63]
-    evidence_reembed_all = catalog["operations"][64]
-    curator_reembed_all = catalog["operations"][65]
-    synth_reenqueue_all = catalog["operations"][66]
-    curator_reenqueue_extract_all = catalog["operations"][67]
+    rules_decay = catalog["operations"][60]
+    prospective_sweep_expired = catalog["operations"][61]
+    directive_sweep_expired = catalog["operations"][62]
+    mark_revisit_due = catalog["operations"][63]
+    ingest_queue_reset_running = catalog["operations"][64]
+    evidence_reembed_all = catalog["operations"][65]
+    curator_reembed_all = catalog["operations"][66]
+    synth_reenqueue_all = catalog["operations"][67]
+    curator_reenqueue_extract_all = catalog["operations"][68]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3054,6 +3096,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_build_deps_none = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(cross_repo_rebuild_build_deps["id"]), 0,
         _put_u32(0),
+    )
+    rules_decay_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(rules_decay["id"]), 0, b"",
+    )
+    rules_decay_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(rules_decay["id"]), 0, _put_u32(18),
+    )
+    rules_decay_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(rules_decay["id"]), 0, _put_u32(0),
     )
     prospective_sweep_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(prospective_sweep_expired["id"]), 0, b"",
@@ -5966,6 +6017,40 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": rules_decay["family"],
+            "id": rules_decay["id"],
+            "name": rules_decay["name"],
+            "request": {
+                "positive": rules_decay_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(rules_decay_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(rules_decay_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": rules_decay_request[:-1].hex()},
+                    {"mutation": "long", "hex": (rules_decay_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "rules_touched": 18, "hex": rules_decay_ok.hex()},
+                    {"result": 0, "rules_touched": 0, "hex": rules_decay_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(rules_decay_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(rules_decay_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(rules_decay["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (rules_decay_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": rules_decay_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (rules_decay_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": prospective_sweep_expired["family"],
             "id": prospective_sweep_expired["id"],
             "name": prospective_sweep_expired["name"],
@@ -6341,14 +6426,15 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_routes = catalog["operations"][57]
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
-    prospective_sweep_expired = catalog["operations"][60]
-    directive_sweep_expired = catalog["operations"][61]
-    mark_revisit_due = catalog["operations"][62]
-    ingest_queue_reset_running = catalog["operations"][63]
-    evidence_reembed_all = catalog["operations"][64]
-    curator_reembed_all = catalog["operations"][65]
-    synth_reenqueue_all = catalog["operations"][66]
-    curator_reenqueue_extract_all = catalog["operations"][67]
+    rules_decay = catalog["operations"][60]
+    prospective_sweep_expired = catalog["operations"][61]
+    directive_sweep_expired = catalog["operations"][62]
+    mark_revisit_due = catalog["operations"][63]
+    ingest_queue_reset_running = catalog["operations"][64]
+    evidence_reembed_all = catalog["operations"][65]
+    curator_reembed_all = catalog["operations"][66]
+    synth_reenqueue_all = catalog["operations"][67]
+    curator_reenqueue_extract_all = catalog["operations"][68]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -7188,6 +7274,17 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{cross_repo_rebuild_build_deps['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX",
          f"{cross_repo_rebuild_build_deps['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_RULES_DECAY", "AIMEE_DB2_EVENT_LEARNING"),
+        ("AIMEE_DB2_STAGE_RULES_DECAY", "AIMEE_DB2_FAMILY_LEARNING"),
+        ("AIMEE_DB2_OPERATION_RULES_DECAY", f"{rules_decay['id']}u"),
+        ("AIMEE_DB2_RULES_DECAY_REQUEST_LEN",
+         f"{rules_decay['request']['encoded_size']}u"),
+        ("AIMEE_DB2_RULES_DECAY_RESPONSE_LEN",
+         f"{rules_decay['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_RULES_DECAY_ERROR_LEN",
+         f"{rules_decay['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_RULES_DECAY_MAX",
+         f"{rules_decay['reply']['field']['maximum']}u"),
         ("AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_EVENT_MAINTENANCE"),
         ("AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_FAMILY_MAINTENANCE"),
         ("AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED",
@@ -9657,6 +9754,57 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
    if (decoded > AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX)
       return -1;
    *expired_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_rules_decay_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RULES_DECAY, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_rules_decay_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RULES_DECAY_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RULES_DECAY && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_rules_decay_reply_encode(uint32_t rules_touched, uint8_t *output,
+                                                     size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || rules_touched > AIMEE_DB2_RULES_DECAY_MAX ||
+       capacity < AIMEE_DB2_RULES_DECAY_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RULES_DECAY, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, rules_touched);
+   *output_len = AIMEE_DB2_RULES_DECAY_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_rules_decay_reply_decode(const uint8_t *input, size_t input_len,
+                                                     uint32_t *rules_touched)
+{{
+   if (rules_touched)
+      *rules_touched = 0u;
+   if (!rules_touched)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RULES_DECAY ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RULES_DECAY_MAX)
+      return -1;
+   *rules_touched = decoded;
    return 0;
 }}
 
@@ -12716,6 +12864,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *build_deps_written, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_rules_decay_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *rules_touched, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -14193,6 +14345,32 @@ aimee_module_call_result_t aimee_db2_cross_repo_rebuild_build_deps_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_rules_decay_call(aimee_db2_call_fn call, void *call_context,
+                                                      uint64_t trace_id, uint64_t deadline_ns,
+                                                      uint32_t *rules_touched,
+                                                      aimee_module_cancelled_fn cancelled,
+                                                      void *cancel_context)
+{
+   if (!call || !rules_touched)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *rules_touched = 0u;
+   uint8_t request[AIMEE_DB2_RULES_DECAY_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RULES_DECAY_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_rules_decay_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RULES_DECAY, AIMEE_DB2_STAGE_RULES_DECAY, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_rules_decay_reply_decode(response, response_len, rules_touched) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -14690,14 +14868,15 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_routes = catalog["operations"][57]
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
-    prospective_sweep_expired = catalog["operations"][60]
-    directive_sweep_expired = catalog["operations"][61]
-    mark_revisit_due = catalog["operations"][62]
-    ingest_queue_reset_running = catalog["operations"][63]
-    evidence_reembed_all = catalog["operations"][64]
-    curator_reembed_all = catalog["operations"][65]
-    synth_reenqueue_all = catalog["operations"][66]
-    curator_reenqueue_extract_all = catalog["operations"][67]
+    rules_decay = catalog["operations"][60]
+    prospective_sweep_expired = catalog["operations"][61]
+    directive_sweep_expired = catalog["operations"][62]
+    mark_revisit_due = catalog["operations"][63]
+    ingest_queue_reset_running = catalog["operations"][64]
+    evidence_reembed_all = catalog["operations"][65]
+    curator_reembed_all = catalog["operations"][66]
+    synth_reenqueue_all = catalog["operations"][67]
+    curator_reenqueue_extract_all = catalog["operations"][68]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -15052,6 +15231,10 @@ const EventCrossRepoRebuildBuildDeps = EventIndex
 const StageCrossRepoRebuildBuildDeps = FamilyIndex
 const OperationCrossRepoRebuildBuildDeps uint32 = {cross_repo_rebuild_build_deps['id']}
 const CrossRepoRebuildBuildDepsMax uint32 = {cross_repo_rebuild_build_deps['reply']['field']['maximum']}
+const EventRulesDecay = EventLearning
+const StageRulesDecay = FamilyLearning
+const OperationRulesDecay uint32 = {rules_decay['id']}
+const RulesDecayMax uint32 = {rules_decay['reply']['field']['maximum']}
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = {prospective_sweep_expired['id']}
@@ -17035,6 +17218,57 @@ func DecodeCrossRepoRebuildBuildDepsReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return buildDepsWritten, nil
+}}
+
+// EncodeRulesDecayRequest emits the empty request envelope. Every decay
+// constant is policy and never travels.
+func EncodeRulesDecayRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationRulesDecay, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeRulesDecayRequest validates the exact learning-family envelope. It is
+// the first operation of that family on the wire.
+func DecodeRulesDecayRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesDecay ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeRulesDecayReply emits one bounded u32 row count summed over the decay
+// and archive statements. A decayed rule and a deleted one are not separable
+// in it.
+func EncodeRulesDecayReply(rulesTouched uint32) ([]byte, error) {{
+	if rulesTouched > RulesDecayMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationRulesDecay, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], rulesTouched)
+	return reply, nil
+}}
+
+// DecodeRulesDecayReply validates the operation and bounded count.
+func DecodeRulesDecayReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRulesDecay || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	rulesTouched := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if rulesTouched > RulesDecayMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return rulesTouched, nil
 }}
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The
