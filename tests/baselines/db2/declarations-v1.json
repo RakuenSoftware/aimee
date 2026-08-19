@@ -17369,9 +17369,15 @@
           "line": 725
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.list_rows operation replaces the tier and kind listing. It is the only read here whose statement is assembled: the tier and kind clauses appear only when their value is non-empty, so an empty value is no filter on that column rather than a match against the empty string, and this is four statements sharing one name. Its LIMIT was interpolated from an unbounded caller integer and is a bounded field on the wire. Identifiers cross and the scope travels, as for the other scoped reads."
+      },
       "signature": "int db2_memory_list ( const char * tier , const char * kind , int hide_archived , int limit , memory_t * out , int max )",
       "signature_sha256": "f2f29295fec914261ef5638dc7cb484dca90379dc0d0a95ddfd1532ff42dde34",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list"
     },
     {
@@ -26448,15 +26454,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "78bc334e2d330ae9c8098d1fdd09cff9afb81779afb333b78d97a70805570122",
+  "fingerprint": "3407725bd0b5c3b4d4a3e63fafc585764a1edfdfa585c63a06d47cbf617cd6fa",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 554,
+    "audit_pending": 553,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 404
+    "reviewed": 405
   }
 }

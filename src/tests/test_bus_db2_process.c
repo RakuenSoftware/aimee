@@ -391,6 +391,22 @@ int main(int argc, char **argv)
                                       NULL) == AIMEE_MODULE_CALL_OK);
    assert(history_count == 0);
 
+   /* Both filter shapes are replayed, because they are different statements:
+    * the tier and kind clauses are only in the query when their value is set. */
+   uint64_t list_ids[AIMEE_DB2_LIST_ROWS_MAX];
+   uint32_t list_count = 99;
+   assert(aimee_db2_list_rows_call(call_client, &client, 9090, 0, 4u, 1u, 1u, "L2", "fact",
+                                   "replay-workspace", "replay-project", list_ids,
+                                   AIMEE_DB2_LIST_ROWS_MAX, &list_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(list_count == 0);
+
+   list_count = 99;
+   assert(aimee_db2_list_rows_call(call_client, &client, 9091, 0, 4u, 0u, 0u, "", "", "", "",
+                                   list_ids, AIMEE_DB2_LIST_ROWS_MAX, &list_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(list_count == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

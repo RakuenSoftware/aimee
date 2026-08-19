@@ -2062,6 +2062,44 @@
       }
     },
     {
+      "family": "memory",
+      "id": 60,
+      "name": "list_rows",
+      "wire_format": "db2-envelope-scoped-filter-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The canonical memory rows, their lifecycle state and the scope tables the listing is ranked against are all relational DB2 state, so the listing stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_list"],
+      "request": {
+        "encoded_size_min": 52,
+        "encoded_size_max": 1092,
+        "policy": {"maximum_ids": 64,
+                   "empty_filter": "an empty tier or kind is no filter on that column, not a match against the empty string",
+                   "assembled_statement": "the tier and kind clauses are appended only when their value is non-empty, so this is four statements sharing one operation",
+                   "ranking": "session-scope rank, then update stamp, both descending"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "hide_archived", "type": "u32", "minimum": 0, "maximum": 1},
+          {"name": "tier", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 3},
+          {"name": "kind", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 15},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

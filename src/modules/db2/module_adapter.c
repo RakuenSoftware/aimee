@@ -306,6 +306,39 @@ static int production_fact_history(const char *normalized_key, int limit, int64_
    return listed;
 }
 
+static int production_list_rows(const char *tier, const char *kind, int hide_archived, int limit,
+                                int scope_active, int include_all, const char *workspace,
+                                const char *project, int64_t *out, int max)
+{
+   if (!tier || !kind || !out || max <= 0 || limit <= 0)
+      return -1;
+   memory_t *rows = calloc((size_t)max, sizeof(*rows));
+   if (!rows)
+      return -1;
+
+   db2_memory_scope_context_t saved;
+   memset(&saved, 0, sizeof(saved));
+   db2_memory_scope_context_get(&saved);
+   if (scope_active)
+      db2_memory_scope_context_set(workspace, project, include_all);
+   else
+      db2_memory_scope_context_clear();
+
+   int listed = db2_memory_list(tier, kind, hide_archived, limit, rows, max);
+
+   if (saved.active)
+      db2_memory_scope_context_set(saved.workspace, saved.project, saved.include_all);
+   else
+      db2_memory_scope_context_clear();
+
+   if (listed > max)
+      listed = max;
+   for (int index = 0; index < listed; index++)
+      out[index] = rows[index].id;
+   free(rows);
+   return listed;
+}
+
 static int production_collect_alias_matches(const char *term, int limit, int scope_active,
                                             int include_all, const char *workspace,
                                             const char *project, int64_t *out, int max)
@@ -593,6 +626,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .negation_fts_search = production_negation_fts_search,
        .search_facts_patterns_by_keyword = production_search_facts_patterns_by_keyword,
        .fact_history = production_fact_history,
+       .list_rows = production_list_rows,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -1272,6 +1306,44 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_fact_history_reply_encode(memory_ids, (uint32_t)listed, response_body,
                                                     response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t list_limit = 0u, list_scope = 0u, list_hide = 0u;
+         char list_tier[AIMEE_DB2_LIST_ROWS_TIER_MAX + 1];
+         char list_kind[AIMEE_DB2_LIST_ROWS_KIND_MAX + 1];
+         char list_workspace[AIMEE_DB2_LIST_ROWS_WORKSPACE_MAX + 1];
+         char list_project[AIMEE_DB2_LIST_ROWS_PROJECT_MAX + 1];
+         if (aimee_db2_list_rows_request_decode(
+                 request_body, request_len, &list_limit, &list_scope, &list_hide, list_tier,
+                 sizeof(list_tier), list_kind, sizeof(list_kind), list_workspace,
+                 sizeof(list_workspace), list_project, sizeof(list_project)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_LIST_ROWS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->list_rows)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int64_t rows[AIMEE_DB2_LIST_ROWS_MAX];
+            /* An empty tier or kind reaches the backend as an empty string,
+             * which is exactly how it decides to leave that clause out. */
+            int listed = backend->list_rows(list_tier, list_kind, (int)list_hide, (int)list_limit,
+                                            (int)(list_scope & 1u), (int)((list_scope >> 1) & 1u),
+                                            list_workspace, list_project, rows, (int)list_limit);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (listed < 0 || listed > (int)list_limit)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint64_t memory_ids[AIMEE_DB2_LIST_ROWS_MAX];
+            for (int index = 0; index < listed; index++)
+            {
+               if (rows[index] < (int64_t)AIMEE_DB2_LIST_ROWS_ID_MIN)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               memory_ids[index] = (uint64_t)rows[index];
+            }
+            if (aimee_db2_list_rows_reply_encode(memory_ids, (uint32_t)listed, response_body,
+                                                 response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

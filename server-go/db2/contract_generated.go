@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a0dee250f5f1ae85ad2dbb2cfb016e39af25d64123a93ccd7d6b8855e2789bf8"
+const ContractSHA256 = "b27f23394c44c4444a0c33e6c80e7223e4c47de7dfb2f01fe77ce821bf47f786"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4077,6 +4077,135 @@ func DecodeFactHistoryReply(reply []byte) ([]uint64, error) {
 	for index := range memoryIDs {
 		id := binary.LittleEndian.Uint64(payload[4+index*8:])
 		if id < FactHistoryIDMin || id > FactHistoryIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+const EventListRows = EventMemory
+const StageListRows = FamilyMemory
+const OperationListRows uint32 = 60
+const ListRowsLimitMin uint32 = 1
+const ListRowsLimitMax uint32 = 64
+const ListRowsScopeFlagsMax uint32 = 3
+const ListRowsHideArchivedMax uint32 = 1
+const ListRowsTierMax = 3
+const ListRowsKindMax = 15
+const ListRowsWorkspaceMax = 511
+const ListRowsProjectMax = 511
+const ListRowsMax uint32 = 64
+const ListRowsIDMin uint64 = 1
+const ListRowsIDMax uint64 = 9223372036854775807
+
+// EncodeListRowsRequest carries the limit, both flag words and the four filters.
+// An empty filter is no filter on that column.
+func EncodeListRowsRequest(limit uint32, scopeFlags uint32, hideArchived uint32, tier string, kind string, workspace string, project string) ([]byte, error) {
+	if limit < ListRowsLimitMin || limit > ListRowsLimitMax || scopeFlags > ListRowsScopeFlagsMax ||
+		hideArchived > ListRowsHideArchivedMax {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := make([]byte, 12)
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], hideArchived)
+	if err := putRowText(&payload, tier, ListRowsTierMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, kind, ListRowsKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, workspace, ListRowsWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, ListRowsProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationListRows, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeListRowsRequest walks the four length prefixes rather than trusting them.
+func DecodeListRowsRequest(request []byte) (uint32, uint32, uint32, string, string, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationListRows || header.Flags != 0 ||
+		header.PayloadLen < 28 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	hideArchived := binary.LittleEndian.Uint32(payload[8:])
+	if limit < ListRowsLimitMin || limit > ListRowsLimitMax || scopeFlags > ListRowsScopeFlagsMax ||
+		hideArchived > ListRowsHideArchivedMax {
+		return 0, 0, 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	var tier, kind, workspace, project string
+	cursor := 12
+	if tier, err = takeRowText(payload, &cursor, ListRowsTierMax); err != nil {
+		return 0, 0, 0, "", "", "", "", err
+	}
+	if kind, err = takeRowText(payload, &cursor, ListRowsKindMax); err != nil {
+		return 0, 0, 0, "", "", "", "", err
+	}
+	if workspace, err = takeRowText(payload, &cursor, ListRowsWorkspaceMax); err != nil {
+		return 0, 0, 0, "", "", "", "", err
+	}
+	if project, err = takeRowText(payload, &cursor, ListRowsProjectMax); err != nil {
+		return 0, 0, 0, "", "", "", "", err
+	}
+	if cursor != len(payload) {
+		return 0, 0, 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	return limit, scopeFlags, hideArchived, tier, kind, workspace, project, nil
+}
+
+// EncodeListRowsReply emits the counted, bounded identifier list.
+func EncodeListRowsReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > ListRowsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < ListRowsIDMin || id > ListRowsIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationListRows, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeListRowsReply validates the operation and every bounded identifier.
+func DecodeListRowsReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationListRows || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > ListRowsMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < ListRowsIDMin || id > ListRowsIDMax {
 			return nil, ErrMalformedEnvelope
 		}
 		memoryIDs[index] = id

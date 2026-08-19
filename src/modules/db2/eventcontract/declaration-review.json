@@ -2100,6 +2100,14 @@
       "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
     },
     {
+      "symbol": "db2_memory_list",
+      "signature_sha256": "f2f29295fec914261ef5638dc7cb484dca90379dc0d0a95ddfd1532ff42dde34",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.list_rows operation replaces the tier and kind listing. It is the only read here whose statement is assembled: the tier and kind clauses appear only when their value is non-empty, so an empty value is no filter on that column rather than a match against the empty string, and this is four statements sharing one name. Its LIMIT was interpolated from an unbounded caller integer and is a bounded field on the wire. Identifiers cross and the scope travels, as for the other scoped reads."
+    },
+    {
       "symbol": "db2_memory_list_session_scope_priority",
       "signature_sha256": "b0110278348371f632b08e96afb7a3771dd2eaaf39ee1786757de0c27c6ec0aa",
       "disposition": "wire-operation",

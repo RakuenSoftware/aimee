@@ -306,7 +306,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                "find_facts_like",
                                                "list_session_scope_priority_like",
                                                "negation_fts_search",
-                                               "search_facts_patterns_by_keyword") else "none"
+                                               "search_facts_patterns_by_keyword",
+                                               "list_rows") else "none"
         if operation["scope"] != expected_scope or \
                 operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
@@ -2272,6 +2273,71 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
                 fail("fact-history-reply",
                      "reply must be a counted identifier list bounded by the request policy")
+        elif key == ("memory", 60) and name == "list_rows" and \
+                operation["wire_format"] == "db2-envelope-scoped-filter-u64-list-v1":
+            # The one read whose statement is assembled rather than fixed. What
+            # an empty tier or kind means is the fact worth pinning: it is no
+            # filter on that column, not a match against the empty string, and
+            # the wire cannot tell those apart on its own.
+            if operation["c_symbols"] != ["db2_memory_list"]:
+                fail("operation-c-symbols", "list_rows C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "list_rows results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "policy", "fields"},
+                            "list_rows.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 7:
+                fail("list-rows-request",
+                     "request must carry the limit, the two flag words and the four filters")
+            counters = [_keys(field, {"name", "type", "minimum", "maximum"},
+                              f"list_rows.request.fields[{index}]")
+                        for index, field in enumerate(request_fields[:3])]
+            filters = [_keys(field, {"name", "type", "minimum_bytes", "maximum_bytes"},
+                             f"list_rows.request.fields[{index}]")
+                       for index, field in enumerate(request_fields[3:], start=3)]
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"maximum_ids", "empty_filter",
+                                                               "assembled_statement", "ranking"}:
+                fail("list-rows-request",
+                     "request policy must bound the reply, say what an empty filter means, say "
+                     "that the statement is assembled, and state the ordering")
+            maximum_ids = policy["maximum_ids"]
+            _string(policy["empty_filter"], "list_rows.request.policy.empty_filter", 120)
+            _string(policy["assembled_statement"],
+                    "list_rows.request.policy.assembled_statement", 160)
+            _string(policy["ranking"], "list_rows.request.policy.ranking", 120)
+            # hide_archived is its own field rather than a third scope bit: it
+            # is the caller's choice, where the scope bits describe the session.
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 28 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 28 + 3 + 15 + 511 + 511 or
+                    counters != [{"name": "limit", "type": "u32", "minimum": 1,
+                                  "maximum": maximum_ids},
+                                 {"name": "scope_flags", "type": "u32", "minimum": 0,
+                                  "maximum": 3},
+                                 {"name": "hide_archived", "type": "u32", "minimum": 0,
+                                  "maximum": 1}] or
+                    filters != [{"name": field, "type": "utf8", "minimum_bytes": 0,
+                                 "maximum_bytes": limit}
+                                for field, limit in (("tier", 3), ("kind", 15),
+                                                     ("workspace", 511), ("project", 511))]):
+                fail("list-rows-request",
+                     "request must carry a bounded limit, the two flag words and the four "
+                     "bounded filters")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "field"}, "list_rows.reply")
+            reply_field = _keys(reply["field"],
+                                {"name", "type", "minimum_items", "maximum_items",
+                                 "item_minimum", "item_maximum"}, "list_rows.reply.field")
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + maximum_ids * 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "memory_ids", "type": "u64-list",
+                                    "minimum_items": 0, "maximum_items": maximum_ids,
+                                    "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
+                fail("list-rows-reply",
+                     "reply must be a counted identifier list bounded by the request policy")
         elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # First operation of the index family. The tiers that count as a
@@ -3382,7 +3448,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 104 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 105 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3403,7 +3469,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "collect_summary_matches", "collect_temporal_matches", "find_facts_like",
             "list_session_scope_priority_like", "negation_fts_search",
             "session_neighbors_before", "session_neighbors_after", "row_get",
-            "row_get_by_unit_id", "search_facts_patterns_by_keyword", "fact_history",
+            "row_get_by_unit_id", "search_facts_patterns_by_keyword", "fact_history", "list_rows",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
@@ -3418,7 +3484,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the one hundred and four supported operations exactly once")
+             "the partial generator requires the one hundred and five supported operations exactly once")
     return catalog
 
 
@@ -3612,6 +3678,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     row_get_by_unit_id = named["row_get_by_unit_id"]
     search_facts_patterns_by_keyword = named["search_facts_patterns_by_keyword"]
     fact_history = named["fact_history"]
+    list_rows = named["list_rows"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -3996,6 +4063,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     search_facts_patterns_by_keyword_vectors = _scoped_term_list_vectors(
         catalog, search_facts_patterns_by_keyword)
     fact_history_vectors = _key_list_vectors(catalog, fact_history)
+    list_rows_vectors = _filter_list_vectors(catalog, list_rows)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -6821,7 +6889,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (count_and_max_updated_ok + b"\0").hex()},
                 ],
             },
-        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, row_get_vectors, row_get_by_unit_id_vectors, search_facts_patterns_by_keyword_vectors, fact_history_vectors, {
+        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, row_get_vectors, row_get_by_unit_id_vectors, search_facts_patterns_by_keyword_vectors, fact_history_vectors, list_rows_vectors, {
             "family": entity_edge_prune_orphans["family"],
             "id": entity_edge_prune_orphans["id"],
             "name": entity_edge_prune_orphans["name"],
@@ -10218,6 +10286,402 @@ func Decode{name}Reply(reply []byte) ([]uint64, error) {{
 """
 
 
+
+# The four filters of db2-envelope-scoped-filter-u64-list-v1, in wire order.
+FILTER_LIST_TEXT = (("tier", 3), ("kind", 15), ("workspace", 511), ("project", 511))
+
+
+def _filter_list_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-scoped-filter-u64-list-v1."""
+    upper = str(operation["name"]).upper()
+    request = operation["request"]
+    reply = operation["reply"]
+    limit, scope_flags, hide_archived = request["fields"][:3]
+    rows = [
+        (f"AIMEE_DB2_EVENT_{upper}", "AIMEE_DB2_EVENT_MEMORY"),
+        (f"AIMEE_DB2_STAGE_{upper}", "AIMEE_DB2_FAMILY_MEMORY"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MIN_LEN", f"{request['encoded_size_min']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MAX_LEN", f"{request['encoded_size_max']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MIN", f"{limit['minimum']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MAX", f"{limit['maximum']}u"),
+        (f"AIMEE_DB2_{upper}_SCOPE_FLAGS_MAX", f"{scope_flags['maximum']}u"),
+        (f"AIMEE_DB2_{upper}_HIDE_ARCHIVED_MAX", f"{hide_archived['maximum']}u"),
+    ]
+    rows += [(f"AIMEE_DB2_{upper}_{name.upper()}_MAX", f"{limit_bytes}u")
+             for name, limit_bytes in FILTER_LIST_TEXT]
+    rows += [
+        (f"AIMEE_DB2_{upper}_RESPONSE_MIN_LEN", f"{reply['encoded_size_min_ok']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MAX_LEN", f"{reply['encoded_size_max_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+        (f"AIMEE_DB2_{upper}_MAX", f"{reply['field']['maximum_items']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MIN", f"{reply['field']['item_minimum']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MAX", f"{reply['field']['item_maximum']}ull"),
+    ]
+    return rows
+
+
+def _filter_list_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-scoped-filter-u64-list-v1."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    parameters = ", ".join(f"const char *{name}" for name, _limit in FILTER_LIST_TEXT)
+    out_parameters = ", ".join(f"char *{name}, size_t {name}_capacity"
+                               for name, _limit in FILTER_LIST_TEXT)
+    lengths = "\n".join(f"""   size_t {name}_len = 0u;
+   while ({name}_len <= AIMEE_DB2_{upper}_{name.upper()}_MAX && {name}[{name}_len])
+      ++{name}_len;
+   if ({name}_len > AIMEE_DB2_{upper}_{name.upper()}_MAX)
+      return -1;""" for name, _limit in FILTER_LIST_TEXT)
+    total = " + ".join(f"{name}_len" for name, _limit in FILTER_LIST_TEXT)
+    writes = "\n".join(f"""   aimee_db2_put_u32(payload + cursor, (uint32_t){name}_len);
+   memcpy(payload + cursor + 4u, {name}, {name}_len);
+   cursor += 4u + (uint32_t){name}_len;"""
+                       for name, _limit in FILTER_LIST_TEXT)
+    clears = "\n".join(f"""   if ({name} && {name}_capacity)
+      {name}[0] = '\\0';""" for name, _limit in FILTER_LIST_TEXT)
+    guards = " ||\n       ".join(
+        f"!{name} || {name}_capacity < (size_t)AIMEE_DB2_{upper}_{name.upper()}_MAX + 1u"
+        for name, _limit in FILTER_LIST_TEXT)
+    takes = "\n".join(f"""   if (aimee_db2_memory_row_take(payload, header.payload_len, &cursor, {name},
+                                 AIMEE_DB2_{upper}_{name.upper()}_MAX) != 0)
+      return -1;""" for name, _limit in FILTER_LIST_TEXT)
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(uint32_t limit, uint32_t scope_flags,
+                                                   uint32_t hide_archived, {parameters},
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!tier || !kind || !workspace || !project || !output || !output_len ||
+       limit < AIMEE_DB2_{upper}_LIMIT_MIN || limit > AIMEE_DB2_{upper}_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_{upper}_SCOPE_FLAGS_MAX ||
+       hide_archived > AIMEE_DB2_{upper}_HIDE_ARCHIVED_MAX)
+      return -1;
+{lengths}
+   size_t payload_len = 28u + {total};
+   if (capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, limit);
+   aimee_db2_put_u32(payload + 4u, scope_flags);
+   aimee_db2_put_u32(payload + 8u, hide_archived);
+   uint32_t cursor = 12u;
+{writes}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *limit, uint32_t *scope_flags,
+                                                   uint32_t *hide_archived, {out_parameters})
+{{
+   if (limit)
+      *limit = 0u;
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (hide_archived)
+      *hide_archived = 0u;
+{clears}
+   if (!limit || !scope_flags || !hide_archived ||
+       {guards})
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       input_len < AIMEE_DB2_{upper}_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_{upper}_REQUEST_MAX_LEN || header.payload_len < 28u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_limit = aimee_db2_get_u32(payload);
+   uint32_t decoded_scope = aimee_db2_get_u32(payload + 4u);
+   uint32_t decoded_hide = aimee_db2_get_u32(payload + 8u);
+   if (decoded_limit < AIMEE_DB2_{upper}_LIMIT_MIN ||
+       decoded_limit > AIMEE_DB2_{upper}_LIMIT_MAX ||
+       decoded_scope > AIMEE_DB2_{upper}_SCOPE_FLAGS_MAX ||
+       decoded_hide > AIMEE_DB2_{upper}_HIDE_ARCHIVED_MAX)
+      return -1;
+   uint32_t cursor = 12u;
+{takes}
+   if (cursor != header.payload_len)
+      return -1;
+   *limit = decoded_limit;
+   *scope_flags = decoded_scope;
+   *hide_archived = decoded_hide;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_encode(const uint64_t *memory_ids, uint32_t count,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) || count > AIMEE_DB2_{upper}_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_{upper}_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+   uint32_t payload_len = 4u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 4u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint64_t *memory_ids, uint32_t capacity,
+                                                 uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_{upper}_MAX || header.payload_len != 4u + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {{
+      uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
+      if (value < AIMEE_DB2_{upper}_ID_MIN || value > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }}
+   *count = decoded;
+   return 0;
+}}
+"""
+
+
+def _filter_list_vectors(catalog: dict[str, object],
+                         operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for db2-envelope-scoped-filter-u64-list-v1."""
+    identifier = int(operation["id"])
+    limit_max = int(operation["request"]["fields"][0]["maximum"])
+    values = {"tier": b"L2", "kind": b"fact", "workspace": b"alpha-workspace",
+              "project": b"beta-project"}
+
+    def request_bytes(limit: int, scope_flags: int, hide_archived: int,
+                      overrides: dict[str, bytes] | None = None) -> bytes:
+        chosen = dict(values)
+        chosen.update(overrides or {})
+        payload = _put_u32(limit) + _put_u32(scope_flags) + _put_u32(hide_archived)
+        for name, _limit in FILTER_LIST_TEXT:
+            payload += _put_u32(len(chosen[name])) + chosen[name]
+        return _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0, payload)
+
+    request = request_bytes(8, 3, 1)
+    tier_length_at = ENVELOPE_HEADER_LEN + 12
+    ids = (7, 19, 9223372036854775807)
+    reply_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0,
+                         _put_u32(len(ids)) + b"".join(_put_u64(value) for value in ids))
+    reply_empty = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0))
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {
+            "positive": request.hex(),
+            "limit": 8,
+            "scope_flags": 3,
+            "hide_archived": 1,
+            "tier": "L2",
+            "kind": "fact",
+            "workspace": "alpha-workspace",
+            "project": "beta-project",
+            "maximum_ids": operation["request"]["policy"]["maximum_ids"],
+            # Every filter empty is a legal request meaning "no filter at all",
+            # not a mutation, so it is pinned as a second positive.
+            "unfiltered": request_bytes(
+                8, 0, 0, {name: b"" for name, _limit in FILTER_LIST_TEXT}).hex(),
+            "negative": [
+                {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+                {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+                {"mutation": "limit_zero", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, 0).hex()},
+                {"mutation": "limit_above_maximum", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, limit_max + 1).hex()},
+                {"mutation": "scope_flags_undefined_bit", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN + 4, 4).hex()},
+                {"mutation": "hide_archived_above_maximum", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN + 8, 2).hex()},
+                {"mutation": "tier_above_maximum", "hex":
+                 request_bytes(8, 3, 1, {"tier": b"L2XY"}).hex()},
+                {"mutation": "tier_length_exceeds_payload", "hex":
+                 _mutate_u32(request, tier_length_at, 3).hex()},
+                {"mutation": "kind_embedded_nul", "hex":
+                 request_bytes(8, 3, 1, {"kind": b"fa\0ct"}).hex()},
+                {"mutation": "short", "hex": request[:-1].hex()},
+                {"mutation": "long", "hex": (request + b"\0").hex()},
+            ],
+        },
+        "reply": {
+            "positive": [
+                {"result": 0, "memory_ids": list(ids), "hex": reply_ok.hex()},
+                {"result": 0, "memory_ids": [], "hex": reply_empty.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
+                {"mutation": "ok_without_count", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
+                {"mutation": "count_exceeds_payload", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, 4).hex()},
+                {"mutation": "count_below_payload", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, 2).hex()},
+                {"mutation": "count_above_maximum", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, limit_max + 1).hex()},
+                {"mutation": "identifier_zero", "hex":
+                 (reply_ok[:ENVELOPE_HEADER_LEN + 4] + _put_u64(0) +
+                  reply_ok[ENVELOPE_HEADER_LEN + 12:]).hex()},
+                {"mutation": "identifier_above_maximum", "hex":
+                 (reply_ok[:-8] + _put_u64(0x8000000000000000)).hex()},
+                {"mutation": "short", "hex": reply_ok[:-1].hex()},
+                {"mutation": "long", "hex": (reply_ok + b"\0").hex()},
+            ],
+        },
+    }
+
+
+def _filter_list_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for db2-envelope-scoped-filter-u64-list-v1."""
+    name = _go_name(str(operation["name"]))
+    request = operation["request"]
+    reply = operation["reply"]
+    limit, scope_flags, hide_archived = request["fields"][:3]
+    bounds = "\n".join(f"const {name}{_go_name(field)}Max = {limit_bytes}"
+                        for field, limit_bytes in FILTER_LIST_TEXT)
+    put = "\n".join(f"""	if err := putRowText(&payload, {field}, {name}{_go_name(field)}Max); err != nil {{
+		return nil, err
+	}}""" for field, _limit in FILTER_LIST_TEXT)
+    take = "\n".join(f"""	if {field}, err = takeRowText(payload, &cursor, {name}{_go_name(field)}Max); err != nil {{
+		return 0, 0, 0, "", "", "", "", err
+	}}""" for field, _limit in FILTER_LIST_TEXT)
+    return f"""const Event{name} = EventMemory
+const Stage{name} = FamilyMemory
+const Operation{name} uint32 = {operation['id']}
+const {name}LimitMin uint32 = {limit['minimum']}
+const {name}LimitMax uint32 = {limit['maximum']}
+const {name}ScopeFlagsMax uint32 = {scope_flags['maximum']}
+const {name}HideArchivedMax uint32 = {hide_archived['maximum']}
+{bounds}
+const {name}Max uint32 = {reply['field']['maximum_items']}
+const {name}IDMin uint64 = {reply['field']['item_minimum']}
+const {name}IDMax uint64 = {reply['field']['item_maximum']}
+
+// Encode{name}Request carries the limit, both flag words and the four filters.
+// An empty filter is no filter on that column.
+func Encode{name}Request(limit uint32, scopeFlags uint32, hideArchived uint32, tier string, kind string, workspace string, project string) ([]byte, error) {{
+	if limit < {name}LimitMin || limit > {name}LimitMax || scopeFlags > {name}ScopeFlagsMax ||
+		hideArchived > {name}HideArchivedMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload := make([]byte, 12)
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], hideArchived)
+{put}
+	header, err := EncodeRequestHeader(Operation{name}, 0, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Request walks the four length prefixes rather than trusting them.
+func Decode{name}Request(request []byte) (uint32, uint32, uint32, string, string, string, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen < 28 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, 0, 0, "", "", "", "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	hideArchived := binary.LittleEndian.Uint32(payload[8:])
+	if limit < {name}LimitMin || limit > {name}LimitMax || scopeFlags > {name}ScopeFlagsMax ||
+		hideArchived > {name}HideArchivedMax {{
+		return 0, 0, 0, "", "", "", "", ErrMalformedEnvelope
+	}}
+	var tier, kind, workspace, project string
+	cursor := 12
+{take}
+	if cursor != len(payload) {{
+		return 0, 0, 0, "", "", "", "", ErrMalformedEnvelope
+	}}
+	return limit, scopeFlags, hideArchived, tier, kind, workspace, project, nil
+}}
+
+// Encode{name}Reply emits the counted, bounded identifier list.
+func Encode{name}Reply(memoryIDs []uint64) ([]byte, error) {{
+	if uint32(len(memoryIDs)) > {name}Max {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for _, id := range memoryIDs {{
+		if id < {name}IDMin || id > {name}IDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {{
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}}
+	return reply, nil
+}}
+
+// Decode{name}Reply validates the operation and every bounded identifier.
+func Decode{name}Reply(reply []byte) ([]uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > {name}Max || header.PayloadLen != 4+count*8 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {{
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < {name}IDMin || id > {name}IDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+		memoryIDs[index] = id
+	}}
+	return memoryIDs, nil
+}}
+
+"""
+
+
 def header_bytes(catalog: dict[str, object]) -> bytes:
     def macros(rows: list[tuple[str, str]]) -> str:
         width = max(len(name) for name, _ in rows)
@@ -10295,6 +10759,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     row_get_by_unit_id = named["row_get_by_unit_id"]
     search_facts_patterns_by_keyword = named["search_facts_patterns_by_keyword"]
     fact_history = named["fact_history"]
+    list_rows = named["list_rows"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -11091,6 +11556,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         *_memory_row_operation_constants(row_get_by_unit_id),
         *_scoped_term_list_constants(search_facts_patterns_by_keyword),
         *_key_list_constants(fact_history),
+        *_filter_list_constants(list_rows),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -15493,7 +15959,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
 }}
 
 {_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
-{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}
+{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -18079,6 +18545,13 @@ extern "C"
        const char *normalized_key, uint32_t limit, uint64_t *memory_ids, uint32_t capacity,
        uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_list_rows_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t limit, uint32_t scope_flags, uint32_t hide_archived, const char *tier,
+       const char *kind, const char *workspace, const char *project, uint64_t *memory_ids,
+       uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -19984,6 +20457,35 @@ aimee_db2_fact_history_call(aimee_db2_call_fn call, void *call_context, uint64_t
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_list_rows_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t limit, uint32_t scope_flags, uint32_t hide_archived, const char *tier,
+    const char *kind, const char *workspace, const char *project, uint64_t *memory_ids,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !tier || !kind || !workspace || !project ||
+       (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIST_ROWS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIST_ROWS_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_list_rows_request_encode(limit, scope_flags, hide_archived, tier, kind, workspace,
+                                          project, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_LIST_ROWS, AIMEE_DB2_STAGE_LIST_ROWS, trace_id, deadline_ns,
+       request, request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_list_rows_reply_decode(response, response_len, memory_ids, capacity, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -21166,6 +21668,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     row_get_by_unit_id = named["row_get_by_unit_id"]
     search_facts_patterns_by_keyword = named["search_facts_patterns_by_keyword"]
     fact_history = named["fact_history"]
+    list_rows = named["list_rows"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -23220,7 +23723,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)

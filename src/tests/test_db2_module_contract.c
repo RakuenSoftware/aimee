@@ -1437,6 +1437,18 @@ int db2_memory_fact_history(const char *normalized_key, void *out, int max)
    return 0;
 }
 
+int db2_memory_list(const char *tier, const char *kind, int hide_archived, int limit, void *out,
+                    int max)
+{
+   (void)tier;
+   (void)kind;
+   (void)hide_archived;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
 {
    (void)term;

@@ -76,6 +76,9 @@ typedef struct
                                            int include_all, const char *workspace,
                                            const char *project, int64_t *out, int max);
    int (*fact_history)(const char *normalized_key, int limit, int64_t *out, int max);
+   int (*list_rows)(const char *tier, const char *kind, int hide_archived, int limit,
+                    int scope_active, int include_all, const char *workspace, const char *project,
+                    int64_t *out, int max);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -287,6 +290,10 @@ static int top_l2_facts_calls;
 static int list_session_scope_priority_calls;
 static int term_probe_calls[10];
 static int history_calls;
+static int list_rows_calls;
+static char list_tier_seen[8];
+static char list_kind_seen[24];
+static int list_hide_seen;
 static char history_key_seen[64];
 static int walk_calls[2];
 static int row_calls[2];
@@ -664,6 +671,24 @@ static int search_facts_patterns_by_keyword(const char *term, int limit, int sco
    return term_probe_impl(9, term, limit, scope_active, include_all, workspace, project, out, max);
 }
 
+static int list_rows(const char *tier, const char *kind, int hide_archived, int limit,
+                     int scope_active, int include_all, const char *workspace, const char *project,
+                     int64_t *out, int max)
+{
+   (void)scope_active;
+   (void)include_all;
+   (void)workspace;
+   (void)project;
+   list_rows_calls++;
+   list_hide_seen = hide_archived;
+   snprintf(list_tier_seen, sizeof(list_tier_seen), "%s", tier ? tier : "");
+   snprintf(list_kind_seen, sizeof(list_kind_seen), "%s", kind ? kind : "");
+   int listed = 0;
+   for (; listed < 2 && listed < max && listed < limit; listed++)
+      out[listed] = 6000 + listed;
+   return listed;
+}
+
 static int fact_history(const char *normalized_key, int limit, int64_t *out, int max)
 {
    history_calls++;
@@ -924,6 +949,18 @@ int db2_memory_search_facts_patterns_by_keyword(const char *keyword, void *out, 
 int db2_memory_fact_history(const char *normalized_key, void *out, int max)
 {
    (void)normalized_key;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list(const char *tier, const char *kind, int hide_archived, int limit, void *out,
+                    int max)
+{
+   (void)tier;
+   (void)kind;
+   (void)hide_archived;
+   (void)limit;
    (void)out;
    (void)max;
    return 0;
@@ -2204,6 +2241,7 @@ int main(void)
        .negation_fts_search = negation_fts_search,
        .search_facts_patterns_by_keyword = search_facts_patterns_by_keyword,
        .fact_history = fact_history,
+       .list_rows = list_rows,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -2599,6 +2637,31 @@ int main(void)
                                       AIMEE_DB2_FACT_HISTORY_MAX, &history_count, NULL,
                                       NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
    assert(history_calls == 1);
+
+   /* An empty tier or kind is no filter on that column, so the backend has to
+    * receive the empty string rather than a placeholder; both shapes are sent. */
+   uint64_t list_ids[AIMEE_DB2_LIST_ROWS_MAX];
+   uint32_t list_count = 99;
+   assert(aimee_db2_list_rows_call(call_client, &client, 7120, 0, 7u, 3u, 1u, "L2", "fact",
+                                   "probe-workspace", "probe-project", list_ids,
+                                   AIMEE_DB2_LIST_ROWS_MAX, &list_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(list_count == 2 && list_ids[0] == 6000 && list_ids[1] == 6001 && list_rows_calls == 1 &&
+          list_hide_seen == 1 && strcmp(list_tier_seen, "L2") == 0 &&
+          strcmp(list_kind_seen, "fact") == 0);
+
+   list_count = 99;
+   assert(aimee_db2_list_rows_call(call_client, &client, 7121, 0, 7u, 0u, 0u, "", "", "", "",
+                                   list_ids, AIMEE_DB2_LIST_ROWS_MAX, &list_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(list_count == 2 && list_rows_calls == 2 && list_hide_seen == 0 &&
+          list_tier_seen[0] == '\0' && list_kind_seen[0] == '\0');
+
+   /* A tier longer than the column it filters is refused before the bus. */
+   assert(aimee_db2_list_rows_call(call_client, &client, 7122, 0, 7u, 0u, 0u, "L2XY", "", "", "",
+                                   list_ids, AIMEE_DB2_LIST_ROWS_MAX, &list_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(list_rows_calls == 2);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */
