@@ -14,52 +14,54 @@
  * NOT here, and never: anything reading the client's own disk or environment.
  * That is the thin client's own job, not knowledge of what the server can do.
  *
- * WHY THE REST ARE NOT HERE YET, from reading every remaining marshaller.
+ * WHY THE REST ARE NOT HERE YET. 102 of the 166 CLI-reachable methods are
+ * served (33 no-argument, 69 specs). The remaining 64 break down as:
  *
- * This list has been WRONG twice, in the same way, and the corrections are the
- * useful part. Both times I called a convention un-describable and treated the
- * marshallers as the thing to change; both times counting showed the spec was
- * the odd one out and the honest fix was to describe what the code does:
+ *   37  NEVER serveable -- the client's own state
+ *   16  a shape the spec deliberately cannot express
+ *   11  describable only if the marshaller changes
  *
- *   - EMPTY POSITIONALS. 81 sites gate on pos_count alone, so
- *     `aimee eval results ""` sends "suite": ""; 2 also require non-empty. I
- *     said a flag for the first "would enshrine a convention that looks like a
- *     bug". A vocabulary expressing 2 of 83 sites is not principled, it is
- *     incomplete -- so `"empty": "emit"`, and six methods followed.
- *   - LENIENT NUMBERS. 53 sites parse with atoi()/cli_args_get_int(), so "12x"
- *     is 12 and "abc" is 0; 3 refuse trailing garbage. Same shape, same
- *     correction: "number_lenient" plus "default", and three more methods.
+ * THE 37 ARE THE POINT, not a shortfall. They read getcwd(),
+ * $AIMEE_SESSION_ID, the filesystem, or vault key material. A thin client
+ * reading its own disk to build a request is doing its own job, not obeying the
+ * server; serving those would be the defect this whole exercise exists to
+ * prevent. Six of them were found only after the generator learned to follow
+ * helper calls -- marshal_add_memory_scope() adds cwd and returns void, so an
+ * earlier pass would have served memory.list with that field silently dropped.
  *
- * Whether those 81 and 53 sites SHOULD behave that way is a live question and
- * NOT settled here. kb.grant is the argument that the numbers should refuse:
- * its team_id is strict because "770001x" becoming 770001 would administer a
- * team the operator did not type. Changing them is a change to the CLI. This
- * file describes the CLI.
+ * THE 16 are rules rather than shapes, and each is a deliberate line:
  *
- * What is left is left for reasons that are not counting errors:
- *
- *   - CONDITIONALS. api.enable emits `port` only when > 0; dogfood.tag's
- *     --surprise and --no-surprise are exclusive; trigger.fire takes --task OR
- *     --proposal; cron's --all is valid for two of its five methods. A spec
- *     language that grew these would stop being data and become a program
- *     shipped over the wire, which is the one line this vocabulary will not
- *     cross.
- *   - DERIVED FIELDS. catalog.show splits "provider:model" in two; cron.add and
- *     mcp.call compute fields; memory.user_capture joins the positionals from
- *     index 1 and prefixes the key; workspace.add inverts --no-scan into
- *     "scan": false and nests part of its body under `args`.
- *   - LOCAL STATE. eval.run, identity.snapshot, identity.diff, vault.unlock and
- *     delegate.launch read the client's own disk, environment or key material.
- *     These must NEVER be served, whatever the vocabulary can express.
- *   - RAW ARGV. provider.set reads argv[0] rather than a parsed positional, so
+ *   - CROSS-FIELD ALTERNATIVES. trigger.fire needs --source AND (--task OR
+ *     --proposal); cron.enable/disable accept an id OR --all. `required` is
+ *     per-field and cannot say "one of these two".
+ *   - INVERTED FLAGS. trajectory.export sends compress:true by default and
+ *     --no-compress clears it. The vocabulary has no negation.
+ *   - REFUSALS THAT ARE NOT ABOUT A FIELD. delegate.log rejects any positional
+ *     argument; memory.user_capture refuses a key over 512 characters. Both are
+ *     rules about the invocation, not about a value.
+ *   - DERIVED FIELDS. catalog.show splits "provider:model"; user_capture joins
+ *     the positionals from index 1 and prefixes the key; cron.add collects
+ *     repeated --skill flags into an array and inverts --disabled into
+ *     enabled:false.
+ *   - RAW ARGV. mcp.recheck and provider.set read argv[0] directly, so
  *     `provider set --json openai` sends name="--json". Describing that would
- *     enshrine semantics that look like a bug, and the counting argument above
- *     does not apply to a sample of one: it is 1 site, not 81.
+ *     enshrine semantics that look like a bug.
  *
- * Adding a method: write the spec, add samples INCLUDING the awkward input for
- * whatever convention it uses (empty string, non-numeric), and let the
- * differential test decide. It compares rendered JSON against the real
- * marshaller, so a spec that is merely plausible fails.
+ * Any of these could be served by growing the vocabulary, and each addition
+ * would move it further from data toward a program transmitted over the wire.
+ * That line is the reason the served form is safe to trust, so it is held here
+ * rather than argued away one method at a time.
+ *
+ * THE 11 need marshaller behaviour to change, which is a product decision
+ * rather than a description.
+ *
+ * ADDING A METHOD: write the spec, add samples INCLUDING the awkward input for
+ * whatever convention it uses (empty string, non-numeric, flag-vs-positional),
+ * and let test_cli_argspec decide. It compares the built body against the real
+ * marshaller, so a spec that is merely plausible fails. When it does, the fix
+ * usually belongs in the generator: every mismatch this session traced back to
+ * reading the wrong part of the source -- the value instead of the guard, a
+ * field-name list instead of the branch, a direct body instead of its helpers.
  */
 
 {"provider.list",
@@ -308,4 +310,19 @@
 
 {"pipeline.status",
  "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
+
+{"api.enable",
+ "{\"bool_flags\":[\"vscode\"],\"fields\":[{\"json\":\"vscode\",\"from\":\"flag\",\"flag\":\"vscode\",\"type\":\"true_if_set\"},{\"json\":\"port\",\"from\":\"flag\",\"flag\":\"port\",\"type\":\"number_lenient\",\"default\":0,\"omit_if_nonpositive\":true},{\"json\":\"rate_limit\",\"from\":\"flag\",\"flag\":\"rate-limit\",\"type\":\"number_lenient\",\"default\":0,\"omit_if_nonpositive\":true}]}"},
+
+{"session.brief",
+ "{\"bool_flags\":[\"list\"],\"fields\":[{\"json\":\"session_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"session\"},{\"json\":\"list\",\"from\":\"flag\",\"flag\":\"list\",\"type\":\"true_if_set\"}]}"},
+
+/* Same verbatim-argv shape as the model family: these dispatch to
+   marshal_agent_args too. */
+
+{"workspace.get",
+ "{\"fields\":[{\"json\":\"args\",\"from\":\"argv_array\"}]}"},
+
+{"workspace.remove",
+ "{\"fields\":[{\"json\":\"args\",\"from\":\"argv_array\"}]}"},
 
