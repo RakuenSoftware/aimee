@@ -25,6 +25,10 @@
  * `empty` says whether a present-but-empty value is sent ("emit") or dropped
  * ("drop", the default). Both are real: 81 positional sites send it, 2 drop it.
  *
+ * `"from": "argv_array"` emits every argv word as a JSON array of strings --
+ * the shape the model and agent command families use to pass their arguments
+ * through verbatim.
+ *
  * `type` distinguishes the two numeric conventions the same way: "number"
  * refuses trailing garbage (3 sites), "number_lenient" is atoi (53 sites).
  * `default` carries the value a field takes when its flag is absent, which is

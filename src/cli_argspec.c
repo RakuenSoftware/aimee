@@ -22,6 +22,10 @@
 #define SRC_POSITIONAL      "positional"
 #define SRC_POSITIONAL_FLAG "positional_or_flag"
 #define SRC_ARGV_JOINED     "argv_joined"
+/* Every argv word as a JSON array of strings. The model and agent command
+ * families pass their arguments through verbatim this way -- one shape,
+ * ten-odd methods, and no interpretation of what the words mean. */
+#define SRC_ARGV_ARRAY "argv_array"
 
 /* Whether a field present-but-empty is sent or dropped. Absent means "drop".
  *
@@ -66,7 +70,8 @@ static const char *field_str(const cJSON *field, const char *key)
 static int known_source(const char *from)
 {
    return from && (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
-                   !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_ARGV_JOINED));
+                   !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_ARGV_JOINED) ||
+                   !strcmp(from, SRC_ARGV_ARRAY));
 }
 
 static int known_empty(const char *e)
@@ -199,11 +204,24 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
 
 /* Add one field to `req`. Returns 0 on success, -1 when a required field is
  * absent (the caller reports usage and abandons the request). */
-static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, const char *joined)
+static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, const char *joined,
+                     int argc, char **argv)
 {
    const char *json_name = field_str(field, "json");
    const char *type = field_str(field, "type");
    int required = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "required"));
+
+   const char *from = field_str(field, "from");
+   if (from && !strcmp(from, SRC_ARGV_ARRAY))
+   {
+      cJSON *arr = cJSON_CreateArray();
+      if (!arr)
+         return -1;
+      for (int i = 0; i < argc; i++)
+         cJSON_AddItemToArray(arr, cJSON_CreateString(argv[i]));
+      cJSON_AddItemToObject(req, json_name, arr);
+      return 0;
+   }
 
    /* true_if_set is a presence test, not a value: `--json` with no argument is
     * the whole of it, so ask the parser whether the flag was there at all. */
@@ -286,7 +304,7 @@ cJSON *cli_argspec_build(const char *method, const cJSON *spec, int argc, char *
 
    int missing = 0;
    for (const cJSON *f = fields ? fields->child : NULL; f && !missing; f = f->next)
-      if (add_field(req, f, &opts, joined) != 0)
+      if (add_field(req, f, &opts, joined, argc, argv) != 0)
          missing = 1;
 
    free((void *)bool_flags);
