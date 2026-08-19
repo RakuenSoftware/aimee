@@ -156,6 +156,14 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_decision_log_mark_revisit_due",
+      "signature_sha256": "68c8c667165a80c21272f9393f008b4d1d813ebe7422b09699cdd71df6e249ab",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.mark_revisit_due operation replaces the sweep that flags active decisions whose review date has arrived. The two states, the requirement that a decision carry a review date at all, and the database clock are fixed policy, as they are for the two sweeps beside it. Unlike those, this backend separates a failed statement from an empty sweep, so the boundary can report the failure instead of an untouched log."
+    },
+    {
       "symbol": "db2_dim_change_reset",
       "signature_sha256": "8f32ca424989ca4e817c4f2bf3787162e3709076b26bf5a7ad4a530a0885bac5",
       "disposition": "wire-operation",

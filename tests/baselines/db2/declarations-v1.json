@@ -6407,9 +6407,15 @@
           "line": 76
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.mark_revisit_due operation replaces the sweep that flags active decisions whose review date has arrived. The two states, the requirement that a decision carry a review date at all, and the database clock are fixed policy, as they are for the two sweeps beside it. Unlike those, this backend separates a failed statement from an empty sweep, so the boundary can report the failure instead of an untouched log."
+      },
       "signature": "int db2_decision_log_mark_revisit_due ( void )",
       "signature_sha256": "68c8c667165a80c21272f9393f008b4d1d813ebe7422b09699cdd71df6e249ab",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_mark_revisit_due"
     },
     {
@@ -26088,15 +26094,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9715936a32b7faafce93153c1fabf158587073d5e1d7a2b409be822048c0fa5c",
+  "fingerprint": "3b20d20e98aced35d4d72eb34e2a491a8554fd4e4ceb396cf30b6fe4f76c9fb5",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 614,
+    "audit_pending": 613,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 344
+    "reviewed": 345
   }
 }

@@ -7,6 +7,7 @@
 #include "c/db2_pool.h"
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
+#include "c/decision_log.h"
 #include "c/epistemic_directives.h"
 #include "c/prospective_memories.h"
 #include "c/entity_edges.h"
@@ -312,6 +313,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .requeue_drifted = db2_code_index_requeue_drifted,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        .directive_sweep_expired = db2_directive_sweep_expired,
+       .mark_revisit_due = db2_decision_log_mark_revisit_due,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -345,7 +347,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION &&
         invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
-        invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED))
+        invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
+        invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1369,7 +1372,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    }
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED ||
-       invocation->stage_id == AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED)
+       invocation->stage_id == AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED ||
+       invocation->stage_id == AIMEE_DB2_STAGE_MARK_REVISIT_DUE)
    {
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {
@@ -1410,6 +1414,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_directive_sweep_expired_reply_encode((uint32_t)directives, response_body,
                                                             response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_mark_revisit_due_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_MARK_REVISIT_DUE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->mark_revisit_due)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Unlike the two sweeps above, this backend separates a failed
+          * statement from an empty one: no connection, no statement and a step
+          * that did not finish are all -1, while nothing being due is zero.
+          * The boundary keeps that apart rather than reporting an untouched
+          * decision log as a successful sweep. */
+         int marked = backend->mark_revisit_due();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (marked < 0 || (uint32_t)marked > AIMEE_DB2_MARK_REVISIT_DUE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_mark_revisit_due_reply_encode((uint32_t)marked, response_body,
+                                                     response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

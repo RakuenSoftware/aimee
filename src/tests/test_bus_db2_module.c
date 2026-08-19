@@ -94,6 +94,7 @@ typedef struct
    int (*requeue_drifted)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
+   int (*mark_revisit_due)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -170,6 +171,7 @@ static int purge_pollution_calls;
 static int requeue_drifted_calls;
 static int prospective_sweep_calls;
 static int directive_sweep_calls;
+static int mark_revisit_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -1079,6 +1081,17 @@ static int directive_sweep_expired(void)
    return 8;
 }
 
+int db2_decision_log_mark_revisit_due(void)
+{
+   return 0;
+}
+
+static int mark_revisit_due(void)
+{
+   mark_revisit_calls++;
+   return 9;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1336,7 +1349,8 @@ int main(void)
                               AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION,
                               AIMEE_DB2_EVENT_REQUEUE_DRIFTED,
                               AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
-                              AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED};
+                              AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED,
+                              AIMEE_DB2_EVENT_MARK_REVISIT_DUE};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -1379,6 +1393,7 @@ int main(void)
        {AIMEE_DB2_EVENT_REQUEUE_DRIFTED, AIMEE_DB2_STAGE_REQUEUE_DRIFTED},
        {AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED},
+       {AIMEE_DB2_EVENT_MARK_REVISIT_DUE, AIMEE_DB2_STAGE_MARK_REVISIT_DUE},
    };
    static const aimee_db2_module_backend_t backend = {
        .is_initialized = is_initialized,
@@ -1446,6 +1461,7 @@ int main(void)
        .requeue_drifted = requeue_drifted,
        .prospective_sweep_expired = prospective_sweep_expired,
        .directive_sweep_expired = directive_sweep_expired,
+       .mark_revisit_due = mark_revisit_due,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1812,6 +1828,11 @@ int main(void)
    assert(aimee_db2_directive_sweep_expired_call(call_client, &client, 7083, 0, &directives, NULL,
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(directives == 8 && directive_sweep_calls == 1);
+
+   uint32_t marked = 99u;
+   assert(aimee_db2_mark_revisit_due_call(call_client, &client, 7084, 0, &marked, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(marked == 9 && mark_revisit_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

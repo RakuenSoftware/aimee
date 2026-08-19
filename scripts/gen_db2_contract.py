@@ -242,7 +242,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "purge_hidden_pollution",
                                                                 "requeue_drifted",
                                                                 "prospective_sweep_expired",
-                                                                "directive_sweep_expired") else
+                                                                "directive_sweep_expired",
+                                                                "mark_revisit_due") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -2118,9 +2119,40 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("directive-sweep-expired-reply",
                      "reply must contain one bounded u32 directive expiry count")
+        elif key == ("maintenance", 3) and name == "mark_revisit_due" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # A decision's review date is the whole point of logging it. A
+            # caller able to move the comparison instant could bring every
+            # future review forward, or push every due one out of sight.
+            if operation["c_symbols"] != ["db2_decision_log_mark_revisit_due"]:
+                fail("operation-c-symbols",
+                     "mark_revisit_due C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "mark_revisit_due results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "mark_revisit_due.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"from_state": "active",
+                                          "to_state": "revisit_due",
+                                          "clock": "database",
+                                          "requires_revisit_when": True}):
+                fail("mark-revisit-due-request",
+                     "request must carry no payload and fix the states and the clock")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "mark_revisit_due.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "mark_revisit_due.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "marked_count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("mark-revisit-due-reply",
+                     "reply must contain one bounded u32 marked count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 59 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 60 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2138,9 +2170,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "pick_first_temporal_ref", "count_and_max_updated",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "prospective_sweep_expired",
-            "directive_sweep_expired"]:
+            "directive_sweep_expired", "mark_revisit_due"]:
         fail("unsupported-operation",
-             "the partial generator requires the fifty-nine supported operations exactly once")
+             "the partial generator requires the sixty supported operations exactly once")
     return catalog
 
 
@@ -2323,6 +2355,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     requeue_drifted = catalog["operations"][56]
     prospective_sweep_expired = catalog["operations"][57]
     directive_sweep_expired = catalog["operations"][58]
+    mark_revisit_due = catalog["operations"][59]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2710,6 +2743,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     directive_sweep_expired_none = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(directive_sweep_expired["id"]), 0, _put_u32(0),
+    )
+    mark_revisit_due_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(mark_revisit_due["id"]), 0, b"",
+    )
+    mark_revisit_due_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(mark_revisit_due["id"]), 0, _put_u32(9),
+    )
+    mark_revisit_due_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(mark_revisit_due["id"]), 0, _put_u32(0),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -5505,6 +5547,40 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                      (directive_sweep_expired_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": mark_revisit_due["family"],
+            "id": mark_revisit_due["id"],
+            "name": mark_revisit_due["name"],
+            "request": {
+                "positive": mark_revisit_due_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(mark_revisit_due_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(mark_revisit_due_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": mark_revisit_due_request[:-1].hex()},
+                    {"mutation": "long", "hex": (mark_revisit_due_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "marked_count": 9, "hex": mark_revisit_due_ok.hex()},
+                    {"result": 0, "marked_count": 0, "hex": mark_revisit_due_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(mark_revisit_due_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(mark_revisit_due_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(mark_revisit_due["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (mark_revisit_due_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": mark_revisit_due_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (mark_revisit_due_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -5576,6 +5652,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     requeue_drifted = catalog["operations"][56]
     prospective_sweep_expired = catalog["operations"][57]
     directive_sweep_expired = catalog["operations"][58]
+    mark_revisit_due = catalog["operations"][59]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -6403,6 +6480,17 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{directive_sweep_expired['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_MAX",
          f"{directive_sweep_expired['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_MARK_REVISIT_DUE", "AIMEE_DB2_EVENT_MAINTENANCE"),
+        ("AIMEE_DB2_STAGE_MARK_REVISIT_DUE", "AIMEE_DB2_FAMILY_MAINTENANCE"),
+        ("AIMEE_DB2_OPERATION_MARK_REVISIT_DUE", f"{mark_revisit_due['id']}u"),
+        ("AIMEE_DB2_MARK_REVISIT_DUE_REQUEST_LEN",
+         f"{mark_revisit_due['request']['encoded_size']}u"),
+        ("AIMEE_DB2_MARK_REVISIT_DUE_RESPONSE_LEN",
+         f"{mark_revisit_due['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_MARK_REVISIT_DUE_ERROR_LEN",
+         f"{mark_revisit_due['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_MARK_REVISIT_DUE_MAX",
+         f"{mark_revisit_due['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -8342,6 +8430,57 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_mark_revisit_due_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_MARK_REVISIT_DUE, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_mark_revisit_due_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_MARK_REVISIT_DUE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_MARK_REVISIT_DUE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_mark_revisit_due_reply_encode(uint32_t marked_count, uint8_t *output,
+                                                          size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || marked_count > AIMEE_DB2_MARK_REVISIT_DUE_MAX ||
+       capacity < AIMEE_DB2_MARK_REVISIT_DUE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_MARK_REVISIT_DUE, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, marked_count);
+   *output_len = AIMEE_DB2_MARK_REVISIT_DUE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_mark_revisit_due_reply_decode(const uint8_t *input, size_t input_len,
+                                                          uint32_t *marked_count)
+{{
+   if (marked_count)
+      *marked_count = 0u;
+   if (!marked_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_MARK_REVISIT_DUE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_MARK_REVISIT_DUE_MAX)
+      return -1;
+   *marked_count = decoded;
    return 0;
 }}
 
@@ -11344,6 +11483,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *directives_expired, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_mark_revisit_due_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *marked_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -12764,6 +12907,31 @@ aimee_module_call_result_t aimee_db2_directive_sweep_expired_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_mark_revisit_due_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, uint32_t *marked_count,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !marked_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *marked_count = 0u;
+   uint8_t request[AIMEE_DB2_MARK_REVISIT_DUE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_MARK_REVISIT_DUE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_mark_revisit_due_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MARK_REVISIT_DUE, AIMEE_DB2_STAGE_MARK_REVISIT_DUE,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_mark_revisit_due_reply_decode(response, response_len, marked_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -13062,6 +13230,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     requeue_drifted = catalog["operations"][56]
     prospective_sweep_expired = catalog["operations"][57]
     directive_sweep_expired = catalog["operations"][58]
+    mark_revisit_due = catalog["operations"][59]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -13412,6 +13581,10 @@ const EventDirectiveSweepExpired = EventMaintenance
 const StageDirectiveSweepExpired = FamilyMaintenance
 const OperationDirectiveSweepExpired uint32 = {directive_sweep_expired['id']}
 const DirectiveSweepExpiredMax uint32 = {directive_sweep_expired['reply']['field']['maximum']}
+const EventMarkRevisitDue = EventMaintenance
+const StageMarkRevisitDue = FamilyMaintenance
+const OperationMarkRevisitDue uint32 = {mark_revisit_due['id']}
+const MarkRevisitDueMax uint32 = {mark_revisit_due['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -15307,6 +15480,54 @@ func DecodeDirectiveSweepExpiredReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return directivesExpired, nil
+}}
+
+// EncodeMarkRevisitDueRequest emits the empty request envelope. The states and
+// the clock are policy and never travel.
+func EncodeMarkRevisitDueRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationMarkRevisitDue, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeMarkRevisitDueRequest validates the exact maintenance-family envelope.
+func DecodeMarkRevisitDueRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMarkRevisitDue ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeMarkRevisitDueReply emits one bounded u32 marked count.
+func EncodeMarkRevisitDueReply(markedCount uint32) ([]byte, error) {{
+	if markedCount > MarkRevisitDueMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationMarkRevisitDue, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], markedCount)
+	return reply, nil
+}}
+
+// DecodeMarkRevisitDueReply validates the operation and bounded count.
+func DecodeMarkRevisitDueReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationMarkRevisitDue || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	markedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if markedCount > MarkRevisitDueMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return markedCount, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

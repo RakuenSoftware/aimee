@@ -606,6 +606,14 @@ int main(int argc, char **argv)
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(directives == 0);
 
+   /* No decision is logged on a fresh schema, so none is due for review. This
+    * backend reports a failed statement as -1 rather than as zero, so the zero
+    * arriving here is the sweep having genuinely run and found nothing. */
+   uint32_t marked = 99;
+   assert(aimee_db2_mark_revisit_due_call(call_client, &client, 9099, 0, &marked, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(marked == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
