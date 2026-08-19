@@ -172,6 +172,14 @@
       "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
     },
     {
+      "symbol": "db2_entity_edge_prune_orphans",
+      "signature_sha256": "6e92ee40b63006fa5a26953c963aaf0a78c1acb76dded6d8dc1f60c1b5faeea1",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_edge_prune_orphans operation replaces the maintenance pass that drops entity edges no surviving memory references. The tiers that count as a reference are fixed policy behind the handler, so a caller cannot widen or narrow what counts as orphaned."
+    },
+    {
       "symbol": "db2_health_probe",
       "signature_sha256": "325f260c51f255dae61d7323836bc549a712cb5486abeb4f4967ffdc57ac05ee",
       "disposition": "wire-operation",

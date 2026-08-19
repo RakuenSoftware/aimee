@@ -71,6 +71,8 @@ static int temporal_ref_calls;
 static int corpus_stat_rc;
 static int corpus_stat_count;
 static int corpus_stat_calls;
+static int edge_prune_value;
+static int edge_prune_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -589,6 +591,17 @@ static int count_and_max_updated(int *out_count, char *out_ts, int out_ts_len)
    *out_count = corpus_stat_count;
    snprintf(out_ts, (size_t)out_ts_len, "%s", corpus_stat_stamp);
    return 1;
+}
+
+int db2_entity_edge_prune_orphans(void)
+{
+   return 0;
+}
+
+static int entity_edge_prune_orphans(void)
+{
+   edge_prune_calls++;
+   return edge_prune_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1283,6 +1296,8 @@ static void reset(void)
    corpus_stat_rc = 1;
    corpus_stat_count = 7;
    corpus_stat_calls = 0;
+   edge_prune_value = 2;
+   edge_prune_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2577,6 +2592,41 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_entity_edge_prune_orphans_wire(void)
+{
+   uint8_t request[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN] = {0};
+   assert(aimee_db2_entity_edge_prune_orphans_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == -1);
+
+   /* This is the first index-family operation, and its event kind and stage
+    * must be the index ones rather than the memory ones every operation before
+    * it uses. Operation numbers are unique only within a family, so the stage
+    * is what keeps an index request out of the memory decoders. */
+   assert(AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS == AIMEE_DB2_EVENT_INDEX);
+   assert(AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS == AIMEE_DB2_FAMILY_INDEX);
+   assert(AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS != AIMEE_DB2_FAMILY_MEMORY);
+   assert(AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS != AIMEE_DB2_FAMILY_LIFECYCLE);
+
+   uint8_t reply[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, pruned = 99;
+   assert(aimee_db2_entity_edge_prune_orphans_reply_encode(2, reply, sizeof(reply), &reply_len) ==
+          0);
+   assert(aimee_db2_entity_edge_prune_orphans_reply_decode(reply, reply_len, &pruned) == 0 &&
+          pruned == 2);
+   assert(aimee_db2_entity_edge_prune_orphans_reply_encode(
+              AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_COUNT_MAX + 1u, reply, sizeof(reply),
+              &reply_len) == -1);
+   assert(aimee_db2_entity_edge_prune_orphans_reply_encode(2, reply, sizeof(reply) - 1,
+                                                           &reply_len) == -1);
+   assert(aimee_db2_entity_edge_prune_orphans_reply_encode(2, reply, sizeof(reply), &reply_len) ==
+          0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_entity_edge_prune_orphans_reply_decode(reply, reply_len, &pruned) == -1 &&
+          pruned == 0);
 }
 
 static void test_count_and_max_updated_wire(void)
@@ -4599,6 +4649,59 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_entity_edge_prune_orphans_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.entity_edge_prune_orphans =
+                                                   entity_edge_prune_orphans};
+   uint8_t request[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN];
+   uint32_t response_len = 99, pruned = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS};
+   assert(aimee_db2_entity_edge_prune_orphans_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(edge_prune_calls == 1);
+   assert(aimee_db2_entity_edge_prune_orphans_reply_decode(response, response_len, &pruned) == 0 &&
+          pruned == 2);
+
+   edge_prune_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   edge_prune_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   edge_prune_value = 2;
+
+   /* THE FAMILY BOUNDARY IS THE STAGE, NOT THE ENVELOPE, AND THAT IS LOAD
+    * BEARING. Operation numbers are unique only within a family, so this
+    * request -- index operation 1, empty payload -- is BYTE-IDENTICAL to
+    * lifecycle's health and to memory's level3_count. Nothing in the envelope
+    * can tell them apart.
+    *
+    * Delivered on the memory stage it is therefore decoded as level3_count and
+    * dispatched to that backend, not refused. The assertions below pin that
+    * real behaviour rather than a rejection the wire cannot perform: here the
+    * memory backend is absent, so it surfaces as CAPABILITY_ABSENT.
+    *
+    * What keeps this correct in production is that the transport routes by
+    * event kind and stage, and the generated client always pairs the matching
+    * event, stage and operation -- a caller cannot assemble a mismatched pair.
+    * The hazard is that a future routing change, or a hand-built request, would
+    * be silently mis-decoded rather than rejected. */
+   aimee_module_invocation_t wrong_family = {.stage_id = AIMEE_DB2_FAMILY_MEMORY};
+   assert(invoke(&backend, &wrong_family, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS == AIMEE_DB2_OPERATION_LEVEL3_COUNT);
+   assert(AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS == AIMEE_DB2_OPERATION_HEALTH);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_count_and_max_updated_handler(void)
 {
    reset();
@@ -6241,6 +6344,7 @@ int main(void)
    test_get_source_session_wire();
    test_pick_first_temporal_ref_wire();
    test_count_and_max_updated_wire();
+   test_entity_edge_prune_orphans_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6293,6 +6397,7 @@ int main(void)
    test_get_source_session_handler();
    test_pick_first_temporal_ref_handler();
    test_count_and_max_updated_handler();
+   test_entity_edge_prune_orphans_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

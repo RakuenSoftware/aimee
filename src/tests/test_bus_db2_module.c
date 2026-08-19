@@ -87,6 +87,7 @@ typedef struct
    int (*get_source_session)(int64_t memory_id, char *out, int out_len);
    int (*pick_first_temporal_ref)(int64_t memory_id, char *out, int out_len);
    int (*count_and_max_updated)(int *out_count, char *out_ts, int out_ts_len);
+   int (*entity_edge_prune_orphans)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -156,6 +157,7 @@ static int get_content_calls;
 static int get_source_session_calls;
 static int temporal_ref_calls;
 static int corpus_stat_calls;
+static int edge_prune_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -988,6 +990,17 @@ static int count_and_max_updated(int *out_count, char *out_ts, int out_ts_len)
    return 1;
 }
 
+int db2_entity_edge_prune_orphans(void)
+{
+   return 0;
+}
+
+static int entity_edge_prune_orphans(void)
+{
+   edge_prune_calls++;
+   return 2;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1234,20 +1247,24 @@ int main(void)
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
 
-   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT};
+   /* Three families now: lifecycle, memory, and index. Each is a distinct
+    * event kind, and the module must serve a kind before any operation in
+    * that family can be routed to it. */
+   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT,
+                              AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = executable,
         .serve = served,
-        .serve_count = 2},
+        .serve_count = (uint32_t)(sizeof(served) / sizeof(served[0]))},
        {.principal_class = 1,
         .principal_ref = CALLER_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = executable,
         .request = served,
-        .request_count = 2},
+        .request_count = (uint32_t)(sizeof(served) / sizeof(served[0]))},
    };
    bus_host_config_t host_config = {.max_slots = 4,
                                     .slot_size = 256,
@@ -1269,6 +1286,7 @@ int main(void)
    static const aimee_module_stage_t stages[] = {
        {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_STAGE_HEALTH},
        {AIMEE_DB2_EVENT_LEVEL3_COUNT, AIMEE_DB2_STAGE_LEVEL3_COUNT},
+       {AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS, AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS},
    };
    static const aimee_db2_module_backend_t backend = {
        .is_initialized = is_initialized,
@@ -1329,6 +1347,7 @@ int main(void)
        .get_source_session = get_source_session,
        .pick_first_temporal_ref = pick_first_temporal_ref,
        .count_and_max_updated = count_and_max_updated,
+       .entity_edge_prune_orphans = entity_edge_prune_orphans,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1344,7 +1363,7 @@ int main(void)
                   .principal_class = 1,
                   .principal_ref = MODULE_REF,
                   .stages = stages,
-                  .stage_count = 2,
+                  .stage_count = (uint32_t)(sizeof(stages) / sizeof(stages[0])),
                   .handler = aimee_module_handler,
                   .user_data = (void *)&backend},
    };
@@ -1655,6 +1674,13 @@ int main(void)
                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(corpus_result == AIMEE_DB2_RESULT_OK && corpus_count == 7 &&
           strcmp(corpus_stamp, "2026-08-19 09:00:00") == 0 && corpus_stat_calls == 1);
+
+   /* First index-family call over the bus: a different event kind and stage
+    * from every operation above it. */
+   uint32_t edges_pruned = 99u;
+   assert(aimee_db2_entity_edge_prune_orphans_call(call_client, &client, 7077, 0, &edges_pruned,
+                                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(edges_pruned == 2 && edge_prune_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

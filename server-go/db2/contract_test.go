@@ -35,6 +35,7 @@ type wireBaseline struct {
 	} `json:"body_envelope"`
 	Operations []struct {
 		Name    string `json:"name"`
+		Family  string `json:"family"`
 		Request struct {
 			Positive                   string   `json:"positive"`
 			SourceSession              string   `json:"source_session"`
@@ -91,6 +92,7 @@ type wireBaseline struct {
 				Dimension             uint32            `json:"dimension"`
 				Count                 uint64            `json:"count"`
 				DeletedCount          uint32            `json:"deleted_count"`
+				PrunedCount           uint32            `json:"pruned_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -236,7 +238,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 52 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 53 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -287,7 +289,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[48].Name != "get_content" ||
 		baseline.Operations[49].Name != "get_source_session" ||
 		baseline.Operations[50].Name != "pick_first_temporal_ref" ||
-		baseline.Operations[51].Name != "count_and_max_updated" {
+		baseline.Operations[51].Name != "count_and_max_updated" ||
+		baseline.Operations[52].Name != "entity_edge_prune_orphans" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -484,6 +487,49 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestEntityEdgePruneOrphansMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[52]
+	if operation.Family != "index" {
+		t.Fatalf("family = %q, want index", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeEntityEdgePruneOrphansRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeEntityEdgePruneOrphansRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeEntityEdgePruneOrphansRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeEntityEdgePruneOrphansReply(vector.PrunedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		pruned, err := DecodeEntityEdgePruneOrphansReply(got)
+		if err != nil || pruned != vector.PrunedCount {
+			t.Fatalf("decode = (%d, %v)", pruned, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		pruned, err := DecodeEntityEdgePruneOrphansReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || pruned != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, pruned, err)
+		}
+	}
+	// Index operation 1 and lifecycle operation 1 (health) encode the same
+	// operation number, so only the family constants tell them apart.
+	if EventEntityEdgePruneOrphans != EventIndex || StageEntityEdgePruneOrphans != FamilyIndex {
+		t.Fatalf("index operation did not carry the index family")
+	}
+	if StageEntityEdgePruneOrphans == FamilyMemory || StageEntityEdgePruneOrphans == FamilyLifecycle {
+		t.Fatalf("index family collided with an existing family")
 	}
 }
 

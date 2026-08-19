@@ -236,7 +236,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "workspace_tag_insert",
                                                                 "set_cognified_kind",
                                                                 "set_source_session",
-                                                                "negation_tokens_update") else
+                                                                "negation_tokens_update",
+                                                                "entity_edge_prune_orphans") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1902,9 +1903,38 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "minimum_bytes": 0, "maximum_bytes": 31}):
                 fail("count-and-max-updated-reply",
                      "reply must carry a bounded count and a clearable bounded stamp")
+        elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # First operation of the index family. The tiers that count as a
+            # surviving reference are fixed policy: a caller that could name
+            # them could delete the whole graph by naming none.
+            if operation["c_symbols"] != ["db2_entity_edge_prune_orphans"]:
+                fail("operation-c-symbols",
+                     "entity_edge_prune_orphans C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results",
+                     "entity_edge_prune_orphans results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "entity_edge_prune_orphans.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"referencing_tiers": ["L1", "L2"]}):
+                fail("entity-edge-prune-orphans-request",
+                     "request must carry no payload and use the fixed referencing tiers")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "entity_edge_prune_orphans.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "entity_edge_prune_orphans.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "pruned_count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("entity-edge-prune-orphans-reply",
+                     "reply must contain one bounded u32 prune count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 52 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 53 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1919,9 +1949,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
             "workspace_tag_insert", "set_cognified_kind", "set_source_session",
             "negation_tokens_update", "get_content", "get_source_session",
-            "pick_first_temporal_ref", "count_and_max_updated"]:
+            "pick_first_temporal_ref", "count_and_max_updated",
+            "entity_edge_prune_orphans"]:
         fail("unsupported-operation",
-             "the partial generator requires the fifty-two supported operations exactly once")
+             "the partial generator requires the fifty-three supported operations exactly once")
     return catalog
 
 
@@ -2097,6 +2128,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     get_source_session = catalog["operations"][49]
     pick_first_temporal_ref = catalog["operations"][50]
     count_and_max_updated = catalog["operations"][51]
+    entity_edge_prune_orphans = catalog["operations"][52]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2427,6 +2459,12 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     count_and_max_updated_unavailable = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(count_and_max_updated["id"]), 5, b"",
+    )
+    entity_edge_prune_orphans_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
+    )
+    entity_edge_prune_orphans_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(entity_edge_prune_orphans["id"]), 0, _put_u32(2),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -4963,6 +5001,43 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (count_and_max_updated_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": entity_edge_prune_orphans["family"],
+            "id": entity_edge_prune_orphans["id"],
+            "name": entity_edge_prune_orphans["name"],
+            "request": {
+                "positive": entity_edge_prune_orphans_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(entity_edge_prune_orphans_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(entity_edge_prune_orphans_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     entity_edge_prune_orphans_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (entity_edge_prune_orphans_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "pruned_count": 2,
+                     "hex": entity_edge_prune_orphans_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(entity_edge_prune_orphans_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(entity_edge_prune_orphans_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(entity_edge_prune_orphans["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (entity_edge_prune_orphans_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": entity_edge_prune_orphans_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (entity_edge_prune_orphans_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -5027,6 +5102,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     get_source_session = catalog["operations"][49]
     pick_first_temporal_ref = catalog["operations"][50]
     count_and_max_updated = catalog["operations"][51]
+    entity_edge_prune_orphans = catalog["operations"][52]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -5770,6 +5846,18 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{count_and_max_updated['reply']['fields'][0]['maximum']}u"),
         ("AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX",
          f"{count_and_max_updated['reply']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
+        ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
+        ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
+         f"{entity_edge_prune_orphans['id']}u"),
+        ("AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN",
+         f"{entity_edge_prune_orphans['request']['encoded_size']}u"),
+        ("AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN",
+         f"{entity_edge_prune_orphans['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_ERROR_LEN",
+         f"{entity_edge_prune_orphans['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_COUNT_MAX",
+         f"{entity_edge_prune_orphans['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -7709,6 +7797,63 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_entity_edge_prune_orphans_request_encode(uint8_t *output,
+                                                                    size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_entity_edge_prune_orphans_request_decode(const uint8_t *input,
+                                                                     size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_entity_edge_prune_orphans_reply_encode(uint32_t pruned_count,
+                                                                   uint8_t *output,
+                                                                   size_t capacity,
+                                                                   uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len ||
+       pruned_count > AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_COUNT_MAX ||
+       capacity < AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, pruned_count);
+   *output_len = AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_entity_edge_prune_orphans_reply_decode(const uint8_t *input,
+                                                                   size_t input_len,
+                                                                   uint32_t *pruned_count)
+{{
+   if (pruned_count)
+      *pruned_count = 0u;
+   if (!pruned_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_COUNT_MAX)
+      return -1;
+   *pruned_count = decoded;
    return 0;
 }}
 
@@ -10301,6 +10446,10 @@ extern "C"
        uint32_t *domain_result, uint32_t *count, char *max_updated_at, size_t stamp_capacity,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -11547,6 +11696,30 @@ aimee_db2_count_and_max_updated_call(aimee_db2_call_fn call, void *call_context,
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !pruned_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *pruned_count = 0u;
+   uint8_t request[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_entity_edge_prune_orphans_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
+            AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_entity_edge_prune_orphans_reply_decode(response, response_len, pruned_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -11838,6 +12011,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     get_source_session = catalog["operations"][49]
     pick_first_temporal_ref = catalog["operations"][50]
     count_and_max_updated = catalog["operations"][51]
+    entity_edge_prune_orphans = catalog["operations"][52]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -12159,6 +12333,10 @@ const StageCountAndMaxUpdated = FamilyMemory
 const OperationCountAndMaxUpdated uint32 = {count_and_max_updated['id']}
 const CountAndMaxUpdatedCountMax uint32 = {count_and_max_updated['reply']['fields'][0]['maximum']}
 const CountAndMaxUpdatedStampMax = {count_and_max_updated['reply']['fields'][1]['maximum_bytes']}
+const EventEntityEdgePruneOrphans = EventIndex
+const StageEntityEdgePruneOrphans = FamilyIndex
+const OperationEntityEdgePruneOrphans uint32 = {entity_edge_prune_orphans['id']}
+const EntityEdgePruneOrphansCountMax uint32 = {entity_edge_prune_orphans['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -13715,6 +13893,54 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 		return 0, 0, "", ErrMalformedEnvelope
 	}}
 	return header.Result, count, maxUpdatedAt, nil
+}}
+
+// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+// tiers that count as a surviving reference are policy and never travel.
+func EncodeEntityEdgePruneOrphansRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeEntityEdgePruneOrphansRequest validates the exact index-family envelope.
+func DecodeEntityEdgePruneOrphansRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityEdgePruneOrphans ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeEntityEdgePruneOrphansReply emits one bounded u32 prune count.
+func EncodeEntityEdgePruneOrphansReply(prunedCount uint32) ([]byte, error) {{
+	if prunedCount > EntityEdgePruneOrphansCountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEntityEdgePruneOrphans, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], prunedCount)
+	return reply, nil
+}}
+
+// DecodeEntityEdgePruneOrphansReply validates the operation and bounded count.
+func DecodeEntityEdgePruneOrphansReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEntityEdgePruneOrphans ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	prunedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if prunedCount > EntityEdgePruneOrphansCountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return prunedCount, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

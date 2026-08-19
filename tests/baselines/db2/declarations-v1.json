@@ -7604,9 +7604,15 @@
           "line": 132
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_edge_prune_orphans operation replaces the maintenance pass that drops entity edges no surviving memory references. The tiers that count as a reference are fixed policy behind the handler, so a caller cannot widen or narrow what counts as orphaned."
+      },
       "signature": "int db2_entity_edge_prune_orphans ( void )",
       "signature_sha256": "6e92ee40b63006fa5a26953c963aaf0a78c1acb76dded6d8dc1f60c1b5faeea1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_prune_orphans"
     },
     {
@@ -26046,15 +26052,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "5d297220416989b658c5ba38767ce9197bffaffc041d3024466425317a3fdff8",
+  "fingerprint": "e6547917bba5ccf80e87ccef200fabef841e328f506ab43c35710d161f514d62",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 621,
+    "audit_pending": 620,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 337
+    "reviewed": 338
   }
 }

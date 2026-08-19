@@ -5,6 +5,7 @@
 #include "c/db2.h"
 #include "c/db2_internal.h"
 #include "c/db2_pool.h"
+#include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
 #include "c/memory_lifecycle.h"
@@ -300,6 +301,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .get_source_session = db2_memory_get_source_session,
        .pick_first_temporal_ref = db2_memory_pick_first_temporal_ref,
        .count_and_max_updated = db2_memory_count_and_max_updated,
+       .entity_edge_prune_orphans = db2_entity_edge_prune_orphans,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -319,9 +321,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 {
    if (response_len)
       *response_len = 0;
+   /* Operation ids are unique per family, not globally, so the stage id is
+    * the outer discriminator: an index-family request and a lifecycle-family
+    * request can carry the same operation number and are told apart only by
+    * the stage they arrive on. Every accepted family needs its own branch
+    * below, and nothing may fall through to another family's decoders. */
    if (!invocation || !response_len || !response_body ||
        (invocation->stage_id != AIMEE_DB2_STAGE_HEALTH &&
-        invocation->stage_id != AIMEE_DB2_STAGE_LEVEL3_COUNT))
+        invocation->stage_id != AIMEE_DB2_STAGE_LEVEL3_COUNT &&
+        invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1233,6 +1241,29 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                  computed ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_INVALID_STATE,
                  computed ? (uint32_t)corpus_count : 0u, computed ? corpus_stamp : NULL,
                  response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   }
+
+   if (invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS)
+   {
+      if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->entity_edge_prune_orphans)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The backend reports both an empty prune and a statement failure as
+          * zero, the same limitation the memory sweeps carry. */
+         int pruned = backend->entity_edge_prune_orphans();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (pruned < 0 || (uint32_t)pruned > AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_entity_edge_prune_orphans_reply_encode((uint32_t)pruned, response_body,
+                                                              response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

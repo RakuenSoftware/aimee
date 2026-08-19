@@ -1433,6 +1433,30 @@
            "maximum_bytes": 31}
         ]
       }
+    },
+    {
+      "family": "index",
+      "id": 1,
+      "name": "entity_edge_prune_orphans",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The entity graph and the canonical memory rows its edges are checked against are both relational DB2 state, so pruning unreferenced edges stays DB2 authority.",
+      "c_symbols": ["db2_entity_edge_prune_orphans"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"referencing_tiers": ["L1", "L2"]}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "pruned_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }
