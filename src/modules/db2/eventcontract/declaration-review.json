@@ -1348,12 +1348,28 @@
       "reason": "Private first half of memory_refresh_aliases: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
     },
     {
+      "symbol": "db2_memory_chunk_upsert",
+      "signature_sha256": "864fed8dd3b3b0294e1c368f9a68555ad7dcf6435e926623d7047e48e02978ff",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private second half of memory_refresh_chunks: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+    },
+    {
       "symbol": "db2_memory_chunks_delete_for_memory",
       "signature_sha256": "70dd6b5d6e641c277a0c3b92dd66af40e721f1eb26b1edc922688f8008edd237",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of memory_refresh_chunks: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_chunks_list",
+      "signature_sha256": "4d94e402dfdaf4cc656a26b52b3916b07644e7917e5fb86cce194b50486eb8eb",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private lookup inside the chunk rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
     },
     {
       "symbol": "db2_memory_conflict_get_pair",
@@ -1460,12 +1476,44 @@
       "reason": "Private first half of the entity refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
     },
     {
+      "symbol": "db2_memory_episode_insert",
+      "signature_sha256": "a831b248cea00d9f03ca240fdce8e3604d51c9763f7e1d1ec9d62023dc2ed5f0",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private second half of memory_refresh_episode_relations: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+    },
+    {
+      "symbol": "db2_memory_episode_unit_ids_for_session",
+      "signature_sha256": "242f4a82b2de8e1e051b8e653bb9f4765049e5d0019c98a41ae0f841f58b2eef",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private lookup inside the episode rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+    },
+    {
+      "symbol": "db2_memory_episode_unit_ids_supersedes",
+      "signature_sha256": "7f7e787ff203b346c0c655afcb5dad58a5745057b48f4f7759e553d8215aff83",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private lookup inside the episode rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+    },
+    {
       "symbol": "db2_memory_episodes_delete_for_memory",
       "signature_sha256": "e5620b3d16735ff839acf46d161f2db4482c827d2fd280242344af13948867a2",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of memory_refresh_episode_relations: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_event_frame_insert",
+      "signature_sha256": "a0912bc43ca9af930803524396ae9d0c27a71c45374b699c1bad8dc168447727",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private second half of the event-frame refresh: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
     },
     {
       "symbol": "db2_memory_event_frames_delete_for_memory",
@@ -1498,6 +1546,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.get_content operation replaces the canonical text read and is the companion to memory.update_content. A missing memory is reported as not_found rather than as empty content, because a stored row may legitimately hold an empty string and the two answers are different."
+    },
+    {
+      "symbol": "db2_memory_get_session_kinds",
+      "signature_sha256": "44decf525d3a6eb1e653684216a006c427c17df2f25c540900c983e4c705ec7f",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private lookup inside the unit-graph rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
     },
     {
       "symbol": "db2_memory_get_source_session",
@@ -1650,6 +1706,30 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.link_delete operation replaces the single relation delete; the link identity is the caller's only input and the relation graph stays DB2 authority."
+    },
+    {
+      "symbol": "db2_memory_links_with_targets",
+      "signature_sha256": "1c6295888eb82504535196acf9224de8265a2f747f9c8cbb60ef408bbcd1d2e8",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+    },
+    {
+      "symbol": "db2_memory_lookup_primary_entity",
+      "signature_sha256": "bb2933e3d46abd9dade0a0ffdf3abd166ff7ff30133ba3e828e4a173297ff39f",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private lookup inside the unit-graph rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+    },
+    {
+      "symbol": "db2_memory_lookup_time_bounds",
+      "signature_sha256": "a85bc1ab17a898c9dc80ca1082770869b1b0f0f824b7dd4b0dc2579a75289a25",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
     },
     {
       "symbol": "db2_memory_negation_tokens_update",
@@ -1908,6 +1988,14 @@
       "reason": "Private first half of the summary refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
     },
     {
+      "symbol": "db2_memory_summary_upsert",
+      "signature_sha256": "284b9790fca2322b53b94259222893e58113e289e8475fdb359067f78046699f",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private second half of memory_refresh_summaries: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+    },
+    {
       "symbol": "db2_memory_temporal_refs_delete_for_memory",
       "signature_sha256": "b10603b3b6e7ce0d2139627d5d7ae50a317f3650ac0fa5863479f19ef3d7c329",
       "disposition": "private-db2",
@@ -1924,12 +2012,28 @@
       "reason": "The typed memory.touch operation replaces the retrieval-accounting bump; the increment and the stamp are fixed policy behind the handler so a caller can record that a memory was used but cannot choose by how much or when."
     },
     {
+      "symbol": "db2_memory_unit_edge_insert",
+      "signature_sha256": "76c0b6227d8c6e50da4583b9f3dab239089a9eb0644f4c624e25009e0326a1c9",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private second half of memory_refresh_units_graph: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+    },
+    {
       "symbol": "db2_memory_unit_edges_delete_for_memory",
       "signature_sha256": "a46e03404fb58c3f868a5a281039bd6e7e60d4723110aacdb579051604e269ba",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of memory_refresh_units_graph: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_unit_insert",
+      "signature_sha256": "b454c3f08118d186e1a85c85c568074f7c2333d8d556459ca8616613a1390785",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Private second half of memory_refresh_units_graph: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
     },
     {
       "symbol": "db2_memory_units_delete_for_memory",

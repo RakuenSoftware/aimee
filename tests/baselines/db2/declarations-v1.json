@@ -15365,9 +15365,15 @@
           "line": 1022
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private second half of memory_refresh_chunks: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+      },
       "signature": "void db2_memory_chunk_upsert ( int64_t memory_id , int chunk_index , const char * chunk_text )",
       "signature_sha256": "864fed8dd3b3b0294e1c368f9a68555ad7dcf6435e926623d7047e48e02978ff",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_chunk_upsert"
     },
     {
@@ -15401,9 +15407,15 @@
           "line": 1018
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private lookup inside the chunk rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+      },
       "signature": "int db2_memory_chunks_list ( int64_t memory_id , db2_memory_chunk_row_t * out , int max )",
       "signature_sha256": "4d94e402dfdaf4cc656a26b52b3916b07644e7917e5fb86cce194b50486eb8eb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_chunks_list"
     },
     {
@@ -15939,9 +15951,15 @@
           "line": 885
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private second half of memory_refresh_episode_relations: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+      },
       "signature": "int64_t db2_memory_episode_insert ( int64_t memory_id , const char * episode_key , const char * episode_text , const char * source_session , const char * reference_time )",
       "signature_sha256": "a831b248cea00d9f03ca240fdce8e3604d51c9763f7e1d1ec9d62023dc2ed5f0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_episode_insert"
     },
     {
@@ -15954,9 +15972,15 @@
           "line": 1031
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private lookup inside the episode rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+      },
       "signature": "int db2_memory_episode_unit_ids_for_session ( int64_t memory_id , const char * source_session , int64_t * out , int max )",
       "signature_sha256": "242f4a82b2de8e1e051b8e653bb9f4765049e5d0019c98a41ae0f841f58b2eef",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_episode_unit_ids_for_session"
     },
     {
@@ -15969,9 +15993,15 @@
           "line": 1037
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private lookup inside the episode rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+      },
       "signature": "int db2_memory_episode_unit_ids_supersedes ( int64_t source_memory_id , int64_t * out , int max )",
       "signature_sha256": "7f7e787ff203b346c0c655afcb5dad58a5745057b48f4f7759e553d8215aff83",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_episode_unit_ids_supersedes"
     },
     {
@@ -16021,9 +16051,15 @@
           "line": 940
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private second half of the event-frame refresh: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+      },
       "signature": "void db2_memory_event_frame_insert ( int64_t memory_id , const char * actor , const char * action , const char * object , const char * location , const char * event_time , const char * evidence_kind )",
       "signature_sha256": "a0912bc43ca9af930803524396ae9d0c27a71c45374b699c1bad8dc168447727",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_event_frame_insert"
     },
     {
@@ -16313,9 +16349,15 @@
           "line": 983
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private lookup inside the unit-graph rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+      },
       "signature": "int db2_memory_get_session_kinds ( int64_t memory_id , char * session_out , int session_len , char * kind_out , int kind_len , char * explicit_kind_out , int explicit_kind_len )",
       "signature_sha256": "44decf525d3a6eb1e653684216a006c427c17df2f25c540900c983e4c705ec7f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_session_kinds"
     },
     {
@@ -17017,9 +17059,15 @@
           "line": 964
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+      },
       "signature": "int db2_memory_links_with_targets ( int64_t memory_id , db2_memory_link_target_row_t * out , int max )",
       "signature_sha256": "1c6295888eb82504535196acf9224de8265a2f747f9c8cbb60ef408bbcd1d2e8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_links_with_targets"
     },
     {
@@ -17368,9 +17416,15 @@
           "line": 873
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private lookup inside the unit-graph rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+      },
       "signature": "void db2_memory_lookup_primary_entity ( int64_t memory_id , char * out , int out_len )",
       "signature_sha256": "bb2933e3d46abd9dade0a0ffdf3abd166ff7ff30133ba3e828e4a173297ff39f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lookup_primary_entity"
     },
     {
@@ -17383,9 +17437,15 @@
           "line": 878
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+      },
       "signature": "void db2_memory_lookup_time_bounds ( int64_t memory_id , char * valid_at_out , int valid_len , char * invalid_at_out , int invalid_len )",
       "signature_sha256": "a85bc1ab17a898c9dc80ca1082770869b1b0f0f824b7dd4b0dc2579a75289a25",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lookup_time_bounds"
     },
     {
@@ -18622,9 +18682,15 @@
           "line": 919
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private second half of memory_refresh_summaries: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+      },
       "signature": "void db2_memory_summary_upsert ( int64_t memory_id , const char * scope , const char * summary )",
       "signature_sha256": "284b9790fca2322b53b94259222893e58113e289e8475fdb359067f78046699f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_summary_upsert"
     },
     {
@@ -18771,9 +18837,15 @@
           "line": 896
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private second half of memory_refresh_units_graph: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+      },
       "signature": "void db2_memory_unit_edge_insert ( int64_t src_unit_id , int64_t dst_unit_id , const char * edge_type , double weight )",
       "signature_sha256": "76c0b6227d8c6e50da4583b9f3dab239089a9eb0644f4c624e25009e0326a1c9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_unit_edge_insert"
     },
     {
@@ -18837,9 +18909,15 @@
           "line": 971
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private second half of memory_refresh_units_graph: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+      },
       "signature": "int64_t db2_memory_unit_insert ( int64_t memory_id , const char * unit_type , const char * memory_kind , const char * unit_key , const char * unit_text , double weight )",
       "signature_sha256": "b454c3f08118d186e1a85c85c568074f7c2333d8d556459ca8616613a1390785",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_unit_insert"
     },
     {
@@ -25962,15 +26040,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "458612f1f1083474e82c5782edff186cb8e8961c110115c43463b202a6b8b18d",
+  "fingerprint": "a523359c84ce5b449f5f2547be71534c921e16fe45e7a2b4fdff6b7f69d6024a",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 635,
+    "audit_pending": 622,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 323
+    "reviewed": 336
   }
 }
