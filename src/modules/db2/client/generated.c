@@ -1076,6 +1076,36 @@ aimee_db2_negation_tokens_update_call(aimee_db2_call_fn call, void *call_context
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_get_content_call(aimee_db2_call_fn call, void *call_context,
+                                                      uint64_t trace_id, uint64_t deadline_ns,
+                                                      uint64_t memory_id, uint32_t *domain_result,
+                                                      char *content, size_t content_capacity,
+                                                      aimee_module_cancelled_fn cancelled,
+                                                      void *cancel_context)
+{
+   if (!call || !domain_result || !content ||
+       content_capacity < (size_t)AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *domain_result = 0u;
+   content[0] = '\0';
+   uint8_t request[AIMEE_DB2_GET_CONTENT_REQUEST_LEN];
+   static _Thread_local uint8_t response[AIMEE_DB2_GET_CONTENT_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_get_content_request_encode(memory_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_GET_CONTENT, AIMEE_DB2_STAGE_GET_CONTENT, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_get_content_reply_decode(response, response_len, domain_result, content,
+                                          content_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,

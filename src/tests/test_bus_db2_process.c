@@ -503,6 +503,19 @@ int main(int argc, char **argv)
    assert(aimee_db2_negation_tokens_update_call(call_client, &client, 9083, 0, 42u, "", NULL,
                                                 NULL) == AIMEE_MODULE_CALL_OK);
 
+   /* Memory 42 does not exist, so the read is a genuine miss and must come
+    * back as not_found rather than as empty content -- the distinction this
+    * operation carries, exercised against the real process. */
+   uint32_t content_result = 99;
+   static char read_content[AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1];
+   assert(aimee_db2_get_content_call(call_client, &client, 9084, 0, 42u, &content_result,
+                                     read_content, sizeof(read_content), NULL,
+                                     NULL) == AIMEE_MODULE_CALL_OK);
+   assert(content_result == AIMEE_DB2_RESULT_NOT_FOUND && read_content[0] == '\0');
+   assert(aimee_db2_get_content_call(call_client, &client, 9085, 0, 0u, &content_result,
+                                     read_content, sizeof(read_content), NULL,
+                                     NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

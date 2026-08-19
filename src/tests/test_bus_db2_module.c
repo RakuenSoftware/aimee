@@ -83,6 +83,7 @@ typedef struct
    void (*set_cognified_kind)(int64_t memory_id, const char *kind);
    void (*set_source_session)(int64_t memory_id, const char *session_id);
    void (*negation_tokens_update)(int64_t memory_id, const char *tokens);
+   int (*get_content)(int64_t memory_id, char *out, int out_len);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -148,6 +149,7 @@ static int source_session_calls;
 static char source_session_last[160];
 static int negation_tokens_calls;
 static char negation_tokens_last[2048];
+static int get_content_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -912,6 +914,23 @@ static void negation_tokens_update(int64_t memory_id, const char *tokens)
    snprintf(negation_tokens_last, sizeof(negation_tokens_last), "%s", tokens);
 }
 
+int db2_memory_get_content(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return 0;
+}
+
+static int get_content(int64_t memory_id, char *out, int out_len)
+{
+   get_content_calls++;
+   if (memory_id != 42)
+      return 0;
+   snprintf(out, (size_t)out_len, "%s", "stored text");
+   return 1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1249,6 +1268,7 @@ int main(void)
        .set_cognified_kind = set_cognified_kind,
        .set_source_session = set_source_session,
        .negation_tokens_update = negation_tokens_update,
+       .get_content = get_content,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1532,6 +1552,17 @@ int main(void)
    assert(aimee_db2_negation_tokens_update_call(call_client, &client, 7069, 0, 42u, "", NULL,
                                                 NULL) == AIMEE_MODULE_CALL_OK);
    assert(negation_tokens_calls == 2 && negation_tokens_last[0] == '\0');
+
+   uint32_t content_result = 99u;
+   static char read_back[AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1];
+   assert(aimee_db2_get_content_call(call_client, &client, 7070, 0, 42u, &content_result, read_back,
+                                     sizeof(read_back), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(content_result == AIMEE_DB2_RESULT_OK && strcmp(read_back, "stored text") == 0 &&
+          get_content_calls == 1);
+   /* A memory that is not there is not_found, not empty content. */
+   assert(aimee_db2_get_content_call(call_client, &client, 7071, 0, 43u, &content_result, read_back,
+                                     sizeof(read_back), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(content_result == AIMEE_DB2_RESULT_NOT_FOUND && read_back[0] == '\0');
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

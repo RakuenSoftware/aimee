@@ -1492,6 +1492,14 @@
       "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
     },
     {
+      "symbol": "db2_memory_get_content",
+      "signature_sha256": "45147cad822329064bfe4f49e6259586766da0199382cb8d31a2205c1536cc05",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.get_content operation replaces the canonical text read and is the companion to memory.update_content. A missing memory is reported as not_found rather than as empty content, because a stored row may legitimately hold an empty string and the two answers are different."
+    },
+    {
       "symbol": "db2_memory_has_any_workspace_tag",
       "signature_sha256": "0f7d1a01cc7c7305aa6812b65a8bc2a9b5052a79f6e069f716d8b4faebb84d90",
       "disposition": "wire-operation",

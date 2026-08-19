@@ -296,6 +296,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .set_cognified_kind = db2_memory_set_cognified_kind,
        .set_source_session = db2_memory_set_source_session,
        .negation_tokens_update = db2_memory_negation_tokens_update,
+       .get_content = db2_memory_get_content,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1134,6 +1135,28 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_negation_tokens_update_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t content_read_memory_id = 0u;
+      if (aimee_db2_get_content_request_decode(request_body, request_len,
+                                               &content_read_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_GET_CONTENT_ERROR_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->get_content)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         static _Thread_local char read_content[AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1];
+         read_content[0] = '\0';
+         int hit = backend->get_content((int64_t)content_read_memory_id, read_content,
+                                        (int)sizeof(read_content));
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         /* A miss carries no content: reporting it as an empty payload would
+          * be indistinguishable from a row that genuinely holds "". */
+         if (aimee_db2_get_content_reply_encode(
+                 hit ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND, hit ? read_content : NULL,
+                 response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

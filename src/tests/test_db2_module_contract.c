@@ -62,6 +62,9 @@ static int source_session_calls;
 static char source_session_last[160];
 static int negation_tokens_calls;
 static char negation_tokens_last[2048];
+static int get_content_hit;
+static int get_content_calls;
+static char get_content_value[2048];
 static char update_content_last[2048];
 static char scope_type_last[64];
 static int64_t link_delete_last;
@@ -503,6 +506,24 @@ static void negation_tokens_update(int64_t memory_id, const char *tokens)
    (void)memory_id;
    negation_tokens_calls++;
    snprintf(negation_tokens_last, sizeof(negation_tokens_last), "%s", tokens);
+}
+
+int db2_memory_get_content(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return 0;
+}
+
+static int get_content(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   get_content_calls++;
+   if (!get_content_hit)
+      return 0;
+   snprintf(out, (size_t)out_len, "%s", get_content_value);
+   return 1;
 }
 
 int64_t db2_memory_count(void)
@@ -1188,6 +1209,9 @@ static void reset(void)
    source_session_last[0] = '\0';
    negation_tokens_calls = 0;
    negation_tokens_last[0] = '\0';
+   get_content_hit = 1;
+   get_content_calls = 0;
+   snprintf(get_content_value, sizeof(get_content_value), "%s", "stored text");
    update_content_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
@@ -2478,6 +2502,53 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_get_content_wire(void)
+{
+   uint8_t request[AIMEE_DB2_GET_CONTENT_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_get_content_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_get_content_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   assert(aimee_db2_get_content_request_encode(0u, request, sizeof(request)) == -1);
+
+   static uint8_t reply[AIMEE_DB2_GET_CONTENT_RESPONSE_MAX_LEN];
+   static char content[AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1];
+   uint32_t reply_len = 99, result = 99;
+   assert(aimee_db2_get_content_reply_encode(AIMEE_DB2_RESULT_OK, "stored text", reply,
+                                             sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_get_content_reply_decode(reply, reply_len, &result, content, sizeof(content)) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_OK && strcmp(content, "stored text") == 0);
+
+   /* THE DISTINCTION THIS OPERATION EXISTS TO PRESERVE. A row holding an empty
+    * string encodes as ok with a zero-length payload; a memory that is not
+    * there encodes as not_found with no payload at all. They are different
+    * lengths, different results, and must decode to different answers. */
+   assert(aimee_db2_get_content_reply_encode(AIMEE_DB2_RESULT_OK, "", reply, sizeof(reply),
+                                             &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_GET_CONTENT_RESPONSE_MIN_LEN);
+   assert(aimee_db2_get_content_reply_decode(reply, reply_len, &result, content, sizeof(content)) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_OK && content[0] == '\0');
+
+   assert(aimee_db2_get_content_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, NULL, reply, sizeof(reply),
+                                             &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_GET_CONTENT_ERROR_LEN);
+   assert(aimee_db2_get_content_reply_decode(reply, reply_len, &result, content, sizeof(content)) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_NOT_FOUND && content[0] == '\0');
+
+   /* not_found must not be encodable with content beside it. */
+   assert(aimee_db2_get_content_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, "x", reply, sizeof(reply),
+                                             &reply_len) == -1);
+
+   static char too_long[AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 2];
+   memset(too_long, 'c', AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1);
+   too_long[AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1] = '\0';
+   assert(aimee_db2_get_content_reply_encode(AIMEE_DB2_RESULT_OK, too_long, reply, sizeof(reply),
+                                             &reply_len) == -1);
 }
 
 static void test_negation_tokens_update_wire(void)
@@ -4335,6 +4406,50 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_get_content_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.get_content = get_content};
+   uint8_t request[AIMEE_DB2_GET_CONTENT_REQUEST_LEN];
+   static uint8_t response[AIMEE_DB2_GET_CONTENT_RESPONSE_MAX_LEN];
+   static char content[AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1];
+   uint32_t response_len = 99, result = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_GET_CONTENT};
+   assert(aimee_db2_get_content_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(get_content_calls == 1);
+   assert(aimee_db2_get_content_reply_decode(response, response_len, &result, content,
+                                             sizeof(content)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && strcmp(content, "stored text") == 0);
+
+   /* A stored empty string still reports ok. */
+   get_content_value[0] = '\0';
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_get_content_reply_decode(response, response_len, &result, content,
+                                             sizeof(content)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && content[0] == '\0');
+
+   /* A missing memory reports not_found, and the handler must not turn that
+    * into the empty-string answer above. */
+   get_content_hit = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(response_len == AIMEE_DB2_GET_CONTENT_ERROR_LEN);
+   assert(aimee_db2_get_content_reply_decode(response, response_len, &result, content,
+                                             sizeof(content)) == 0);
+   assert(result == AIMEE_DB2_RESULT_NOT_FOUND);
+   get_content_hit = 1;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response,
+                 AIMEE_DB2_GET_CONTENT_ERROR_LEN - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_negation_tokens_update_handler(void)
 {
    reset();
@@ -5800,6 +5915,7 @@ int main(void)
    test_set_cognified_kind_wire();
    test_set_source_session_wire();
    test_negation_tokens_update_wire();
+   test_get_content_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5848,6 +5964,7 @@ int main(void)
    test_set_cognified_kind_handler();
    test_set_source_session_handler();
    test_negation_tokens_update_handler();
+   test_get_content_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

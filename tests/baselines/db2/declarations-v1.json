@@ -16246,9 +16246,15 @@
           "line": 330
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.get_content operation replaces the canonical text read and is the companion to memory.update_content. A missing memory is reported as not_found rather than as empty content, because a stored row may legitimately hold an empty string and the two answers are different."
+      },
       "signature": "int db2_memory_get_content ( int64_t memory_id , char * out , int out_len )",
       "signature_sha256": "45147cad822329064bfe4f49e6259586766da0199382cb8d31a2205c1536cc05",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_content"
     },
     {
@@ -25944,15 +25950,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7d1f96aefa7c634af566e96f8bee8fc8aa2512970cbdd1ed1f6eccb69ddbc429",
+  "fingerprint": "d752af23571e553ebdf3ee3908855aa1a814ab3eea40125b926b397928325fef",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 638,
+    "audit_pending": 637,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 320
+    "reviewed": 321
   }
 }

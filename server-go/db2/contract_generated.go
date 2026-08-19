@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "f7a0e80180a609530d8ba1b9d4f306ae126ac7d2be6b3be8b743b8af7bd7d408"
+const ContractSHA256 = "6152426ca447d4685e99c10a7962604ca3383c4f8e771b08f4041e1194f45ece"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -300,6 +300,11 @@ const StageNegationTokensUpdate = FamilyMemory
 const OperationNegationTokensUpdate uint32 = 38
 const NegationTokensUpdateMemoryIDMax uint64 = 9223372036854775807
 const NegationTokensUpdateTokensMax = 2047
+const EventGetContent = EventMemory
+const StageGetContent = FamilyMemory
+const OperationGetContent uint32 = 39
+const GetContentMemoryIDMax uint64 = 9223372036854775807
+const GetContentContentMax = 2047
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1527,6 +1532,89 @@ func DecodeNegationTokensUpdateReply(reply []byte) error {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+// EncodeGetContentRequest emits the memory whose text is read.
+func EncodeGetContentRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > GetContentMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationGetContent, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeGetContentRequest validates the envelope and the bounded memory.
+func DecodeGetContentRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationGetContent || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > GetContentMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeGetContentReply carries the content, or reports that the memory is
+// absent. A missing row and a row holding "" are different answers, so
+// not_found carries no payload at all rather than an empty one.
+func EncodeGetContentReply(result uint32, content string) ([]byte, error) {
+	if result == ResultNotFound {
+		if content != "" {
+			return nil, ErrMalformedEnvelope
+		}
+		header, err := EncodeReplyHeader(OperationGetContent, result, 0)
+		if err != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		return header, nil
+	}
+	if result != ResultOK || len(content) > GetContentContentMax || hasNUL(content) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 4 + len(content)
+	header, err := EncodeReplyHeader(OperationGetContent, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(content)))
+	copy(payload[4:], content)
+	return reply, nil
+}
+
+// DecodeGetContentReply keeps "no such memory" distinct from empty content.
+func DecodeGetContentReply(reply []byte) (uint32, string, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationGetContent {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 &&
+		len(reply) == int(EnvelopeHeaderLen) {
+		return header.Result, "", nil
+	}
+	if header.Result != ResultOK || header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	contentLen := binary.LittleEndian.Uint32(payload)
+	if contentLen > uint32(GetContentContentMax) || 4+contentLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	content := string(payload[4 : 4+contentLen])
+	if hasNUL(content) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return header.Result, content, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

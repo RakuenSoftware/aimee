@@ -1331,6 +1331,31 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 39,
+      "name": "get_content",
+      "wire_format": "db2-envelope-u64-string-reply-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "not_found"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory content is the canonical relational column; a portable ANN provider holds a derived vector and cannot return the text.",
+      "c_symbols": ["db2_memory_get_content"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "memory_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 2075,
+        "encoded_size_error": 24,
+        "field": {"name": "content", "type": "utf8", "minimum_bytes": 0,
+                  "maximum_bytes": 2047}
+      }
     }
   ]
 }

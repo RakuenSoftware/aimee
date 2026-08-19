@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "f7a0e80180a609530d8ba1b9d4f306ae126ac7d2be6b3be8b743b8af7bd7d408"
+#define AIMEE_DB2_CONTRACT_SHA256 "6152426ca447d4685e99c10a7962604ca3383c4f8e771b08f4041e1194f45ece"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -455,6 +455,15 @@
 #define AIMEE_DB2_NEGATION_TOKENS_UPDATE_ERROR_LEN        24u
 #define AIMEE_DB2_NEGATION_TOKENS_UPDATE_MEMORY_ID_MAX    9223372036854775807ull
 #define AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX       2047u
+#define AIMEE_DB2_EVENT_GET_CONTENT                       AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_GET_CONTENT                       AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_GET_CONTENT                   39u
+#define AIMEE_DB2_GET_CONTENT_REQUEST_LEN                 32u
+#define AIMEE_DB2_GET_CONTENT_RESPONSE_MIN_LEN            28u
+#define AIMEE_DB2_GET_CONTENT_RESPONSE_MAX_LEN            2075u
+#define AIMEE_DB2_GET_CONTENT_ERROR_LEN                   24u
+#define AIMEE_DB2_GET_CONTENT_MEMORY_ID_MAX               9223372036854775807ull
+#define AIMEE_DB2_GET_CONTENT_CONTENT_MAX                 2047u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2368,6 +2377,115 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_get_content_request_encode(uint64_t memory_id, uint8_t *output,
+                                                      size_t capacity)
+{
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_GET_CONTENT_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_GET_CONTENT_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_GET_CONTENT, 0u, 8u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}
+
+static inline int aimee_db2_get_content_request_decode(const uint8_t *input, size_t input_len,
+                                                       uint64_t *memory_id)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_GET_CONTENT_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_GET_CONTENT || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_GET_CONTENT_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_get_content_reply_encode(uint32_t result, const char *content,
+                                                     uint8_t *output, size_t capacity,
+                                                     uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_NOT_FOUND)
+   {
+      /* A missing memory carries no content at all. Encoding an empty payload
+       * here would make it indistinguishable from a row holding "". */
+      if (content != NULL || capacity < AIMEE_DB2_GET_CONTENT_ERROR_LEN ||
+          aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_GET_CONTENT, result, 0u, output,
+                                        capacity) != 0)
+         return -1;
+      *output_len = AIMEE_DB2_GET_CONTENT_ERROR_LEN;
+      return 0;
+   }
+   if (result != AIMEE_DB2_RESULT_OK || !content)
+      return -1;
+   size_t content_len = 0u;
+   while (content_len <= AIMEE_DB2_GET_CONTENT_CONTENT_MAX && content[content_len])
+      ++content_len;
+   uint32_t payload_len = (uint32_t)(4u + content_len);
+   if (content_len > AIMEE_DB2_GET_CONTENT_CONTENT_MAX ||
+       capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_GET_CONTENT, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)content_len);
+   if (content_len != 0u)
+      memcpy(payload + 4u, content, content_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_get_content_reply_decode(const uint8_t *input, size_t input_len,
+                                                     uint32_t *result, char *content,
+                                                     size_t content_capacity)
+{
+   if (result)
+      *result = 0u;
+   if (content && content_capacity)
+      content[0] = '\0';
+   if (!result || !content ||
+       content_capacity < (size_t)AIMEE_DB2_GET_CONTENT_CONTENT_MAX + 1u)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_GET_CONTENT)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_NOT_FOUND && header.payload_len == 0u &&
+       input_len == AIMEE_DB2_GET_CONTENT_ERROR_LEN)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t content_len = aimee_db2_get_u32(payload);
+   if (content_len > AIMEE_DB2_GET_CONTENT_CONTENT_MAX ||
+       (uint32_t)4u + content_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < content_len; ++index)
+      if (payload[4u + index] == 0u)
+         return -1;
+   if (content_len != 0u)
+      memcpy(content, payload + 4u, content_len);
+   content[content_len] = '\0';
+   *result = header.result;
    return 0;
 }
 
