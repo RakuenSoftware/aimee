@@ -101,6 +101,7 @@ type wireBaseline struct {
 				DirectivesExpired     uint32            `json:"directives_expired"`
 				MarkedCount           uint32            `json:"marked_count"`
 				ResetCount            uint32            `json:"reset_count"`
+				RequeuedRows          uint32            `json:"requeued_rows"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -246,7 +247,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 61 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 62 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -306,7 +307,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[57].Name != "prospective_sweep_expired" ||
 		baseline.Operations[58].Name != "directive_sweep_expired" ||
 		baseline.Operations[59].Name != "mark_revisit_due" ||
-		baseline.Operations[60].Name != "ingest_queue_reset_running" {
+		baseline.Operations[60].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[61].Name != "evidence_reembed_all" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -502,6 +504,50 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestEvidenceReembedAllMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[61]
+	if operation.Family != "maintenance" {
+		t.Fatalf("family = %q, want maintenance", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeEvidenceReembedAllRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeEvidenceReembedAllRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	if err := DecodeProspectiveSweepExpiredRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("prospective decoder accepted a reembed request: %v", err)
+	}
+	if err := DecodeMarkRevisitDueRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("revisit decoder accepted a reembed request: %v", err)
+	}
+	if err := DecodeIngestQueueResetRunningRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("queue-reset decoder accepted a reembed request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeEvidenceReembedAllRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeEvidenceReembedAllReply(vector.RequeuedRows)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		rows, err := DecodeEvidenceReembedAllReply(got)
+		if err != nil || rows != vector.RequeuedRows {
+			t.Fatalf("decode = (%d, %v)", rows, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		rows, err := DecodeEvidenceReembedAllReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || rows != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, rows, err)
 		}
 	}
 }

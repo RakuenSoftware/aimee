@@ -625,6 +625,13 @@ int main(int argc, char **argv)
                                                     NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(reset_rows == 0);
 
+   /* The evidence index is empty on a fresh schema, so the total-reach reset
+    * touches nothing. That is the one case where its reach does not matter. */
+   uint32_t evidence_rows = 99;
+   assert(aimee_db2_evidence_reembed_all_call(call_client, &client, 9102, 0, &evidence_rows, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(evidence_rows == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

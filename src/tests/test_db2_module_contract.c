@@ -89,6 +89,8 @@ static int mark_revisit_value;
 static int mark_revisit_calls;
 static int queue_reset_value;
 static int queue_reset_calls;
+static int evidence_reembed_value;
+static int evidence_reembed_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -706,6 +708,17 @@ static int ingest_queue_reset_running(void)
 {
    queue_reset_calls++;
    return queue_reset_value;
+}
+
+int db2_evidence_reembed_all(void)
+{
+   return 0;
+}
+
+static int evidence_reembed_all(void)
+{
+   evidence_reembed_calls++;
+   return evidence_reembed_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1418,6 +1431,8 @@ static void reset(void)
    mark_revisit_calls = 0;
    queue_reset_value = 10;
    queue_reset_calls = 0;
+   evidence_reembed_value = 11;
+   evidence_reembed_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2712,6 +2727,34 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_evidence_reembed_all_wire(void)
+{
+   uint8_t request[AIMEE_DB2_EVIDENCE_REEMBED_ALL_REQUEST_LEN] = {0};
+   assert(aimee_db2_evidence_reembed_all_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_evidence_reembed_all_request_decode(request, sizeof(request)) == 0);
+   /* Fifth maintenance operation, so the four before it must refuse it. */
+   assert(aimee_db2_prospective_sweep_expired_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_directive_sweep_expired_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_mark_revisit_due_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_ingest_queue_reset_running_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_evidence_reembed_all_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_EVIDENCE_REEMBED_ALL_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, rows = 99;
+   assert(aimee_db2_evidence_reembed_all_reply_encode(11, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_evidence_reembed_all_reply_decode(reply, reply_len, &rows) == 0 && rows == 11);
+   assert(aimee_db2_evidence_reembed_all_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_evidence_reembed_all_reply_decode(reply, reply_len, &rows) == 0 && rows == 0);
+   assert(aimee_db2_evidence_reembed_all_reply_encode(AIMEE_DB2_EVIDENCE_REEMBED_ALL_MAX + 1u,
+                                                      reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_evidence_reembed_all_reply_encode(11, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_evidence_reembed_all_reply_encode(11, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_evidence_reembed_all_reply_decode(reply, reply_len, &rows) == -1 && rows == 0);
 }
 
 static void test_ingest_queue_reset_running_wire(void)
@@ -5030,6 +5073,45 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_evidence_reembed_all_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.evidence_reembed_all = evidence_reembed_all};
+   uint8_t request[AIMEE_DB2_EVIDENCE_REEMBED_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EVIDENCE_REEMBED_ALL_RESPONSE_LEN];
+   uint32_t response_len = 99, rows = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL};
+   assert(aimee_db2_evidence_reembed_all_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(evidence_reembed_calls == 1);
+   assert(aimee_db2_evidence_reembed_all_reply_decode(response, response_len, &rows) == 0 &&
+          rows == 11);
+
+   /* An empty evidence index has nothing to requeue. Replaying the reset finds
+    * the same nothing, which is what the catalog's safe idempotency claims --
+    * a second call cannot lose failure history that has already been cleared. */
+   evidence_reembed_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_evidence_reembed_all_reply_decode(response, response_len, &rows) == 0 &&
+          rows == 0);
+
+   /* This backend reports a missing connection or statement as zero, so an
+    * empty result and a failed one are the same number. Pinned so the
+    * limitation stays visible; the negative path is still refused. */
+   evidence_reembed_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   evidence_reembed_value = 11;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_ingest_queue_reset_running_handler(void)
 {
    reset();
@@ -7037,6 +7119,7 @@ int main(void)
    test_directive_sweep_expired_wire();
    test_mark_revisit_due_wire();
    test_ingest_queue_reset_running_wire();
+   test_evidence_reembed_all_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -7098,6 +7181,7 @@ int main(void)
    test_directive_sweep_expired_handler();
    test_mark_revisit_due_handler();
    test_ingest_queue_reset_running_handler();
+   test_evidence_reembed_all_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

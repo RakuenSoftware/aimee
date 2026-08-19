@@ -10,6 +10,7 @@
 #include "c/decision_log.h"
 #include "c/kb_service_backend.h"
 #include "c/epistemic_directives.h"
+#include "c/evidence_vectors.h"
 #include "c/prospective_memories.h"
 #include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
@@ -316,6 +317,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .directive_sweep_expired = db2_directive_sweep_expired,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
        .ingest_queue_reset_running = db2_kb_ingest_queue_reset_running,
+       .evidence_reembed_all = db2_evidence_reembed_all,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -351,7 +353,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
-        invocation->stage_id != AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING))
+        invocation->stage_id != AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING &&
+        invocation->stage_id != AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1377,7 +1380,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    if (invocation->stage_id == AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED ||
        invocation->stage_id == AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED ||
        invocation->stage_id == AIMEE_DB2_STAGE_MARK_REVISIT_DUE ||
-       invocation->stage_id == AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING)
+       invocation->stage_id == AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING ||
+       invocation->stage_id == AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL)
    {
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {
@@ -1459,6 +1463,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_ingest_queue_reset_running_reply_encode(
                  (uint32_t)reset_rows, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_evidence_reembed_all_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_EVIDENCE_REEMBED_ALL_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->evidence_reembed_all)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The only operation on this stage whose reach is every row, and it
+          * discards each row's attempt count and last error along the way.
+          * None of that reach travels, so a caller cannot narrow or widen it.
+          * An empty index and a failed statement are both zero here. */
+         int evidence_rows = backend->evidence_reembed_all();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (evidence_rows < 0 || (uint32_t)evidence_rows > AIMEE_DB2_EVIDENCE_REEMBED_ALL_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_evidence_reembed_all_reply_encode((uint32_t)evidence_rows, response_body,
+                                                         response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

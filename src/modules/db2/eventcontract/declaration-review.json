@@ -228,6 +228,14 @@
       "reason": "The typed index.entity_edge_prune_orphans operation replaces the maintenance pass that drops entity edges no surviving memory references. The tiers that count as a reference are fixed policy behind the handler, so a caller cannot widen or narrow what counts as orphaned."
     },
     {
+      "symbol": "db2_evidence_reembed_all",
+      "signature_sha256": "035c143627d98f44fe725f139c22c1704f5e545911052c7be5d3ba5204e20444",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.evidence_reembed_all operation replaces the reset that requeues every evidence index row after an embedder version change. Its reach is total and deliberately so: it takes no predicate, resets the attempt count and discards the last error on every row. Recording that as fixed policy is the point of the entry -- the reach cannot be narrowed or widened by a caller, and the discarded failure history is stated rather than left to be discovered by someone wondering where the errors went."
+    },
+    {
       "symbol": "db2_health_probe",
       "signature_sha256": "325f260c51f255dae61d7323836bc549a712cb5486abeb4f4967ffdc57ac05ee",
       "disposition": "wire-operation",

@@ -8285,9 +8285,15 @@
           "line": 39
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.evidence_reembed_all operation replaces the reset that requeues every evidence index row after an embedder version change. Its reach is total and deliberately so: it takes no predicate, resets the attempt count and discards the last error on every row. Recording that as fixed policy is the point of the entry -- the reach cannot be narrowed or widened by a caller, and the discarded failure history is stated rather than left to be discovered by someone wondering where the errors went."
+      },
       "signature": "int db2_evidence_reembed_all ( void )",
       "signature_sha256": "035c143627d98f44fe725f139c22c1704f5e545911052c7be5d3ba5204e20444",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_evidence_reembed_all"
     },
     {
@@ -26100,15 +26106,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fe9e36f439972ab9865259fea73609c63ef3fe4869db15493bb732a116247499",
+  "fingerprint": "9a84657faeb0a723aa1dcf198b53fcb2f3e9e7fa8807979a5df9aa75db203ca7",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 612,
+    "audit_pending": 611,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 346
+    "reviewed": 347
   }
 }

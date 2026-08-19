@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "78578b1f33a90fb7f641879be4f4a8b4040398b8fbed0aa7f5cdb112722669b4"
+const ContractSHA256 = "9da41a907c2a244da59deede3797b67b718f4497d126790e596a318ef70622a5"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -357,6 +357,10 @@ const EventIngestQueueResetRunning = EventMaintenance
 const StageIngestQueueResetRunning = FamilyMaintenance
 const OperationIngestQueueResetRunning uint32 = 4
 const IngestQueueResetRunningMax uint32 = 2147483647
+const EventEvidenceReembedAll = EventMaintenance
+const StageEvidenceReembedAll = FamilyMaintenance
+const OperationEvidenceReembedAll uint32 = 5
+const EvidenceReembedAllMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2351,6 +2355,55 @@ func DecodeIngestQueueResetRunningReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return resetCount, nil
+}
+
+// EncodeEvidenceReembedAllRequest emits the empty request envelope. The total
+// reach and the attempt-and-error discard are policy and never travel.
+func EncodeEvidenceReembedAllRequest() []byte {
+	header, err := EncodeRequestHeader(OperationEvidenceReembedAll, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeEvidenceReembedAllRequest validates the exact maintenance-family
+// envelope.
+func DecodeEvidenceReembedAllRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEvidenceReembedAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeEvidenceReembedAllReply emits one bounded u32 requeued row count.
+func EncodeEvidenceReembedAllReply(requeuedRows uint32) ([]byte, error) {
+	if requeuedRows > EvidenceReembedAllMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEvidenceReembedAll, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], requeuedRows)
+	return reply, nil
+}
+
+// DecodeEvidenceReembedAllReply validates the operation and bounded count.
+func DecodeEvidenceReembedAllReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEvidenceReembedAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	requeuedRows := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if requeuedRows > EvidenceReembedAllMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return requeuedRows, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.
