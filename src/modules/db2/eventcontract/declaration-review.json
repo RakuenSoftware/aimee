@@ -324,6 +324,22 @@
       "reason": "The typed maintenance.ingest_queue_reset_running operation replaces the startup recovery that returns queue rows abandoned by a dead worker to the pending pool. The two states and the clearing of started_at are fixed policy. Clearing the claim instant is the part that matters: a row left marked as claimed by a process that no longer exists is work that never runs again, and a caller able to skip the clear would hand back a row that still looks taken."
     },
     {
+      "symbol": "db2_kb_runtime_state_vector_rebuild_lock_release",
+      "signature_sha256": "299e905f09f5782074e7ac3041beb7a925ea72217020b05ffafc05f086c6647c",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.vector_rebuild_lock_release operation deletes the rebuild lock row. It does not check who holds it, so any caller can release another's lock; that is recorded rather than implied. It returns void, so like the proposal archive it cannot report a failure and the catalog says so."
+    },
+    {
+      "symbol": "db2_kb_runtime_state_vector_rebuild_lock_try_acquire",
+      "signature_sha256": "5ce6a794439c975fb1e1fc60b45191d647ed3e4e53bcaa55e0b8593fd3eeb55a",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.vector_rebuild_lock_try_acquire operation claims the vector rebuild lock. It is a check followed by a separate write, so two callers can both observe the lock free and both claim it: it does not provide mutual exclusion. The catalog records that as atomicity check-then-set and mutually_exclusive false so the gap is stated where a reader will find it, rather than inferred from the word lock."
+    },
+    {
       "symbol": "db2_kb_service_agent_hint_consume_json",
       "signature_sha256": "495f0aaa0e5a6f7d73f3c27767bdf4e030862cad32e4c208e186064343ab9674",
       "disposition": "private-db2",

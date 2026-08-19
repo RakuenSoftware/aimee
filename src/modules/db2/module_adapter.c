@@ -5,33 +5,33 @@
 #include "c/db2.h"
 #include "c/db2_internal.h"
 #include "c/db2_pool.h"
+#include "c/artifacts.h"
 #include "c/code_index.h"
-#include "c/curiosity.h"
 #include "c/code_index_ops.h"
 #include "c/cross_repo_build.h"
 #include "c/cross_repo_identity.h"
 #include "c/cross_repo_route.h"
-#include "c/artifacts.h"
+#include "c/curiosity.h"
 #include "c/db2_learning.h"
-#include "c/learning_synth_ops.h"
 #include "c/decision_log.h"
-#include "c/kb_payload.h"
-#include "c/mining.h"
-#include "c/kb_service_backend.h"
-#include "c/epistemic_directives.h"
-#include "c/kb_service_backend.h"
-#include "c/evidence_vectors.h"
-#include "c/prospective_memories.h"
-#include "c/rel_types_store.h"
-#include "c/rules.h"
 #include "c/entity_edges.h"
+#include "c/epistemic_directives.h"
+#include "c/evidence_vectors.h"
+#include "c/kb_payload.h"
+#include "c/kb_runtime_state.h"
+#include "c/kb_service_backend.h"
 #include "c/kind_lifecycle.h"
+#include "c/learning_synth_ops.h"
 #include "c/memory_health.h"
 #include "c/memory_lifecycle.h"
 #include "c/memory_payload.h"
 #include "c/memory_promotion.h"
 #include "c/memory_query.h"
 #include "c/memory_relations.h"
+#include "c/mining.h"
+#include "c/prospective_memories.h"
+#include "c/rel_types_store.h"
+#include "c/rules.h"
 
 static int production_health_counters(int promote_use_count, double promote_confidence,
                                       aimee_db2_health_counters_t *counters)
@@ -333,6 +333,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .mining_seed_job_defaults = db2_mining_seed_job_defaults,
        .proposals_archive_expired = db2_learning_proposals_archive_expired,
        .rel_types_ensure_seed = db2_rel_types_ensure_seed,
+       .vector_rebuild_lock_try_acquire = db2_kb_runtime_state_vector_rebuild_lock_try_acquire,
+       .vector_rebuild_lock_release = db2_kb_runtime_state_vector_rebuild_lock_release,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        /* Of the two identical sweeps, bind the one that reports failure:
         * db2_directive_sweep_expired collapses a failed statement into
@@ -384,6 +386,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED &&
+        invocation->stage_id != AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE &&
+        invocation->stage_id != AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1477,6 +1481,52 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_cross_repo_rebuild_build_deps_reply_encode(
                  (uint32_t)build_deps_written, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   }
+
+   if (invocation->stage_id == AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE)
+   {
+      if (aimee_db2_vector_rebuild_lock_try_acquire_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->vector_rebuild_lock_try_acquire)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The custody family's first stage. A one here means this caller
+          * wrote the lock row, not that it is the only holder: the backend
+          * reads the row and writes it as two separate statements, so two
+          * callers that both read before either writes are both told they
+          * acquired it. Serving the operation on one stage narrows that window
+          * but does not close it while unmigrated callers still reach the
+          * backend directly. The catalog says mutually_exclusive is false. */
+         int acquired = backend->vector_rebuild_lock_try_acquire();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (acquired < 0 || (uint32_t)acquired > AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_vector_rebuild_lock_try_acquire_reply_encode(
+                 (uint32_t)acquired, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_vector_rebuild_lock_release_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->vector_rebuild_lock_release)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The release does not check who holds the lock, so any caller can
+          * release another's, and it returns void so no failure can reach the
+          * wire. Both are recorded in the catalog rather than left to be
+          * discovered by whoever loses a rebuild to a stranger's release. */
+         backend->vector_rebuild_lock_release();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_vector_rebuild_lock_release_reply_encode(response_body, response_capacity,
+                                                                response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

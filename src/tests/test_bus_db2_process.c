@@ -114,7 +114,8 @@ int main(int argc, char **argv)
                               AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
                               AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_RULES_DECAY,
-                              AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED};
+                              AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED,
+                              AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -651,6 +652,31 @@ int main(int argc, char **argv)
     * nothing to retire. It would answer ok either way: this is the one
     * operation on the bus whose backend cannot report a failure. */
    assert(aimee_db2_proposals_archive_expired_call(call_client, &client, 9116, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+
+   /* The custody family against real Postgres. Sequentially the lock behaves:
+    * the first acquire claims it, the second is refused because the row the
+    * first wrote is inside its lease window, and after a release the next
+    * acquire succeeds again. That is what this replay can show. The race the
+    * catalog records is concurrent, not sequential -- two callers interleaving
+    * between the read and the write -- and a single-threaded replay cannot
+    * produce it. The gap is recorded in the catalog rather than demonstrated
+    * here, and the release below removes the row without asking who owns it. */
+   uint32_t acquired = 99;
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_call(call_client, &client, 9117, 0, &acquired,
+                                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acquired == 1);
+   acquired = 99;
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_call(call_client, &client, 9118, 0, &acquired,
+                                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acquired == 0);
+   assert(aimee_db2_vector_rebuild_lock_release_call(call_client, &client, 9119, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   acquired = 99;
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_call(call_client, &client, 9120, 0, &acquired,
+                                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acquired == 1);
+   assert(aimee_db2_vector_rebuild_lock_release_call(call_client, &client, 9121, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
    /* The maintenance family reaching the real process for the first time. No

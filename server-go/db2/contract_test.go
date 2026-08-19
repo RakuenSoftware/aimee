@@ -110,6 +110,7 @@ type wireBaseline struct {
 				BuildDepsWritten      uint32            `json:"build_deps_written"`
 				RulesTouched          uint32            `json:"rules_touched"`
 				ItemsRescored         uint32            `json:"items_rescored"`
+				Acquired              uint32            `json:"acquired"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -255,7 +256,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 73 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 75 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -320,14 +321,16 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[62].Name != "mining_seed_job_defaults" ||
 		baseline.Operations[63].Name != "proposals_archive_expired" ||
 		baseline.Operations[64].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[65].Name != "prospective_sweep_expired" ||
-		baseline.Operations[66].Name != "directive_sweep_expired" ||
-		baseline.Operations[67].Name != "mark_revisit_due" ||
-		baseline.Operations[68].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[69].Name != "evidence_reembed_all" ||
-		baseline.Operations[70].Name != "curator_reembed_all" ||
-		baseline.Operations[71].Name != "synth_reenqueue_all" ||
-		baseline.Operations[72].Name != "curator_reenqueue_extract_all" {
+		baseline.Operations[65].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[66].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[67].Name != "prospective_sweep_expired" ||
+		baseline.Operations[68].Name != "directive_sweep_expired" ||
+		baseline.Operations[69].Name != "mark_revisit_due" ||
+		baseline.Operations[70].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[71].Name != "evidence_reembed_all" ||
+		baseline.Operations[72].Name != "curator_reembed_all" ||
+		baseline.Operations[73].Name != "synth_reenqueue_all" ||
+		baseline.Operations[74].Name != "curator_reenqueue_extract_all" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -528,7 +531,7 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[72]
+	operation := loadWireBaseline(t).Operations[74]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -570,7 +573,7 @@ func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
 
 func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	operation := baseline.Operations[71]
+	operation := baseline.Operations[73]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -611,7 +614,7 @@ func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestCuratorReembedAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[70]
+	operation := loadWireBaseline(t).Operations[72]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -652,7 +655,7 @@ func TestCuratorReembedAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestEvidenceReembedAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[69]
+	operation := loadWireBaseline(t).Operations[71]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -696,7 +699,7 @@ func TestEvidenceReembedAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestIngestQueueResetRunningMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[68]
+	operation := loadWireBaseline(t).Operations[70]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -740,7 +743,7 @@ func TestIngestQueueResetRunningMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestMarkRevisitDueMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[67]
+	operation := loadWireBaseline(t).Operations[69]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -781,7 +784,7 @@ func TestMarkRevisitDueMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestDirectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[66]
+	operation := loadWireBaseline(t).Operations[68]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -824,7 +827,7 @@ func TestDirectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestProspectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[65]
+	operation := loadWireBaseline(t).Operations[67]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -903,6 +906,70 @@ func TestProposalsArchiveExpiredMatchesEverySharedCVector(t *testing.T) {
 	for _, vector := range operation.Reply.Negative {
 		if err := DecodeProposalsArchiveExpiredReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
 			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+}
+
+func TestVectorRebuildLockMatchesEverySharedCVector(t *testing.T) {
+	baseline := loadWireBaseline(t)
+	acquire := baseline.Operations[65]
+	release := baseline.Operations[66]
+	if acquire.Family != "custody" || release.Family != "custody" {
+		t.Fatalf("families = %q/%q, want custody", acquire.Family, release.Family)
+	}
+	wantAcquire := decodeHex(t, acquire.Request.Positive)
+	if got := EncodeVectorRebuildLockTryAcquireRequest(); string(got) != string(wantAcquire) {
+		t.Fatalf("acquire request = %x, want %x", got, wantAcquire)
+	}
+	wantRelease := decodeHex(t, release.Request.Positive)
+	if got := EncodeVectorRebuildLockReleaseRequest(); string(got) != string(wantRelease) {
+		t.Fatalf("release request = %x, want %x", got, wantRelease)
+	}
+	// Each must refuse the other: a release read as an acquire would hand a
+	// caller a lock it never asked for.
+	if err := DecodeVectorRebuildLockTryAcquireRequest(wantRelease); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("acquire decoder accepted a release request: %v", err)
+	}
+	if err := DecodeVectorRebuildLockReleaseRequest(wantAcquire); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("release decoder accepted an acquire request: %v", err)
+	}
+	for _, vector := range acquire.Request.Negative {
+		if err := DecodeVectorRebuildLockTryAcquireRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative acquire request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range release.Request.Negative {
+		if err := DecodeVectorRebuildLockReleaseRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative release request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range acquire.Reply.Positive {
+		got, err := EncodeVectorRebuildLockTryAcquireReply(vector.Acquired)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive acquire reply = (%x, %v)", got, err)
+		}
+		flag, err := DecodeVectorRebuildLockTryAcquireReply(got)
+		if err != nil || flag != vector.Acquired {
+			t.Fatalf("decode = (%d, %v)", flag, err)
+		}
+	}
+	for _, vector := range acquire.Reply.Negative {
+		flag, err := DecodeVectorRebuildLockTryAcquireReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || flag != 0 {
+			t.Fatalf("negative acquire reply %s = (%d, %v)", vector.Mutation, flag, err)
+		}
+	}
+	if len(release.Reply.Positive) != 1 {
+		t.Fatalf("acknowledgement replies have exactly one positive form, got %d",
+			len(release.Reply.Positive))
+	}
+	wantReleaseReply := decodeHex(t, release.Reply.Positive[0].Hex)
+	if got := EncodeVectorRebuildLockReleaseReply(); string(got) != string(wantReleaseReply) {
+		t.Fatalf("release reply = %x, want %x", got, wantReleaseReply)
+	}
+	for _, vector := range release.Reply.Negative {
+		if err := DecodeVectorRebuildLockReleaseReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative release reply %s: %v", vector.Mutation, err)
 		}
 	}
 }

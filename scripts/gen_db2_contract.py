@@ -243,6 +243,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "requeue_drifted",
                                                                 "prospective_sweep_expired",
                                                                 "proposals_archive_expired",
+                                                                "vector_rebuild_lock_release",
                                                                 "directive_sweep_expired",
                                                                 "mark_revisit_due",
                                                                 "ingest_queue_reset_running",
@@ -262,12 +263,17 @@ def validate_catalog(value: object) -> dict[str, object]:
                                             "rules_decay",
                                             "curiosity_rescore_all",
                                             "mining_seed_job_defaults",
-                                            "rel_types_ensure_seed") else "none")
+                                            "rel_types_ensure_seed",
+                                            "vector_rebuild_lock_try_acquire") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
         # observationally neutral the way every other operation here is.
         expected_idempotency = ("unsafe"
+                                # Acquiring a lock is not observationally
+                                # neutral: the second call sees the row the
+                                # first one wrote and answers differently.
                                 if name in ("health_record", "demote_id", "touch", "reject",
-                                            "decay_confidence")
+                                            "decay_confidence",
+                                            "vector_rebuild_lock_try_acquire")
                                 else "safe")
         if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
@@ -2338,6 +2344,73 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["payload"] != "none"):
                 fail("proposals-archive-expired-reply",
                      "reply must be a bare acknowledgement envelope")
+        elif key == ("custody", 1) and name == "vector_rebuild_lock_try_acquire" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # This is a check followed by a separate write. Two callers can
+            # both find the lock free and both claim it, so it does not provide
+            # mutual exclusion and the catalog has to say so: calling something
+            # a lock is exactly the kind of name that stops people checking.
+            # The lease bounds the damage rather than preventing it -- a holder
+            # that dies stops renewing and the row ages out after 1800 seconds.
+            if operation["c_symbols"] != ["db2_kb_runtime_state_vector_rebuild_lock_try_acquire"]:
+                fail("operation-c-symbols",
+                     "vector_rebuild_lock_try_acquire C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results",
+                     "vector_rebuild_lock_try_acquire results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "vector_rebuild_lock_try_acquire.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"state_key": "vector_rebuild_lock",
+                                          "lease_seconds": 1800,
+                                          "clock": "database",
+                                          "atomicity": "check-then-set",
+                                          "mutually_exclusive": False}):
+                fail("vector-rebuild-lock-try-acquire-request",
+                     "request must carry no payload and state the check-then-set gap")
+            if request["policy"]["mutually_exclusive"]:
+                fail("vector-rebuild-lock-try-acquire-claim",
+                     "a check-then-set acquire cannot claim mutual exclusion")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field", "count_source"},
+                          "vector_rebuild_lock_try_acquire.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "vector_rebuild_lock_try_acquire.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["count_source"] != "predicate" or
+                    field != {"name": "acquired", "type": "u32", "minimum": 0,
+                              "maximum": 1}):
+                fail("vector-rebuild-lock-try-acquire-reply",
+                     "reply must contain one zero-or-one acquisition flag")
+        elif key == ("custody", 2) and name == "vector_rebuild_lock_release" and \
+                operation["wire_format"] == "db2-envelope-ack-v1":
+            # The release does not check who holds the lock, so any caller can
+            # release another's. Recorded rather than implied.
+            if operation["c_symbols"] != ["db2_kb_runtime_state_vector_rebuild_lock_release"]:
+                fail("operation-c-symbols",
+                     "vector_rebuild_lock_release C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results",
+                     "vector_rebuild_lock_release results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "vector_rebuild_lock_release.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"state_key": "vector_rebuild_lock",
+                                          "releases_regardless_of_holder": True,
+                                          "reports_failure": False}):
+                fail("vector-rebuild-lock-release-request",
+                     "request must carry no payload and state the unowned release")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "payload"},
+                          "vector_rebuild_lock_release.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["payload"] != "none"):
+                fail("vector-rebuild-lock-release-reply",
+                     "reply must be a bare acknowledgement envelope")
         elif key == ("organization", 1) and name == "rel_types_ensure_seed" and \
                 operation["wire_format"] == "db2-envelope-ack-v1":
             # Unlike the mining seed, this one's content is not DB2's. The
@@ -2629,7 +2702,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 73 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 75 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2650,12 +2723,13 @@ def validate_catalog(value: object) -> dict[str, object]:
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
             "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
             "proposals_archive_expired", "rel_types_ensure_seed",
+            "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
             "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the seventy-three supported operations exactly once")
+             "the partial generator requires the seventy-five supported operations exactly once")
     return catalog
 
 
@@ -2844,14 +2918,16 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     mining_seed_job_defaults = catalog["operations"][62]
     proposals_archive_expired = catalog["operations"][63]
     rel_types_ensure_seed = catalog["operations"][64]
-    prospective_sweep_expired = catalog["operations"][65]
-    directive_sweep_expired = catalog["operations"][66]
-    mark_revisit_due = catalog["operations"][67]
-    ingest_queue_reset_running = catalog["operations"][68]
-    evidence_reembed_all = catalog["operations"][69]
-    curator_reembed_all = catalog["operations"][70]
-    synth_reenqueue_all = catalog["operations"][71]
-    curator_reenqueue_extract_all = catalog["operations"][72]
+    vector_rebuild_lock_try_acquire = catalog["operations"][65]
+    vector_rebuild_lock_release = catalog["operations"][66]
+    prospective_sweep_expired = catalog["operations"][67]
+    directive_sweep_expired = catalog["operations"][68]
+    mark_revisit_due = catalog["operations"][69]
+    ingest_queue_reset_running = catalog["operations"][70]
+    evidence_reembed_all = catalog["operations"][71]
+    curator_reembed_all = catalog["operations"][72]
+    synth_reenqueue_all = catalog["operations"][73]
+    curator_reenqueue_extract_all = catalog["operations"][74]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3282,6 +3358,23 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     rel_types_ensure_seed_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(rel_types_ensure_seed["id"]), 0, b"",
+    )
+    vector_rebuild_lock_try_acquire_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(vector_rebuild_lock_try_acquire["id"]), 0, b"",
+    )
+    vector_rebuild_lock_try_acquire_taken = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(vector_rebuild_lock_try_acquire["id"]), 0,
+        _put_u32(1),
+    )
+    vector_rebuild_lock_try_acquire_refused = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(vector_rebuild_lock_try_acquire["id"]), 0,
+        _put_u32(0),
+    )
+    vector_rebuild_lock_release_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(vector_rebuild_lock_release["id"]), 0, b"",
+    )
+    vector_rebuild_lock_release_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(vector_rebuild_lock_release["id"]), 0, b"",
     )
     proposals_archive_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(proposals_archive_expired["id"]), 0, b"",
@@ -6375,6 +6468,80 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": vector_rebuild_lock_try_acquire["family"],
+            "id": vector_rebuild_lock_try_acquire["id"],
+            "name": vector_rebuild_lock_try_acquire["name"],
+            "request": {
+                "positive": vector_rebuild_lock_try_acquire_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(vector_rebuild_lock_try_acquire_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(vector_rebuild_lock_try_acquire_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     vector_rebuild_lock_try_acquire_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (vector_rebuild_lock_try_acquire_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "acquired": 1,
+                     "hex": vector_rebuild_lock_try_acquire_taken.hex()},
+                    {"result": 0, "acquired": 0,
+                     "hex": vector_rebuild_lock_try_acquire_refused.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(vector_rebuild_lock_try_acquire_taken, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(vector_rebuild_lock_try_acquire_taken, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(vector_rebuild_lock_try_acquire["id"]), 0, b"").hex()},
+                    {"mutation": "flag_out_of_range", "hex":
+                     (vector_rebuild_lock_try_acquire_taken[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex":
+                     vector_rebuild_lock_try_acquire_taken[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (vector_rebuild_lock_try_acquire_taken + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": vector_rebuild_lock_release["family"],
+            "id": vector_rebuild_lock_release["id"],
+            "name": vector_rebuild_lock_release["name"],
+            "request": {
+                "positive": vector_rebuild_lock_release_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(vector_rebuild_lock_release_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(vector_rebuild_lock_release_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     vector_rebuild_lock_release_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (vector_rebuild_lock_release_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": vector_rebuild_lock_release_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(vector_rebuild_lock_release_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(vector_rebuild_lock_release_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(vector_rebuild_lock_release_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex":
+                     vector_rebuild_lock_release_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (vector_rebuild_lock_release_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": prospective_sweep_expired["family"],
             "id": prospective_sweep_expired["id"],
             "name": prospective_sweep_expired["name"],
@@ -6768,14 +6935,16 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     mining_seed_job_defaults = catalog["operations"][62]
     proposals_archive_expired = catalog["operations"][63]
     rel_types_ensure_seed = catalog["operations"][64]
-    prospective_sweep_expired = catalog["operations"][65]
-    directive_sweep_expired = catalog["operations"][66]
-    mark_revisit_due = catalog["operations"][67]
-    ingest_queue_reset_running = catalog["operations"][68]
-    evidence_reembed_all = catalog["operations"][69]
-    curator_reembed_all = catalog["operations"][70]
-    synth_reenqueue_all = catalog["operations"][71]
-    curator_reenqueue_extract_all = catalog["operations"][72]
+    vector_rebuild_lock_try_acquire = catalog["operations"][65]
+    vector_rebuild_lock_release = catalog["operations"][66]
+    prospective_sweep_expired = catalog["operations"][67]
+    directive_sweep_expired = catalog["operations"][68]
+    mark_revisit_due = catalog["operations"][69]
+    ingest_queue_reset_running = catalog["operations"][70]
+    evidence_reembed_all = catalog["operations"][71]
+    curator_reembed_all = catalog["operations"][72]
+    synth_reenqueue_all = catalog["operations"][73]
+    curator_reenqueue_extract_all = catalog["operations"][74]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -7668,6 +7837,28 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{rel_types_ensure_seed['reply']['encoded_size_ok']}u"),
         ("AIMEE_DB2_REL_TYPES_ENSURE_SEED_ERROR_LEN",
          f"{rel_types_ensure_seed['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE", "AIMEE_DB2_EVENT_CUSTODY"),
+        ("AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE", "AIMEE_DB2_FAMILY_CUSTODY"),
+        ("AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_TRY_ACQUIRE",
+         f"{vector_rebuild_lock_try_acquire['id']}u"),
+        ("AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_REQUEST_LEN",
+         f"{vector_rebuild_lock_try_acquire['request']['encoded_size']}u"),
+        ("AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN",
+         f"{vector_rebuild_lock_try_acquire['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_ERROR_LEN",
+         f"{vector_rebuild_lock_try_acquire['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_MAX",
+         f"{vector_rebuild_lock_try_acquire['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_RELEASE", "AIMEE_DB2_EVENT_CUSTODY"),
+        ("AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE", "AIMEE_DB2_FAMILY_CUSTODY"),
+        ("AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_RELEASE",
+         f"{vector_rebuild_lock_release['id']}u"),
+        ("AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN",
+         f"{vector_rebuild_lock_release['request']['encoded_size']}u"),
+        ("AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN",
+         f"{vector_rebuild_lock_release['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_ERROR_LEN",
+         f"{vector_rebuild_lock_release['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_EVENT_MAINTENANCE"),
         ("AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_FAMILY_MAINTENANCE"),
         ("AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED",
@@ -10185,6 +10376,108 @@ static inline int aimee_db2_proposals_archive_expired_reply_decode(const uint8_t
    return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
                   input_len == AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN &&
                   header.operation == AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_try_acquire_request_encode(uint8_t *output,
+                                                                           size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_TRY_ACQUIRE, 0u,
+                                          0u, output, capacity);
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_try_acquire_request_decode(const uint8_t *input,
+                                                                           size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_TRY_ACQUIRE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_try_acquire_reply_encode(uint32_t acquired,
+                                                                         uint8_t *output,
+                                                                         size_t capacity,
+                                                                         uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || acquired > AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_MAX ||
+       capacity < AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_TRY_ACQUIRE,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, acquired);
+   *output_len = AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(const uint8_t *input,
+                                                                         size_t input_len,
+                                                                         uint32_t *acquired)
+{{
+   if (acquired)
+      *acquired = 0u;
+   if (!acquired)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_TRY_ACQUIRE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_MAX)
+      return -1;
+   *acquired = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_release_request_encode(uint8_t *output,
+                                                                       size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_RELEASE, 0u, 0u,
+                                          output, capacity);
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_release_request_decode(const uint8_t *input,
+                                                                       size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_RELEASE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_release_reply_encode(uint8_t *output,
+                                                                     size_t capacity,
+                                                                     uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len ||
+       capacity < AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_RELEASE,
+                                     AIMEE_DB2_RESULT_OK, 0u, output, capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_vector_rebuild_lock_release_reply_decode(const uint8_t *input,
+                                                                     size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_RELEASE &&
                   header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
               ? 0
               : -1;
@@ -13457,6 +13750,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_vector_rebuild_lock_try_acquire_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *acquired, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_vector_rebuild_lock_release_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_proposals_archive_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -15037,6 +15338,54 @@ aimee_db2_rel_types_ensure_seed_call(aimee_db2_call_fn call, void *call_context,
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_vector_rebuild_lock_try_acquire_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t *acquired, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !acquired)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *acquired = 0u;
+   uint8_t request[AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_vector_rebuild_lock_try_acquire_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE,
+            AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(response, response_len, acquired) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_vector_rebuild_lock_release_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_vector_rebuild_lock_release_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_RELEASE,
+            AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_vector_rebuild_lock_release_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t
 aimee_db2_proposals_archive_expired_call(aimee_db2_call_fn call, void *call_context,
                                          uint64_t trace_id, uint64_t deadline_ns,
@@ -15563,14 +15912,16 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     mining_seed_job_defaults = catalog["operations"][62]
     proposals_archive_expired = catalog["operations"][63]
     rel_types_ensure_seed = catalog["operations"][64]
-    prospective_sweep_expired = catalog["operations"][65]
-    directive_sweep_expired = catalog["operations"][66]
-    mark_revisit_due = catalog["operations"][67]
-    ingest_queue_reset_running = catalog["operations"][68]
-    evidence_reembed_all = catalog["operations"][69]
-    curator_reembed_all = catalog["operations"][70]
-    synth_reenqueue_all = catalog["operations"][71]
-    curator_reenqueue_extract_all = catalog["operations"][72]
+    vector_rebuild_lock_try_acquire = catalog["operations"][65]
+    vector_rebuild_lock_release = catalog["operations"][66]
+    prospective_sweep_expired = catalog["operations"][67]
+    directive_sweep_expired = catalog["operations"][68]
+    mark_revisit_due = catalog["operations"][69]
+    ingest_queue_reset_running = catalog["operations"][70]
+    evidence_reembed_all = catalog["operations"][71]
+    curator_reembed_all = catalog["operations"][72]
+    synth_reenqueue_all = catalog["operations"][73]
+    curator_reenqueue_extract_all = catalog["operations"][74]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -15939,6 +16290,13 @@ const OperationMiningSeedJobDefaults uint32 = {mining_seed_job_defaults['id']}
 const EventRelTypesEnsureSeed = EventOrganization
 const StageRelTypesEnsureSeed = FamilyOrganization
 const OperationRelTypesEnsureSeed uint32 = {rel_types_ensure_seed['id']}
+const EventVectorRebuildLockTryAcquire = EventCustody
+const StageVectorRebuildLockTryAcquire = FamilyCustody
+const OperationVectorRebuildLockTryAcquire uint32 = {vector_rebuild_lock_try_acquire['id']}
+const VectorRebuildLockTryAcquireMax uint32 = {vector_rebuild_lock_try_acquire['reply']['field']['maximum']}
+const EventVectorRebuildLockRelease = EventCustody
+const StageVectorRebuildLockRelease = FamilyCustody
+const OperationVectorRebuildLockRelease uint32 = {vector_rebuild_lock_release['id']}
 const EventProposalsArchiveExpired = EventLearning
 const StageProposalsArchiveExpired = FamilyLearning
 const OperationProposalsArchiveExpired uint32 = {proposals_archive_expired['id']}
@@ -18105,6 +18463,99 @@ func EncodeRelTypesEnsureSeedReply() []byte {{
 func DecodeRelTypesEnsureSeedReply(reply []byte) error {{
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeVectorRebuildLockTryAcquireRequest emits the empty request envelope.
+// The state key and the lease are policy and never travel.
+func EncodeVectorRebuildLockTryAcquireRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationVectorRebuildLockTryAcquire, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeVectorRebuildLockTryAcquireRequest validates the exact custody-family
+// envelope.
+func DecodeVectorRebuildLockTryAcquireRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationVectorRebuildLockTryAcquire ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeVectorRebuildLockTryAcquireReply emits the zero-or-one acquisition
+// flag. A one means this caller wrote the lock row, not that it is the only
+// holder: the backend checks and writes separately, so two callers can both
+// be told they acquired it.
+func EncodeVectorRebuildLockTryAcquireReply(acquired uint32) ([]byte, error) {{
+	if acquired > VectorRebuildLockTryAcquireMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationVectorRebuildLockTryAcquire, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], acquired)
+	return reply, nil
+}}
+
+// DecodeVectorRebuildLockTryAcquireReply validates the operation and flag.
+func DecodeVectorRebuildLockTryAcquireReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationVectorRebuildLockTryAcquire ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	acquired := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if acquired > VectorRebuildLockTryAcquireMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return acquired, nil
+}}
+
+// EncodeVectorRebuildLockReleaseRequest emits the empty request envelope.
+func EncodeVectorRebuildLockReleaseRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationVectorRebuildLockRelease, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeVectorRebuildLockReleaseRequest validates the exact custody-family
+// envelope.
+func DecodeVectorRebuildLockReleaseRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationVectorRebuildLockRelease ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeVectorRebuildLockReleaseReply emits a bare acknowledgement. The release
+// does not check who holds the lock and cannot report a failure.
+func EncodeVectorRebuildLockReleaseReply() []byte {{
+	header, err := EncodeReplyHeader(OperationVectorRebuildLockRelease, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeVectorRebuildLockReleaseReply validates the acknowledgement envelope.
+func DecodeVectorRebuildLockReleaseReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationVectorRebuildLockRelease ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != EnvelopeHeaderLen {{
 		return ErrMalformedEnvelope

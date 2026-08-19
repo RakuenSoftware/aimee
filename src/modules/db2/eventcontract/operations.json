@@ -1778,6 +1778,58 @@
       }
     },
     {
+      "family": "custody",
+      "id": 1,
+      "name": "vector_rebuild_lock_try_acquire",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rebuild lock is a row in the canonical relational runtime-state table, not portable ANN state.",
+      "c_symbols": ["db2_kb_runtime_state_vector_rebuild_lock_try_acquire"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"state_key": "vector_rebuild_lock", "lease_seconds": 1800,
+                   "clock": "database", "atomicity": "check-then-set",
+                   "mutually_exclusive": false}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "acquired", "type": "u32", "minimum": 0,
+                  "maximum": 1},
+        "count_source": "predicate"
+      }
+    },
+    {
+      "family": "custody",
+      "id": 2,
+      "name": "vector_rebuild_lock_release",
+      "wire_format": "db2-envelope-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rebuild lock is a row in the canonical relational runtime-state table, not portable ANN state.",
+      "c_symbols": ["db2_kb_runtime_state_vector_rebuild_lock_release"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"state_key": "vector_rebuild_lock",
+                   "releases_regardless_of_holder": true,
+                   "reports_failure": false}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "payload": "none"
+      }
+    },
+    {
       "family": "maintenance",
       "id": 1,
       "name": "prospective_sweep_expired",

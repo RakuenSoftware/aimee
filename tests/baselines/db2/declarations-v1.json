@@ -10325,9 +10325,15 @@
           "line": 42
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.vector_rebuild_lock_release operation deletes the rebuild lock row. It does not check who holds it, so any caller can release another's lock; that is recorded rather than implied. It returns void, so like the proposal archive it cannot report a failure and the catalog says so."
+      },
       "signature": "void db2_kb_runtime_state_vector_rebuild_lock_release ( void )",
       "signature_sha256": "299e905f09f5782074e7ac3041beb7a925ea72217020b05ffafc05f086c6647c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_runtime_state_vector_rebuild_lock_release"
     },
     {
@@ -10340,9 +10346,15 @@
           "line": 39
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.vector_rebuild_lock_try_acquire operation claims the vector rebuild lock. It is a check followed by a separate write, so two callers can both observe the lock free and both claim it: it does not provide mutual exclusion. The catalog records that as atomicity check-then-set and mutually_exclusive false so the gap is stated where a reader will find it, rather than inferred from the word lock."
+      },
       "signature": "int db2_kb_runtime_state_vector_rebuild_lock_try_acquire ( void )",
       "signature_sha256": "5ce6a794439c975fb1e1fc60b45191d647ed3e4e53bcaa55e0b8593fd3eeb55a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_runtime_state_vector_rebuild_lock_try_acquire"
     },
     {
@@ -26178,15 +26190,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c96d1fe07aea9501bf7bd302b80d91d5bfc4877c390ab1acd2e40339b9d0f56e",
+  "fingerprint": "04cedfbb52439d9ac3563db11f7355de02b5d479e5209521b617854730caa55b",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 599,
+    "audit_pending": 597,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 359
+    "reviewed": 361
   }
 }

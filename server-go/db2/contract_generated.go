@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "3a3b123dce718f6e5320c2dafa13e93d38eb96aef7d4d3a9ec9e467f492a81aa"
+const ContractSHA256 = "2f183787a191657bb2ce0796ff14d69829a845eb61b3410c8bd83a5fe38b1b96"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -367,6 +367,13 @@ const OperationMiningSeedJobDefaults uint32 = 3
 const EventRelTypesEnsureSeed = EventOrganization
 const StageRelTypesEnsureSeed = FamilyOrganization
 const OperationRelTypesEnsureSeed uint32 = 1
+const EventVectorRebuildLockTryAcquire = EventCustody
+const StageVectorRebuildLockTryAcquire = FamilyCustody
+const OperationVectorRebuildLockTryAcquire uint32 = 1
+const VectorRebuildLockTryAcquireMax uint32 = 1
+const EventVectorRebuildLockRelease = EventCustody
+const StageVectorRebuildLockRelease = FamilyCustody
+const OperationVectorRebuildLockRelease uint32 = 2
 const EventProposalsArchiveExpired = EventLearning
 const StageProposalsArchiveExpired = FamilyLearning
 const OperationProposalsArchiveExpired uint32 = 4
@@ -2535,6 +2542,99 @@ func EncodeRelTypesEnsureSeedReply() []byte {
 func DecodeRelTypesEnsureSeedReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeVectorRebuildLockTryAcquireRequest emits the empty request envelope.
+// The state key and the lease are policy and never travel.
+func EncodeVectorRebuildLockTryAcquireRequest() []byte {
+	header, err := EncodeRequestHeader(OperationVectorRebuildLockTryAcquire, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeVectorRebuildLockTryAcquireRequest validates the exact custody-family
+// envelope.
+func DecodeVectorRebuildLockTryAcquireRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationVectorRebuildLockTryAcquire ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeVectorRebuildLockTryAcquireReply emits the zero-or-one acquisition
+// flag. A one means this caller wrote the lock row, not that it is the only
+// holder: the backend checks and writes separately, so two callers can both
+// be told they acquired it.
+func EncodeVectorRebuildLockTryAcquireReply(acquired uint32) ([]byte, error) {
+	if acquired > VectorRebuildLockTryAcquireMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationVectorRebuildLockTryAcquire, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], acquired)
+	return reply, nil
+}
+
+// DecodeVectorRebuildLockTryAcquireReply validates the operation and flag.
+func DecodeVectorRebuildLockTryAcquireReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationVectorRebuildLockTryAcquire ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	acquired := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if acquired > VectorRebuildLockTryAcquireMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return acquired, nil
+}
+
+// EncodeVectorRebuildLockReleaseRequest emits the empty request envelope.
+func EncodeVectorRebuildLockReleaseRequest() []byte {
+	header, err := EncodeRequestHeader(OperationVectorRebuildLockRelease, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeVectorRebuildLockReleaseRequest validates the exact custody-family
+// envelope.
+func DecodeVectorRebuildLockReleaseRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationVectorRebuildLockRelease ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeVectorRebuildLockReleaseReply emits a bare acknowledgement. The release
+// does not check who holds the lock and cannot report a failure.
+func EncodeVectorRebuildLockReleaseReply() []byte {
+	header, err := EncodeReplyHeader(OperationVectorRebuildLockRelease, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeVectorRebuildLockReleaseReply validates the acknowledgement envelope.
+func DecodeVectorRebuildLockReleaseReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationVectorRebuildLockRelease ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != EnvelopeHeaderLen {
 		return ErrMalformedEnvelope

@@ -87,6 +87,8 @@ typedef struct
    int (*mining_seed_job_defaults)(void);
    void (*proposals_archive_expired)(void);
    int (*rel_types_ensure_seed)(void);
+   int (*vector_rebuild_lock_try_acquire)(void);
+   void (*vector_rebuild_lock_release)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);

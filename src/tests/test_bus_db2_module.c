@@ -100,6 +100,8 @@ typedef struct
    int (*mining_seed_job_defaults)(void);
    void (*proposals_archive_expired)(void);
    int (*rel_types_ensure_seed)(void);
+   int (*vector_rebuild_lock_try_acquire)(void);
+   void (*vector_rebuild_lock_release)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);
@@ -190,6 +192,8 @@ static int curiosity_rescore_calls;
 static int mining_seed_calls;
 static int proposals_archive_calls;
 static int rel_types_seed_calls;
+static int lock_acquire_calls;
+static int lock_release_calls;
 static int prospective_sweep_calls;
 static int directive_sweep_calls;
 static int mark_revisit_calls;
@@ -1171,6 +1175,26 @@ static int rel_types_ensure_seed(void)
    return 0;
 }
 
+int db2_kb_runtime_state_vector_rebuild_lock_try_acquire(void)
+{
+   return 0;
+}
+
+void db2_kb_runtime_state_vector_rebuild_lock_release(void)
+{
+}
+
+static int vector_rebuild_lock_try_acquire(void)
+{
+   lock_acquire_calls++;
+   return 1;
+}
+
+static void vector_rebuild_lock_release(void)
+{
+   lock_release_calls++;
+}
+
 int db2_prospective_sweep_expired(void)
 {
    return 0;
@@ -1528,6 +1552,8 @@ int main(void)
                               AIMEE_DB2_EVENT_MINING_SEED_JOB_DEFAULTS,
                               AIMEE_DB2_EVENT_PROPOSALS_ARCHIVE_EXPIRED,
                               AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED,
+                              AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE,
+                              AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_RELEASE,
                               AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_MARK_REVISIT_DUE,
@@ -1586,6 +1612,9 @@ int main(void)
        {AIMEE_DB2_EVENT_MINING_SEED_JOB_DEFAULTS, AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS},
        {AIMEE_DB2_EVENT_PROPOSALS_ARCHIVE_EXPIRED, AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED},
        {AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED, AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED},
+       {AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE,
+        AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE},
+       {AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_RELEASE, AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE},
        {AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_MARK_REVISIT_DUE, AIMEE_DB2_STAGE_MARK_REVISIT_DUE},
@@ -1668,6 +1697,8 @@ int main(void)
        .mining_seed_job_defaults = mining_seed_job_defaults,
        .proposals_archive_expired = proposals_archive_expired,
        .rel_types_ensure_seed = rel_types_ensure_seed,
+       .vector_rebuild_lock_try_acquire = vector_rebuild_lock_try_acquire,
+       .vector_rebuild_lock_release = vector_rebuild_lock_release,
        .prospective_sweep_expired = prospective_sweep_expired,
        .directive_sweep_expired = directive_sweep_expired,
        .mark_revisit_due = mark_revisit_due,
@@ -2073,6 +2104,16 @@ int main(void)
    assert(aimee_db2_rel_types_ensure_seed_call(call_client, &client, 7096, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(rel_types_seed_calls == 1);
+
+   /* The custody family's first crossing of the bus, and the first pair
+    * of operations that are meant to be used together. */
+   uint32_t acquired = 99u;
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_call(call_client, &client, 7098, 0, &acquired,
+                                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acquired == 1 && lock_acquire_calls == 1);
+   assert(aimee_db2_vector_rebuild_lock_release_call(call_client, &client, 7099, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(lock_release_calls == 1);
 
    /* The maintenance family's first crossing of the bus: a new event kind
     * and a new stage, not another operation on one already carrying work. */

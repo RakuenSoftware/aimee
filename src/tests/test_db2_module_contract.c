@@ -96,6 +96,9 @@ static int mining_seed_calls;
 static int proposals_archive_calls;
 static int rel_types_seed_value;
 static int rel_types_seed_calls;
+static int lock_acquire_value;
+static int lock_acquire_calls;
+static int lock_release_calls;
 static int prospective_sweep_value;
 static int prospective_sweep_calls;
 static int directive_sweep_value;
@@ -771,6 +774,26 @@ static int rel_types_ensure_seed(void)
 {
    rel_types_seed_calls++;
    return rel_types_seed_value;
+}
+
+int db2_kb_runtime_state_vector_rebuild_lock_try_acquire(void)
+{
+   return 0;
+}
+
+void db2_kb_runtime_state_vector_rebuild_lock_release(void)
+{
+}
+
+static int vector_rebuild_lock_try_acquire(void)
+{
+   lock_acquire_calls++;
+   return lock_acquire_value;
+}
+
+static void vector_rebuild_lock_release(void)
+{
+   lock_release_calls++;
 }
 
 int db2_prospective_sweep_expired(void)
@@ -1583,6 +1606,9 @@ static void reset(void)
    proposals_archive_calls = 0;
    rel_types_seed_value = 0;
    rel_types_seed_calls = 0;
+   lock_acquire_value = 1;
+   lock_acquire_calls = 0;
+   lock_release_calls = 0;
    prospective_sweep_value = 7;
    prospective_sweep_calls = 0;
    directive_sweep_value = 8;
@@ -3149,6 +3175,45 @@ static void test_prospective_sweep_expired_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prospective_sweep_expired_reply_decode(reply, reply_len, &expired) == -1 &&
           expired == 0);
+}
+
+static void test_vector_rebuild_lock_wire(void)
+{
+   uint8_t acquire[AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_REQUEST_LEN] = {0};
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_request_encode(acquire, sizeof(acquire)) == 0);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_request_decode(acquire, sizeof(acquire)) == 0);
+   /* First operation of the custody family, so it shares its bytes with every
+    * other family's first operation. */
+   assert(aimee_db2_rules_decay_request_decode(acquire, sizeof(acquire)) == 0);
+   assert(aimee_db2_rel_types_ensure_seed_request_decode(acquire, sizeof(acquire)) == 0);
+
+   uint8_t release[AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN] = {0};
+   assert(aimee_db2_vector_rebuild_lock_release_request_encode(release, sizeof(release)) == 0);
+   assert(aimee_db2_vector_rebuild_lock_release_request_decode(release, sizeof(release)) == 0);
+   /* Acquire and release are operations 1 and 2 of the same family, so each
+    * must refuse the other: a release must never be read as an acquire. */
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_request_decode(release, sizeof(release)) == -1);
+   assert(aimee_db2_vector_rebuild_lock_release_request_decode(acquire, sizeof(acquire)) == -1);
+
+   uint8_t reply[AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, flag = 99;
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_encode(1, reply, sizeof(reply),
+                                                                 &reply_len) == 0);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(reply, reply_len, &flag) == 0 &&
+          flag == 1);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_encode(0, reply, sizeof(reply),
+                                                                 &reply_len) == 0);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(reply, reply_len, &flag) == 0 &&
+          flag == 0);
+   /* The flag is zero or one and nothing else: a two here would be a decoder
+    * inventing a third answer to a yes-or-no question. */
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_encode(2, reply, sizeof(reply),
+                                                                 &reply_len) == -1);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_encode(1, reply, sizeof(reply),
+                                                                 &reply_len) == 0);
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 2u);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(reply, reply_len, &flag) == -1 &&
+          flag == 0);
 }
 
 static void test_rel_types_ensure_seed_wire(void)
@@ -5925,6 +5990,77 @@ static void test_prospective_sweep_expired_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_vector_rebuild_lock_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {
+       .vector_rebuild_lock_try_acquire = vector_rebuild_lock_try_acquire,
+       .vector_rebuild_lock_release = vector_rebuild_lock_release};
+   uint8_t request[AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN];
+   uint32_t response_len = 99, acquired = 99;
+   aimee_module_invocation_t invocation = {.stage_id =
+                                               AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE};
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(lock_acquire_calls == 1);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(response, response_len,
+                                                                 &acquired) == 0 &&
+          acquired == 1);
+
+   /* A zero is the lock already held by someone within the lease window. */
+   lock_acquire_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(response, response_len,
+                                                                 &acquired) == 0 &&
+          acquired == 0);
+
+   /* The handler returns whatever the backend says, including two consecutive
+    * ones. That is all this stub can show: it demonstrates the pass-through,
+    * not that the real backend races. The race is real and lives in the
+    * backend -- a read and a separate write, so two callers that both read
+    * before either writes are both told they hold the lock -- but showing it
+    * needs concurrency neither this test nor the replay has. The catalog
+    * records it as mutually_exclusive false, which is where the claim belongs
+    * when no test can carry it. */
+   lock_acquire_value = 1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(response, response_len,
+                                                                 &acquired) == 0 &&
+          acquired == 1);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_reply_decode(response, response_len,
+                                                                 &acquired) == 0 &&
+          acquired == 1);
+
+   /* The release takes no holder and reports no failure, so it is the same
+    * acknowledgement whether or not this caller ever held the lock. */
+   uint8_t release_request[AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN];
+   uint8_t release_response[AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN];
+   aimee_module_invocation_t release = {.stage_id = AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE};
+   assert(aimee_db2_vector_rebuild_lock_release_request_encode(release_request,
+                                                               sizeof(release_request)) == 0);
+   assert(invoke(&backend, &release, release_request, sizeof(release_request), release_response,
+                 sizeof(release_response), &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(lock_release_calls == 1);
+   assert(aimee_db2_vector_rebuild_lock_release_reply_decode(release_response, response_len) == 0);
+   assert(invoke(&backend, &release, release_request, sizeof(release_request), release_response,
+                 sizeof(release_response), &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(lock_release_calls == 2);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&absent, &release, release_request, sizeof(release_request), release_response,
+                 sizeof(release_response), &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_rel_types_ensure_seed_handler(void)
 {
    reset();
@@ -8108,6 +8244,7 @@ int main(void)
    test_mining_seed_job_defaults_wire();
    test_proposals_archive_expired_wire();
    test_rel_types_ensure_seed_wire();
+   test_vector_rebuild_lock_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
    test_mark_revisit_due_wire();
@@ -8181,6 +8318,7 @@ int main(void)
    test_mining_seed_job_defaults_handler();
    test_proposals_archive_expired_handler();
    test_rel_types_ensure_seed_handler();
+   test_vector_rebuild_lock_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
    test_mark_revisit_due_handler();
