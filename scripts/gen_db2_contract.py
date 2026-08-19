@@ -238,7 +238,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "set_source_session",
                                                                 "negation_tokens_update",
                                                                 "entity_edge_prune_orphans",
-                                                                "entity_edge_normalize_weights") else
+                                                                "entity_edge_normalize_weights",
+                                                                "purge_hidden_pollution") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1991,9 +1992,41 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("project-count-reply",
                      "reply must contain one bounded u32 project count")
+        elif key == ("index", 4) and name == "purge_hidden_pollution" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # A deletion sweep whose reach is entirely policy. The hidden-path
+            # rule and the .gitmodules exemption both stay here because the
+            # ingest path admits submodule declarations: a caller able to send
+            # either one could delete files the indexer is supposed to keep.
+            if operation["c_symbols"] != ["db2_code_index_purge_hidden_pollution"]:
+                fail("operation-c-symbols",
+                     "purge_hidden_pollution C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results",
+                     "purge_hidden_pollution results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "purge_hidden_pollution.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"lifecycle_state": "current",
+                                          "generation": "current",
+                                          "manifest_exemption": ".gitmodules"}):
+                fail("purge-hidden-pollution-request",
+                     "request must carry no payload and fix the sweep's reach")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "purge_hidden_pollution.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "purge_hidden_pollution.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "purged_count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("purge-hidden-pollution-reply",
+                     "reply must contain one bounded u32 purge count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 55 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 56 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2009,9 +2042,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "workspace_tag_insert", "set_cognified_kind", "set_source_session",
             "negation_tokens_update", "get_content", "get_source_session",
             "pick_first_temporal_ref", "count_and_max_updated",
-            "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count"]:
+            "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
+            "purge_hidden_pollution"]:
         fail("unsupported-operation",
-             "the partial generator requires the fifty-five supported operations exactly once")
+             "the partial generator requires the fifty-six supported operations exactly once")
     return catalog
 
 
@@ -2190,6 +2224,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     entity_edge_prune_orphans = catalog["operations"][52]
     entity_edge_normalize_weights = catalog["operations"][53]
     project_count = catalog["operations"][54]
+    purge_hidden_pollution = catalog["operations"][55]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2541,6 +2576,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     project_count_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(project_count["id"]), 0, _put_u32(4),
+    )
+    purge_hidden_pollution_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(purge_hidden_pollution["id"]), 0, b"",
+    )
+    purge_hidden_pollution_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(purge_hidden_pollution["id"]), 0, _put_u32(5),
+    )
+    purge_hidden_pollution_clean = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(purge_hidden_pollution["id"]), 0, _put_u32(0),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -5188,6 +5232,42 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (project_count_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": purge_hidden_pollution["family"],
+            "id": purge_hidden_pollution["id"],
+            "name": purge_hidden_pollution["name"],
+            "request": {
+                "positive": purge_hidden_pollution_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(purge_hidden_pollution_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(purge_hidden_pollution_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": purge_hidden_pollution_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (purge_hidden_pollution_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "purged_count": 5, "hex": purge_hidden_pollution_ok.hex()},
+                    {"result": 0, "purged_count": 0,
+                     "hex": purge_hidden_pollution_clean.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(purge_hidden_pollution_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(purge_hidden_pollution_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(purge_hidden_pollution["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (purge_hidden_pollution_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": purge_hidden_pollution_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (purge_hidden_pollution_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -5255,6 +5335,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     entity_edge_prune_orphans = catalog["operations"][52]
     entity_edge_normalize_weights = catalog["operations"][53]
     project_count = catalog["operations"][54]
+    purge_hidden_pollution = catalog["operations"][55]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -6035,6 +6116,18 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{project_count['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_PROJECT_COUNT_MAX",
          f"{project_count['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION", "AIMEE_DB2_EVENT_INDEX"),
+        ("AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION", "AIMEE_DB2_FAMILY_INDEX"),
+        ("AIMEE_DB2_OPERATION_PURGE_HIDDEN_POLLUTION",
+         f"{purge_hidden_pollution['id']}u"),
+        ("AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN",
+         f"{purge_hidden_pollution['request']['encoded_size']}u"),
+        ("AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN",
+         f"{purge_hidden_pollution['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_PURGE_HIDDEN_POLLUTION_ERROR_LEN",
+         f"{purge_hidden_pollution['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_PURGE_HIDDEN_POLLUTION_MAX",
+         f"{purge_hidden_pollution['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -7974,6 +8067,61 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_purge_hidden_pollution_request_encode(uint8_t *output,
+                                                                  size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PURGE_HIDDEN_POLLUTION, 0u, 0u,
+                                          output, capacity);
+}}
+
+static inline int aimee_db2_purge_hidden_pollution_request_decode(const uint8_t *input,
+                                                                  size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PURGE_HIDDEN_POLLUTION &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_purge_hidden_pollution_reply_encode(uint32_t purged_count,
+                                                                uint8_t *output, size_t capacity,
+                                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || purged_count > AIMEE_DB2_PURGE_HIDDEN_POLLUTION_MAX ||
+       capacity < AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PURGE_HIDDEN_POLLUTION,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, purged_count);
+   *output_len = AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_purge_hidden_pollution_reply_decode(const uint8_t *input,
+                                                                size_t input_len,
+                                                                uint32_t *purged_count)
+{{
+   if (purged_count)
+      *purged_count = 0u;
+   if (!purged_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_PURGE_HIDDEN_POLLUTION ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_PURGE_HIDDEN_POLLUTION_MAX)
+      return -1;
+   *purged_count = decoded;
    return 0;
 }}
 
@@ -10743,6 +10891,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *project_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_purge_hidden_pollution_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *purged_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -12064,6 +12216,31 @@ aimee_module_call_result_t aimee_db2_project_count_call(aimee_db2_call_fn call, 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_purge_hidden_pollution_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                      uint64_t deadline_ns, uint32_t *purged_count,
+                                      aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !purged_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *purged_count = 0u;
+   uint8_t request[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_purge_hidden_pollution_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION,
+            AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_purge_hidden_pollution_reply_decode(response, response_len, purged_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -12358,6 +12535,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     entity_edge_prune_orphans = catalog["operations"][52]
     entity_edge_normalize_weights = catalog["operations"][53]
     project_count = catalog["operations"][54]
+    purge_hidden_pollution = catalog["operations"][55]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -12692,6 +12870,10 @@ const EventProjectCount = EventIndex
 const StageProjectCount = FamilyIndex
 const OperationProjectCount uint32 = {project_count['id']}
 const ProjectCountMax uint32 = {project_count['reply']['field']['maximum']}
+const EventPurgeHiddenPollution = EventIndex
+const StagePurgeHiddenPollution = FamilyIndex
+const OperationPurgeHiddenPollution uint32 = {purge_hidden_pollution['id']}
+const PurgeHiddenPollutionMax uint32 = {purge_hidden_pollution['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -14393,6 +14575,54 @@ func DecodeProjectCountReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return projectCount, nil
+}}
+
+// EncodePurgeHiddenPollutionRequest emits the empty request envelope. The
+// sweep's reach is policy and never travels.
+func EncodePurgeHiddenPollutionRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationPurgeHiddenPollution, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodePurgeHiddenPollutionRequest validates the exact index-family envelope.
+func DecodePurgeHiddenPollutionRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPurgeHiddenPollution ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodePurgeHiddenPollutionReply emits one bounded u32 purge count.
+func EncodePurgeHiddenPollutionReply(purgedCount uint32) ([]byte, error) {{
+	if purgedCount > PurgeHiddenPollutionMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationPurgeHiddenPollution, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], purgedCount)
+	return reply, nil
+}}
+
+// DecodePurgeHiddenPollutionReply validates the operation and bounded count.
+func DecodePurgeHiddenPollutionReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPurgeHiddenPollution ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	purgedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if purgedCount > PurgeHiddenPollutionMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return purgedCount, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

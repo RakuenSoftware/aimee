@@ -4381,9 +4381,15 @@
           "line": 110
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.purge_hidden_pollution operation replaces the startup hygiene sweep that removes inadmissible hidden-path files from the current generation. Which paths are inadmissible, and the .gitmodules exemption that keeps legitimately indexed submodule declarations, are fixed policy: a caller cannot widen the deletion to reach files the ingest path admits."
+      },
       "signature": "int db2_code_index_purge_hidden_pollution ( void )",
       "signature_sha256": "49344b06a20e56406e73eeda8561a4281f8b4ace1715968b197a05f724508bc8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_purge_hidden_pollution"
     },
     {
@@ -26064,15 +26070,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "91297e5f9496c89d47c77cbb70ef0452aacc7e3f73810952f153ee933d3609d7",
+  "fingerprint": "e06808a20a9988677ac7456a07ac350f65f877ed36034a71910081dec12937a0",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 618,
+    "audit_pending": 617,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 340
+    "reviewed": 341
   }
 }

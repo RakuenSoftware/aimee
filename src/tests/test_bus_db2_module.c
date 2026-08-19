@@ -90,6 +90,7 @@ typedef struct
    int (*entity_edge_prune_orphans)(void);
    int (*entity_edge_normalize_weights)(void);
    int (*project_count)(void);
+   int (*purge_hidden_pollution)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -162,6 +163,7 @@ static int corpus_stat_calls;
 static int edge_prune_calls;
 static int edge_normalize_calls;
 static int project_count_calls;
+static int purge_pollution_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -1027,6 +1029,17 @@ static int project_count(void)
    return 4;
 }
 
+int db2_code_index_purge_hidden_pollution(void)
+{
+   return 0;
+}
+
+static int purge_hidden_pollution(void)
+{
+   purge_pollution_calls++;
+   return 5;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1276,10 +1289,12 @@ int main(void)
    /* Three families now: lifecycle, memory, and index. Each is a distinct
     * event kind, and the module must serve a kind before any operation in
     * that family can be routed to it. */
-   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT,
+   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH,
+                              AIMEE_DB2_EVENT_LEVEL3_COUNT,
                               AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
                               AIMEE_DB2_EVENT_ENTITY_EDGE_NORMALIZE_WEIGHTS,
-                              AIMEE_DB2_EVENT_PROJECT_COUNT};
+                              AIMEE_DB2_EVENT_PROJECT_COUNT,
+                              AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -1318,6 +1333,7 @@ int main(void)
        {AIMEE_DB2_EVENT_ENTITY_EDGE_NORMALIZE_WEIGHTS,
         AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS},
        {AIMEE_DB2_EVENT_PROJECT_COUNT, AIMEE_DB2_STAGE_PROJECT_COUNT},
+       {AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION, AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION},
    };
    static const aimee_db2_module_backend_t backend = {
        .is_initialized = is_initialized,
@@ -1381,6 +1397,7 @@ int main(void)
        .entity_edge_prune_orphans = entity_edge_prune_orphans,
        .entity_edge_normalize_weights = entity_edge_normalize_weights,
        .project_count = project_count,
+       .purge_hidden_pollution = purge_hidden_pollution,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1725,6 +1742,11 @@ int main(void)
    assert(aimee_db2_project_count_call(call_client, &client, 7079, 0, &projects, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(projects == 4 && project_count_calls == 1);
+
+   uint32_t purged = 99u;
+   assert(aimee_db2_purge_hidden_pollution_call(call_client, &client, 7080, 0, &purged, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(purged == 5 && purge_pollution_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -305,6 +305,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_edge_prune_orphans = db2_entity_edge_prune_orphans,
        .entity_edge_normalize_weights = db2_entity_edge_normalize_weights,
        .project_count = db2_code_index_project_count,
+       .purge_hidden_pollution = db2_code_index_purge_hidden_pollution,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -334,7 +335,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_LEVEL3_COUNT &&
         invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS &&
         invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS &&
-        invocation->stage_id != AIMEE_DB2_STAGE_PROJECT_COUNT))
+        invocation->stage_id != AIMEE_DB2_STAGE_PROJECT_COUNT &&
+        invocation->stage_id != AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1254,7 +1256,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS ||
        invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS ||
-       invocation->stage_id == AIMEE_DB2_STAGE_PROJECT_COUNT)
+       invocation->stage_id == AIMEE_DB2_STAGE_PROJECT_COUNT ||
+       invocation->stage_id == AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION)
    {
       if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
       {
@@ -1309,6 +1312,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_project_count_reply_encode((uint32_t)projects, response_body,
                                                   response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_purge_hidden_pollution_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->purge_hidden_pollution)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Unlike the counts above, this backend does separate failure from an
+          * empty result: no connection or no statement is -1, a clean index is
+          * zero. The negative arrives as internal rather than as a purge that
+          * removed nothing. */
+         int purged = backend->purge_hidden_pollution();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (purged < 0 || (uint32_t)purged > AIMEE_DB2_PURGE_HIDDEN_POLLUTION_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_purge_hidden_pollution_reply_encode((uint32_t)purged, response_body,
+                                                           response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

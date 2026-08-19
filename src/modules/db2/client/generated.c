@@ -1269,6 +1269,31 @@ aimee_module_call_result_t aimee_db2_project_count_call(aimee_db2_call_fn call, 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_purge_hidden_pollution_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                      uint64_t deadline_ns, uint32_t *purged_count,
+                                      aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !purged_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *purged_count = 0u;
+   uint8_t request[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_purge_hidden_pollution_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION,
+            AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_purge_hidden_pollution_reply_decode(response, response_len, purged_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,

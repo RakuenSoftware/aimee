@@ -77,6 +77,8 @@ static int edge_normalize_value;
 static int edge_normalize_calls;
 static int project_count_value;
 static int project_count_calls;
+static int purge_pollution_value;
+static int purge_pollution_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -628,6 +630,17 @@ static int project_count(void)
 {
    project_count_calls++;
    return project_count_value;
+}
+
+int db2_code_index_purge_hidden_pollution(void)
+{
+   return 0;
+}
+
+static int purge_hidden_pollution(void)
+{
+   purge_pollution_calls++;
+   return purge_pollution_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1328,6 +1341,8 @@ static void reset(void)
    edge_normalize_calls = 0;
    project_count_value = 4;
    project_count_calls = 0;
+   purge_pollution_value = 5;
+   purge_pollution_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2622,6 +2637,37 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_purge_hidden_pollution_wire(void)
+{
+   uint8_t request[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN] = {0};
+   assert(aimee_db2_purge_hidden_pollution_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_purge_hidden_pollution_request_decode(request, sizeof(request)) == 0);
+   /* Fourth index operation: every earlier one in the family must refuse it,
+    * because the operation number is all that tells them apart. */
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_project_count_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_purge_hidden_pollution_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, purged = 99;
+   assert(aimee_db2_purge_hidden_pollution_reply_encode(5, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_purge_hidden_pollution_reply_decode(reply, reply_len, &purged) == 0 &&
+          purged == 5);
+   assert(aimee_db2_purge_hidden_pollution_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_purge_hidden_pollution_reply_decode(reply, reply_len, &purged) == 0 &&
+          purged == 0);
+   assert(aimee_db2_purge_hidden_pollution_reply_encode(AIMEE_DB2_PURGE_HIDDEN_POLLUTION_MAX + 1u,
+                                                        reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_purge_hidden_pollution_reply_encode(5, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_purge_hidden_pollution_reply_encode(5, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_purge_hidden_pollution_reply_decode(reply, reply_len, &purged) == -1 &&
+          purged == 0);
 }
 
 static void test_project_count_wire(void)
@@ -4750,6 +4796,44 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_purge_hidden_pollution_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.purge_hidden_pollution = purge_hidden_pollution};
+   uint8_t request[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN];
+   uint32_t response_len = 99, purged = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION};
+   assert(aimee_db2_purge_hidden_pollution_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(purge_pollution_calls == 1);
+   assert(aimee_db2_purge_hidden_pollution_reply_decode(response, response_len, &purged) == 0 &&
+          purged == 5);
+
+   /* An index with nothing inadmissible left in it. Zero is the sweep having
+    * run and found nothing, and the replay depends on that: a second call
+    * deletes nothing more, which is what safe idempotency claims. */
+   purge_pollution_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_purge_hidden_pollution_reply_decode(response, response_len, &purged) == 0 &&
+          purged == 0);
+
+   /* No connection and no statement are both -1 here, and the boundary keeps
+    * them as a failure rather than reporting a clean index. */
+   purge_pollution_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   purge_pollution_value = 5;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_project_count_handler(void)
 {
    reset();
@@ -6520,6 +6604,7 @@ int main(void)
    test_entity_edge_prune_orphans_wire();
    test_entity_edge_normalize_weights_wire();
    test_project_count_wire();
+   test_purge_hidden_pollution_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6575,6 +6660,7 @@ int main(void)
    test_entity_edge_prune_orphans_handler();
    test_entity_edge_normalize_weights_handler();
    test_project_count_handler();
+   test_purge_hidden_pollution_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

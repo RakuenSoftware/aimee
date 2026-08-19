@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "08cff11ba76297d5a1caf300bbcfb15c31bb071c1e84378426a088ce2795308d"
+const ContractSHA256 = "b4e72a504c2cd431a9c1d8e318418ffb9bce02faa4f5fe540044abdc3d1f4c2b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -333,6 +333,10 @@ const EventProjectCount = EventIndex
 const StageProjectCount = FamilyIndex
 const OperationProjectCount uint32 = 3
 const ProjectCountMax uint32 = 2147483647
+const EventPurgeHiddenPollution = EventIndex
+const StagePurgeHiddenPollution = FamilyIndex
+const OperationPurgeHiddenPollution uint32 = 4
+const PurgeHiddenPollutionMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2036,6 +2040,54 @@ func DecodeProjectCountReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return projectCount, nil
+}
+
+// EncodePurgeHiddenPollutionRequest emits the empty request envelope. The
+// sweep's reach is policy and never travels.
+func EncodePurgeHiddenPollutionRequest() []byte {
+	header, err := EncodeRequestHeader(OperationPurgeHiddenPollution, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodePurgeHiddenPollutionRequest validates the exact index-family envelope.
+func DecodePurgeHiddenPollutionRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPurgeHiddenPollution ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodePurgeHiddenPollutionReply emits one bounded u32 purge count.
+func EncodePurgeHiddenPollutionReply(purgedCount uint32) ([]byte, error) {
+	if purgedCount > PurgeHiddenPollutionMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationPurgeHiddenPollution, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], purgedCount)
+	return reply, nil
+}
+
+// DecodePurgeHiddenPollutionReply validates the operation and bounded count.
+func DecodePurgeHiddenPollutionReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPurgeHiddenPollution ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	purgedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if purgedCount > PurgeHiddenPollutionMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return purgedCount, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

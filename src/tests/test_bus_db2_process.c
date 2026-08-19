@@ -562,6 +562,18 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(projects == 0);
 
+   /* A fresh schema has no inadmissible file to remove, and replaying the sweep
+    * must return the same zero: that is what the catalog's `safe` idempotency
+    * claims, and a second call is the only thing that demonstrates it. */
+   uint32_t purged = 99;
+   assert(aimee_db2_purge_hidden_pollution_call(call_client, &client, 9092, 0, &purged, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(purged == 0);
+   purged = 99;
+   assert(aimee_db2_purge_hidden_pollution_call(call_client, &client, 9093, 0, &purged, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(purged == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
