@@ -1884,6 +1884,14 @@
       "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
     },
     {
+      "symbol": "db2_memory_fact_history",
+      "signature_sha256": "ca5164ffeb8bad8e86dfe6e7928579c7902068cdf1344e8bda3c6fa46754d324",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.fact_history operation replaces the version walk. The caller sends the normalised key; forming the versioned keys from it is the handler's, so the naming convention does not become a caller's business. It is unscoped, unlike every other search here -- a fact's history is its history whatever the session. Its statement has no LIMIT: the database returns every version and the limit only decides how many are read back, which is a cost the wire cannot show and so is recorded in the policy."
+    },
+    {
       "symbol": "db2_memory_find_facts_like",
       "signature_sha256": "e8c8fcd777337efcf964e3bb39a9a55b1e9300eb3abf4f9c4a8f26dfc46dfd77",
       "disposition": "wire-operation",
@@ -2322,6 +2330,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
+    },
+    {
+      "symbol": "db2_memory_search_facts_patterns_by_keyword",
+      "signature_sha256": "a9f12fdc5e57d883d3cf89e6da7971eba292f7354aa5bbd7e1c03ab8c1dbd5e3",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.search_facts_patterns_by_keyword operation replaces the keyword search. Which tiers and kinds count as a fact or a pattern is DB2 policy and stays behind the handler. Its statement did not select the identifier, so every row came back with id zero: a caller serialising the row published a zero identifier and resolved no headline. The identifier is selected now, which is also what makes the operation expressible as an identifier list. Scope and reply shape follow the other scoped searches."
     },
     {
       "symbol": "db2_memory_session_l0_list",

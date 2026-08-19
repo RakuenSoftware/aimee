@@ -72,6 +72,10 @@ typedef struct
                                            const char *project, int64_t *out, int max);
    int (*negation_fts_search)(const char *term, int limit, int scope_active, int include_all,
                               const char *workspace, const char *project, int64_t *out, int max);
+   int (*search_facts_patterns_by_keyword)(const char *term, int limit, int scope_active,
+                                           int include_all, const char *workspace,
+                                           const char *project, int64_t *out, int max);
+   int (*fact_history)(const char *normalized_key, int limit, int64_t *out, int max);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -281,7 +285,9 @@ static int effectiveness_stats_calls;
 static int list_l2_memory_ids_calls;
 static int top_l2_facts_calls;
 static int list_session_scope_priority_calls;
-static int term_probe_calls[9];
+static int term_probe_calls[10];
+static int history_calls;
+static char history_key_seen[64];
 static int walk_calls[2];
 static int row_calls[2];
 static int64_t row_identifier_seen;
@@ -651,6 +657,23 @@ static int session_neighbors_after(const char *session_id, int64_t anchor_id, in
    return walk_impl(1, session_id, anchor_id, limit, out, max);
 }
 
+static int search_facts_patterns_by_keyword(const char *term, int limit, int scope_active,
+                                            int include_all, const char *workspace,
+                                            const char *project, int64_t *out, int max)
+{
+   return term_probe_impl(9, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int fact_history(const char *normalized_key, int limit, int64_t *out, int max)
+{
+   history_calls++;
+   snprintf(history_key_seen, sizeof(history_key_seen), "%s", normalized_key ? normalized_key : "");
+   int listed = 0;
+   for (; listed < 2 && listed < max && listed < limit; listed++)
+      out[listed] = 5000 + listed;
+   return listed;
+}
+
 static int collect_alias_matches(const char *term, int limit, int scope_active, int include_all,
                                  const char *workspace, const char *project, int64_t *out, int max)
 {
@@ -886,6 +909,24 @@ int db2_memory_get_by_unit_id(int64_t unit_id, void *out)
    (void)unit_id;
    (void)out;
    return -1;
+}
+
+/* Three arguments: the keyword search and the history both bind the caller's
+ * buffer size rather than taking a separate limit. */
+int db2_memory_search_facts_patterns_by_keyword(const char *keyword, void *out, int max)
+{
+   (void)keyword;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_fact_history(const char *normalized_key, void *out, int max)
+{
+   (void)normalized_key;
+   (void)out;
+   (void)max;
+   return 0;
 }
 
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
@@ -2161,6 +2202,8 @@ int main(void)
        .find_facts_like = find_facts_like,
        .list_session_scope_priority_like = list_session_scope_priority_like,
        .negation_fts_search = negation_fts_search,
+       .search_facts_patterns_by_keyword = search_facts_patterns_by_keyword,
+       .fact_history = fact_history,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -2533,6 +2576,29 @@ int main(void)
    assert(aimee_db2_row_get_call(call_client, &client, 7103, 0, 0u, &row_result, &fetched, NULL,
                                  NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
    assert(row_calls[0] == 2);
+
+   probe_count = 99;
+   assert(aimee_db2_search_facts_patterns_by_keyword_call(
+              call_client, &client, 7110, 0, "needle", 5u, 1u, "probe-workspace", "probe-project",
+              probe_ids, AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_MAX, &probe_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 1000 && probe_ids[1] == 1001 &&
+          term_probe_calls[9] == 1 && strcmp(term_probe_term_seen, "needle") == 0);
+
+   /* The history is the one search that carries no scope. */
+   uint64_t history_ids[AIMEE_DB2_FACT_HISTORY_MAX];
+   uint32_t history_count = 99;
+   assert(aimee_db2_fact_history_call(call_client, &client, 7111, 0, "fact:deploy-target", 6u,
+                                      history_ids, AIMEE_DB2_FACT_HISTORY_MAX, &history_count, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+   assert(history_count == 2 && history_ids[0] == 5000 && history_ids[1] == 5001 &&
+          history_calls == 1 && strcmp(history_key_seen, "fact:deploy-target") == 0);
+
+   /* An empty key would match every unversioned row, so the encoder refuses it. */
+   assert(aimee_db2_fact_history_call(call_client, &client, 7112, 0, "", 6u, history_ids,
+                                      AIMEE_DB2_FACT_HISTORY_MAX, &history_count, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(history_calls == 1);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

@@ -270,6 +270,42 @@ static int production_row_get_by_unit_id(int64_t unit_id, aimee_db2_memory_row_t
    return production_row_read(db2_memory_get_by_unit_id, unit_id, row);
 }
 
+/* The keyword search takes the caller's buffer size as its own LIMIT, the way
+ * list_session_scope_priority_like does. */
+static int search_facts_patterns_by_keyword_read(const char *keyword, int limit, memory_t *out,
+                                                 int max)
+{
+   (void)limit;
+   return db2_memory_search_facts_patterns_by_keyword(keyword, out, max);
+}
+
+static int production_search_facts_patterns_by_keyword(const char *term, int limit,
+                                                       int scope_active, int include_all,
+                                                       const char *workspace, const char *project,
+                                                       int64_t *out, int max)
+{
+   return production_scoped_term_ids(search_facts_patterns_by_keyword_read, term, limit,
+                                     scope_active, include_all, workspace, project, out, max);
+}
+
+/* The history takes no limit and no scope; the caller's buffer size is the only
+ * bound, and the statement itself has none. */
+static int production_fact_history(const char *normalized_key, int limit, int64_t *out, int max)
+{
+   if (!normalized_key || !out || max <= 0 || limit <= 0)
+      return -1;
+   memory_t *rows = calloc((size_t)max, sizeof(*rows));
+   if (!rows)
+      return -1;
+   int listed = db2_memory_fact_history(normalized_key, rows, max);
+   if (listed > max)
+      listed = max;
+   for (int index = 0; index < listed; index++)
+      out[index] = rows[index].id;
+   free(rows);
+   return listed;
+}
+
 static int production_collect_alias_matches(const char *term, int limit, int scope_active,
                                             int include_all, const char *workspace,
                                             const char *project, int64_t *out, int max)
@@ -555,6 +591,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .find_facts_like = production_find_facts_like,
        .list_session_scope_priority_like = production_list_session_scope_priority_like,
        .negation_fts_search = production_negation_fts_search,
+       .search_facts_patterns_by_keyword = production_search_facts_patterns_by_keyword,
+       .fact_history = production_fact_history,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -1090,6 +1128,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             read = backend ? backend->negation_fts_search : NULL;
             encode = aimee_db2_negation_fts_search_reply_encode;
          }
+         if (!encode && aimee_db2_search_facts_patterns_by_keyword_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->search_facts_patterns_by_keyword : NULL;
+            encode = aimee_db2_search_facts_patterns_by_keyword_reply_encode;
+         }
          if (encode)
          {
             if (response_capacity < AIMEE_DB2_COLLECT_ALIAS_MATCHES_RESPONSE_MAX_LEN)
@@ -1197,6 +1242,36 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (encode(found == 0 ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND,
                        found == 0 ? &row : NULL, response_body, response_capacity,
                        response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t history_limit = 0u;
+         char history_key[AIMEE_DB2_FACT_HISTORY_KEY_MAX + 1];
+         if (aimee_db2_fact_history_request_decode(request_body, request_len, history_key,
+                                                   sizeof(history_key), &history_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_FACT_HISTORY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->fact_history)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int64_t rows[AIMEE_DB2_FACT_HISTORY_MAX];
+            int listed =
+                backend->fact_history(history_key, (int)history_limit, rows, (int)history_limit);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (listed < 0 || listed > (int)history_limit)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint64_t memory_ids[AIMEE_DB2_FACT_HISTORY_MAX];
+            for (int index = 0; index < listed; index++)
+            {
+               if (rows[index] < (int64_t)AIMEE_DB2_FACT_HISTORY_ID_MIN)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               memory_ids[index] = (uint64_t)rows[index];
+            }
+            if (aimee_db2_fact_history_reply_encode(memory_ids, (uint32_t)listed, response_body,
+                                                    response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

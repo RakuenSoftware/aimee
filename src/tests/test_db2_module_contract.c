@@ -1419,6 +1419,24 @@ int db2_memory_get_by_unit_id(int64_t unit_id, void *out)
    return -1;
 }
 
+/* Three arguments: the keyword search and the history both bind the caller's
+ * buffer size rather than taking a separate limit. */
+int db2_memory_search_facts_patterns_by_keyword(const char *keyword, void *out, int max)
+{
+   (void)keyword;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_fact_history(const char *normalized_key, void *out, int max)
+{
+   (void)normalized_key;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
 {
    (void)term;

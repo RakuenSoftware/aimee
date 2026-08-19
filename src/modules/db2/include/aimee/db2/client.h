@@ -315,6 +315,17 @@ extern "C"
        uint64_t unit_id, uint32_t *domain_result, aimee_db2_memory_row_t *row,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_search_facts_patterns_by_keyword_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *term, uint32_t limit, uint32_t scope_flags, const char *workspace,
+       const char *project, uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_fact_history_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *normalized_key, uint32_t limit, uint64_t *memory_ids, uint32_t capacity,
+       uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);

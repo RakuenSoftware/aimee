@@ -58,6 +58,11 @@ typedef struct
                                            const char *project, int64_t *out, int max);
    int (*negation_fts_search)(const char *term, int limit, int scope_active, int include_all,
                               const char *workspace, const char *project, int64_t *out, int max);
+   int (*search_facts_patterns_by_keyword)(const char *term, int limit, int scope_active,
+                                           int include_all, const char *workspace,
+                                           const char *project, int64_t *out, int max);
+   /* Unscoped: a fact's history is its history whatever the session. */
+   int (*fact_history)(const char *normalized_key, int limit, int64_t *out, int max);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);

@@ -1388,7 +1388,11 @@ int db2_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *o
       return 0;
 
    static const char *sql =
-       "SELECT m.key, m.content FROM memories m"
+       /* The identifier is selected because the row carries one: without it every
+        * row came back with id zero, so a caller serialising the row published
+        * "id": 0 and any lookup keyed on the identifier -- the headline summary,
+        * for one -- silently found nothing. */
+       "SELECT m.id, m.key, m.content FROM memories m"
        " WHERE m.tier IN ('L2', 'L3', 'L5')"
        "   AND m.kind IN ('fact', 'pattern')"
        "   AND (LOWER(m.content) LIKE '%' || LOWER(?1) || '%'"
@@ -1408,8 +1412,9 @@ int db2_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *o
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       memset(&out[n], 0, sizeof(out[n]));
-      const char *k = aimee_pg_column_text(st, 0);
-      const char *c = aimee_pg_column_text(st, 1);
+      out[n].id = aimee_pg_column_int64(st, 0);
+      const char *k = aimee_pg_column_text(st, 1);
+      const char *c = aimee_pg_column_text(st, 2);
       snprintf(out[n].key, sizeof(out[n].key), "%s", k ? k : "");
       snprintf(out[n].content, sizeof(out[n].content), "%s", c ? c : "");
       n++;

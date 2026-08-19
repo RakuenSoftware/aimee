@@ -1994,6 +1994,74 @@
       }
     },
     {
+      "family": "memory",
+      "id": 58,
+      "name": "search_facts_patterns_by_keyword",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Facts and patterns are canonical DB2 rows and the tiers and kinds that qualify are DB2 policy, so the selection stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_search_facts_patterns_by_keyword"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the content or the key anywhere within them, case-insensitively, among the fact and pattern kinds in tiers L2, L3 and L5",
+                   "ranking": "session-scope rank, then confidence, then use_count"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 59,
+      "name": "fact_history",
+      "wire_format": "db2-envelope-string-u32-u64-list-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "A fact's versions are canonical DB2 rows keyed by a naming convention DB2 owns, so gathering them stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_fact_history"],
+      "request": {
+        "encoded_size_min": 33,
+        "encoded_size_max": 543,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the key exactly, and every key the handler forms by appending the version suffix to it",
+                   "ranking": "creation stamp, newest first",
+                   "unbounded_statement": "the statement has no LIMIT, so the database returns every version and the limit only decides how many are read back"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "normalized_key", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

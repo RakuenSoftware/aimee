@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "dbfeac9edf854aa88dea5969c741fccf0614b660bea64e6c1cfcdf8defa5e2ef"
+const ContractSHA256 = "a0dee250f5f1ae85ad2dbb2cfb016e39af25d64123a93ccd7d6b8855e2789bf8"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -3859,6 +3859,229 @@ func DecodeRowGetByUnitIDReply(reply []byte) (uint32, *MemoryRow, error) {
 		return 0, nil, err
 	}
 	return header.Result, &row, nil
+}
+
+const EventSearchFactsPatternsByKeyword = EventMemory
+const StageSearchFactsPatternsByKeyword = FamilyMemory
+const OperationSearchFactsPatternsByKeyword uint32 = 58
+const SearchFactsPatternsByKeywordLimitMin uint32 = 1
+const SearchFactsPatternsByKeywordLimitMax uint32 = 64
+const SearchFactsPatternsByKeywordScopeFlagsMax uint32 = 3
+const SearchFactsPatternsByKeywordTermMin = 1
+const SearchFactsPatternsByKeywordTermMax = 511
+const SearchFactsPatternsByKeywordWorkspaceMax = 511
+const SearchFactsPatternsByKeywordProjectMax = 511
+const SearchFactsPatternsByKeywordMax uint32 = 64
+const SearchFactsPatternsByKeywordIDMin uint64 = 1
+const SearchFactsPatternsByKeywordIDMax uint64 = 9223372036854775807
+const EventFactHistory = EventMemory
+const StageFactHistory = FamilyMemory
+const OperationFactHistory uint32 = 59
+const FactHistoryLimitMin uint32 = 1
+const FactHistoryLimitMax uint32 = 64
+const FactHistoryKeyMin = 1
+const FactHistoryKeyMax = 511
+const FactHistoryMax uint32 = 64
+const FactHistoryIDMin uint64 = 1
+const FactHistoryIDMax uint64 = 9223372036854775807
+
+// EncodeSearchFactsPatternsByKeywordRequest carries the term, the limit and the session scope.
+func EncodeSearchFactsPatternsByKeywordRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < SearchFactsPatternsByKeywordLimitMin || limit > SearchFactsPatternsByKeywordLimitMax || scopeFlags > SearchFactsPatternsByKeywordScopeFlagsMax ||
+		len(term) < SearchFactsPatternsByKeywordTermMin || len(term) > SearchFactsPatternsByKeywordTermMax ||
+		len(workspace) > SearchFactsPatternsByKeywordWorkspaceMax || len(project) > SearchFactsPatternsByKeywordProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationSearchFactsPatternsByKeyword, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeSearchFactsPatternsByKeywordRequest walks the three length prefixes rather than trusting them.
+func DecodeSearchFactsPatternsByKeywordRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSearchFactsPatternsByKeyword || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < SearchFactsPatternsByKeywordLimitMin || limit > SearchFactsPatternsByKeywordLimitMax || scopeFlags > SearchFactsPatternsByKeywordScopeFlagsMax ||
+		termLen < SearchFactsPatternsByKeywordTermMin || termLen > SearchFactsPatternsByKeywordTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > SearchFactsPatternsByKeywordWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > SearchFactsPatternsByKeywordProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeSearchFactsPatternsByKeywordReply emits the counted, bounded identifier list.
+func EncodeSearchFactsPatternsByKeywordReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > SearchFactsPatternsByKeywordMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < SearchFactsPatternsByKeywordIDMin || id > SearchFactsPatternsByKeywordIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationSearchFactsPatternsByKeyword, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeSearchFactsPatternsByKeywordReply validates the operation and every bounded identifier.
+func DecodeSearchFactsPatternsByKeywordReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSearchFactsPatternsByKeyword || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > SearchFactsPatternsByKeywordMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < SearchFactsPatternsByKeywordIDMin || id > SearchFactsPatternsByKeywordIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeFactHistoryRequest carries the key and the read-back limit.
+func EncodeFactHistoryRequest(normalizedKey string, limit uint32) ([]byte, error) {
+	if limit < FactHistoryLimitMin || limit > FactHistoryLimitMax ||
+		len(normalizedKey) < FactHistoryKeyMin || len(normalizedKey) > FactHistoryKeyMax ||
+		hasNUL(normalizedKey) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 8 + len(normalizedKey)
+	header, err := EncodeRequestHeader(OperationFactHistory, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], uint32(len(normalizedKey)))
+	copy(payload[8:], normalizedKey)
+	return request, nil
+}
+
+// DecodeFactHistoryRequest validates the limit and the key.
+func DecodeFactHistoryRequest(request []byte) (string, uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFactHistory || header.Flags != 0 ||
+		header.PayloadLen < 9 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	keyLen := binary.LittleEndian.Uint32(payload[4:])
+	if limit < FactHistoryLimitMin || limit > FactHistoryLimitMax || keyLen < FactHistoryKeyMin ||
+		keyLen > FactHistoryKeyMax || header.PayloadLen != 8+keyLen {
+		return "", 0, ErrMalformedEnvelope
+	}
+	normalizedKey := string(payload[8 : 8+keyLen])
+	if hasNUL(normalizedKey) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return normalizedKey, limit, nil
+}
+
+// EncodeFactHistoryReply emits the counted, bounded identifier list.
+func EncodeFactHistoryReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > FactHistoryMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < FactHistoryIDMin || id > FactHistoryIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationFactHistory, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeFactHistoryReply validates the operation and every bounded identifier.
+func DecodeFactHistoryReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationFactHistory || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > FactHistoryMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < FactHistoryIDMin || id > FactHistoryIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
 }
 
 // EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The

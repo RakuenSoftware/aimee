@@ -377,6 +377,20 @@ int main(int argc, char **argv)
                                             &fetched, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(row_result == AIMEE_DB2_RESULT_NOT_FOUND && fetched.id == 0);
 
+   probe_count = 99;
+   assert(aimee_db2_search_facts_patterns_by_keyword_call(
+              call_client, &client, 9080, 0, "replay-term", 4u, 1u, "replay-workspace",
+              "replay-project", probe_ids, AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_MAX,
+              &probe_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   uint64_t history_ids[AIMEE_DB2_FACT_HISTORY_MAX];
+   uint32_t history_count = 99;
+   assert(aimee_db2_fact_history_call(call_client, &client, 9081, 0, "fact:replay", 4u, history_ids,
+                                      AIMEE_DB2_FACT_HISTORY_MAX, &history_count, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+   assert(history_count == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

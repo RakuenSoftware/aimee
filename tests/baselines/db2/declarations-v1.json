@@ -16409,9 +16409,15 @@
           "line": 20
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.fact_history operation replaces the version walk. The caller sends the normalised key; forming the versioned keys from it is the handler's, so the naming convention does not become a caller's business. It is unscoped, unlike every other search here -- a fact's history is its history whatever the session. Its statement has no LIMIT: the database returns every version and the limit only decides how many are read back, which is a cost the wire cannot show and so is recorded in the policy."
+      },
       "signature": "int db2_memory_fact_history ( const char * normalized_key , memory_t * out , int max )",
       "signature_sha256": "ca5164ffeb8bad8e86dfe6e7928579c7902068cdf1344e8bda3c6fa46754d324",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_fact_history"
     },
     {
@@ -18707,9 +18713,15 @@
           "line": 786
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.search_facts_patterns_by_keyword operation replaces the keyword search. Which tiers and kinds count as a fact or a pattern is DB2 policy and stays behind the handler. Its statement did not select the identifier, so every row came back with id zero: a caller serialising the row published a zero identifier and resolved no headline. The identifier is selected now, which is also what makes the operation expressible as an identifier list. Scope and reply shape follow the other scoped searches."
+      },
       "signature": "int db2_memory_search_facts_patterns_by_keyword ( const char * keyword , memory_t * out , int max )",
       "signature_sha256": "a9f12fdc5e57d883d3cf89e6da7971eba292f7354aa5bbd7e1c03ab8c1dbd5e3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_search_facts_patterns_by_keyword"
     },
     {
@@ -26436,15 +26448,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e3d4592d5ee3ff1293bdeae39c1fec86764f7bb228ca83d968b42471929df777",
+  "fingerprint": "78bc334e2d330ae9c8098d1fdd09cff9afb81779afb333b78d97a70805570122",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 556,
+    "audit_pending": 554,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 402
+    "reviewed": 404
   }
 }
