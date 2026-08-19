@@ -37,6 +37,7 @@
 #include "execution_trace.h"
 #include "wfe_binding.h"
 #include "pipelines.h"
+#include "roadmap_runtime.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -1107,6 +1108,67 @@ static void test_a_pipeline_row_survives_a_nine_parameter_update(void)
    printf("  PASS: a pipeline row survives a nine-parameter update\n");
 }
 
+/* select_next answers 1 for "no unit", 0 for "here is one" and -1 for a broken
+   store -- the opposite way round from every other found-style read here. The
+   caller in roadmap_auto.c branches on all three and treats 1 as "the roadmap
+   is finished": read as a found-flag it would finish a roadmap that still had
+   work, or keep working one that was done. */
+static void test_the_roadmap_selector_keeps_all_three_answers(void)
+{
+   must(db1_roadmap_dispatch_upsert("rm-bus", "lean", 1, 5000) == 0, "opened a dispatch");
+   rdm_dispatch_t disp;
+   memset(&disp, 0, sizeof disp);
+   must(db1_roadmap_dispatch_get("rm-bus", &disp) == 0, "read it back");
+   must(strcmp(disp.token_profile, "lean") == 0, "the profile crossed");
+   must(disp.require_slice_discussion == 1, "and the flag");
+   must(disp.budget_ceiling_tokens == 5000, "and the ceiling");
+   must(db1_roadmap_dispatch_get("rm-none", &disp) != 0, "an absent roadmap is not a read");
+
+   must(db1_roadmap_dispatch_set_status("rm-bus", "running", "") == 0, "set a status");
+   must(db1_roadmap_dispatch_set_phase("rm-bus", "dispatch") == 0, "set a phase");
+
+   char unit[64] = "x";
+   must(db1_roadmap_unit_select_next("rm-bus", unit, sizeof unit) == 1,
+        "with no units at all, the selector says one rather than zero");
+
+   /* level 'task' deliberately: the selector takes tasks, so a unit at any
+      other level is invisible to it however pending it looks. */
+   must(db1_roadmap_unit_ensure("rm-bus", "u1", "task", "strict") == 0, "ensured a unit");
+   must(db1_roadmap_unit_ensure("rm-bus", "u2", "task", "strict") == 0, "and another");
+   must(db1_roadmap_unit_ensure("rm-bus", "g1", "goal", "strict") == 0, "and a goal above them");
+
+   unit[0] = 0;
+   must(db1_roadmap_unit_select_next("rm-bus", unit, sizeof unit) == 0,
+        "with a pending unit it says zero");
+   must(strcmp(unit, "u1") == 0, "and hands back the lowest id");
+
+   must(db1_roadmap_unit_claim("rm-bus", "u1", "worker-a", "worktrees/u1") == 0, "claimed it");
+   rdm_unit_dispatch_t got;
+   memset(&got, 0, sizeof got);
+   must(db1_roadmap_unit_get("rm-bus", "u1", &got) == 0, "read the unit back");
+   must(strcmp(got.claimed_by, "worker-a") == 0, "the owner crossed");
+   must(strcmp(got.worktree_path, "worktrees/u1") == 0, "and the worktree path");
+
+   must(db1_roadmap_unit_heartbeat("rm-bus", "u1") == 0, "heartbeat");
+   must(db1_roadmap_unit_set_coord_job("rm-bus", "u1", 77) == 0, "linked a coord job");
+   must(db1_roadmap_unit_increment_verify_attempts("rm-bus", "u1") == 0, "counted an attempt");
+   memset(&got, 0, sizeof got);
+   must(db1_roadmap_unit_get("rm-bus", "u1", &got) == 0, "re-read it");
+   must(got.coord_job_id == 77, "the coord job landed in its own column");
+   must(got.verify_attempts == 1, "and the attempt counted once");
+
+   must(db1_roadmap_unit_finish("rm-bus", "u1", "done", "all good", "") == 0, "finished it");
+   must(db1_roadmap_unit_set_state("rm-bus", "u2", "done") == 0, "and closed the other");
+
+   unit[0] = 0;
+   must(db1_roadmap_unit_select_next("rm-bus", unit, sizeof unit) == 1,
+        "with every task done it is back to one, which is what ends a roadmap");
+   must(db1_roadmap_unit_get("rm-bus", "g1", &got) == 0,
+        "the goal is still there -- it was never selectable, not never stored");
+
+   printf("  PASS: the roadmap selector keeps all three answers\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1156,6 +1218,7 @@ int main(int argc, char **argv)
    test_execution_trace_rows_keep_their_shapes();
    test_a_binding_refusal_is_not_a_broken_store();
    test_a_pipeline_row_survives_a_nine_parameter_update();
+   test_the_roadmap_selector_keeps_all_three_answers();
 
    stop_module();
    obs_bus_stop();

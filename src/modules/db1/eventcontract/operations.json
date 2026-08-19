@@ -262,6 +262,7 @@
    "retired_sources": [
     "execution_trace.c",
     "pipelines.c",
+    "roadmap_runtime.c",
     "wfe_binding.c"
    ]
   },
@@ -17441,6 +17442,671 @@
      }
     ],
     "max_bytes": 262144
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 21,
+   "name": "roadmap_dispatch_upsert",
+   "c_name": "db1_roadmap_dispatch_upsert",
+   "c_params": [
+    "roadmap_id",
+    "token_profile",
+    "require_slice_discussion",
+    "budget_ceiling_tokens"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "token_profile",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "require_slice_discussion",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "budget_ceiling_tokens",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 22,
+   "name": "roadmap_dispatch_get",
+   "c_name": "db1_roadmap_dispatch_get",
+   "c_params": [
+    "roadmap_id",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rdm_dispatch_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "roadmap_id",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "phase",
+      "type": "text"
+     },
+     {
+      "name": "token_profile",
+      "type": "text"
+     },
+     {
+      "name": "require_slice_discussion",
+      "type": "int"
+     },
+     {
+      "name": "budget_ceiling_tokens",
+      "type": "int"
+     },
+     {
+      "name": "exit_reason",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 23,
+   "name": "roadmap_dispatch_set_status",
+   "c_name": "db1_roadmap_dispatch_set_status",
+   "c_params": [
+    "roadmap_id",
+    "status",
+    "exit_reason"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "exit_reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 24,
+   "name": "roadmap_dispatch_set_phase",
+   "c_name": "db1_roadmap_dispatch_set_phase",
+   "c_params": [
+    "roadmap_id",
+    "phase"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 25,
+   "name": "roadmap_unit_ensure",
+   "c_name": "db1_roadmap_unit_ensure",
+   "c_params": [
+    "roadmap_id",
+    "unit_id",
+    "level",
+    "tool_policy_mode"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "level",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "tool_policy_mode",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 26,
+   "name": "roadmap_unit_get",
+   "c_name": "db1_roadmap_unit_get",
+   "c_params": [
+    "roadmap_id",
+    "unit_id",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rdm_unit_dispatch_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "roadmap_id",
+      "type": "text"
+     },
+     {
+      "name": "unit_id",
+      "type": "text"
+     },
+     {
+      "name": "level",
+      "type": "text"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "tool_policy_mode",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "heartbeat_at",
+      "type": "text"
+     },
+     {
+      "name": "verify_attempts",
+      "type": "int"
+     },
+     {
+      "name": "dispatch_attempts",
+      "type": "int"
+     },
+     {
+      "name": "worktree_path",
+      "type": "text"
+     },
+     {
+      "name": "coord_job_id",
+      "type": "int"
+     },
+     {
+      "name": "result",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 27,
+   "name": "roadmap_unit_set_state",
+   "c_name": "db1_roadmap_unit_set_state",
+   "c_params": [
+    "roadmap_id",
+    "unit_id",
+    "state"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "state",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 28,
+   "name": "roadmap_unit_claim",
+   "c_name": "db1_roadmap_unit_claim",
+   "c_params": [
+    "roadmap_id",
+    "unit_id",
+    "owner",
+    "worktree_path"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "worktree_path",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 29,
+   "name": "roadmap_unit_heartbeat",
+   "c_name": "db1_roadmap_unit_heartbeat",
+   "c_params": [
+    "roadmap_id",
+    "unit_id"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 30,
+   "name": "roadmap_unit_finish",
+   "c_name": "db1_roadmap_unit_finish",
+   "c_params": [
+    "roadmap_id",
+    "unit_id",
+    "state",
+    "result",
+    "error"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "state",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "result",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 31,
+   "name": "roadmap_unit_set_coord_job",
+   "c_name": "db1_roadmap_unit_set_coord_job",
+   "c_params": [
+    "roadmap_id",
+    "unit_id",
+    "coord_job_id"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "coord_job_id",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 32,
+   "name": "roadmap_unit_increment_verify_attempts",
+   "c_name": "db1_roadmap_unit_increment_verify_attempts",
+   "c_params": [
+    "roadmap_id",
+    "unit_id"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unit_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 33,
+   "name": "roadmap_unit_select_next",
+   "c_name": "db1_roadmap_unit_select_next",
+   "c_params": [
+    "roadmap_id",
+    "out_unit_id",
+    "len"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "roadmap_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "unit_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
    }
   }
  ]

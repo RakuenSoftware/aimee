@@ -18,6 +18,7 @@
 /* clang-format off */
 #include "execution_trace.h"
 #include "pipelines.h"
+#include "roadmap_runtime.h"
 #include "wfe_binding.h"
 
 #include "db1_module_api.h"
@@ -700,6 +701,152 @@ int db1_pipeline_list_active(db1_pipeline_t *out, int max)
    }
    free(wire_scratch);
    return wire_rows;
+}
+
+int db1_roadmap_dispatch_upsert(const char *roadmap_id, const char *token_profile, int require_slice_discussion, int budget_ceiling_tokens)
+{
+   if (!roadmap_id || !roadmap_id[0])
+      return -1;
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", require_slice_discussion);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%d", budget_ceiling_tokens);
+   const char *fields[] = {roadmap_id, token_profile ? token_profile : "", arg2, arg3};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_UPSERT, fields, 4, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out)
+{
+   if (!roadmap_id || !roadmap_id[0] || !out)
+      return -1;
+   const char *fields[] = {roadmap_id};
+   char slot0[32];
+   char slot5[32];
+   char slot6[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, out->roadmap_id, out->status, out->phase, out->token_profile, slot5, slot6, out->exit_reason, out->created_at, out->updated_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->roadmap_id, sizeof out->status, sizeof out->phase, sizeof out->token_profile, sizeof slot5, sizeof slot6, sizeof out->exit_reason, sizeof out->created_at, sizeof out->updated_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_GET, fields, 1, values, caps, 10, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->require_slice_discussion = (int)strtol(slot5, NULL, 10);
+   out->budget_ceiling_tokens = (int)strtol(slot6, NULL, 10);
+   return 0;
+}
+
+int db1_roadmap_dispatch_set_status(const char *roadmap_id, const char *status, const char *exit_reason)
+{
+   if (!roadmap_id || !roadmap_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, status ? status : "", exit_reason ? exit_reason : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_STATUS, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_dispatch_set_phase(const char *roadmap_id, const char *phase)
+{
+   if (!roadmap_id || !roadmap_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, phase ? phase : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_PHASE, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_ensure(const char *roadmap_id, const char *unit_id, const char *level, const char *tool_policy_mode)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, unit_id, level ? level : "", tool_policy_mode ? tool_policy_mode : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_ENSURE, fields, 4, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_t *out)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0] || !out)
+      return -1;
+   const char *fields[] = {roadmap_id, unit_id};
+   char slot0[32];
+   char slot9[32];
+   char slot10[32];
+   char slot12[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, out->roadmap_id, out->unit_id, out->level, out->state, out->tool_policy_mode, out->claimed_by, out->claimed_at, out->heartbeat_at, slot9, slot10, out->worktree_path, slot12, out->result, out->error, out->created_at, out->updated_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->roadmap_id, sizeof out->unit_id, sizeof out->level, sizeof out->state, sizeof out->tool_policy_mode, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->heartbeat_at, sizeof slot9, sizeof slot10, sizeof out->worktree_path, sizeof slot12, sizeof out->result, sizeof out->error, sizeof out->created_at, sizeof out->updated_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_GET, fields, 2, values, caps, 17, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->verify_attempts = (int)strtol(slot9, NULL, 10);
+   out->dispatch_attempts = (int)strtol(slot10, NULL, 10);
+   out->coord_job_id = (int)strtol(slot12, NULL, 10);
+   return 0;
+}
+
+int db1_roadmap_unit_set_state(const char *roadmap_id, const char *unit_id, const char *state)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, unit_id, state ? state : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_SET_STATE, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_claim(const char *roadmap_id, const char *unit_id, const char *owner, const char *worktree_path)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, unit_id, owner ? owner : "", worktree_path ? worktree_path : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_CLAIM, fields, 4, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_heartbeat(const char *roadmap_id, const char *unit_id)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, unit_id};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_HEARTBEAT, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_finish(const char *roadmap_id, const char *unit_id, const char *state, const char *result, const char *error)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, unit_id, state ? state : "", result ? result : "", error ? error : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_FINISH, fields, 5, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_set_coord_job(const char *roadmap_id, const char *unit_id, int coord_job_id)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
+      return -1;
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", coord_job_id);
+   const char *fields[] = {roadmap_id, unit_id, arg2};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_SET_COORD_JOB, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_id)
+{
+   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
+      return -1;
+   const char *fields[] = {roadmap_id, unit_id};
+   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_INCREMENT_VERIFY_ATTEMPTS, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_roadmap_unit_select_next(const char *roadmap_id, char *out_unit_id, size_t len)
+{
+   if (!roadmap_id || !roadmap_id[0] || !out_unit_id || len == 0)
+      return -1;
+   const char *fields[] = {roadmap_id};
+   char slot_rc[32];
+   char *const values[] = {out_unit_id, slot_rc};
+   const size_t caps[] = {len, sizeof slot_rc};
+   int wire_status = call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_SELECT_NEXT, fields, 1, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtol(slot_rc, NULL, 10);
 }
 
 /* clang-format on */

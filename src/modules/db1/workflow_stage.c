@@ -15,6 +15,7 @@
 #include "db1_module_api.h"
 #include "execution_trace.h"
 #include "pipelines.h"
+#include "roadmap_runtime.h"
 #include "wfe_binding.h"
 
 #include <errno.h>
@@ -163,7 +164,9 @@ aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint
    int found = 0;
    db1_execution_trace_detail_t row_db1_execution_trace_detail_t;
    db1_pipeline_t row_db1_pipeline_t;
-   const char *row_slots[12];
+   rdm_dispatch_t row_rdm_dispatch_t;
+   rdm_unit_dispatch_t row_rdm_unit_dispatch_t;
+   const char *row_slots[17];
    char row_text[5][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
@@ -921,6 +924,290 @@ aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint
       listed = 1;
       break;
    }
+   case AIMEE_DB1_OP_ROADMAP_DISPATCH_UPSERT:
+   {
+      if (count != 4u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed2;
+      if (parse_int(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed3;
+      if (parse_int(field[3], &parsed3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_dispatch_upsert(field[0], field[1], parsed2, parsed3);
+      break;
+   }
+   case AIMEE_DB1_OP_ROADMAP_DISPATCH_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_rdm_dispatch_t, 0, sizeof row_rdm_dispatch_t);
+      rc = db1_roadmap_dispatch_get(field[0], &row_rdm_dispatch_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_rdm_dispatch_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_rdm_dispatch_t.require_slice_discussion);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_rdm_dispatch_t.budget_ceiling_tokens);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_rdm_dispatch_t.roadmap_id;
+      row_slots[2] = row_rdm_dispatch_t.status;
+      row_slots[3] = row_rdm_dispatch_t.phase;
+      row_slots[4] = row_rdm_dispatch_t.token_profile;
+      row_slots[5] = row_text[1];
+      row_slots[6] = row_text[2];
+      row_slots[7] = row_rdm_dispatch_t.exit_reason;
+      row_slots[8] = row_rdm_dispatch_t.created_at;
+      row_slots[9] = row_rdm_dispatch_t.updated_at;
+      rows = row_slots;
+      row_count = 10u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_STATUS:
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_dispatch_set_status(field[0], field[1], field[2]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_PHASE:
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_dispatch_set_phase(field[0], field[1]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_UNIT_ENSURE:
+      if (count != 4u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_ensure(field[0], field[1], field[2], field[3]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_UNIT_GET:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_rdm_unit_dispatch_t, 0, sizeof row_rdm_unit_dispatch_t);
+      rc = db1_roadmap_unit_get(field[0], field[1], &row_rdm_unit_dispatch_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_rdm_unit_dispatch_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_rdm_unit_dispatch_t.verify_attempts);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_rdm_unit_dispatch_t.dispatch_attempts);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_rdm_unit_dispatch_t.coord_job_id);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_rdm_unit_dispatch_t.roadmap_id;
+      row_slots[2] = row_rdm_unit_dispatch_t.unit_id;
+      row_slots[3] = row_rdm_unit_dispatch_t.level;
+      row_slots[4] = row_rdm_unit_dispatch_t.state;
+      row_slots[5] = row_rdm_unit_dispatch_t.tool_policy_mode;
+      row_slots[6] = row_rdm_unit_dispatch_t.claimed_by;
+      row_slots[7] = row_rdm_unit_dispatch_t.claimed_at;
+      row_slots[8] = row_rdm_unit_dispatch_t.heartbeat_at;
+      row_slots[9] = row_text[1];
+      row_slots[10] = row_text[2];
+      row_slots[11] = row_rdm_unit_dispatch_t.worktree_path;
+      row_slots[12] = row_text[3];
+      row_slots[13] = row_rdm_unit_dispatch_t.result;
+      row_slots[14] = row_rdm_unit_dispatch_t.error;
+      row_slots[15] = row_rdm_unit_dispatch_t.created_at;
+      row_slots[16] = row_rdm_unit_dispatch_t.updated_at;
+      rows = row_slots;
+      row_count = 17u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_ROADMAP_UNIT_SET_STATE:
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_set_state(field[0], field[1], field[2]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_UNIT_CLAIM:
+      if (count != 4u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_claim(field[0], field[1], field[2], field[3]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_UNIT_HEARTBEAT:
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_heartbeat(field[0], field[1]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_UNIT_FINISH:
+      if (count != 5u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_finish(field[0], field[1], field[2], field[3], field[4]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_UNIT_SET_COORD_JOB:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed2;
+      if (parse_int(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_set_coord_job(field[0], field[1], parsed2);
+      break;
+   }
+   case AIMEE_DB1_OP_ROADMAP_UNIT_INCREMENT_VERIFY_ATTEMPTS:
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_increment_verify_attempts(field[0], field[1]);
+      break;
+   case AIMEE_DB1_OP_ROADMAP_UNIT_SELECT_NEXT:
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_roadmap_unit_select_next(field[0], value, sizeof value);
+      snprintf(row_text[0], sizeof row_text[0], "%d", rc);
+      row_slots[0] = value;
+      row_slots[1] = row_text[0];
+      rows = row_slots;
+      row_count = 2u;
+      rc = 0;
+      reads = 1;
+      break;
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
