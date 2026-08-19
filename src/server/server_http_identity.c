@@ -14,7 +14,35 @@
 #include "platform_ipc.h"
 #include "vault_principal.h"
 #include <aimee/core/connection/auth.h>
+#include <ctype.h>
 #include <string.h>
+
+#define AIMEE_SESSION_BEARER_MARKER ".aimee-session."
+
+int server_http_session_bearer_unbind(const char *presented, char *bearer, size_t bearer_n,
+                                      char *session_id, size_t session_n)
+{
+   if (!bearer || bearer_n == 0 || !session_id || session_n == 0)
+      return 0;
+   snprintf(bearer, bearer_n, "%s", presented ? presented : "");
+   session_id[0] = '\0';
+   if (!presented)
+      return 0;
+   const char *mark = strstr(presented, AIMEE_SESSION_BEARER_MARKER);
+   if (!mark || strlen(mark + sizeof(AIMEE_SESSION_BEARER_MARKER) - 1) != 32)
+      return 0;
+   const char *sid = mark + sizeof(AIMEE_SESSION_BEARER_MARKER) - 1;
+   for (int i = 0; i < 32; i++)
+      if (!isdigit((unsigned char)sid[i]) && !(sid[i] >= 'a' && sid[i] <= 'f'))
+         return 0;
+   size_t base_n = (size_t)(mark - presented);
+   if (base_n == 0 || base_n >= bearer_n || 33 > session_n)
+      return 0;
+   memcpy(bearer, presented, base_n);
+   bearer[base_n] = '\0';
+   memcpy(session_id, sid, 33);
+   return 1;
+}
 
 /* Per-thread captured identity for the request currently being routed. Thread-
  * local for the same reason as the front-end's g_rpc_conn_caps: each connection
@@ -101,7 +129,13 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
       {
          const char *bearer = aimee_core_bearer_token(authz);
          if (bearer)
-            snprintf(tl_bearer, sizeof(tl_bearer), "%s", bearer);
+         {
+            char bound_sid[80];
+            (void)server_http_session_bearer_unbind(bearer, tl_bearer, sizeof(tl_bearer), bound_sid,
+                                                    sizeof(bound_sid));
+            if (!tl_session_hdr[0] && bound_sid[0])
+               snprintf(tl_session_hdr, sizeof(tl_session_hdr), "%s", bound_sid);
+         }
       }
       http_header(buf, "X-Aimee-Management-Status", tl_status_staple, sizeof(tl_status_staple));
    }

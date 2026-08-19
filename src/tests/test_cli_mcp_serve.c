@@ -351,9 +351,14 @@ cJSON *cli_v1_dispatch_local(cJSON *request, int timeout_ms)
       }
       cJSON_AddStringToObject(resp, "status", "ok");
       cJSON *tools = cJSON_CreateArray();
-      cJSON *tool = cJSON_CreateObject();
-      cJSON_AddStringToObject(tool, "name", "search_memory");
-      cJSON_AddItemToArray(tools, tool);
+      const char *names[] = {"search_memory",   "roundtable_review",    "index",     "find_symbol",
+                             "ast_grep_search", "preview_blast_radius", "kb_future", NULL};
+      for (int i = 0; names[i]; i++)
+      {
+         cJSON *tool = cJSON_CreateObject();
+         cJSON_AddStringToObject(tool, "name", names[i]);
+         cJSON_AddItemToArray(tools, tool);
+      }
       cJSON_AddItemToObject(resp, "tools", tools);
       return resp;
    }
@@ -806,54 +811,57 @@ static void test_initialize(void)
 
    cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
    assert(cJSON_IsString(instructions));
-   assert(strstr(instructions->valuestring, "get_help") != NULL);
-   assert(strstr(instructions->valuestring, "spawn_agent") != NULL);
-   assert(strstr(instructions->valuestring, "delegate tool") != NULL);
+   assert(strstr(instructions->valuestring, "<aimee-session") == NULL);
+   assert(strstr(instructions->valuestring, "<aimee-persona") == NULL);
+   assert(strstr(instructions->valuestring, "optional") != NULL);
+   assert(strstr(instructions->valuestring, "directly callable") != NULL);
+   assert(strstr(instructions->valuestring, "find_tools") != NULL);
+   assert(strstr(instructions->valuestring, "command=hybrid") == NULL);
+   assert(strstr(instructions->valuestring, "max_results") == NULL);
+   assert(strstr(instructions->valuestring, "call index") == NULL);
    assert(strstr(instructions->valuestring, "isolated checkout") == NULL);
-
-   /* LISTED TOOLS ARE DIRECTLY CALLABLE, AND THE TEXT MUST LEAD WITH THAT.
-    *
-    * Twice now agents have spent their tool budget on the discovery protocol
-    * instead of the work: once at five of fourteen calls, and again on a
-    * benchmark cell that made two find_tools, two describe_tool and two call_tool
-    * calls and not one direct find_symbol -- with find_symbol advertised the
-    * whole time. Pin the ordering, because the ordering is the behaviour. */
-   {
-      const char *ins = instructions->valuestring;
-      assert(strstr(ins, "directly callable") != NULL);
-      assert(strstr(ins, "Do not route a listed tool through call_tool") != NULL);
-      /* Discovery must be framed as the exception, i.e. introduced only after the
-       * direct-call rule, and explicitly for tools that are NOT listed. */
-      assert(strstr(ins, "NOT listed") != NULL);
-      assert(strstr(ins, "directly callable") < strstr(ins, "find_tools"));
-      /* get_help must not be ordered before doing any work. */
-      assert(strstr(ins, "before trying anything else") == NULL);
-   }
-   assert(g_worktree_ensure_calls == 1);
+   assert(strlen(instructions->valuestring) < 256);
+   assert(g_worktree_ensure_calls == 0);
    assert(g_reverse_channel_starts == 0);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
 }
 
-/* An MCP-hosted session has no SessionStart hook, so `initialize` is where it
- * gets isolated: the proxy must ENTER the prepared worktree (it is the process
- * aimee's file/exec tools resolve paths in) and tell the caller where its work
- * will land. */
-static void test_initialize_enters_session_worktree(void)
+static void test_initialize_ignores_model_behaviour_experiments(void)
+{
+   setenv("AIMEE_MCP_PREFER_TOOLS", "true", 1);
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 101);
+   cJSON_AddStringToObject(req, "method", "initialize");
+   cJSON_AddObjectToObject(req, "params");
+
+   cJSON *resp = capture_response(req);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
+   assert(cJSON_IsString(instructions));
+   assert(strstr(instructions->valuestring, "optional") != NULL);
+   assert(strstr(instructions->valuestring, "find_tools") != NULL);
+   assert(strstr(instructions->valuestring, "command=hybrid") == NULL);
+   assert(strstr(instructions->valuestring, "max_results") == NULL);
+   assert(strstr(instructions->valuestring, "<aimee-session") == NULL);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+   unsetenv("AIMEE_MCP_PREFER_TOOLS");
+   puts("  PASS: test_initialize_ignores_model_behaviour_experiments");
+}
+
+/* MCP is a child of the client and cannot bind the host shell's cwd. A hidden
+ * MCP-only chdir would split one session across two checkouts, so initialize
+ * must preserve the cwd established by the universal launcher and emit no
+ * checkout instruction. */
+static void test_initialize_preserves_client_bound_worktree(void)
 {
    char origin_cwd[4096];
    assert(getcwd(origin_cwd, sizeof(origin_cwd)));
-
-   char wt[4096];
-   const char *tmp = getenv("TMPDIR");
-   snprintf(wt, sizeof(wt), "%s/aimee-mcp-init-wt-%d", (tmp && tmp[0]) ? tmp : "/tmp",
-            (int)getpid());
-   char mk[4200];
-   snprintf(mk, sizeof(mk), "rm -rf '%s' && mkdir -p '%s'", wt, wt);
-   assert(system(mk) == 0);
-
-   g_worktree_to_return = wt;
+   g_worktree_to_return = "/must/not/be/entered";
    g_worktree_ensure_calls = 0;
    g_worktree_sid[0] = '\0';
 
@@ -867,36 +875,24 @@ static void test_initialize_enters_session_worktree(void)
    cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
    assert(cJSON_IsObject(result));
 
-   /* It asked for a worktree, keyed by a non-empty session id. */
-   assert(g_worktree_ensure_calls == 1);
-   assert(g_worktree_sid[0] != '\0');
-
-   /* It entered it — this process's cwd IS what the file/exec tools use. */
+   assert(g_worktree_ensure_calls == 0);
    char now[4096];
    assert(getcwd(now, sizeof(now)));
-   char real_wt[4096], real_now[4096];
-   assert(realpath(wt, real_wt) && realpath(now, real_now));
-   assert(strcmp(real_wt, real_now) == 0);
+   assert(strcmp(origin_cwd, now) == 0);
 
-   /* And it told the caller, without dropping the base instructions. */
    cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
    assert(cJSON_IsString(instructions));
-   assert(strstr(instructions->valuestring, "get_help") != NULL);
-   assert(strstr(instructions->valuestring, "isolated checkout") != NULL);
-   assert(strstr(instructions->valuestring, wt) != NULL);
+   assert(strstr(instructions->valuestring, "optional") != NULL);
+   assert(strstr(instructions->valuestring, "isolated checkout") == NULL);
+   assert(strstr(instructions->valuestring, g_worktree_to_return) == NULL);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
-
-   assert(chdir(origin_cwd) == 0);
-   snprintf(mk, sizeof(mk), "rm -rf '%s'", wt);
-   (void)system(mk);
    g_worktree_to_return = NULL;
 }
 
 /* The remote server cannot infer or scan a thin client's checkout. Initialize
- * must seed the canonical root before worktree isolation changes cwd to the
- * hidden session path; otherwise the first find_symbol has no active project. */
+ * must seed the client-bound root before the first find_symbol. */
 static void test_remote_initialize_bootstraps_canonical_index(void)
 {
    g_remote_active = 1;
@@ -918,7 +914,7 @@ static void test_remote_initialize_bootstraps_canonical_index(void)
    assert(g_index_ensure_calls == 1);
    assert(g_index_ensure_before_worktree == 1);
    assert(strcmp(g_index_ensure_root, "/work/rakuen-blog") == 0);
-   assert(g_worktree_ensure_calls == 1);
+   assert(g_worktree_ensure_calls == 0);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
@@ -942,6 +938,59 @@ static void test_tools_list(void)
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
+}
+
+static void test_mcp_only_allowlist_filters_listing_and_dispatch(void)
+{
+   /* This is the last leg of the KB projection path: the runtime's federated
+    * tools/list contains a KB-only module tool, the generated allowlist exposes
+    * exactly that tool, and tools/call still dispatches it. */
+   setenv("AIMEE_MCP_TOOL_ALLOWLIST", "kb_future", 1);
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 111);
+   cJSON_AddStringToObject(req, "method", "tools/list");
+   cJSON_AddObjectToObject(req, "params");
+   cJSON *resp = capture_response(req);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   cJSON *tools = cJSON_GetObjectItemCaseSensitive(result, "tools");
+   assert(cJSON_GetArraySize(tools) == 1);
+   assert(
+       strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(tools, 0), "name")->valuestring,
+              "kb_future") == 0);
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+
+   g_last_mcp_call_tool[0] = '\0';
+   req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 112);
+   cJSON_AddStringToObject(req, "method", "tools/call");
+   cJSON *params = cJSON_AddObjectToObject(req, "params");
+   cJSON_AddStringToObject(params, "name", "kb_future");
+   cJSON_AddObjectToObject(params, "arguments");
+   resp = capture_response(req);
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(resp, "result")));
+   assert(strcmp(g_last_mcp_call_tool, "kb_future") == 0);
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+
+   req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 113);
+   cJSON_AddStringToObject(req, "method", "tools/call");
+   params = cJSON_AddObjectToObject(req, "params");
+   cJSON_AddStringToObject(params, "name", "search_memory");
+   cJSON_AddObjectToObject(params, "arguments");
+   resp = capture_response(req);
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(error, "code")));
+   assert(cJSON_GetObjectItemCaseSensitive(error, "code")->valueint == -32601);
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+
+   unsetenv("AIMEE_MCP_TOOL_ALLOWLIST");
 }
 
 static void test_remote_discovery_retries_are_safe(void)
@@ -1450,10 +1499,12 @@ int main(void)
    test_resources_read_memory_by_id();
    test_resources_read_unknown_uri();
    test_initialize();
-   test_initialize_enters_session_worktree();
+   test_initialize_ignores_model_behaviour_experiments();
+   test_initialize_preserves_client_bound_worktree();
    test_remote_initialize_bootstraps_canonical_index();
    test_session_id_is_shared_not_invented();
    test_tools_list();
+   test_mcp_only_allowlist_filters_listing_and_dispatch();
    test_tools_list_preserves_server_error();
    test_remote_discovery_retries_are_safe();
    test_tools_call_success();

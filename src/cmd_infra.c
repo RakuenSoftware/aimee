@@ -1320,7 +1320,51 @@ static void repo_name_from_url(const char *url, char *out, size_t outlen)
 
 /* Register abs_path as a workspace, discover + index projects, and print results.
  * Shared by both the plain-path and --repo flows. Returns project count or -1. */
-static int register_and_index(app_ctx_t *ctx, const char *abs_path)
+static void workspace_project_identity(const char *root, int collision_safe, char *out,
+                                       size_t out_len)
+{
+   const char *base = strrchr(root, '/');
+   base = (base && base[1]) ? base + 1 : root;
+   snprintf(out, out_len, "%s", base);
+   if (!collision_safe)
+      return;
+
+   project_info_t indexed[256];
+   int count = kb_client_index_list(indexed, 256);
+   int name_collision = 0;
+   for (int i = 0; i < count; i++)
+   {
+      if (strcmp(indexed[i].root, root) == 0)
+      {
+         snprintf(out, out_len, "%s", indexed[i].name);
+         return;
+      }
+      if (strcmp(indexed[i].name, base) == 0)
+         name_collision = 1;
+   }
+   if (!name_collision)
+      return;
+
+   /* Stable path-derived identity only when the human name is already occupied.
+    * This preserves familiar names in the common case while preventing two
+    * unrelated checkouts named `api` from aliasing in the canonical index. */
+   unsigned long hash = 2166136261u;
+   for (const unsigned char *p = (const unsigned char *)root; *p; p++)
+      hash = (hash ^ *p) * 16777619u;
+   snprintf(out, out_len, "%s-%08lx", base, hash & 0xfffffffful);
+}
+
+static int workspace_project_ready(const char *name, const char *root)
+{
+   project_info_t indexed[256];
+   int count = kb_client_index_list(indexed, 256);
+   for (int i = 0; i < count; i++)
+      if (strcmp(indexed[i].name, name) == 0 && strcmp(indexed[i].root, root) == 0)
+         return 1;
+   return 0;
+}
+
+static int register_and_index(app_ctx_t *ctx, const char *abs_path, int prepare)
 {
    int add_rc = config_workspace_add(abs_path, NULL, NULL, NULL);
    /* Already registered is the state the caller asked for, so it is not an
@@ -1358,38 +1402,74 @@ static int register_and_index(app_ctx_t *ctx, const char *abs_path)
    fprintf(stderr, "workspace: %s %s (%d project(s) discovered)\n",
            add_rc == -2 ? "re-indexed" : "added", abs_path, count);
 
+   char project_names[MAX_DISCOVERED_PROJECTS][128] = {{0}};
+   int project_ready[MAX_DISCOVERED_PROJECTS] = {0};
+   int all_ready = count > 0;
    for (int i = 0; i < count; i++)
    {
-      const char *name = strrchr(projects[i], '/');
-      name = name ? name + 1 : projects[i];
+      workspace_project_identity(projects[i], prepare, project_names[i], sizeof(project_names[i]));
+      const char *name = project_names[i];
       fprintf(stderr, "  indexing: %s\n", name);
       kb_client_index_scan_result_t res;
       if (kb_client_index_scan(name, projects[i], 0, &res) != 0)
+      {
          fprintf(stderr, "    knowledge service unavailable — skipped\n");
+         all_ready = 0;
+      }
       else if (res.skipped)
          fprintf(stderr, "    skipped (%s)\n", res.reason[0] ? res.reason : "unknown");
+
+      /* The scan path may enqueue work behind a service boundary. `prepare` is
+       * the atomic session-facing command, so it does not return until the
+       * exact name/root pair is readable (or the bounded readiness window
+       * expires). Ordinary `add` keeps its historical non-waiting behavior. */
+      if (prepare)
+      {
+         for (int attempt = 0; attempt < 100 && !project_ready[i]; attempt++)
+         {
+            project_ready[i] = workspace_project_ready(name, projects[i]);
+            if (!project_ready[i])
+               usleep(100000);
+         }
+         if (!project_ready[i])
+            all_ready = 0;
+      }
+      else
+         project_ready[i] = 1;
    }
 
    if (ctx->json_output)
    {
       cJSON *obj = cJSON_CreateObject();
       cJSON_AddStringToObject(obj, "path", abs_path);
+      cJSON_AddStringToObject(obj, "host_path", abs_path);
+      cJSON_AddStringToObject(obj, "index_root", abs_path);
+      cJSON_AddStringToObject(obj, "workspace_state", add_rc == -2 ? "reused" : "registered");
       cJSON_AddNumberToObject(obj, "projects", count);
+      cJSON_AddBoolToObject(obj, "ready", all_ready);
+      cJSON *details = cJSON_AddArrayToObject(obj, "project_details");
+      for (int i = 0; i < count; i++)
+      {
+         cJSON *detail = cJSON_CreateObject();
+         cJSON_AddStringToObject(detail, "project", project_names[i]);
+         cJSON_AddStringToObject(detail, "root", projects[i]);
+         cJSON_AddBoolToObject(detail, "ready", project_ready[i]);
+         cJSON_AddItemToArray(details, detail);
+      }
       emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
    }
    else
    {
       for (int i = 0; i < count; i++)
       {
-         const char *name = strrchr(projects[i], '/');
-         name = name ? name + 1 : projects[i];
-         fprintf(stderr, "  %s\n", name);
+         fprintf(stderr, "  %s%s\n", project_names[i],
+                 prepare ? (project_ready[i] ? " (ready)" : " (not ready)") : "");
       }
    }
    return count;
 }
 
-static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
+static void workspace_cmd_add_impl(app_ctx_t *ctx, int argc, char **argv, int prepare)
 {
    /* Parse flags: --repo <url> [--path <dest>] */
    opt_parsed_t opts;
@@ -1462,15 +1542,16 @@ static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
          return;
       }
 
-      register_and_index(ctx, dest);
+      register_and_index(ctx, dest, prepare);
       return;
    }
 
    /* Plain path */
    if (opt_pos(&opts, 0) == NULL)
    {
-      fprintf(stderr, "Usage: aimee workspace add <path>\n");
-      fprintf(stderr, "       aimee workspace add --repo <url> [--path <dest>]\n");
+      fprintf(stderr, "Usage: aimee workspace %s <path>\n", prepare ? "prepare" : "add");
+      fprintf(stderr, "       aimee workspace %s --repo <url> [--path <dest>]\n",
+              prepare ? "prepare" : "add");
       return;
    }
 
@@ -1488,7 +1569,17 @@ static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   register_and_index(ctx, abs);
+   register_and_index(ctx, abs, prepare);
+}
+
+static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
+{
+   workspace_cmd_add_impl(ctx, argc, argv, 0);
+}
+
+static void workspace_cmd_prepare(app_ctx_t *ctx, int argc, char **argv)
+{
+   workspace_cmd_add_impl(ctx, argc, argv, 1);
 }
 
 static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
@@ -1580,6 +1671,7 @@ static void workspace_cmd_remove(app_ctx_t *ctx, int argc, char **argv)
 
 static const subcmd_t cmd_workspace_subs[] = {
     {"add", "add a workspace", workspace_cmd_add},
+    {"prepare", "register, index, and wait until a workspace is readable", workspace_cmd_prepare},
     {"list", "list workspaces", workspace_cmd_list},
     {"remove", "remove a workspace", workspace_cmd_remove},
     {NULL, NULL, NULL},
@@ -1589,7 +1681,7 @@ void cmd_workspace(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
    {
-      fprintf(stderr, "Usage: aimee workspace <add|list|remove> [options]\n");
+      fprintf(stderr, "Usage: aimee workspace <add|prepare|list|remove> [options]\n");
       return;
    }
 
@@ -1600,7 +1692,7 @@ void cmd_workspace(app_ctx_t *ctx, int argc, char **argv)
    if (subcmd_dispatch(cmd_workspace_subs, sub, ctx, argc, argv) != 0)
    {
       fprintf(stderr, "Unknown workspace subcommand: %s\n", sub);
-      fprintf(stderr, "Usage: aimee workspace <add|list|remove> [options]\n");
+      fprintf(stderr, "Usage: aimee workspace <add|prepare|list|remove> [options]\n");
    }
 }
 
