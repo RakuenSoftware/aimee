@@ -422,6 +422,51 @@ static void test_no_plaintext_at_rest(void)
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
+/* Take credential-shaped variables out of the ambient environment.
+ *
+ * test_env_source asserts that after a bootstrap NOTHING credential-shaped is
+ * left set, which quietly assumes the environment it inherited had none. Any
+ * *_TOKEN, *_SECRET, *_API_KEY and so on breaks it -- and the harness this
+ * suite is developed under exports CLAUDE_CODE_MESSAGING_TOKEN, so it failed
+ * on every run here while passing in CI, which is the worst way for a test to
+ * be wrong: red for one person and green for everyone else.
+ *
+ * The suffixes mirror name_span_is_credential in vault_env_bootstrap.c. They
+ * are duplicated rather than exported because the point is to make this test
+ * independent of the ambient environment, and a test that asked the code under
+ * test which variables to remove would be asking the thing it is checking. */
+static void scrub_ambient_credentials(void)
+{
+   static const char *const suffixes[] = {
+       "_TOKEN",  "_SECRET", "_PASSWORD",   "_PRIVATE_KEY", "_API_KEY", "_DSN",
+       "_BEARER", "_PASS",   "_CREDENTIAL", "_CREDENTIALS", NULL};
+   for (;;)
+   {
+      extern char **environ;
+      char *victim = NULL;
+      for (char **entry = environ; *entry && !victim; entry++)
+      {
+         const char *eq = strchr(*entry, '=');
+         if (!eq || eq == *entry)
+            continue;
+         size_t len = (size_t)(eq - *entry);
+         for (int i = 0; suffixes[i] && !victim; i++)
+         {
+            size_t sl = strlen(suffixes[i]);
+            if (len >= sl && memcmp(*entry + len - sl, suffixes[i], sl) == 0)
+               victim = strndup(*entry, len);
+         }
+         if (!victim && strstr(*entry, "_SECRET_") && strstr(*entry, "_SECRET_") < eq)
+            victim = strndup(*entry, len);
+      }
+      if (!victim)
+         return;
+      /* unsetenv invalidates the walk, so restart after each removal. */
+      unsetenv(victim);
+      free(victim);
+   }
+}
+
 int main(void)
 {
    snprintf(g_root, sizeof(g_root), "/tmp/aimee-vaultboot-test-%d", (int)getpid());
@@ -430,6 +475,7 @@ int main(void)
    snprintf(mk, sizeof(mk), "rm -rf %s && mkdir -p %s", g_root, g_home);
    assert(system(mk) == 0);
    setenv("AIMEE_HOME", g_home, 1);
+   scrub_ambient_credentials();
    vault_kek_cache_clear();
    server_vault_bootstrap_set_resolver(fake_resolver);
 

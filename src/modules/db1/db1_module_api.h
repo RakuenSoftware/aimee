@@ -104,6 +104,9 @@
 #define AIMEE_DB1_OP_CLARIFY_WEAKEST_DIM        41u
 #define AIMEE_DB1_OP_CLARIFY_NEXT_QUESTION      42u
 #define AIMEE_DB1_OP_CLARIFY_CRYSTALLIZE        43u
+#define AIMEE_DB1_OP_WM_DELETE                  44u
+#define AIMEE_DB1_OP_WM_CLEAR                   45u
+#define AIMEE_DB1_OP_WM_GC                      46u
 
 /* Family 4: queued agent work: logs, coordination jobs and the cron that
  * drives them. */
