@@ -73,9 +73,27 @@
  * exactly there:
  *
  *   - memory.delete SHIPPED saying number_lenient (atoi) where the marshaller
- *     calls atoll(). Any memory id above 2^31 would have been truncated by the
- *     thin client and addressed a different row. Every generated id was small,
- *     so nothing ever disagreed.
+ *     calls atoll(). Every generated id was small, so nothing ever disagreed.
+ *
+ *     It does not truncate to a large wrong number, which is what "truncated"
+ *     first suggested. atoi() keeps the LOW 32 BITS AS A SIGNED INT, measured
+ *     on a real appliance against the shipped binary:
+ *
+ *         2147483647 -> 2147483647      (the last id that survives)
+ *         2147483648 -> -2147483648
+ *         4294967296 -> 0
+ *         4294967297 -> 1               <-- deletes memory 1
+ *         8589934592 -> 0
+ *
+ *     So `aimee memory delete 4294967297` deleted memory 1. Not a different row
+ *     in the abstract: a LOW-numbered, early, probably important one, because
+ *     the wrap lands near zero.
+ *
+ *     A JSON number is a double, so ids above 2^53 cannot round-trip whatever
+ *     parse the spec names -- 2^53+1 arrives as ...990. That ceiling is shared
+ *     by the compiled marshaller and is not something a spec can fix; it is
+ *     recorded here so the next person does not read atoll() as a promise of
+ *     the full 64-bit range.
  *   - insights.overview showed that the interpreter conflated "flag absent"
  *     with "flag present but empty", silently dropping a default.
  *
