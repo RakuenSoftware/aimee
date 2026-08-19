@@ -9,6 +9,80 @@
 #include <string.h>
 #include "cJSON.h"
 
+/* Place the persona on the first user message, once per conversation.
+ *
+ * Prepending to the first USER message rather than adding a system message is
+ * what makes this client-agnostic: every ingress shape has a first user turn,
+ * while system-message support and placement rules differ per protocol.
+ *
+ * Two independent guards keep it from firing twice. An assistant turn anywhere
+ * in the history proves this is an existing conversation, and the caller
+ * transcript may not contain our earlier mutated request -- so the absence of
+ * the marker alone is not permission to inject again. The marker check then
+ * covers the case where the caller does echo our mutated first turn back.
+ *
+ * Returns 1 when the persona was placed, 0 when it was not needed or could not
+ * be placed. Allocation failure restores the block array before returning. */
+int aimee_ir_prepend_persona_instructions(aimee_request_t *request, const char *instructions)
+{
+   if (!request || !instructions || !instructions[0])
+      return 0;
+
+   for (int i = 0; i < request->n_messages; i++)
+      if (request->messages[i].role && strcmp(request->messages[i].role, "assistant") == 0)
+         return 0;
+
+   aimee_message_t *first_user = NULL;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      if (request->messages[i].role && strcmp(request->messages[i].role, "user") == 0)
+      {
+         first_user = &request->messages[i];
+         break;
+      }
+   }
+   if (!first_user)
+      return 0;
+
+   for (int i = 0; i < first_user->n_blocks; i++)
+      if (first_user->blocks[i].type == AIMEE_BLK_TEXT && first_user->blocks[i].text &&
+          strstr(first_user->blocks[i].text, "<aimee-persona ") != NULL)
+         return 0;
+
+   aimee_block_t *blocks =
+       realloc(first_user->blocks, (size_t)(first_user->n_blocks + 1) * sizeof *blocks);
+   if (!blocks)
+      return 0;
+   first_user->blocks = blocks;
+   memmove(&blocks[1], &blocks[0], (size_t)first_user->n_blocks * sizeof *blocks);
+   memset(&blocks[0], 0, sizeof blocks[0]);
+   blocks[0].type = AIMEE_BLK_TEXT;
+   blocks[0].text = strdup(instructions);
+   if (!blocks[0].text)
+   {
+      memmove(&blocks[0], &blocks[1], (size_t)first_user->n_blocks * sizeof *blocks);
+      return 0;
+   }
+   first_user->n_blocks += 1;
+   return 1;
+}
+
+/* Flat-text persona placement, for plain-chat handlers with no IR to mutate. */
+char *aimee_ir_prepend_persona_text(const char *text, const char *instructions)
+{
+   const char *body = text ? text : "";
+   if (!instructions || !instructions[0] || strstr(body, "<aimee-persona ") != NULL)
+      return strdup(body);
+   size_t ilen = strlen(instructions), blen = strlen(body);
+   char *out = malloc(ilen + blen + 2);
+   if (!out)
+      return NULL;
+   memcpy(out, instructions, ilen);
+   out[ilen] = '\n';
+   memcpy(out + ilen + 1, body, blen + 1);
+   return out;
+}
+
 static int session_text_has(const char *text, const char *needle)
 {
    return text && needle && strstr(text, needle) != NULL;

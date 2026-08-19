@@ -47,6 +47,13 @@ static char *kb_status_provider(void)
    return kb_client_status_json();
 }
 
+/* The runtime is the thin client's sole discovery endpoint. Fold the KB's
+ * independently registered one-surface modules into that projection. */
+static char *kb_agent_surfaces_provider(void)
+{
+   return kb_client_agent_surfaces_json();
+}
+
 /* GET /v1/kb/curator provider: the curator observability block (§4). */
 static char *kb_curator_provider(void)
 {
@@ -308,6 +315,7 @@ static int notes_search_handler(const char *body, char *resp, int cap)
 
 void server_native_register(void)
 {
+   server_http_set_kb_agent_surfaces_provider(kb_agent_surfaces_provider);
    server_http_set_rules_provider(rules_provider);
    server_http_set_dashboard_memory_provider(dashboard_memory_provider);
    server_http_set_dashboard_reminders_provider(dashboard_reminders_provider);

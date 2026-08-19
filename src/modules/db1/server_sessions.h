@@ -52,6 +52,17 @@ extern "C"
 
    /* UPDATE source + chat_key (gateway origin). Returns 0 on success. */
 
+   /* Atomically reserve first-message persona delivery on this durable session.
+    * Returns 1 when THIS caller won the claim and must deliver, 0 when another
+    * caller already claimed or completed it, -1 on error. Pair every 1 with
+    * db1_server_session_persona_delivery_finish so a failed delivery does not
+    * leave the session wedged mid-claim. */
+   int db1_server_session_persona_delivery_claim(const char *id);
+
+   /* Release a claim: delivered != 0 marks it done, 0 returns it to unclaimed
+    * so a later request retries. Returns 0 on success. */
+   int db1_server_session_persona_delivery_finish(const char *id, int delivered);
+
    /* DELETE by id. Returns 0 on success. */
    int db1_server_session_delete(const char *id);
 

@@ -301,6 +301,13 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
       eff_session = rctx->principal;
    else
       eff_session = session_id();
+   char aimee_metadata[256] = "";
+   if (is_ingress && rctx)
+      snprintf(aimee_metadata, sizeof(aimee_metadata),
+               "{\"aimee_tool_calls\":%d,\"aimee_redundant_tool_calls\":%d,"
+               "\"aimee_intervention\":\"%s\",\"aimee_tool_transport\":\"%s\"}",
+               rctx->aimee_tool_calls, rctx->aimee_redundant_tool_calls, rctx->aimee_intervention,
+               rctx->aimee_tool_transport);
    db1_token_audit_row_t row = {
        .session_id = eff_session,
        .delegation_id = deleg_id ? deleg_id : "",
@@ -323,6 +330,7 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
         * `model`; falls back to model when not separately recorded. */
        .served_model = result->served_model[0] ? result->served_model : bill_model,
        .duration_ms = result->latency_ms,
+       .metadata = aimee_metadata,
        .prompt_tokens = usage.input_tokens,
        .completion_tokens = usage.output_tokens,
        .cache_write_tokens = usage.cache_write_tokens,

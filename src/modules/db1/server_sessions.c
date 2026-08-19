@@ -94,6 +94,70 @@ int db1_server_session_set_outcome(const char *id, const char *outcome)
    return run_simple_update("UPDATE server_sessions SET outcome = ? WHERE id = ?", id, outcome);
 }
 
+/* Claim first-message persona delivery, once, for this durable session.
+ *
+ * The claim and the test are one UPDATE: `WHERE persona_delivery_state = 0`
+ * makes exactly one of two concurrent first requests observe changes()==1, so
+ * the persona is delivered once even when a client opens two connections at
+ * the same instant. A separate read-then-write would let both pass the read. */
+int db1_server_session_persona_delivery_claim(const char *id)
+{
+   if (!id || !id[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   static const char *claim_sql =
+       "UPDATE server_sessions SET persona_delivery_state = 2, last_activity_at = datetime('now')"
+       " WHERE id = ? AND persona_delivery_state = 0";
+   if (sqlite3_prepare_v2(db, claim_sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(stmt);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
+   sqlite3_finalize(stmt);
+   if (rc != SQLITE_DONE)
+      return -1;
+   if (changed == 1)
+      return 1;
+
+   /* No row changed: either someone else holds/completed the claim, or the
+    * session does not exist. Only the first is "already handled". */
+   static const char *read_sql = "SELECT persona_delivery_state FROM server_sessions WHERE id = ?";
+   if (sqlite3_prepare_v2(db, read_sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT);
+   rc = sqlite3_step(stmt);
+   int state = (rc == SQLITE_ROW) ? sqlite3_column_int(stmt, 0) : -1;
+   sqlite3_finalize(stmt);
+   return state >= 1 ? 0 : -1;
+}
+
+/* Release a claim. delivered != 0 records success; 0 returns the session to
+ * unclaimed so a later request retries rather than the persona being lost
+ * because one request failed after claiming. */
+int db1_server_session_persona_delivery_finish(const char *id, int delivered)
+{
+   if (!id || !id[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql =
+       "UPDATE server_sessions SET persona_delivery_state = ?, last_activity_at = datetime('now')"
+       " WHERE id = ? AND persona_delivery_state = 2";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_int(stmt, 1, delivered ? 1 : 0);
+   sqlite3_bind_text(stmt, 2, id, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(stmt);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
+   sqlite3_finalize(stmt);
+   return (rc == SQLITE_DONE && changed == 1) ? 0 : -1;
+}
+
 int db1_server_session_delete(const char *id)
 {
    if (!id)

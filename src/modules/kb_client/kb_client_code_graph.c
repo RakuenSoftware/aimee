@@ -17,7 +17,11 @@
 #include <string.h>
 
 #define KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS (8 * 1000)
-#define KB_CLIENT_CODE_CONTEXT_TIMEOUT_MS    (2 * 1000)
+/* Context composes exact, structural, and vector evidence into one bounded
+ * packet. On a warm KB that routinely takes more than two seconds, so the old
+ * 2s budget made the recommended first discovery command return no answer while
+ * ordinary graph reads succeeded. Use the same interactive read budget. */
+#define KB_CLIENT_CODE_CONTEXT_TIMEOUT_MS KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS
 
 char *kb_client_code_context(const char *query, const char *symbol, const char *project,
                              int *status_out)

@@ -148,6 +148,26 @@ static void test_no_message_match_reports_no_match(void)
    printf("  PASS: test_no_message_match_reports_no_match\n");
 }
 
+static void test_persona_delivery_tracks_durable_session_lifetime(void)
+{
+   const char *sid = "sid-persona-delivery";
+   assert(db1_server_session_create(sid, "gateway", "test-principal") == 0);
+   assert(db1_server_session_persona_delivery_claim(sid) == 1);
+   assert(db1_server_session_persona_delivery_claim(sid) == 0); /* reserved */
+   assert(db1_server_session_persona_delivery_finish(sid, 0) == 0);
+   assert(db1_server_session_persona_delivery_claim(sid) == 1); /* retry */
+   assert(db1_server_session_persona_delivery_finish(sid, 1) == 0);
+   assert(db1_server_session_persona_delivery_claim(sid) == 0); /* committed */
+
+   /* Normal session expiration/deletion removes the delivery record with it;
+    * recreating the same id is a genuinely new session and may deliver once. */
+   assert(db1_server_session_delete(sid) == 0);
+   assert(db1_server_session_create(sid, "gateway", "test-principal") == 0);
+   assert(db1_server_session_persona_delivery_claim(sid) == 1);
+   assert(db1_server_session_persona_delivery_finish(sid, 1) == 0);
+   printf("  PASS: test_persona_delivery_tracks_durable_session_lifetime\n");
+}
+
 int main(void)
 {
    assert(db1_init(":memory:") == 0);
@@ -158,6 +178,7 @@ int main(void)
    test_hidden_sources_excluded_unless_included();
    test_principal_scope_excludes_other_operator();
    test_no_message_match_reports_no_match();
+   test_persona_delivery_tracks_durable_session_lifetime();
    printf("session_search_tool: all tests passed\n");
    return 0;
 }

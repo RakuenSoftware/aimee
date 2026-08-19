@@ -223,13 +223,16 @@ __attribute__((weak)) int aimee_ir_responses_to_chat(const char *body, char *mod
 
 __attribute__((weak)) void *aimee_ir_build_from_chat(const char *agent_model, const void *messages,
                                                      const void *tools, const char *system,
-                                                     const char *driver_name)
+                                                     const char *driver_name, int max_tokens,
+                                                     double temperature)
 {
    (void)agent_model;
    (void)messages;
    (void)tools;
    (void)system;
    (void)driver_name;
+   (void)max_tokens;
+   (void)temperature;
    return NULL;
 }
 

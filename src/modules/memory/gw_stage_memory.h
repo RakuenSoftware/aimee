@@ -60,6 +60,13 @@ extern "C"
     * (keeping the build in one place is what makes the consolidation byte-safe). */
    char *gw_memory_system_prompt(const char *query);
 
+   /* Legacy plain-chat adapter; see the definition for why it still exists. */
+   char *gw_memory_system_prompt_for_session(const char *query, int session_start);
+
+   /* Prepend the caller-resolved persona payload to the first user message.
+    * `ud` is the immutable payload for this request. */
+   int ir_stage_persona_instructions(aimee_request_t *ir, void *ud);
+
    /* Slice 7: 1 unless AIMEE_STAGE_MEMORY is explicitly disabled (0/off/false). Lets
     * the memory injection stage be removed from the pipeline "at will" via config; the
     * registry omits the stage when this returns 0. Default-ON, matching pre-registry. */

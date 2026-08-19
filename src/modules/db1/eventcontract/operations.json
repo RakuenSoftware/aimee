@@ -9631,6 +9631,80 @@
    }
   },
   {
+   "family": "sessions",
+   "id": 23,
+   "name": "server_session_persona_delivery_claim",
+   "c_name": "db1_server_session_persona_delivery_claim",
+   "c_params": [
+    "id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "claimed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   },
+   "c_returns": "int64"
+  },
+  {
+   "family": "sessions",
+   "id": 24,
+   "name": "server_session_persona_delivery_finish",
+   "c_name": "db1_server_session_persona_delivery_finish",
+   "c_params": [
+    "id",
+    "delivered"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "delivered",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
    "family": "runtime",
    "id": 1,
    "name": "runtime_state_set",

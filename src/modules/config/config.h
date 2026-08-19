@@ -401,6 +401,13 @@ typedef struct config
     * instead. The env var AIMEE_NO_CLIENT_INTEGRATIONS overrides this at runtime.
     * Set false to opt out. */
    int client_integrations_enabled;
+   /* client_tool_transport_preference: ordered registration preference for
+    * agent-facing Aimee capabilities. "cli-first" (default) selects a CLI
+    * descriptor when a capability offers both CLI and MCP; "mcp-first" selects
+    * MCP. A capability that offers only one surface always keeps that surface,
+    * so future MCP-only modules from aimee-server or aimee-kb remain reachable
+    * under cli-first without duplicating capabilities that offer both. */
+   char client_tool_transport_preference[16];
    /* audit_action_enabled: emit a per-tool-call governed-action row (kind=
     * tool_action) to audit.log from pre_tool_check. Default-ON (the
     * trajectory_export reader shipped, so the rows are consumable); audit is

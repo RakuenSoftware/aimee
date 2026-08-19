@@ -6,6 +6,10 @@
 #include <aimee/translation/aimee_frontend.h>
 #include "modules/memory/gw_stage_memory.h" /* ir_stage_memory + gw_stage_memory_enabled */
 #include "config.h" /* config_load + config_module_enabled (modules.memory) */
+#include "persona.h"
+#include "server_http.h"          /* session_persona_get */
+#include "server_http_identity.h" /* inbound session identity */
+#include "request_context.h"
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "aimee.h"          /* size macros for agent_types.h */
 #include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
@@ -52,6 +56,94 @@ static int ir_memory_enabled(void)
    return config_module_enabled(tri, gw_stage_memory_enabled());
 }
 
+static char *ir_resolve_persona_instructions(void)
+{
+   char name[PERSONA_NAME_MAX] = "";
+   const char *sid = server_http_identity_session_hdr();
+   if (!(sid && sid[0] && session_persona_get(sid, name, sizeof name)))
+      config_current_persona(name, sizeof name);
+   if (strcmp(name, "engineer") == 0 && config_default_persona()[0])
+      snprintf(name, sizeof name, "%s", config_default_persona());
+   return persona_compose_primary_instructions(name, NULL);
+}
+
+/* The neutral IR keeps provider-native tool sidecars so a Responses request can
+ * survive its intermediate chat-shaped hop and be rebuilt for a Responses
+ * backend. That preservation must end at an actual OpenAI chat backend: its
+ * `tools` array accepts function entries only (llama.cpp rejects a Codex
+ * `custom` tool before inference). Filter only the final provider request, after
+ * the driver is known, so chatgpt/Responses still receives native tool types. */
+static void filter_openai_chat_tools(cJSON *provider_request, int is_responses)
+{
+   if (is_responses || !provider_request)
+      return;
+   cJSON *tools = cJSON_GetObjectItemCaseSensitive(provider_request, "tools");
+   if (!cJSON_IsArray(tools))
+      return;
+   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+   {
+      cJSON *tool = cJSON_GetArrayItem(tools, i);
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "type"));
+      if (type && strcmp(type, "function") != 0)
+         cJSON_DeleteItemFromArray(tools, i);
+   }
+   if (cJSON_GetArraySize(tools) == 0)
+      cJSON_DeleteItemFromObjectCaseSensitive(provider_request, "tools");
+}
+
+char *aimee_ir_prepend_active_persona_text(const char *text, int conversation_established)
+{
+   const char *sid = server_http_identity_session_hdr();
+   int claim = session_persona_delivery_claim(sid);
+   if (claim == 0)
+      return strdup(text ? text : "");
+   if (claim < 0)
+   {
+      fprintf(stderr, "aimee: persona delivery state unavailable; retaining retry eligibility\n");
+      return NULL;
+   }
+   /* A migrated/restarted named session starts with delivery_state=0 even when
+    * its transcript is already established. Commit that observation before a
+    * later compacted request drops the assistant history; otherwise the legacy
+    * flat path would misclassify the compacted turn as a new conversation and
+    * inject a persona midway through it. */
+   if (conversation_established)
+   {
+      char *out = strdup(text ? text : "");
+      session_persona_delivery_finish(sid, out != NULL);
+      return out;
+   }
+   char *instructions = ir_resolve_persona_instructions();
+   char *out = aimee_ir_prepend_persona_text(text, instructions);
+   session_persona_delivery_finish(sid, instructions && instructions[0] && out);
+   free(instructions);
+   return out;
+}
+
+/* A transform returning zero can still mean the persona was already present, or
+ * that a restarted server first observed an established conversation.  Both are
+ * terminal.  Only a genuine first request that could not be mutated (for example
+ * allocation failure or no user message yet) should release the reservation. */
+static int ir_persona_delivery_already_satisfied(const aimee_request_t *ir)
+{
+   if (!ir)
+      return 0;
+   for (int i = 0; i < ir->n_messages; i++)
+   {
+      const aimee_message_t *message = &ir->messages[i];
+      if (message->role && strcmp(message->role, "assistant") == 0)
+         return 1;
+      if (!message->role || strcmp(message->role, "user") != 0)
+         continue;
+      for (int j = 0; j < message->n_blocks; j++)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             strstr(message->blocks[j].text, "<aimee-persona ") != NULL)
+            return 1;
+      return 0;
+   }
+   return 0;
+}
+
 void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
 {
    /* The one place modules register on the IR (universal-gateway P4): fired once per
@@ -59,6 +151,17 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
     * is the first ported module -- it replaces gw_stage_memory's two structured-ingress
     * arms (anthropic /v1/messages + /v1/responses). The four legacy plain-chat handlers
     * stay on gw_memory_system_prompt until agent_execute itself moves onto the IR. */
+   const char *sid = server_http_identity_session_hdr();
+   int persona_first = session_persona_delivery_claim(sid);
+   if (persona_first < 0)
+      fprintf(stderr, "aimee: persona delivery state unavailable; retaining retry eligibility\n");
+   char *persona_instructions = persona_first > 0 ? ir_resolve_persona_instructions() : NULL;
+   int persona_inserted = 0;
+   if (persona_instructions && persona_instructions[0])
+      persona_inserted = ir_stage_persona_instructions(ir, persona_instructions);
+   int persona_delivered = persona_inserted || ir_persona_delivery_already_satisfied(ir);
+   if (persona_first > 0)
+      session_persona_delivery_finish(sid, persona_delivered);
    const aimee_ir_transform_t stages[] = {
        {"memory", ir_stage_memory, NULL, memory_enabled},
        /* Runs AFTER memory, so the opening turn already carries the guidance that
@@ -69,6 +172,8 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
         * that will actually be sent rather than the one that arrived. */
        {"session_assist", aimee_ir_stage_session_assist, NULL, 1},
    };
+   if (persona_inserted)
+      ir->mutated = 1;
    aimee_ir_run_transforms(ir, stages, sizeof stages / sizeof stages[0]);
 
    /* What the turn actually did, recorded on the ingress request so the ordinary
@@ -145,6 +250,7 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
       aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_ANTHROPIC);
       return NULL;
    }
+   filter_openai_chat_tools(prov, is_responses);
    char *s = cJSON_PrintUnformatted(prov);
    cJSON_Delete(prov);
    if (s)
@@ -302,9 +408,9 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    aimee_ir_apply_request_stages(
        &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
 
-   int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);
+   cJSON *prov = is_responses_wire ? responses_backend_build(&ir) : openai_backend_build(&ir);
    aimee_request_free(&ir);
+   filter_openai_chat_tools(prov, is_responses_wire);
    if (!prov)
       aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_OPENAI_CHAT);
    else

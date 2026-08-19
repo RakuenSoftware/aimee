@@ -71,7 +71,7 @@
     "src/tests/test_memory_advanced.c": 3,
     "src/tests/test_memory_retrieval_eval.c": 2,
     "src/tests/test_oauth_reauth.c": 1,
-    "src/tests/test_persona.c": 13,
+    "src/tests/test_persona.c": 17,
     "src/tests/test_pki.c": 1,
     "src/tests/test_platform_process.c": 2,
     "src/tests/test_prompts.c": 14,
