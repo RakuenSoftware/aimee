@@ -212,6 +212,12 @@ static const sample_t SAMPLES[] = {
     {"kb.update", {"v0", "v1", NULL}},
     {"kb.update", {"", "v1", NULL}},
     {"kb.update", {"v0", "v1", "--embed", "x", NULL}},
+    {"curator.implements", {NULL}},
+    {"curator.implements", {"v0", NULL}},
+    {"curator.implements", {"", NULL}},
+    {"curator.synthesize", {NULL}},
+    {"curator.synthesize", {"v0", NULL}},
+    {"curator.synthesize", {"", NULL}},
 };
 
 static const char *spec_for(const char *method)

@@ -178,3 +178,10 @@
  "{\"fields\":[{\"json\":\"project\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 {"kb.update",
  "{\"fields\":[{\"json\":\"path\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\"}]}"},
+
+{"curator.implements",
+ "{\"fields\":[{\"json\":\"topic\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+
+{"curator.synthesize",
+ "{\"fields\":[{\"json\":\"topic\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+
