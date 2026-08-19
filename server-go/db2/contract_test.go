@@ -98,6 +98,7 @@ type wireBaseline struct {
 				PurgedCount           uint32            `json:"purged_count"`
 				RequeuedCount         uint32            `json:"requeued_count"`
 				ExpiredCount          uint32            `json:"expired_count"`
+				DirectivesExpired     uint32            `json:"directives_expired"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -243,7 +244,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 58 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 59 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -300,7 +301,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[54].Name != "project_count" ||
 		baseline.Operations[55].Name != "purge_hidden_pollution" ||
 		baseline.Operations[56].Name != "requeue_drifted" ||
-		baseline.Operations[57].Name != "prospective_sweep_expired" {
+		baseline.Operations[57].Name != "prospective_sweep_expired" ||
+		baseline.Operations[58].Name != "directive_sweep_expired" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -496,6 +498,49 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestDirectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[58]
+	if operation.Family != "maintenance" {
+		t.Fatalf("family = %q, want maintenance", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeDirectiveSweepExpiredRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeDirectiveSweepExpiredRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	if err := DecodeProspectiveSweepExpiredRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("prospective decoder accepted a directive request: %v", err)
+	}
+	// Operation 2 of the index family produces the same bytes. Asserting the
+	// share rather than a separation keeps the envelope's actual reach honest.
+	if err := DecodeEntityEdgeNormalizeWeightsRequest(wantRequest); err != nil {
+		t.Fatalf("expected the index family's second operation to share these bytes: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeDirectiveSweepExpiredRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeDirectiveSweepExpiredReply(vector.DirectivesExpired)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		directives, err := DecodeDirectiveSweepExpiredReply(got)
+		if err != nil || directives != vector.DirectivesExpired {
+			t.Fatalf("decode = (%d, %v)", directives, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		directives, err := DecodeDirectiveSweepExpiredReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || directives != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, directives, err)
 		}
 	}
 }

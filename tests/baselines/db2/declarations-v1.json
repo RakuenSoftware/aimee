@@ -6889,9 +6889,15 @@
           "line": 59
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_sweep_expired operation replaces the sweep that closes epistemic directives whose validity window has passed. It carries the same fixed policy as the prospective sweep it sits beside: the two states, the requirement that a directive carry a window at all, and the database clock. A directive is an instruction the system holds itself to, so retiring one early on a caller's wrong clock would quietly drop a constraint that is still in force."
+      },
       "signature": "int db2_directive_sweep_expired ( void )",
       "signature_sha256": "7a61bc9ef65700d4345680f65dcbb28b9f858a29b7433cfae16b369e6aeae62b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_sweep_expired"
     },
     {
@@ -26082,15 +26088,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "63f7f449185da8021fc5248399441bc4f3721fcd607f9fd27ae182069df81fbb",
+  "fingerprint": "9715936a32b7faafce93153c1fabf158587073d5e1d7a2b409be822048c0fa5c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 615,
+    "audit_pending": 614,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 343
+    "reviewed": 344
   }
 }

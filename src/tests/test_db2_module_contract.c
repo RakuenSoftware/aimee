@@ -83,6 +83,8 @@ static int requeue_drifted_value;
 static int requeue_drifted_calls;
 static int prospective_sweep_value;
 static int prospective_sweep_calls;
+static int directive_sweep_value;
+static int directive_sweep_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -667,6 +669,17 @@ static int prospective_sweep_expired(void)
 {
    prospective_sweep_calls++;
    return prospective_sweep_value;
+}
+
+int db2_directive_sweep_expired(void)
+{
+   return 0;
+}
+
+static int directive_sweep_expired(void)
+{
+   directive_sweep_calls++;
+   return directive_sweep_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1373,6 +1386,8 @@ static void reset(void)
    requeue_drifted_calls = 0;
    prospective_sweep_value = 7;
    prospective_sweep_calls = 0;
+   directive_sweep_value = 8;
+   directive_sweep_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2667,6 +2682,37 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_directive_sweep_expired_wire(void)
+{
+   uint8_t request[AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_REQUEST_LEN] = {0};
+   assert(aimee_db2_directive_sweep_expired_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_directive_sweep_expired_request_decode(request, sizeof(request)) == 0);
+   /* Second maintenance operation, so the first one must refuse it. It shares
+    * operation number 2 with the index family's second operation, whose empty
+    * request is byte-identical -- the stage separates them, not the envelope. */
+   assert(aimee_db2_prospective_sweep_expired_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_directive_sweep_expired_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, directives = 99;
+   assert(aimee_db2_directive_sweep_expired_reply_encode(8, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_directive_sweep_expired_reply_decode(reply, reply_len, &directives) == 0 &&
+          directives == 8);
+   assert(aimee_db2_directive_sweep_expired_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_directive_sweep_expired_reply_decode(reply, reply_len, &directives) == 0 &&
+          directives == 0);
+   assert(aimee_db2_directive_sweep_expired_reply_encode(AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_MAX + 1u,
+                                                         reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_directive_sweep_expired_reply_encode(8, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_directive_sweep_expired_reply_encode(8, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_directive_sweep_expired_reply_decode(reply, reply_len, &directives) == -1 &&
+          directives == 0);
 }
 
 static void test_prospective_sweep_expired_wire(void)
@@ -4895,6 +4941,42 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_directive_sweep_expired_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.directive_sweep_expired = directive_sweep_expired};
+   uint8_t request[AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_RESPONSE_LEN];
+   uint32_t response_len = 99, directives = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED};
+   assert(aimee_db2_directive_sweep_expired_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(directive_sweep_calls == 1);
+   assert(aimee_db2_directive_sweep_expired_reply_decode(response, response_len, &directives) ==
+              0 &&
+          directives == 8);
+
+   /* Nothing open has passed its window, and a failed statement, are both
+    * zero from this backend. Pinned so the limitation stays visible. */
+   directive_sweep_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_directive_sweep_expired_reply_decode(response, response_len, &directives) ==
+              0 &&
+          directives == 0);
+   directive_sweep_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   directive_sweep_value = 8;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_prospective_sweep_expired_handler(void)
 {
    reset();
@@ -6786,6 +6868,7 @@ int main(void)
    test_purge_hidden_pollution_wire();
    test_requeue_drifted_wire();
    test_prospective_sweep_expired_wire();
+   test_directive_sweep_expired_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6844,6 +6927,7 @@ int main(void)
    test_purge_hidden_pollution_handler();
    test_requeue_drifted_handler();
    test_prospective_sweep_expired_handler();
+   test_directive_sweep_expired_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

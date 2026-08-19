@@ -164,6 +164,14 @@
       "reason": "The typed lifecycle.dimension_reset operation keeps schema replacement, maintenance marking, and requeue accounting inside one DB2-owned operator transaction while returning only bounded structured evidence."
     },
     {
+      "symbol": "db2_directive_sweep_expired",
+      "signature_sha256": "7a61bc9ef65700d4345680f65dcbb28b9f858a29b7433cfae16b369e6aeae62b",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.directive_sweep_expired operation replaces the sweep that closes epistemic directives whose validity window has passed. It carries the same fixed policy as the prospective sweep it sits beside: the two states, the requirement that a directive carry a window at all, and the database clock. A directive is an instruction the system holds itself to, so retiring one early on a caller's wrong clock would quietly drop a constraint that is still in force."
+    },
+    {
       "symbol": "db2_embedder_serving_id",
       "signature_sha256": "5898a1bdc571792a4b16c259f8fdabbbe26d17272c55d0670cf98d7488917972",
       "disposition": "wire-operation",

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "bc99c8a52e00a3dc1351a873abfc077811db1c111bd5d10fbdd91670900f8e54"
+const ContractSHA256 = "274ef19ab8c907fed4b819940097712f1e4664f63b9bca283a0fa1f798920321"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -345,6 +345,10 @@ const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
 const ProspectiveSweepExpiredMax uint32 = 2147483647
+const EventDirectiveSweepExpired = EventMaintenance
+const StageDirectiveSweepExpired = FamilyMaintenance
+const OperationDirectiveSweepExpired uint32 = 2
+const DirectiveSweepExpiredMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2193,6 +2197,55 @@ func DecodeProspectiveSweepExpiredReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return expiredCount, nil
+}
+
+// EncodeDirectiveSweepExpiredRequest emits the empty request envelope. The
+// states and the clock are policy and never travel.
+func EncodeDirectiveSweepExpiredRequest() []byte {
+	header, err := EncodeRequestHeader(OperationDirectiveSweepExpired, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeDirectiveSweepExpiredRequest validates the exact maintenance-family
+// envelope.
+func DecodeDirectiveSweepExpiredRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveSweepExpired ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeDirectiveSweepExpiredReply emits one bounded u32 directive expiry count.
+func EncodeDirectiveSweepExpiredReply(directivesExpired uint32) ([]byte, error) {
+	if directivesExpired > DirectiveSweepExpiredMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDirectiveSweepExpired, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], directivesExpired)
+	return reply, nil
+}
+
+// DecodeDirectiveSweepExpiredReply validates the operation and bounded count.
+func DecodeDirectiveSweepExpiredReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDirectiveSweepExpired ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	directivesExpired := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if directivesExpired > DirectiveSweepExpiredMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return directivesExpired, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

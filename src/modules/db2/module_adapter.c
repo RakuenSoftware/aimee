@@ -7,6 +7,7 @@
 #include "c/db2_pool.h"
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
+#include "c/epistemic_directives.h"
 #include "c/prospective_memories.h"
 #include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
@@ -310,6 +311,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .purge_hidden_pollution = db2_code_index_purge_hidden_pollution,
        .requeue_drifted = db2_code_index_requeue_drifted,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
+       .directive_sweep_expired = db2_directive_sweep_expired,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -342,7 +344,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_PROJECT_COUNT &&
         invocation->stage_id != AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION &&
         invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED &&
-        invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED))
+        invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
+        invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1365,7 +1368,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }
 
-   if (invocation->stage_id == AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED)
+   if (invocation->stage_id == AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED ||
+       invocation->stage_id == AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED)
    {
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {
@@ -1385,6 +1389,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_prospective_sweep_expired_reply_encode((uint32_t)expired, response_body,
                                                               response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_directive_sweep_expired_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->directive_sweep_expired)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Same collapse as the sweep above: nothing open has passed its
+          * window, and a failed statement, both arrive as zero. The clock
+          * stays in the database for the same reason it does there, and it
+          * matters more here -- a directive is a rule the system holds itself
+          * to, so retiring one early drops a constraint still in force. */
+         int directives = backend->directive_sweep_expired();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (directives < 0 || (uint32_t)directives > AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_directive_sweep_expired_reply_encode((uint32_t)directives, response_body,
+                                                            response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

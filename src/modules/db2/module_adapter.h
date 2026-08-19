@@ -80,6 +80,7 @@ typedef struct
    int (*purge_hidden_pollution)(void);
    int (*requeue_drifted)(void);
    int (*prospective_sweep_expired)(void);
+   int (*directive_sweep_expired)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
