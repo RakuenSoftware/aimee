@@ -70,3 +70,25 @@ Point the client at the recorder with `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN`
 (not `AIMEE_API_*`, which is read by other tooling and leaves the client
 unauthenticated, which shows up as `manifest -> 401` and a fallback to the
 client's compiled tables, quietly testing the wrong thing).
+
+## The exploratory passes
+
+`exploratory.sh` drives the served surface against a real server and prints what
+reached the wire. `adversarial.sh` does the same with inputs nobody would think
+to sample.
+
+They earned their place immediately. `index.structure` shipped a spec that put
+the file in `project`, because marshal_index_file_request sends
+`<project> <file_path>` for TWO positionals and `<file_path>` alone for one --
+and the differential test never generated a single positional, so the compiled
+marshaller and the interpreter were only ever compared where they agreed.
+`aimee index structure <file>`, the way the command is actually used, answered
+"missing file_path". No amount of spec-derived sampling would have found that;
+running the real command did.
+
+What the adversarial pass confirmed rather than found: `--days -100` clamps to
+1, `--days abc` parses to 0 and clamps to 1, `--json` in a positional slot is
+parsed as the flag it is, unicode and embedded quotes and newlines survive the
+wire intact, and the session cascade resolves --session over $AIMEE_SESSION_ID
+over the literal "default" -- that last one checked with the variable actually
+SET, which is the only way the precedence is observable at all.
