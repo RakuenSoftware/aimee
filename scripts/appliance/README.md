@@ -34,7 +34,7 @@ The second one earned its place. `memory.delete` shipped with a spec saying
   4294967297   -> 1            <-- deletes memory 1
 ```
 
-atoi() keeps the low 32 bits as a signed int, so the wrap lands near zero — on
+atoi() keeps the low 32 bits as a signed int, so the wrap lands near zero, on
 low-numbered, early rows. The differential test could not see it: its samples
 come from the spec, and every id it generated was small.
 
@@ -53,7 +53,7 @@ Hold the client binary **constant** and swap only the server:
 ```
 
 The client did not change. If its behaviour still changes, it is obeying the
-server — which is the whole point of the thin client, and the reason a fix like
+server. That is the whole point of the thin client, and the reason a fix like
 this ships without touching a single installed client.
 
 ## Running them
@@ -67,6 +67,6 @@ bash wire_assertions.sh              # does the client send what they say?
 ```
 
 Point the client at the recorder with `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN`
-(not `AIMEE_API_*` — that pair is read by other tooling and leaves the client
+(not `AIMEE_API_*`, which is read by other tooling and leaves the client
 unauthenticated, which shows up as `manifest -> 401` and a fallback to the
 client's compiled tables, quietly testing the wrong thing).
