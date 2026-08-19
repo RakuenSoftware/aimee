@@ -729,6 +729,11 @@
           "id": 16,
           "name": "db1-lifecycle",
           "event_kind": 11792
+        },
+        {
+          "id": 17,
+          "name": "db1-mgmt-jwks",
+          "event_kind": 11793
         }
       ]
     }

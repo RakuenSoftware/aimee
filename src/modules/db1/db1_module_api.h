@@ -559,6 +559,17 @@
 #define AIMEE_DB1_OP_STAGE_ATTEMPT_GET                   31u
 #define AIMEE_DB1_OP_WORK_ITEM_RECORD_OUTCOME            32u
 
+/* Family 17: the management-JWKS cache row: the envelope the server verified,
+ * when it is valid for, and the digests that pin it. Digests cross as hex
+ * because the wire has no bytes. */
+
+#define AIMEE_DB1_EVENT_MGMT_JWKS 11793u
+#define AIMEE_DB1_STAGE_MGMT_JWKS 17u
+
+#define AIMEE_DB1_OP_MGMT_JWKS_READ       1u
+#define AIMEE_DB1_OP_MGMT_JWKS_GENERATION 2u
+#define AIMEE_DB1_OP_MGMT_JWKS_INSTALL    3u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

@@ -42,6 +42,7 @@
 #include "roundtable_pipeline.h"
 #include "remote_client_grant.h"
 #include "server_identity_jti.h"
+#include "mgmt_jwks_cache.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -82,7 +83,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_GUARDRAIL_STATE,  AIMEE_DB1_EVENT_ENSEMBLE,
     AIMEE_DB1_EVENT_WORKFLOW,         AIMEE_DB1_EVENT_ROUNDTABLE,
     AIMEE_DB1_EVENT_IDENTITY,         AIMEE_DB1_EVENT_CHECKPOINTS,
-    AIMEE_DB1_EVENT_JTI_REPLAY,
+    AIMEE_DB1_EVENT_JTI_REPLAY,       AIMEE_DB1_EVENT_MGMT_JWKS,
 };
 
 static pid_t g_module = -1;
@@ -1476,6 +1477,61 @@ static void test_a_replayed_token_is_not_a_broken_store(void)
    printf("  PASS: a replayed token is not a broken store\n");
 }
 
+/* The digests here are the reason this family exists. A SHA-256 is bytes, the
+   wire carries NUL-terminated text, and a digest with a zero byte in it would
+   arrive short -- then compare equal to whatever followed it, in the path that
+   decides whether a management token is trusted. They cross as hex, so this
+   case puts a digest with an embedded zero through and reads it back. */
+static void test_a_digest_with_a_zero_byte_survives_the_wire(void)
+{
+   /* 00 in the middle and at the end: the two places a length-terminated
+      encoding would cut it short. */
+   const char *env_hex = "a1004b5c6d7e8f90a1b2c3d4e5f60718"
+                         "293a4b5c6d7e8f90a1b2c3d4e5f60700";
+   const char *man_hex = "00112233445566778899aabbccddeeff"
+                         "00112233445566778899aabbccddeeff";
+   const char *bundle_hex = "ff00ee11dd22cc33bb44aa5599668877"
+                            "ff00ee11dd22cc33bb44aa5599668877";
+
+   db1_mgmt_jwks_install_t in;
+   memset(&in, 0, sizeof in);
+   in.valid_from = 1000;
+   in.valid_until = 2000;
+   in.fetched_at = 1500;
+   snprintf(in.jwks, sizeof in.jwks, "%s", "7b226b657973223a5b5d7d"); /* {"keys":[]} */
+   snprintf(in.envelope, sizeof in.envelope, "%s", "an-envelope");
+   snprintf(in.envelope_sha256, sizeof in.envelope_sha256, "%s", env_hex);
+   snprintf(in.manifest_sha256, sizeof in.manifest_sha256, "%s", man_hex);
+   snprintf(in.trust_bundle_sha256, sizeof in.trust_bundle_sha256, "%s", bundle_hex);
+
+   db1_mgmt_jwks_row_t row;
+   memset(&row, 0, sizeof row);
+   must(db1_mgmt_jwks_read(&row) == 0, "there is no cached row to begin with");
+
+   must(db1_mgmt_jwks_install(&in) == 0, "installed the row");
+   must(db1_mgmt_jwks_install(&in) == 0, "installing the same envelope again is not a conflict");
+
+   db1_mgmt_jwks_install_t other = in;
+   snprintf(other.envelope_sha256, sizeof other.envelope_sha256, "%s",
+            "deadbeef00000000000000000000000000000000000000000000000000000000");
+   must(db1_mgmt_jwks_install(&other) == 1, "a DIFFERENT envelope is a conflict, not an overwrite");
+
+   memset(&row, 0, sizeof row);
+   must(db1_mgmt_jwks_read(&row) == 1, "read the row back");
+   must(strcmp(row.envelope_sha256, env_hex) == 0,
+        "the digest with a zero byte in the middle and at the end came back whole");
+   must(strcmp(row.manifest_sha256, man_hex) == 0, "so did the one that starts with a zero byte");
+   must(strcmp(row.trust_bundle_sha256, bundle_hex) == 0, "and the third");
+   must(strcmp(row.envelope, "an-envelope") == 0, "the envelope crossed");
+   must(row.valid_from == 1000 && row.valid_until == 2000, "and its validity window");
+
+   int64_t generation = 0;
+   must(db1_mgmt_jwks_generation(&generation) == 1, "read the generation");
+   must(generation == 1, "which is one for a freshly installed row");
+
+   printf("  PASS: a digest with a zero byte survives the wire\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1530,6 +1586,7 @@ int main(int argc, char **argv)
    test_a_roundtable_run_round_trips_and_swaps_once();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
+   test_a_digest_with_a_zero_byte_survives_the_wire();
 
    stop_module();
    obs_bus_stop();

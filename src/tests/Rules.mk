@@ -2695,6 +2695,7 @@ $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication: \
 $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache: \
     $(OBJDIR)/tests/test_server_mgmt_jwks_cache.o \
     $(OBJDIR)/server/server_mgmt_jwks_cache.o \
+    $(OBJDIR)/modules/db1/mgmt_jwks_cache.o \
     $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
     $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
     $(OBJDIR)/kb/kb_mgmt_token_public.o \
@@ -5310,6 +5311,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/checkpoints_stage.o \
                                        $(OBJDIR)/modules/db1/jti_replay_stage.o \
                                        $(OBJDIR)/modules/db1/lifecycle_stage.o \
+                                       $(OBJDIR)/modules/db1/mgmt_jwks_stage.o \
+                                       $(OBJDIR)/modules/db1/mgmt_jwks_cache.o \
                                        $(OBJDIR)/modules/db1/server_identity_jti.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/wfe_store_lists.o \
                      $(OBJDIR)/modules/db1/server_management_jti.o \
@@ -6142,6 +6145,8 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
+                     $(OBJDIR)/modules/db1/mgmt_jwks_cache.o \
+                     $(OBJDIR)/server/server_mgmt_jwks_cache.o \
                      $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/wfe_store_lists.o \
                      $(OBJDIR)/modules/db1/server_management_jti.o \
                      $(OBJDIR)/modules/db1/server_identity_jti.o \

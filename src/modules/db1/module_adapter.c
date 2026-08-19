@@ -161,6 +161,9 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    case AIMEE_DB1_STAGE_WORKFLOW:
       return aimee_db1_stage_workflow(request_body, request_len, response_body, response_capacity,
                                       response_len);
+   case AIMEE_DB1_STAGE_MGMT_JWKS:
+      return aimee_db1_stage_mgmt_jwks(request_body, request_len, response_body, response_capacity,
+                                       response_len);
    case AIMEE_DB1_STAGE_LIFECYCLE:
       return aimee_db1_stage_lifecycle(request_body, request_len, response_body, response_capacity,
                                        response_len);

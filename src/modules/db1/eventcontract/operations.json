@@ -345,6 +345,21 @@
    "retired_sources": [
     "wfe_store.c"
    ]
+  },
+  {
+   "id": 17,
+   "name": "mgmt_jwks",
+   "event_kind": 11793,
+   "active": true,
+   "doc": "the management-JWKS cache row: the envelope the server verified, when it is valid for, and the digests that pin it. Digests cross as hex because the wire has no bytes.",
+   "client_doc": "",
+   "covers": "mgmt_jwks_cache",
+   "sources": [
+    "mgmt_jwks_cache"
+   ],
+   "retired_sources": [
+    "mgmt_jwks_cache.c"
+   ]
   }
  ],
  "result_codes": [
@@ -23606,6 +23621,168 @@
    "reply": {
     "fields": [],
     "max_bytes": 0
+   }
+  },
+  {
+   "family": "mgmt_jwks",
+   "id": 1,
+   "name": "mgmt_jwks_read",
+   "c_name": "db1_mgmt_jwks_read",
+   "c_params": [
+    "out"
+   ],
+   "c_returns": "found",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "struct": "db1_mgmt_jwks_row_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "generation",
+      "type": "int64"
+     },
+     {
+      "name": "valid_from",
+      "type": "int64"
+     },
+     {
+      "name": "valid_until",
+      "type": "int64"
+     },
+     {
+      "name": "envelope",
+      "type": "text"
+     },
+     {
+      "name": "envelope_sha256",
+      "type": "text"
+     },
+     {
+      "name": "manifest_sha256",
+      "type": "text"
+     },
+     {
+      "name": "trust_bundle_sha256",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "mgmt_jwks",
+   "id": 2,
+   "name": "mgmt_jwks_generation",
+   "c_name": "db1_mgmt_jwks_generation",
+   "c_params": [
+    "out"
+   ],
+   "c_returns": "found",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "generation",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "mgmt_jwks",
+   "id": 3,
+   "name": "mgmt_jwks_install",
+   "c_name": "db1_mgmt_jwks_install",
+   "c_params": [
+    "in"
+   ],
+   "c_returns": "int64",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_mgmt_jwks_install_t",
+    "fields": [
+     {
+      "name": "valid_from",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "valid_until",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "fetched_at",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "jwks",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "envelope",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "envelope_sha256",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "manifest_sha256",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "trust_bundle_sha256",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "outcome",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
    }
   }
  ]
