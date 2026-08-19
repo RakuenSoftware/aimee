@@ -731,6 +731,19 @@ int main(int argc, char **argv)
    assert(aimee_db2_directive_record_surface_call(call_client, &client, 9126, 0, 1, NULL, NULL) ==
           AIMEE_MODULE_CALL_INTERNAL);
 
+   /* Four by-id operations across two families against real Postgres, none of
+    * which matches a row on a fresh schema. The bump is the one that reports
+    * success anyway: its statement ran, and it does not ask whether it counted
+    * anything. The three deletes all report the miss as a failure. */
+   assert(aimee_db2_anti_pattern_bump_call(call_client, &client, 9127, 0, 41, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_anti_pattern_delete_call(call_client, &client, 9128, 0, 41, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
+   assert(aimee_db2_doc_delete_call(call_client, &client, 9129, 0, 43, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
+   assert(aimee_db2_task_delete_call(call_client, &client, 9130, 0, 44, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
+
    /* No decision is logged on a fresh schema, so none is due for review. This
     * backend reports a failed statement as -1 rather than as zero, so the zero
     * arriving here is the sweep having genuinely run and found nothing. */

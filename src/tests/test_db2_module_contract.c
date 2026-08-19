@@ -114,6 +114,18 @@ static int directive_suppress_calls;
 static int64_t directive_suppress_id;
 static int directive_surface_value;
 static int directive_surface_calls;
+static int anti_pattern_bump_value;
+static int anti_pattern_bump_calls;
+static int64_t anti_pattern_bump_seen;
+static int anti_pattern_delete_value;
+static int anti_pattern_delete_calls;
+static int64_t anti_pattern_delete_seen;
+static int doc_delete_value;
+static int doc_delete_calls;
+static int64_t doc_delete_seen;
+static int task_delete_value;
+static int task_delete_calls;
+static int64_t task_delete_seen;
 static int64_t directive_surface_id;
 static int mark_revisit_value;
 static int mark_revisit_calls;
@@ -886,6 +898,58 @@ static int directive_record_surface(int64_t directive_id)
    directive_surface_calls++;
    directive_surface_id = directive_id;
    return directive_surface_value;
+}
+
+int db2_anti_pattern_bump(int64_t anti_pattern_id)
+{
+   (void)anti_pattern_id;
+   return 0;
+}
+
+static int anti_pattern_bump(int64_t anti_pattern_id)
+{
+   anti_pattern_bump_calls++;
+   anti_pattern_bump_seen = anti_pattern_id;
+   return anti_pattern_bump_value;
+}
+
+int db2_anti_pattern_delete(int64_t anti_pattern_id)
+{
+   (void)anti_pattern_id;
+   return 0;
+}
+
+static int anti_pattern_delete(int64_t anti_pattern_id)
+{
+   anti_pattern_delete_calls++;
+   anti_pattern_delete_seen = anti_pattern_id;
+   return anti_pattern_delete_value;
+}
+
+int db2_kb_doc_delete(int64_t doc_id)
+{
+   (void)doc_id;
+   return 0;
+}
+
+static int doc_delete(int64_t doc_id)
+{
+   doc_delete_calls++;
+   doc_delete_seen = doc_id;
+   return doc_delete_value;
+}
+
+int db2_task_delete(int64_t task_id)
+{
+   (void)task_id;
+   return 0;
+}
+
+static int task_delete(int64_t task_id)
+{
+   task_delete_calls++;
+   task_delete_seen = task_id;
+   return task_delete_value;
 }
 
 static int directive_sweep_expired(void)
@@ -1695,6 +1759,18 @@ static void reset(void)
    directive_suppress_id = 0;
    directive_surface_value = 0;
    directive_surface_calls = 0;
+   anti_pattern_bump_value = 0;
+   anti_pattern_bump_calls = 0;
+   anti_pattern_bump_seen = 0;
+   anti_pattern_delete_value = 0;
+   anti_pattern_delete_calls = 0;
+   anti_pattern_delete_seen = 0;
+   doc_delete_value = 0;
+   doc_delete_calls = 0;
+   doc_delete_seen = 0;
+   task_delete_value = 0;
+   task_delete_calls = 0;
+   task_delete_seen = 0;
    directive_surface_id = 0;
    mark_revisit_value = 9;
    mark_revisit_calls = 0;
@@ -3189,6 +3265,45 @@ static void test_mark_revisit_due_wire(void)
    assert(aimee_db2_mark_revisit_due_reply_encode(9, reply, sizeof(reply), &reply_len) == 0);
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_mark_revisit_due_reply_decode(reply, reply_len, &marked) == -1 && marked == 0);
+}
+
+static void test_by_id_operations_wire(void)
+{
+   /* Four operations across two families that all carry one identifier and
+    * answer with an acknowledgement. What differs is what each does about a
+    * row that is not there, and that is recorded in the catalog rather than
+    * being visible on the wire -- these envelopes are indistinguishable. */
+   uint8_t bump[AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN] = {0};
+   uint8_t remove[AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN] = {0};
+   uint64_t decoded = 0;
+   assert(aimee_db2_anti_pattern_bump_request_encode(41, bump, sizeof(bump)) == 0);
+   assert(aimee_db2_anti_pattern_delete_request_encode(41, remove, sizeof(remove)) == 0);
+   assert(aimee_db2_anti_pattern_bump_request_decode(bump, sizeof(bump), &decoded) == 0 &&
+          decoded == 41);
+   /* Same family, same payload, adjacent numbers: bumping must never delete. */
+   assert(aimee_db2_anti_pattern_bump_request_decode(remove, sizeof(remove), &decoded) == -1);
+   assert(aimee_db2_anti_pattern_delete_request_decode(bump, sizeof(bump), &decoded) == -1);
+
+   assert(aimee_db2_anti_pattern_bump_request_encode(0, bump, sizeof(bump)) == -1);
+   assert(aimee_db2_anti_pattern_bump_request_encode(AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX + 1ull,
+                                                     bump, sizeof(bump)) == -1);
+
+   uint8_t doc[AIMEE_DB2_DOC_DELETE_REQUEST_LEN] = {0};
+   uint8_t task[AIMEE_DB2_TASK_DELETE_REQUEST_LEN] = {0};
+   assert(aimee_db2_doc_delete_request_encode(43, doc, sizeof(doc)) == 0);
+   assert(aimee_db2_task_delete_request_encode(44, task, sizeof(task)) == 0);
+   assert(aimee_db2_doc_delete_request_decode(task, sizeof(task), &decoded) == -1);
+   assert(aimee_db2_task_delete_request_decode(doc, sizeof(doc), &decoded) == -1);
+   /* Different families, so these also differ from the learning pair. */
+   assert(aimee_db2_anti_pattern_delete_request_decode(doc, sizeof(doc), &decoded) == -1);
+
+   uint8_t reply[AIMEE_DB2_TASK_DELETE_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99;
+   assert(aimee_db2_task_delete_reply_encode(reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_task_delete_reply_decode(reply, reply_len) == 0);
+   assert(aimee_db2_doc_delete_reply_decode(reply, reply_len) == -1);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_task_delete_reply_decode(reply, reply_len) == -1);
 }
 
 static void test_directive_id_operations_wire(void)
@@ -6121,6 +6236,48 @@ static void test_mark_revisit_due_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_by_id_operations_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.anti_pattern_bump = anti_pattern_bump,
+                                               .anti_pattern_delete = anti_pattern_delete,
+                                               .doc_delete = doc_delete,
+                                               .task_delete = task_delete};
+   uint8_t request[AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t bump = {.stage_id = AIMEE_DB2_STAGE_ANTI_PATTERN_BUMP};
+   assert(aimee_db2_anti_pattern_bump_request_encode(41, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &bump, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(anti_pattern_bump_calls == 1 && anti_pattern_bump_seen == 41);
+
+   /* The bump and the delete sit on one table and disagree about a missing
+    * row: the bump reports success whether or not it counted anything, the
+    * delete reports an error. Neither backend distinguishes that from a real
+    * failure, so on the wire both arrive as internal and the difference is
+    * only visible in the catalog. Pinned here so the disagreement is a
+    * decision on the record rather than something a caller trips over. */
+   anti_pattern_bump_value = -1;
+   assert(invoke(&backend, &bump, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   anti_pattern_bump_value = 0;
+
+   uint8_t task_request[AIMEE_DB2_TASK_DELETE_REQUEST_LEN];
+   uint8_t task_response[AIMEE_DB2_TASK_DELETE_RESPONSE_LEN];
+   aimee_module_invocation_t task = {.stage_id = AIMEE_DB2_STAGE_TASK_DELETE};
+   assert(aimee_db2_task_delete_request_encode(44, task_request, sizeof(task_request)) == 0);
+   assert(invoke(&backend, &task, task_request, sizeof(task_request), task_response,
+                 sizeof(task_response), &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(task_delete_calls == 1 && task_delete_seen == 44);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &bump, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &bump, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_directive_id_operations_handler(void)
 {
    reset();
@@ -8629,6 +8786,7 @@ int main(void)
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
    test_directive_id_operations_wire();
+   test_by_id_operations_wire();
    test_mark_revisit_due_wire();
    test_ingest_queue_reset_running_wire();
    test_evidence_reembed_all_wire();
@@ -8707,6 +8865,7 @@ int main(void)
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
    test_directive_id_operations_handler();
+   test_by_id_operations_handler();
    test_mark_revisit_due_handler();
    test_ingest_queue_reset_running_handler();
    test_evidence_reembed_all_handler();

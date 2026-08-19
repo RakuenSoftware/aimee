@@ -96,6 +96,10 @@ typedef struct
    int (*directive_sweep_expired)(void);
    int (*directive_suppress)(int64_t directive_id);
    int (*directive_record_surface)(int64_t directive_id);
+   int (*anti_pattern_bump)(int64_t anti_pattern_id);
+   int (*anti_pattern_delete)(int64_t anti_pattern_id);
+   int (*doc_delete)(int64_t doc_id);
+   int (*task_delete)(int64_t task_id);
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);

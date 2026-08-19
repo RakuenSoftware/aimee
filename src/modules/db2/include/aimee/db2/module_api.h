@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "9cda39ca129ab14875d9cd1ad6579837e11fc7df8b668119912f1e537a23ca66"
+#define AIMEE_DB2_CONTRACT_SHA256 "2be83d190a1bfa4b4bf8584b5f8451edebc0f2deebcc5e63b65a409663be72a4"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -684,6 +684,34 @@
 #define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN        24u
 #define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ERROR_LEN           24u
 #define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ID_MAX              9223372036854775807ull
+#define AIMEE_DB2_EVENT_ANTI_PATTERN_BUMP                      AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ANTI_PATTERN_BUMP                      AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP                  6u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN                32u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN               24u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_ERROR_LEN                  24u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX                     9223372036854775807ull
+#define AIMEE_DB2_EVENT_ANTI_PATTERN_DELETE                    AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ANTI_PATTERN_DELETE                    AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE                7u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN              32u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN             24u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_ERROR_LEN                24u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX                   9223372036854775807ull
+#define AIMEE_DB2_EVENT_DOC_DELETE                             AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_DOC_DELETE                             AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_DOC_DELETE                         2u
+#define AIMEE_DB2_DOC_DELETE_REQUEST_LEN                       32u
+#define AIMEE_DB2_DOC_DELETE_RESPONSE_LEN                      24u
+#define AIMEE_DB2_DOC_DELETE_ERROR_LEN                         24u
+#define AIMEE_DB2_DOC_DELETE_ID_MAX                            9223372036854775807ull
+#define AIMEE_DB2_EVENT_TASK_DELETE                            AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_TASK_DELETE                            AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_TASK_DELETE                        3u
+#define AIMEE_DB2_TASK_DELETE_REQUEST_LEN                      32u
+#define AIMEE_DB2_TASK_DELETE_RESPONSE_LEN                     24u
+#define AIMEE_DB2_TASK_DELETE_ERROR_LEN                        24u
+#define AIMEE_DB2_TASK_DELETE_ID_MAX                           9223372036854775807ull
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2598,6 +2626,226 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}
+
+static inline int aimee_db2_anti_pattern_bump_request_encode(uint64_t anti_pattern_id, uint8_t *output,
+                                                  size_t capacity)
+{
+   if (!output || anti_pattern_id == 0u || anti_pattern_id > AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX ||
+       capacity < AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, anti_pattern_id);
+   return 0;
+}
+
+static inline int aimee_db2_anti_pattern_bump_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *anti_pattern_id)
+{
+   if (anti_pattern_id)
+      *anti_pattern_id = 0u;
+   if (!anti_pattern_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX)
+      return -1;
+   *anti_pattern_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_anti_pattern_bump_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_anti_pattern_bump_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_anti_pattern_delete_request_encode(uint64_t anti_pattern_id, uint8_t *output,
+                                                  size_t capacity)
+{
+   if (!output || anti_pattern_id == 0u || anti_pattern_id > AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX ||
+       capacity < AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, anti_pattern_id);
+   return 0;
+}
+
+static inline int aimee_db2_anti_pattern_delete_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *anti_pattern_id)
+{
+   if (anti_pattern_id)
+      *anti_pattern_id = 0u;
+   if (!anti_pattern_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX)
+      return -1;
+   *anti_pattern_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_anti_pattern_delete_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_anti_pattern_delete_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_doc_delete_request_encode(uint64_t doc_id, uint8_t *output,
+                                                  size_t capacity)
+{
+   if (!output || doc_id == 0u || doc_id > AIMEE_DB2_DOC_DELETE_ID_MAX ||
+       capacity < AIMEE_DB2_DOC_DELETE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DOC_DELETE, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, doc_id);
+   return 0;
+}
+
+static inline int aimee_db2_doc_delete_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *doc_id)
+{
+   if (doc_id)
+      *doc_id = 0u;
+   if (!doc_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DOC_DELETE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DOC_DELETE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_DOC_DELETE_ID_MAX)
+      return -1;
+   *doc_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_doc_delete_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_DOC_DELETE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DOC_DELETE, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_DOC_DELETE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_doc_delete_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DOC_DELETE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DOC_DELETE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_task_delete_request_encode(uint64_t task_id, uint8_t *output,
+                                                  size_t capacity)
+{
+   if (!output || task_id == 0u || task_id > AIMEE_DB2_TASK_DELETE_ID_MAX ||
+       capacity < AIMEE_DB2_TASK_DELETE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TASK_DELETE, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, task_id);
+   return 0;
+}
+
+static inline int aimee_db2_task_delete_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *task_id)
+{
+   if (task_id)
+      *task_id = 0u;
+   if (!task_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_TASK_DELETE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_TASK_DELETE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_TASK_DELETE_ID_MAX)
+      return -1;
+   *task_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_task_delete_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_TASK_DELETE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TASK_DELETE, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_TASK_DELETE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_task_delete_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TASK_DELETE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TASK_DELETE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }
 
 static inline int aimee_db2_directive_suppress_request_encode(uint64_t directive_id, uint8_t *output,

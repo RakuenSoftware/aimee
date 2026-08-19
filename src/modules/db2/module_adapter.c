@@ -5,6 +5,7 @@
 #include "c/db2.h"
 #include "c/db2_internal.h"
 #include "c/db2_pool.h"
+#include "c/anti_patterns.h"
 #include "c/artifacts.h"
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
@@ -17,6 +18,7 @@
 #include "c/entity_edges.h"
 #include "c/epistemic_directives.h"
 #include "c/evidence_vectors.h"
+#include "c/kb_docs.h"
 #include "c/kb_payload.h"
 #include "c/kb_releases.h"
 #include "c/kb_runtime_state.h"
@@ -33,6 +35,7 @@
 #include "c/prospective_memories.h"
 #include "c/rel_types_store.h"
 #include "c/rules.h"
+#include "c/tasks.h"
 #include "c/trace_mining.h"
 
 static int production_health_counters(int promote_use_count, double promote_confidence,
@@ -349,6 +352,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
         * carries the state guard rather than checking it separately. */
        .directive_suppress = db2_directive_suppress,
        .directive_record_surface = db2_directive_record_surface,
+       .anti_pattern_bump = db2_anti_pattern_bump,
+       .anti_pattern_delete = db2_anti_pattern_delete,
+       .doc_delete = db2_kb_doc_delete,
+       .task_delete = db2_task_delete,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
        .ingest_queue_reset_running = db2_kb_ingest_queue_reset_running,
        .evidence_reembed_all = db2_evidence_reembed_all,
@@ -404,6 +411,10 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE &&
+        invocation->stage_id != AIMEE_DB2_STAGE_ANTI_PATTERN_BUMP &&
+        invocation->stage_id != AIMEE_DB2_STAGE_ANTI_PATTERN_DELETE &&
+        invocation->stage_id != AIMEE_DB2_STAGE_DOC_DELETE &&
+        invocation->stage_id != AIMEE_DB2_STAGE_TASK_DELETE &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
         invocation->stage_id != AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING &&
         invocation->stage_id != AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL &&
@@ -1612,6 +1623,44 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
+      uint64_t row_id = 0u;
+      if (aimee_db2_doc_delete_request_decode(request_body, request_len, &row_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DOC_DELETE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->doc_delete)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Deleting a document that is not there is an error, matching
+          * the anti-pattern delete rather than the bump. */
+         if (backend->doc_delete((int64_t)row_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_doc_delete_reply_encode(response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_task_delete_request_decode(request_body, request_len, &row_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_TASK_DELETE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->task_delete)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Two statements with no transaction: the edge delete runs
+          * first and its failure is ignored, then the task delete
+          * decides the result. A caller can be told the task is gone
+          * while its edges remain. The schema's foreign key cascades
+          * them anyway, which is why that looked safe; the catalog
+          * records that the pair is not atomic. */
+         if (backend->task_delete((int64_t)row_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_task_delete_reply_encode(response_body, response_capacity, response_len) !=
+             0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }
 
@@ -1720,6 +1769,46 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_trace_mining_last_id_reply_encode((uint64_t)last_trace_id, response_body,
                                                          response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t anti_pattern_id = 0u;
+      if (aimee_db2_anti_pattern_bump_request_decode(request_body, request_len, &anti_pattern_id) ==
+          0)
+      {
+         if (response_capacity < AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->anti_pattern_bump)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Reports success whenever the statement ran, so bumping an
+          * identifier that does not exist is indistinguishable from
+          * bumping one that does. The delete below makes the opposite
+          * choice on the same table; both are in the catalog. */
+         if (backend->anti_pattern_bump((int64_t)anti_pattern_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_anti_pattern_bump_reply_encode(response_body, response_capacity,
+                                                      response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_anti_pattern_delete_request_decode(request_body, request_len,
+                                                       &anti_pattern_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->anti_pattern_delete)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The opposite choice to the bump above: nothing deleted is
+          * reported as an error. The backend does not separate that
+          * from a failed statement, so both arrive as internal. */
+         if (backend->anti_pattern_delete((int64_t)anti_pattern_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_anti_pattern_delete_reply_encode(response_body, response_capacity,
+                                                        response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

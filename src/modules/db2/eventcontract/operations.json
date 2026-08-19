@@ -1803,6 +1803,54 @@
       }
     },
     {
+      "family": "learning",
+      "id": 6,
+      "name": "anti_pattern_bump",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Anti-pattern hit counts are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_anti_pattern_bump"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "anti_pattern_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807},
+        "policy": {"increments": "hit_count", "matches_missing_row": "reported-as-ok"}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "learning",
+      "id": 7,
+      "name": "anti_pattern_delete",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Anti-pattern rows are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_anti_pattern_delete"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "anti_pattern_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807},
+        "policy": {"matches_missing_row": "reported-as-error"}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -1824,6 +1872,56 @@
         "encoded_size_ok": 24,
         "encoded_size_error": 24,
         "payload": "none"
+      }
+    },
+    {
+      "family": "organization",
+      "id": 2,
+      "name": "doc_delete",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Document rows are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_kb_doc_delete"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "doc_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807},
+        "policy": {"matches_missing_row": "reported-as-error"}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "organization",
+      "id": 3,
+      "name": "task_delete",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Task rows and their edges are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_task_delete"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "task_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807},
+        "policy": {"matches_missing_row": "reported-as-error",
+                   "deletes_edges_first": true, "edge_delete_failure": "ignored",
+                   "atomic": false}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
       }
     },
     {

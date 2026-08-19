@@ -109,6 +109,10 @@ typedef struct
    int (*directive_sweep_expired)(void);
    int (*directive_suppress)(int64_t directive_id);
    int (*directive_record_surface)(int64_t directive_id);
+   int (*anti_pattern_bump)(int64_t anti_pattern_id);
+   int (*anti_pattern_delete)(int64_t anti_pattern_id);
+   int (*doc_delete)(int64_t doc_id);
+   int (*task_delete)(int64_t task_id);
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);
@@ -208,6 +212,14 @@ static int64_t directive_suppress_id;
 static int directive_suppress_calls;
 static int64_t directive_surface_id;
 static int directive_surface_calls;
+static int64_t anti_pattern_bump_seen;
+static int anti_pattern_bump_calls;
+static int64_t anti_pattern_delete_seen;
+static int anti_pattern_delete_calls;
+static int64_t doc_delete_seen;
+static int doc_delete_calls;
+static int64_t task_delete_seen;
+static int task_delete_calls;
 static int mark_revisit_calls;
 static int queue_reset_calls;
 static int evidence_reembed_calls;
@@ -1287,6 +1299,58 @@ static int directive_record_surface(int64_t directive_id)
    return 0;
 }
 
+int db2_anti_pattern_bump(int64_t anti_pattern_id)
+{
+   (void)anti_pattern_id;
+   return 0;
+}
+
+static int anti_pattern_bump(int64_t anti_pattern_id)
+{
+   anti_pattern_bump_calls++;
+   anti_pattern_bump_seen = anti_pattern_id;
+   return 0;
+}
+
+int db2_anti_pattern_delete(int64_t anti_pattern_id)
+{
+   (void)anti_pattern_id;
+   return 0;
+}
+
+static int anti_pattern_delete(int64_t anti_pattern_id)
+{
+   anti_pattern_delete_calls++;
+   anti_pattern_delete_seen = anti_pattern_id;
+   return 0;
+}
+
+int db2_kb_doc_delete(int64_t doc_id)
+{
+   (void)doc_id;
+   return 0;
+}
+
+static int doc_delete(int64_t doc_id)
+{
+   doc_delete_calls++;
+   doc_delete_seen = doc_id;
+   return 0;
+}
+
+int db2_task_delete(int64_t task_id)
+{
+   (void)task_id;
+   return 0;
+}
+
+static int task_delete(int64_t task_id)
+{
+   task_delete_calls++;
+   task_delete_seen = task_id;
+   return 0;
+}
+
 static int directive_sweep_expired(void)
 {
    directive_sweep_calls++;
@@ -1737,6 +1801,10 @@ int main(void)
        .directive_sweep_expired = directive_sweep_expired,
        .directive_suppress = directive_suppress,
        .directive_record_surface = directive_record_surface,
+       .anti_pattern_bump = anti_pattern_bump,
+       .anti_pattern_delete = anti_pattern_delete,
+       .doc_delete = doc_delete,
+       .task_delete = task_delete,
        .mark_revisit_due = mark_revisit_due,
        .ingest_queue_reset_running = ingest_queue_reset_running,
        .evidence_reembed_all = evidence_reembed_all,
@@ -2186,6 +2254,22 @@ int main(void)
    assert(aimee_db2_directive_record_surface_call(call_client, &client, 7104, 0, 32, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(directive_surface_calls == 1 && directive_surface_id == 32);
+
+   assert(aimee_db2_anti_pattern_bump_call(call_client, &client, 7105, 0, 41, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(anti_pattern_bump_calls == 1 && anti_pattern_bump_seen == 41);
+
+   assert(aimee_db2_anti_pattern_delete_call(call_client, &client, 7106, 0, 42, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(anti_pattern_delete_calls == 1 && anti_pattern_delete_seen == 42);
+
+   assert(aimee_db2_doc_delete_call(call_client, &client, 7107, 0, 43, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(doc_delete_calls == 1 && doc_delete_seen == 43);
+
+   assert(aimee_db2_task_delete_call(call_client, &client, 7108, 0, 44, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(task_delete_calls == 1 && task_delete_seen == 44);
 
    uint32_t marked = 99u;
    assert(aimee_db2_mark_revisit_due_call(call_client, &client, 7084, 0, &marked, NULL, NULL) ==

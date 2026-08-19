@@ -242,6 +242,9 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "purge_hidden_pollution",
                                                                 "requeue_drifted",
                                                                 "directive_suppress",
+                                                                "anti_pattern_bump",
+                                                                "anti_pattern_delete",
+                                                                "doc_delete",
                                                                 "directive_record_surface",
                                                                 "prospective_sweep_expired",
                                                                 "proposals_archive_expired",
@@ -262,6 +265,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 # so a concurrent reader can see between them.
                                 "multi-statement"
                                 if name in ("curator_reenqueue_extract_all",
+                                            "task_delete",
                                             "rules_decay",
                                             "curiosity_rescore_all",
                                             "mining_seed_job_defaults",
@@ -277,7 +281,11 @@ def validate_catalog(value: object) -> dict[str, object]:
                                             "decay_confidence",
                                             "vector_rebuild_lock_try_acquire",
                                             "directive_suppress",
-                                            "directive_record_surface")
+                                            "directive_record_surface",
+                                            "anti_pattern_bump",
+                                            "anti_pattern_delete",
+                                            "doc_delete",
+                                            "task_delete")
                                 else "safe")
         if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
@@ -2839,9 +2847,118 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["absent_collapsed_into_error"] is not True):
                 fail(f"{name.replace('_', '-')}-reply",
                      "reply must be an acknowledgement that records the absent collapse")
+        elif key == ("learning", 6) and name == "anti_pattern_bump" and \
+                operation["wire_format"] == "db2-envelope-u64-ack-v1":
+            # A counter bump that does not care whether it counted anything: the
+            # statement reports success as long as it ran, so bumping an id that
+            # does not exist is indistinguishable from bumping one that does.
+            # Recorded, because the neighbouring delete makes the opposite choice.
+            if operation["c_symbols"] != ["db2_anti_pattern_bump"]:
+                fail("operation-c-symbols",
+                     "anti_pattern_bump C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "anti_pattern_bump results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "field", "policy"},
+                            "anti_pattern_bump.request")
+            field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                          "anti_pattern_bump.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request["policy"] != {"increments": "hit_count", "matches_missing_row": "reported-as-ok"} or
+                    field != {"name": "anti_pattern_id", "type": "u64", "minimum": 1,
+                              "maximum": 0x7fffffffffffffff}):
+                fail("anti-pattern-bump-request",
+                     "request must carry one positive u64 id and its missing-row policy")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "anti_pattern_bump.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("anti-pattern-bump-reply", "reply must be a bare acknowledgement")
+        elif key == ("learning", 7) and name == "anti_pattern_delete" and \
+                operation["wire_format"] == "db2-envelope-u64-ack-v1":
+            # The same table as the bump beside it and the opposite choice about a
+            # missing row: this one reports an error when nothing was deleted. Both
+            # are recorded so the inconsistency is a decision on the record rather
+            # than a surprise to whoever calls both.
+            if operation["c_symbols"] != ["db2_anti_pattern_delete"]:
+                fail("operation-c-symbols",
+                     "anti_pattern_delete C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "anti_pattern_delete results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "field", "policy"},
+                            "anti_pattern_delete.request")
+            field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                          "anti_pattern_delete.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request["policy"] != {"matches_missing_row": "reported-as-error"} or
+                    field != {"name": "anti_pattern_id", "type": "u64", "minimum": 1,
+                              "maximum": 0x7fffffffffffffff}):
+                fail("anti-pattern-delete-request",
+                     "request must carry one positive u64 id and its missing-row policy")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "anti_pattern_delete.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("anti-pattern-delete-reply", "reply must be a bare acknowledgement")
+        elif key == ("organization", 2) and name == "doc_delete" and \
+                operation["wire_format"] == "db2-envelope-u64-ack-v1":
+            # Deleting a document that is not there is an error here, matching the
+            # anti-pattern delete rather than the bump.
+            if operation["c_symbols"] != ["db2_kb_doc_delete"]:
+                fail("operation-c-symbols",
+                     "doc_delete C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "doc_delete results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "field", "policy"},
+                            "doc_delete.request")
+            field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                          "doc_delete.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request["policy"] != {"matches_missing_row": "reported-as-error"} or
+                    field != {"name": "doc_id", "type": "u64", "minimum": 1,
+                              "maximum": 0x7fffffffffffffff}):
+                fail("doc-delete-request",
+                     "request must carry one positive u64 id and its missing-row policy")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "doc_delete.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("doc-delete-reply", "reply must be a bare acknowledgement")
+        elif key == ("organization", 3) and name == "task_delete" and \
+                operation["wire_format"] == "db2-envelope-u64-ack-v1":
+            # Two statements with no transaction around them. The edge delete runs
+            # first and its failure is ignored, then the task delete decides the
+            # result, so a caller can be told the task is gone while its edges
+            # remain -- or the reverse if the second statement fails. The schema's
+            # foreign key would cascade the edges anyway, which is why the explicit
+            # delete was thought safe to ignore; the catalog records that it is not
+            # atomic rather than leaving the reasoning in a comment.
+            if operation["c_symbols"] != ["db2_task_delete"]:
+                fail("operation-c-symbols",
+                     "task_delete C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "task_delete results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "field", "policy"},
+                            "task_delete.request")
+            field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                          "task_delete.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request["policy"] != {"matches_missing_row": "reported-as-error", "deletes_edges_first": True, "edge_delete_failure": "ignored", "atomic": False} or
+                    field != {"name": "task_id", "type": "u64", "minimum": 1,
+                              "maximum": 0x7fffffffffffffff}):
+                fail("task-delete-request",
+                     "request must carry one positive u64 id and its missing-row policy")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "task_delete.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("task-delete-reply", "reply must be a bare acknowledgement")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 80 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 84 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2861,7 +2978,8 @@ def validate_catalog(value: object) -> dict[str, object]:
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
             "drift_candidates", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
-            "proposals_archive_expired", "trace_mining_last_id", "rel_types_ensure_seed",
+            "proposals_archive_expired", "trace_mining_last_id", "anti_pattern_bump",
+            "anti_pattern_delete", "rel_types_ensure_seed", "doc_delete", "task_delete",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
             "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
@@ -2869,7 +2987,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the eighty supported operations exactly once")
+             "the partial generator requires the eighty-four supported operations exactly once")
     return catalog
 
 
@@ -3059,20 +3177,24 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     mining_seed_job_defaults = catalog["operations"][63]
     proposals_archive_expired = catalog["operations"][64]
     trace_mining_last_id = catalog["operations"][65]
-    rel_types_ensure_seed = catalog["operations"][66]
-    vector_rebuild_lock_try_acquire = catalog["operations"][67]
-    vector_rebuild_lock_release = catalog["operations"][68]
-    release_get_active = catalog["operations"][69]
-    prospective_sweep_expired = catalog["operations"][70]
-    directive_sweep_expired = catalog["operations"][71]
-    mark_revisit_due = catalog["operations"][72]
-    ingest_queue_reset_running = catalog["operations"][73]
-    evidence_reembed_all = catalog["operations"][74]
-    curator_reembed_all = catalog["operations"][75]
-    synth_reenqueue_all = catalog["operations"][76]
-    curator_reenqueue_extract_all = catalog["operations"][77]
-    directive_suppress = catalog["operations"][78]
-    directive_record_surface = catalog["operations"][79]
+    anti_pattern_bump = catalog["operations"][66]
+    anti_pattern_delete = catalog["operations"][67]
+    rel_types_ensure_seed = catalog["operations"][68]
+    doc_delete = catalog["operations"][69]
+    task_delete = catalog["operations"][70]
+    vector_rebuild_lock_try_acquire = catalog["operations"][71]
+    vector_rebuild_lock_release = catalog["operations"][72]
+    release_get_active = catalog["operations"][73]
+    prospective_sweep_expired = catalog["operations"][74]
+    directive_sweep_expired = catalog["operations"][75]
+    mark_revisit_due = catalog["operations"][76]
+    ingest_queue_reset_running = catalog["operations"][77]
+    evidence_reembed_all = catalog["operations"][78]
+    curator_reembed_all = catalog["operations"][79]
+    synth_reenqueue_all = catalog["operations"][80]
+    curator_reenqueue_extract_all = catalog["operations"][81]
+    directive_suppress = catalog["operations"][82]
+    directive_record_surface = catalog["operations"][83]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3639,6 +3761,30 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     directive_record_surface_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(directive_record_surface["id"]), 0, b"",
+    )
+    anti_pattern_bump_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(anti_pattern_bump["id"]), 0, _put_u64(41),
+    )
+    anti_pattern_bump_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(anti_pattern_bump["id"]), 0, b"",
+    )
+    anti_pattern_delete_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(anti_pattern_delete["id"]), 0, _put_u64(42),
+    )
+    anti_pattern_delete_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(anti_pattern_delete["id"]), 0, b"",
+    )
+    doc_delete_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(doc_delete["id"]), 0, _put_u64(43),
+    )
+    doc_delete_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(doc_delete["id"]), 0, b"",
+    )
+    task_delete_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(task_delete["id"]), 0, _put_u64(44),
+    )
+    task_delete_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(task_delete["id"]), 0, b"",
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -6699,6 +6845,74 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": anti_pattern_bump["family"],
+            "id": anti_pattern_bump["id"],
+            "name": anti_pattern_bump["name"],
+            "request": {
+                "positive": anti_pattern_bump_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(anti_pattern_bump_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(anti_pattern_bump_request, 16, 1).hex()},
+                    {"mutation": "zero_id", "hex":
+                     (anti_pattern_bump_request[:-8] + _put_u64(0)).hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (anti_pattern_bump_request[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": anti_pattern_bump_request[:-1].hex()},
+                    {"mutation": "long", "hex": (anti_pattern_bump_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": anti_pattern_bump_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(anti_pattern_bump_ok, 8, int(anti_pattern_bump["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(anti_pattern_bump_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(anti_pattern_bump_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex": anti_pattern_bump_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (anti_pattern_bump_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": anti_pattern_delete["family"],
+            "id": anti_pattern_delete["id"],
+            "name": anti_pattern_delete["name"],
+            "request": {
+                "positive": anti_pattern_delete_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(anti_pattern_delete_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(anti_pattern_delete_request, 16, 1).hex()},
+                    {"mutation": "zero_id", "hex":
+                     (anti_pattern_delete_request[:-8] + _put_u64(0)).hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (anti_pattern_delete_request[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": anti_pattern_delete_request[:-1].hex()},
+                    {"mutation": "long", "hex": (anti_pattern_delete_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": anti_pattern_delete_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(anti_pattern_delete_ok, 8, int(anti_pattern_delete["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(anti_pattern_delete_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(anti_pattern_delete_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex": anti_pattern_delete_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (anti_pattern_delete_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": rel_types_ensure_seed["family"],
             "id": rel_types_ensure_seed["id"],
             "name": rel_types_ensure_seed["name"],
@@ -6729,6 +6943,74 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "short", "hex": rel_types_ensure_seed_ok[:-1].hex()},
                     {"mutation": "long", "hex":
                      (rel_types_ensure_seed_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": doc_delete["family"],
+            "id": doc_delete["id"],
+            "name": doc_delete["name"],
+            "request": {
+                "positive": doc_delete_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(doc_delete_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(doc_delete_request, 16, 1).hex()},
+                    {"mutation": "zero_id", "hex":
+                     (doc_delete_request[:-8] + _put_u64(0)).hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (doc_delete_request[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": doc_delete_request[:-1].hex()},
+                    {"mutation": "long", "hex": (doc_delete_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": doc_delete_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(doc_delete_ok, 8, int(doc_delete["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(doc_delete_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(doc_delete_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex": doc_delete_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (doc_delete_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": task_delete["family"],
+            "id": task_delete["id"],
+            "name": task_delete["name"],
+            "request": {
+                "positive": task_delete_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(task_delete_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(task_delete_request, 16, 1).hex()},
+                    {"mutation": "zero_id", "hex":
+                     (task_delete_request[:-8] + _put_u64(0)).hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (task_delete_request[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": task_delete_request[:-1].hex()},
+                    {"mutation": "long", "hex": (task_delete_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": task_delete_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(task_delete_ok, 8, int(task_delete["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(task_delete_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(task_delete_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex": task_delete_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (task_delete_ok + b"\0").hex()},
                 ],
             },
         }, {
@@ -7326,20 +7608,24 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     mining_seed_job_defaults = catalog["operations"][63]
     proposals_archive_expired = catalog["operations"][64]
     trace_mining_last_id = catalog["operations"][65]
-    rel_types_ensure_seed = catalog["operations"][66]
-    vector_rebuild_lock_try_acquire = catalog["operations"][67]
-    vector_rebuild_lock_release = catalog["operations"][68]
-    release_get_active = catalog["operations"][69]
-    prospective_sweep_expired = catalog["operations"][70]
-    directive_sweep_expired = catalog["operations"][71]
-    mark_revisit_due = catalog["operations"][72]
-    ingest_queue_reset_running = catalog["operations"][73]
-    evidence_reembed_all = catalog["operations"][74]
-    curator_reembed_all = catalog["operations"][75]
-    synth_reenqueue_all = catalog["operations"][76]
-    curator_reenqueue_extract_all = catalog["operations"][77]
-    directive_suppress = catalog["operations"][78]
-    directive_record_surface = catalog["operations"][79]
+    anti_pattern_bump = catalog["operations"][66]
+    anti_pattern_delete = catalog["operations"][67]
+    rel_types_ensure_seed = catalog["operations"][68]
+    doc_delete = catalog["operations"][69]
+    task_delete = catalog["operations"][70]
+    vector_rebuild_lock_try_acquire = catalog["operations"][71]
+    vector_rebuild_lock_release = catalog["operations"][72]
+    release_get_active = catalog["operations"][73]
+    prospective_sweep_expired = catalog["operations"][74]
+    directive_sweep_expired = catalog["operations"][75]
+    mark_revisit_due = catalog["operations"][76]
+    ingest_queue_reset_running = catalog["operations"][77]
+    evidence_reembed_all = catalog["operations"][78]
+    curator_reembed_all = catalog["operations"][79]
+    synth_reenqueue_all = catalog["operations"][80]
+    curator_reenqueue_extract_all = catalog["operations"][81]
+    directive_suppress = catalog["operations"][82]
+    directive_record_surface = catalog["operations"][83]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -8402,6 +8688,50 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{directive_record_surface['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ID_MAX",
          f"{directive_record_surface['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_ANTI_PATTERN_BUMP", "AIMEE_DB2_EVENT_LEARNING"),
+        ("AIMEE_DB2_STAGE_ANTI_PATTERN_BUMP", "AIMEE_DB2_FAMILY_LEARNING"),
+        ("AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP", f"{anti_pattern_bump['id']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN",
+         f"{anti_pattern_bump['request']['encoded_size']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN",
+         f"{anti_pattern_bump['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_BUMP_ERROR_LEN",
+         f"{anti_pattern_bump['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX",
+         f"{anti_pattern_bump['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_ANTI_PATTERN_DELETE", "AIMEE_DB2_EVENT_LEARNING"),
+        ("AIMEE_DB2_STAGE_ANTI_PATTERN_DELETE", "AIMEE_DB2_FAMILY_LEARNING"),
+        ("AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE", f"{anti_pattern_delete['id']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN",
+         f"{anti_pattern_delete['request']['encoded_size']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN",
+         f"{anti_pattern_delete['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_DELETE_ERROR_LEN",
+         f"{anti_pattern_delete['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX",
+         f"{anti_pattern_delete['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_DOC_DELETE", "AIMEE_DB2_EVENT_ORGANIZATION"),
+        ("AIMEE_DB2_STAGE_DOC_DELETE", "AIMEE_DB2_FAMILY_ORGANIZATION"),
+        ("AIMEE_DB2_OPERATION_DOC_DELETE", f"{doc_delete['id']}u"),
+        ("AIMEE_DB2_DOC_DELETE_REQUEST_LEN",
+         f"{doc_delete['request']['encoded_size']}u"),
+        ("AIMEE_DB2_DOC_DELETE_RESPONSE_LEN",
+         f"{doc_delete['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_DOC_DELETE_ERROR_LEN",
+         f"{doc_delete['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_DOC_DELETE_ID_MAX",
+         f"{doc_delete['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_TASK_DELETE", "AIMEE_DB2_EVENT_ORGANIZATION"),
+        ("AIMEE_DB2_STAGE_TASK_DELETE", "AIMEE_DB2_FAMILY_ORGANIZATION"),
+        ("AIMEE_DB2_OPERATION_TASK_DELETE", f"{task_delete['id']}u"),
+        ("AIMEE_DB2_TASK_DELETE_REQUEST_LEN",
+         f"{task_delete['request']['encoded_size']}u"),
+        ("AIMEE_DB2_TASK_DELETE_RESPONSE_LEN",
+         f"{task_delete['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_TASK_DELETE_ERROR_LEN",
+         f"{task_delete['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_TASK_DELETE_ID_MAX",
+         f"{task_delete['request']['field']['maximum']}ull"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -10342,6 +10672,226 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}}
+
+static inline int aimee_db2_anti_pattern_bump_request_encode(uint64_t anti_pattern_id, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || anti_pattern_id == 0u || anti_pattern_id > AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX ||
+       capacity < AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, anti_pattern_id);
+   return 0;
+}}
+
+static inline int aimee_db2_anti_pattern_bump_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *anti_pattern_id)
+{{
+   if (anti_pattern_id)
+      *anti_pattern_id = 0u;
+   if (!anti_pattern_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX)
+      return -1;
+   *anti_pattern_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_anti_pattern_bump_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_anti_pattern_bump_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_anti_pattern_delete_request_encode(uint64_t anti_pattern_id, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || anti_pattern_id == 0u || anti_pattern_id > AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX ||
+       capacity < AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, anti_pattern_id);
+   return 0;
+}}
+
+static inline int aimee_db2_anti_pattern_delete_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *anti_pattern_id)
+{{
+   if (anti_pattern_id)
+      *anti_pattern_id = 0u;
+   if (!anti_pattern_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX)
+      return -1;
+   *anti_pattern_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_anti_pattern_delete_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_anti_pattern_delete_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_doc_delete_request_encode(uint64_t doc_id, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || doc_id == 0u || doc_id > AIMEE_DB2_DOC_DELETE_ID_MAX ||
+       capacity < AIMEE_DB2_DOC_DELETE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DOC_DELETE, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, doc_id);
+   return 0;
+}}
+
+static inline int aimee_db2_doc_delete_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *doc_id)
+{{
+   if (doc_id)
+      *doc_id = 0u;
+   if (!doc_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DOC_DELETE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DOC_DELETE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_DOC_DELETE_ID_MAX)
+      return -1;
+   *doc_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_doc_delete_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_DOC_DELETE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DOC_DELETE, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_DOC_DELETE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_doc_delete_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DOC_DELETE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DOC_DELETE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_task_delete_request_encode(uint64_t task_id, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || task_id == 0u || task_id > AIMEE_DB2_TASK_DELETE_ID_MAX ||
+       capacity < AIMEE_DB2_TASK_DELETE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TASK_DELETE, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, task_id);
+   return 0;
+}}
+
+static inline int aimee_db2_task_delete_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *task_id)
+{{
+   if (task_id)
+      *task_id = 0u;
+   if (!task_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_TASK_DELETE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_TASK_DELETE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_TASK_DELETE_ID_MAX)
+      return -1;
+   *task_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_task_delete_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_TASK_DELETE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TASK_DELETE, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_TASK_DELETE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_task_delete_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TASK_DELETE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TASK_DELETE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }}
 
 static inline int aimee_db2_directive_suppress_request_encode(uint64_t directive_id, uint8_t *output,
@@ -14532,6 +15082,22 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t directive_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_anti_pattern_bump_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t anti_pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_anti_pattern_delete_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t anti_pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_doc_delete_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t doc_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_task_delete_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t task_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_directive_record_surface_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t directive_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -16473,6 +17039,104 @@ aimee_module_call_result_t aimee_db2_directive_record_surface_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_anti_pattern_bump_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                 uint64_t deadline_ns, uint64_t anti_pattern_id,
+                                 aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_anti_pattern_bump_request_encode(anti_pattern_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ANTI_PATTERN_BUMP, AIMEE_DB2_STAGE_ANTI_PATTERN_BUMP,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_anti_pattern_bump_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_anti_pattern_delete_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint64_t anti_pattern_id,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_anti_pattern_delete_request_encode(anti_pattern_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ANTI_PATTERN_DELETE, AIMEE_DB2_STAGE_ANTI_PATTERN_DELETE,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_anti_pattern_delete_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_doc_delete_call(aimee_db2_call_fn call, void *call_context,
+                                                     uint64_t trace_id, uint64_t deadline_ns,
+                                                     uint64_t doc_id,
+                                                     aimee_module_cancelled_fn cancelled,
+                                                     void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DOC_DELETE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DOC_DELETE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_doc_delete_request_encode(doc_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DOC_DELETE, AIMEE_DB2_STAGE_DOC_DELETE, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_doc_delete_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_task_delete_call(aimee_db2_call_fn call, void *call_context,
+                                                      uint64_t trace_id, uint64_t deadline_ns,
+                                                      uint64_t task_id,
+                                                      aimee_module_cancelled_fn cancelled,
+                                                      void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_TASK_DELETE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_TASK_DELETE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_task_delete_request_encode(task_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_TASK_DELETE, AIMEE_DB2_STAGE_TASK_DELETE, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_task_delete_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -16778,20 +17442,24 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     mining_seed_job_defaults = catalog["operations"][63]
     proposals_archive_expired = catalog["operations"][64]
     trace_mining_last_id = catalog["operations"][65]
-    rel_types_ensure_seed = catalog["operations"][66]
-    vector_rebuild_lock_try_acquire = catalog["operations"][67]
-    vector_rebuild_lock_release = catalog["operations"][68]
-    release_get_active = catalog["operations"][69]
-    prospective_sweep_expired = catalog["operations"][70]
-    directive_sweep_expired = catalog["operations"][71]
-    mark_revisit_due = catalog["operations"][72]
-    ingest_queue_reset_running = catalog["operations"][73]
-    evidence_reembed_all = catalog["operations"][74]
-    curator_reembed_all = catalog["operations"][75]
-    synth_reenqueue_all = catalog["operations"][76]
-    curator_reenqueue_extract_all = catalog["operations"][77]
-    directive_suppress = catalog["operations"][78]
-    directive_record_surface = catalog["operations"][79]
+    anti_pattern_bump = catalog["operations"][66]
+    anti_pattern_delete = catalog["operations"][67]
+    rel_types_ensure_seed = catalog["operations"][68]
+    doc_delete = catalog["operations"][69]
+    task_delete = catalog["operations"][70]
+    vector_rebuild_lock_try_acquire = catalog["operations"][71]
+    vector_rebuild_lock_release = catalog["operations"][72]
+    release_get_active = catalog["operations"][73]
+    prospective_sweep_expired = catalog["operations"][74]
+    directive_sweep_expired = catalog["operations"][75]
+    mark_revisit_due = catalog["operations"][76]
+    ingest_queue_reset_running = catalog["operations"][77]
+    evidence_reembed_all = catalog["operations"][78]
+    curator_reembed_all = catalog["operations"][79]
+    synth_reenqueue_all = catalog["operations"][80]
+    curator_reenqueue_extract_all = catalog["operations"][81]
+    directive_suppress = catalog["operations"][82]
+    directive_record_surface = catalog["operations"][83]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -17222,6 +17890,22 @@ const EventDirectiveRecordSurface = EventMaintenance
 const StageDirectiveRecordSurface = FamilyMaintenance
 const OperationDirectiveRecordSurface uint32 = {directive_record_surface['id']}
 const DirectiveRecordSurfaceIDMax uint64 = {directive_record_surface['request']['field']['maximum']}
+const EventAntiPatternBump = EventLearning
+const StageAntiPatternBump = FamilyLearning
+const OperationAntiPatternBump uint32 = {anti_pattern_bump['id']}
+const AntiPatternBumpIDMax uint64 = {anti_pattern_bump['request']['field']['maximum']}
+const EventAntiPatternDelete = EventLearning
+const StageAntiPatternDelete = FamilyLearning
+const OperationAntiPatternDelete uint32 = {anti_pattern_delete['id']}
+const AntiPatternDeleteIDMax uint64 = {anti_pattern_delete['request']['field']['maximum']}
+const EventDocDelete = EventOrganization
+const StageDocDelete = FamilyOrganization
+const OperationDocDelete uint32 = {doc_delete['id']}
+const DocDeleteIDMax uint64 = {doc_delete['request']['field']['maximum']}
+const EventTaskDelete = EventOrganization
+const StageTaskDelete = FamilyOrganization
+const OperationTaskDelete uint32 = {task_delete['id']}
+const TaskDeleteIDMax uint64 = {task_delete['request']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -20130,6 +20814,198 @@ func EncodeDirectiveRecordSurfaceReply() []byte {{
 func DecodeDirectiveRecordSurfaceReply(reply []byte) error {{
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationDirectiveRecordSurface || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeAntiPatternBumpRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeAntiPatternBumpRequest(antiPatternBumpID uint64) ([]byte, error) {{
+	if antiPatternBumpID == 0 || antiPatternBumpID > AntiPatternBumpIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationAntiPatternBump, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], antiPatternBumpID)
+	return request, nil
+}}
+
+// DecodeAntiPatternBumpRequest validates the exact envelope.
+func DecodeAntiPatternBumpRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternBump || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	antiPatternBumpID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if antiPatternBumpID == 0 || antiPatternBumpID > AntiPatternBumpIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return antiPatternBumpID, nil
+}}
+
+// EncodeAntiPatternBumpReply emits a bare acknowledgement.
+func EncodeAntiPatternBumpReply() []byte {{
+	header, err := EncodeReplyHeader(OperationAntiPatternBump, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeAntiPatternBumpReply validates the acknowledgement envelope.
+func DecodeAntiPatternBumpReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAntiPatternBump || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeAntiPatternDeleteRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeAntiPatternDeleteRequest(antiPatternDeleteID uint64) ([]byte, error) {{
+	if antiPatternDeleteID == 0 || antiPatternDeleteID > AntiPatternDeleteIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationAntiPatternDelete, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], antiPatternDeleteID)
+	return request, nil
+}}
+
+// DecodeAntiPatternDeleteRequest validates the exact envelope.
+func DecodeAntiPatternDeleteRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternDelete || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	antiPatternDeleteID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if antiPatternDeleteID == 0 || antiPatternDeleteID > AntiPatternDeleteIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return antiPatternDeleteID, nil
+}}
+
+// EncodeAntiPatternDeleteReply emits a bare acknowledgement.
+func EncodeAntiPatternDeleteReply() []byte {{
+	header, err := EncodeReplyHeader(OperationAntiPatternDelete, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeAntiPatternDeleteReply validates the acknowledgement envelope.
+func DecodeAntiPatternDeleteReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAntiPatternDelete || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeDocDeleteRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeDocDeleteRequest(docDeleteID uint64) ([]byte, error) {{
+	if docDeleteID == 0 || docDeleteID > DocDeleteIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationDocDelete, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], docDeleteID)
+	return request, nil
+}}
+
+// DecodeDocDeleteRequest validates the exact envelope.
+func DecodeDocDeleteRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocDelete || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	docDeleteID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if docDeleteID == 0 || docDeleteID > DocDeleteIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return docDeleteID, nil
+}}
+
+// EncodeDocDeleteReply emits a bare acknowledgement.
+func EncodeDocDeleteReply() []byte {{
+	header, err := EncodeReplyHeader(OperationDocDelete, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeDocDeleteReply validates the acknowledgement envelope.
+func DecodeDocDeleteReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDocDelete || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeTaskDeleteRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeTaskDeleteRequest(taskDeleteID uint64) ([]byte, error) {{
+	if taskDeleteID == 0 || taskDeleteID > TaskDeleteIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationTaskDelete, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], taskDeleteID)
+	return request, nil
+}}
+
+// DecodeTaskDeleteRequest validates the exact envelope.
+func DecodeTaskDeleteRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskDelete || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	taskDeleteID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if taskDeleteID == 0 || taskDeleteID > TaskDeleteIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return taskDeleteID, nil
+}}
+
+// EncodeTaskDeleteReply emits a bare acknowledgement.
+func EncodeTaskDeleteReply() []byte {{
+	header, err := EncodeReplyHeader(OperationTaskDelete, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeTaskDeleteReply validates the acknowledgement envelope.
+func DecodeTaskDeleteReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTaskDelete || header.Result != ResultOK ||
 		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {{
 		return ErrMalformedEnvelope
 	}}

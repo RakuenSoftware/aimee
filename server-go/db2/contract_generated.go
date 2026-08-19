@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "9cda39ca129ab14875d9cd1ad6579837e11fc7df8b668119912f1e537a23ca66"
+const ContractSHA256 = "2be83d190a1bfa4b4bf8584b5f8451edebc0f2deebcc5e63b65a409663be72a4"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -429,6 +429,22 @@ const EventDirectiveRecordSurface = EventMaintenance
 const StageDirectiveRecordSurface = FamilyMaintenance
 const OperationDirectiveRecordSurface uint32 = 10
 const DirectiveRecordSurfaceIDMax uint64 = 9223372036854775807
+const EventAntiPatternBump = EventLearning
+const StageAntiPatternBump = FamilyLearning
+const OperationAntiPatternBump uint32 = 6
+const AntiPatternBumpIDMax uint64 = 9223372036854775807
+const EventAntiPatternDelete = EventLearning
+const StageAntiPatternDelete = FamilyLearning
+const OperationAntiPatternDelete uint32 = 7
+const AntiPatternDeleteIDMax uint64 = 9223372036854775807
+const EventDocDelete = EventOrganization
+const StageDocDelete = FamilyOrganization
+const OperationDocDelete uint32 = 2
+const DocDeleteIDMax uint64 = 9223372036854775807
+const EventTaskDelete = EventOrganization
+const StageTaskDelete = FamilyOrganization
+const OperationTaskDelete uint32 = 3
+const TaskDeleteIDMax uint64 = 9223372036854775807
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -3339,6 +3355,198 @@ func EncodeDirectiveRecordSurfaceReply() []byte {
 func DecodeDirectiveRecordSurfaceReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationDirectiveRecordSurface || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeAntiPatternBumpRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeAntiPatternBumpRequest(antiPatternBumpID uint64) ([]byte, error) {
+	if antiPatternBumpID == 0 || antiPatternBumpID > AntiPatternBumpIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationAntiPatternBump, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], antiPatternBumpID)
+	return request, nil
+}
+
+// DecodeAntiPatternBumpRequest validates the exact envelope.
+func DecodeAntiPatternBumpRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternBump || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	antiPatternBumpID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if antiPatternBumpID == 0 || antiPatternBumpID > AntiPatternBumpIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return antiPatternBumpID, nil
+}
+
+// EncodeAntiPatternBumpReply emits a bare acknowledgement.
+func EncodeAntiPatternBumpReply() []byte {
+	header, err := EncodeReplyHeader(OperationAntiPatternBump, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeAntiPatternBumpReply validates the acknowledgement envelope.
+func DecodeAntiPatternBumpReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAntiPatternBump || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeAntiPatternDeleteRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeAntiPatternDeleteRequest(antiPatternDeleteID uint64) ([]byte, error) {
+	if antiPatternDeleteID == 0 || antiPatternDeleteID > AntiPatternDeleteIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationAntiPatternDelete, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], antiPatternDeleteID)
+	return request, nil
+}
+
+// DecodeAntiPatternDeleteRequest validates the exact envelope.
+func DecodeAntiPatternDeleteRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternDelete || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	antiPatternDeleteID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if antiPatternDeleteID == 0 || antiPatternDeleteID > AntiPatternDeleteIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return antiPatternDeleteID, nil
+}
+
+// EncodeAntiPatternDeleteReply emits a bare acknowledgement.
+func EncodeAntiPatternDeleteReply() []byte {
+	header, err := EncodeReplyHeader(OperationAntiPatternDelete, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeAntiPatternDeleteReply validates the acknowledgement envelope.
+func DecodeAntiPatternDeleteReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAntiPatternDelete || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeDocDeleteRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeDocDeleteRequest(docDeleteID uint64) ([]byte, error) {
+	if docDeleteID == 0 || docDeleteID > DocDeleteIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDocDelete, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], docDeleteID)
+	return request, nil
+}
+
+// DecodeDocDeleteRequest validates the exact envelope.
+func DecodeDocDeleteRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocDelete || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	docDeleteID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if docDeleteID == 0 || docDeleteID > DocDeleteIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return docDeleteID, nil
+}
+
+// EncodeDocDeleteReply emits a bare acknowledgement.
+func EncodeDocDeleteReply() []byte {
+	header, err := EncodeReplyHeader(OperationDocDelete, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeDocDeleteReply validates the acknowledgement envelope.
+func DecodeDocDeleteReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDocDelete || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeTaskDeleteRequest emits the identifier. What the statement does with a
+// missing row is policy and never travels.
+func EncodeTaskDeleteRequest(taskDeleteID uint64) ([]byte, error) {
+	if taskDeleteID == 0 || taskDeleteID > TaskDeleteIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationTaskDelete, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], taskDeleteID)
+	return request, nil
+}
+
+// DecodeTaskDeleteRequest validates the exact envelope.
+func DecodeTaskDeleteRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskDelete || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	taskDeleteID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if taskDeleteID == 0 || taskDeleteID > TaskDeleteIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return taskDeleteID, nil
+}
+
+// EncodeTaskDeleteReply emits a bare acknowledgement.
+func EncodeTaskDeleteReply() []byte {
+	header, err := EncodeReplyHeader(OperationTaskDelete, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeTaskDeleteReply validates the acknowledgement envelope.
+func DecodeTaskDeleteReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTaskDelete || header.Result != ResultOK ||
 		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {
 		return ErrMalformedEnvelope
 	}

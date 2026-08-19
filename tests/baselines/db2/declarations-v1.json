@@ -3049,9 +3049,15 @@
           "line": 55
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.anti_pattern_bump operation increments an anti-pattern's hit count. It reports success whenever the statement ran, so bumping an identifier that does not exist looks exactly like bumping one that does. Recorded because the delete on the same table makes the opposite choice, and a caller using both would otherwise have to discover the difference."
+      },
       "signature": "int db2_anti_pattern_bump ( int64_t id )",
       "signature_sha256": "7dcb238fd67595c2cab8ed4f626ccecff7bd5f7e8c9a4d2b9f5742e8e5c0d4a0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_anti_pattern_bump"
     },
     {
@@ -3082,9 +3088,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.anti_pattern_delete operation removes an anti-pattern by identifier and reports an error when no row matched. That is the opposite of the bump beside it, which treats a missing row as success. Both choices are now on the record rather than being a difference nobody wrote down."
+      },
       "signature": "int db2_anti_pattern_delete ( int64_t id )",
       "signature_sha256": "7677e71319eff0d6d44ac4c77713123208bdfc1ec5b87180b538d0b202e683c3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_anti_pattern_delete"
     },
     {
@@ -9348,9 +9360,15 @@
           "line": 51
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.doc_delete operation removes a document row by identifier, reporting an error when nothing matched."
+      },
       "signature": "int db2_kb_doc_delete ( int64_t id )",
       "signature_sha256": "c328a0030a8a02969c5ffa7558082226ca67a71ba7759df2348b7dbd5fed65b2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_delete"
     },
     {
@@ -21844,9 +21862,15 @@
           "line": 46
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.task_delete operation removes a task and its edges. It runs two statements with no transaction and ignores whether the edge delete succeeded, so a caller can be told the task is gone while its edges remain. The schema's foreign key cascades the edges anyway, which is why the explicit delete looked safe to ignore; the catalog records that the pair is not atomic instead of leaving that reasoning in a comment."
+      },
       "signature": "int db2_task_delete ( int64_t id )",
       "signature_sha256": "21f27fb7c710097e6ea93b0bfbe11956a8b8740863c592cabcd7b5fa33a8a3c8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_task_delete"
     },
     {
@@ -26304,15 +26328,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b8220acd0bc6dc756983946df5b15ed39056b4d34ae791c879195ec3fab8ccb6",
+  "fingerprint": "a33ed65c4b0af51270754dabf0726a4388ecc57ccc91cc34203683d00c07e3f7",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 578,
+    "audit_pending": 574,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 380
+    "reviewed": 384
   }
 }

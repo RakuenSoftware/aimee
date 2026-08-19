@@ -108,6 +108,22 @@
       "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
     },
     {
+      "symbol": "db2_anti_pattern_bump",
+      "signature_sha256": "7dcb238fd67595c2cab8ed4f626ccecff7bd5f7e8c9a4d2b9f5742e8e5c0d4a0",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_bump operation increments an anti-pattern's hit count. It reports success whenever the statement ran, so bumping an identifier that does not exist looks exactly like bumping one that does. Recorded because the delete on the same table makes the opposite choice, and a caller using both would otherwise have to discover the difference."
+    },
+    {
+      "symbol": "db2_anti_pattern_delete",
+      "signature_sha256": "7677e71319eff0d6d44ac4c77713123208bdfc1ec5b87180b538d0b202e683c3",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_delete operation removes an anti-pattern by identifier and reports an error when no row matched. That is the opposite of the bump beside it, which treats a missing row as success. Both choices are now on the record rather than being a difference nobody wrote down."
+    },
+    {
       "symbol": "db2_artifact_gen_id",
       "signature_sha256": "c1911e29817cc9bb30d28d255c09b434818be47018ce579c1036cef1a398bb4a",
       "disposition": "private-db2",
@@ -378,6 +394,14 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.health operation proves the DB2 owner is initialized before reporting PostgreSQL and canonical KB readiness."
+    },
+    {
+      "symbol": "db2_kb_doc_delete",
+      "signature_sha256": "c328a0030a8a02969c5ffa7558082226ca67a71ba7759df2348b7dbd5fed65b2",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.doc_delete operation removes a document row by identifier, reporting an error when nothing matched."
     },
     {
       "symbol": "db2_kb_health_probe",
@@ -2474,6 +2498,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.synth_reenqueue_all operation replaces the reset that requeues every learning synthesis operation after a learning version change. Its reach and its discard are identical to the evidence reset already on the bus: no predicate, attempts back to zero, last error cleared. Both are triggered by the same version bump and both are recorded as fixed policy, so the pair cannot drift apart without the gate noticing."
+    },
+    {
+      "symbol": "db2_task_delete",
+      "signature_sha256": "21f27fb7c710097e6ea93b0bfbe11956a8b8740863c592cabcd7b5fa33a8a3c8",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_delete operation removes a task and its edges. It runs two statements with no transaction and ignores whether the edge delete succeeded, so a caller can be told the task is gone while its edges remain. The schema's foreign key cascades the edges anyway, which is why the explicit delete looked safe to ignore; the catalog records that the pair is not atomic instead of leaving that reasoning in a comment."
     },
     {
       "symbol": "db2_tenant_scope_begin",
