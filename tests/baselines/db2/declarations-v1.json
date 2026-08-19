@@ -11320,9 +11320,15 @@
           "line": 111
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "This is db2_directive_sweep_expired again: the same UPDATE, character for character once whitespace is normalised, reached through a second header. It gets no operation of its own. It joins maintenance.directive_sweep_expired, and because the two disagree about failure -- this one returns -1 where the other returns 0 -- the boundary binds this one, so a failed sweep is reported instead of being read as an empty one."
+      },
       "signature": "int db2_kb_service_directive_sweep_expired ( void )",
       "signature_sha256": "7160596f07d318b7b139148b26aa08c33b4f0207a20dec7be53ae0915767fe92",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_directive_sweep_expired"
     },
     {
@@ -26154,15 +26160,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f2b8552ed10ea065c51eddc1d631ba426c987547d6af2e2abdfa9ea766d84e32",
+  "fingerprint": "2c118fe37cdbdd8a9593654bb4df1d7b0347080f4350c3682de6eed8f9f5d26a",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 603,
+    "audit_pending": 602,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 355
+    "reviewed": 356
   }
 }

@@ -1738,7 +1738,8 @@
       "results": ["ok"],
       "db3_placement": "retained-db2",
       "db3_reason": "Epistemic directive state and its validity window are canonical relational DB2 records, not portable ANN state.",
-      "c_symbols": ["db2_directive_sweep_expired"],
+      "c_symbols": ["db2_directive_sweep_expired",
+                    "db2_kb_service_directive_sweep_expired"],
       "request": {
         "encoded_size": 24,
         "payload": "none",

@@ -2303,9 +2303,15 @@ def validate_catalog(value: object) -> dict[str, object]:
             # Same fixed policy as the sweep beside it, and for a sharper
             # reason: a directive is a constraint the system holds itself to,
             # so retiring one early would quietly drop a rule still in force.
-            if operation["c_symbols"] != ["db2_directive_sweep_expired"]:
+            # Two symbols, one statement. db2_kb_service_directive_sweep_expired
+            # runs the same UPDATE through a second header and differs only in
+            # returning -1 where the other returns 0 on failure. Listing both
+            # here keeps the duplication visible: if one of them changes, this
+            # entry has to be revisited rather than the pair silently diverging.
+            if operation["c_symbols"] != ["db2_directive_sweep_expired",
+                                          "db2_kb_service_directive_sweep_expired"]:
                 fail("operation-c-symbols",
-                     "directive_sweep_expired C symbol differs from the reviewed backend")
+                     "directive_sweep_expired C symbols differ from the reviewed backends")
             if operation["results"] != ["ok"]:
                 fail("operation-results", "directive_sweep_expired results must equal ['ok']")
             request = _keys(operation["request"], {"encoded_size", "payload", "policy"},

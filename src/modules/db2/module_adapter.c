@@ -17,6 +17,7 @@
 #include "c/kb_payload.h"
 #include "c/kb_service_backend.h"
 #include "c/epistemic_directives.h"
+#include "c/kb_service_backend.h"
 #include "c/evidence_vectors.h"
 #include "c/prospective_memories.h"
 #include "c/rules.h"
@@ -327,7 +328,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .rules_decay = db2_rules_decay,
        .curiosity_rescore_all = db2_curiosity_rescore_all,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
-       .directive_sweep_expired = db2_directive_sweep_expired,
+       /* Of the two identical sweeps, bind the one that reports failure:
+        * db2_directive_sweep_expired collapses a failed statement into
+        * the same zero an empty sweep produces. */
+       .directive_sweep_expired = db2_kb_service_directive_sweep_expired,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
        .ingest_queue_reset_running = db2_kb_ingest_queue_reset_running,
        .evidence_reembed_all = db2_evidence_reembed_all,

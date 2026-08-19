@@ -1150,6 +1150,11 @@ int db2_directive_sweep_expired(void)
    return 0;
 }
 
+int db2_kb_service_directive_sweep_expired(void)
+{
+   return 0;
+}
+
 static int directive_sweep_expired(void)
 {
    directive_sweep_calls++;

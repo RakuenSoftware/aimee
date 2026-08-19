@@ -753,6 +753,11 @@ int db2_directive_sweep_expired(void)
    return 0;
 }
 
+int db2_kb_service_directive_sweep_expired(void)
+{
+   return 0;
+}
+
 static int directive_sweep_expired(void)
 {
    directive_sweep_calls++;
@@ -5727,8 +5732,11 @@ static void test_directive_sweep_expired_handler(void)
               0 &&
           directives == 8);
 
-   /* Nothing open has passed its window, and a failed statement, are both
-    * zero from this backend. Pinned so the limitation stays visible. */
+   /* Two C symbols run this statement. The production boundary binds the one
+    * that returns -1 on failure, so a failed sweep arrives as internal rather
+    * than as an untouched set of directives; the other collapses both into
+    * zero. Only the reporting differs, and this pins which behaviour the wire
+    * gets. */
    directive_sweep_value = 0;
    assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
                  &response_len) == AIMEE_MODULE_STATUS_OK);

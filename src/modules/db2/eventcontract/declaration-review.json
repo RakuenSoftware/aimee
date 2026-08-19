@@ -596,6 +596,14 @@
       "reason": "The cJSON directive-list facade cannot define the stable contract; DB2 returns bounded state- and cause-filtered typed records."
     },
     {
+      "symbol": "db2_kb_service_directive_sweep_expired",
+      "signature_sha256": "7160596f07d318b7b139148b26aa08c33b4f0207a20dec7be53ae0915767fe92",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "This is db2_directive_sweep_expired again: the same UPDATE, character for character once whitespace is normalised, reached through a second header. It gets no operation of its own. It joins maintenance.directive_sweep_expired, and because the two disagree about failure -- this one returns -1 where the other returns 0 -- the boundary binds this one, so a failed sweep is reported instead of being read as an empty one."
+    },
+    {
       "symbol": "db2_kb_service_feedback_record_json",
       "signature_sha256": "cda9db3e47e1286f00298298a4c54d77bed81435811660b36ae66f0f3e08348e",
       "disposition": "private-db2",
