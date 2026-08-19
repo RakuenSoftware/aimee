@@ -452,6 +452,39 @@
 #define AIMEE_DB1_OP_STEP_EVIDENCE_INSERT                   48u
 #define AIMEE_DB1_OP_STEP_EVIDENCE_GET_LATEST               49u
 
+/* Family 12: roundtable pipeline runs, passes, attempts and gates: the review
+ * pipeline's own state machine, split from workflow because one family's
+ * generated client cannot hold both. */
+
+#define AIMEE_DB1_EVENT_ROUNDTABLE 11788u
+#define AIMEE_DB1_STAGE_ROUNDTABLE 12u
+
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_CREATE               1u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_GET                  2u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_UPDATE               3u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_SET_STATE            4u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_CAS_STATE            5u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_LIST                 6u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_COUNT_ACTIVE         7u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_BRANCH_OWNER         8u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_CREATE              9u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_GET                 10u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_UPDATE              11u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_LATEST              12u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_MAX_NO              13u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_MAX_GROUP           14u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_GROUP_AGG           15u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_CREATE           16u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_GET_BY_RUN       17u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_CURRENT          18u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_UPDATE           19u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_MAX_NO           20u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_SUPERSEDE_OTHERS 21u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_CREATE              22u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_GET                 23u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_UPDATE              24u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_AGE_EXCEEDS_HOURS   25u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

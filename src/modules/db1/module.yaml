@@ -64,6 +64,7 @@
     "src/modules/db1/remote_client_grant.c",
     "src/modules/db1/roadmap_runtime.c",
     "src/modules/db1/roundtable_pipeline.c",
+    "src/modules/db1/roundtable_stage.c",
     "src/modules/db1/runtime_stage.c",
     "src/modules/db1/runtime_state.c",
     "src/modules/db1/secrets.c",

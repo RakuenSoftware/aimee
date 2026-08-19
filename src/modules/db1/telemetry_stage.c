@@ -1829,7 +1829,7 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
          return AIMEE_MODULE_STATUS_INTERNAL;
       }
       domain_rows = found;
-      rc = db1_eval_results_list(field[0], found, parsed1);
+      rc = db1_eval_results_list(field[0][0] ? field[0] : NULL, found, parsed1);
       if (rc > 0)
       {
          uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)

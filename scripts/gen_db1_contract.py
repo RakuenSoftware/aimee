@@ -460,11 +460,31 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             repeated_member = isinstance(entry_field, dict) and "repeat" in entry_field
             nested_member = isinstance(entry_field, dict) and "fields" in entry_field
             allowed = {"name", "type", "required"}
+            if isinstance(entry_field, dict) and "null_when_empty" in entry_field:
+                # The wire has no NULL: an absent string arrives as "". For most
+                # parameters that is the same thing, and for some it is not --
+                # db1_roundtable_run_list reads NULL as "every non-terminal run"
+                # and "" as "state equals the empty string", which matches
+                # nothing. Saying so here restores the distinction the C
+                # signature always had.
+                allowed = allowed | {"null_when_empty"}
             if repeated_member:
                 allowed = allowed | {"repeat"}
             if nested_member:
                 allowed = allowed | {"fields"}
             declared = keys(entry_field, allowed, f"{name}.request.fields[{position}]")
+            if declared.get("null_when_empty") is not None:
+                if declared["null_when_empty"] is not True:
+                    fail("null-when-empty",
+                         f"{name} field {declared['name']!r} null_when_empty must be true")
+                if str(declared["type"]) != "text":
+                    fail("null-when-empty",
+                         f"{name} field {declared['name']!r} is NULL when empty, which is "
+                         f"about a string")
+                if declared.get("required"):
+                    fail("null-when-empty",
+                         f"{name} field {declared['name']!r} is required, so it is never "
+                         f"empty and never NULL")
             if repeated_member:
                 # Only a struct has members wide enough to need this. A bare
                 # argument that repeats is the `repeated` shape, which carries
@@ -2761,6 +2781,8 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         assert isinstance(request, dict) and isinstance(reply, dict)
         arity = len(request["fields"])
         types = [str(f["type"]) for f in request["fields"]]
+        nullable = (lambda at: bool(request["fields"][at].get("null_when_empty"))
+                    if at < len(request["fields"]) else False)
         names = [str(f["name"]) for f in request["fields"]]
         reads = bool(reply["fields"])
         in_struct = str(request["struct"]) if "struct" in request else ""
@@ -2834,6 +2856,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                                  f"         free(scratch);\n"
                                  f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
                                  f"      }}\n")
+                elif nullable(position):
+                    # "" is how an absent string arrives; this parameter is one
+                    # whose NULL means something else entirely.
+                    args.append(f"field[{position}][0] ? field[{position}] : NULL")
                 else:
                     args.append(f"field[{position}]")
 

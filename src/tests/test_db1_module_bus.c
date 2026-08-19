@@ -39,6 +39,7 @@
 #include "pipelines.h"
 #include "roadmap_runtime.h"
 #include "execution_plans.h"
+#include "roundtable_pipeline.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -77,7 +78,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
     AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
     AIMEE_DB1_EVENT_GUARDRAIL_STATE,  AIMEE_DB1_EVENT_ENSEMBLE,
-    AIMEE_DB1_EVENT_WORKFLOW,
+    AIMEE_DB1_EVENT_WORKFLOW,         AIMEE_DB1_EVENT_ROUNDTABLE,
 };
 
 static pid_t g_module = -1;
@@ -1263,6 +1264,121 @@ static void test_a_plan_carries_its_steps_and_their_dependencies(void)
    printf("  PASS: a plan carries its steps and their dependencies\n");
 }
 
+/* rtp_run_t is 36 columns and the update writes all of them from one struct,
+   so a column that crossed into the wrong slot would be invisible in any test
+   that left most of them empty. The compare-and-swap matters just as much: it
+   is what makes gate resolution exactly-once, so two concurrent passes cannot
+   both merge, and it says so by changing exactly one row or none. */
+static void test_a_roundtable_run_round_trips_and_swaps_once(void)
+{
+   int run_id = 0;
+   must(db1_roundtable_run_create("an idea", "the done bar", "repo", "main", &run_id) == 0,
+        "created a run");
+   must(run_id > 0, "with an id");
+
+   rtp_run_t run;
+   memset(&run, 0, sizeof run);
+   must(db1_roundtable_run_get(run_id, &run) == 0, "read it back");
+   must(strcmp(run.idea, "an idea") == 0, "the idea crossed");
+   must(strcmp(run.done_bar, "the done bar") == 0, "and the done bar");
+   must(strcmp(run.base_branch, "main") == 0, "and the base branch");
+   rtp_run_t absent;
+   memset(&absent, 0, sizeof absent);
+   must(db1_roundtable_run_get(999999, &absent) != 0, "an absent run is not a read");
+
+   /* Distinct values in the columns most likely to be transposed. */
+   snprintf(run.head_branch, sizeof run.head_branch, "%s", "feature/x");
+   snprintf(run.head_sha, sizeof run.head_sha, "%s", "aaaa1111");
+   snprintf(run.base_sha, sizeof run.base_sha, "%s", "bbbb2222");
+   run.proposal_pr_number = 11;
+   run.impl_pr_number = 22;
+   run.proposal_phase_cost_usd = 1.25;
+   run.impl_phase_cost_usd = 2.50;
+   run.total_cost_usd = 3.75;
+   run.accepted_question_count = 7;
+   must(db1_roundtable_run_update(&run) == 0, "wrote every mutable column back");
+
+   memset(&run, 0, sizeof run);
+   must(db1_roundtable_run_get(run_id, &run) == 0, "re-read the run");
+   must(strcmp(run.head_sha, "aaaa1111") == 0 && strcmp(run.base_sha, "bbbb2222") == 0,
+        "the two shas stayed in their own columns");
+   must(run.proposal_pr_number == 11 && run.impl_pr_number == 22, "so did the two PR numbers");
+   must(run.proposal_phase_cost_usd == 1.25 && run.impl_phase_cost_usd == 2.50,
+        "and the two phase costs, which are doubles rather than cents");
+   must(run.total_cost_usd == 3.75, "and the total");
+   must(run.accepted_question_count == 7, "and the question count");
+
+   must(db1_roundtable_run_count_active() >= 1, "the run counts as active");
+   must(db1_roundtable_run_branch_owner("repo", "feature/x", 0) == run_id,
+        "and it owns its head branch");
+   must(db1_roundtable_run_branch_owner("repo", "feature/x", run_id) == 0,
+        "excluding itself, nobody owns it");
+
+   /* Exactly-once: the first swap wins and the second finds nothing to move. */
+   must(db1_roundtable_run_set_state(run_id, "gate", "impl") == 0, "moved it to a gate");
+   must(db1_roundtable_run_cas_state(run_id, "gate", "merging") == 0, "the first swap won");
+   must(db1_roundtable_run_cas_state(run_id, "gate", "merging") != 0,
+        "and the second lost, which is what stops two passes both merging");
+
+   rtp_run_t runs[8];
+   memset(runs, 0, sizeof runs);
+   must(db1_roundtable_run_list(NULL, runs, 8) >= 1, "listed the non-terminal runs");
+
+   int pass_id = 0;
+   must(db1_roundtable_pass_create(run_id, "review", "chunked", 1, "hash-1", &pass_id) == 0,
+        "opened a pass");
+   must(db1_roundtable_pass_max_no(run_id, "review") == 1, "which is pass one");
+   rtp_pass_t pass;
+   memset(&pass, 0, sizeof pass);
+   must(db1_roundtable_pass_latest(run_id, "review", &pass) == 0, "read the latest pass");
+   must(pass.id == pass_id, "and it is the one we opened");
+   pass.blocking_count = 3;
+   pass.suggestion_count = 5;
+   pass.nit_count = 9;
+   pass.cost_usd = 0.5;
+   pass.chunk_group = 1;
+   pass.chunk_index = 1;
+   pass.is_chunked = 1;
+   must(db1_roundtable_pass_update(&pass) == 0, "updated its counts");
+   memset(&pass, 0, sizeof pass);
+   must(db1_roundtable_pass_get(pass_id, &pass) == 0, "re-read the pass");
+   must(pass.blocking_count == 3 && pass.suggestion_count == 5 && pass.nit_count == 9,
+        "each count kept its own column");
+
+   int attempt_id = 0;
+   must(db1_roundtable_attempt_create(pass_id, 1, "run-abc", &attempt_id) == 0, "made an attempt");
+   must(db1_roundtable_attempt_max_no(pass_id) == 1, "which is attempt one");
+   rtp_attempt_t att;
+   memset(&att, 0, sizeof att);
+   must(db1_roundtable_attempt_get_by_run("run-abc", &att) == 0, "found it by run id");
+   must(att.id == attempt_id, "and it is the one we made");
+   must(db1_roundtable_attempt_current(pass_id, &att) == 0, "it is the current attempt");
+   must(db1_roundtable_attempt_supersede_others(pass_id, attempt_id) == 0, "superseded the rest");
+
+   int gate_id = 0;
+   must(db1_roundtable_gate_create(run_id, 1, 42, "cccc3333", &gate_id) == 0, "opened a gate");
+   rtp_gate_t gate;
+   memset(&gate, 0, sizeof gate);
+   must(db1_roundtable_gate_get(run_id, 1, &gate) == 0, "read the gate");
+   must(gate.pr_number == 42, "the PR number crossed");
+   must(strcmp(gate.expected_head_sha, "cccc3333") == 0, "and the sha it expects");
+   snprintf(gate.verdict, sizeof gate.verdict, "%s", "pass");
+   gate.merge_exit_code = 0;
+   must(db1_roundtable_gate_update(&gate) == 0, "recorded a verdict");
+   must(db1_roundtable_gate_age_exceeds_hours(run_id, 1, 24) == 0, "a fresh gate is not stale");
+
+   rtp_group_agg_t agg;
+   memset(&agg, 0, sizeof agg);
+   /* Group numbering starts at one: nothing is group zero, and asking for it
+      is rejected rather than answered with an empty aggregate. */
+   must(db1_roundtable_pass_group_agg(run_id, "review", 1, &agg) == 0, "aggregated the group");
+   must(agg.total == 1, "which counted the one chunked pass");
+   must(db1_roundtable_pass_group_agg(run_id, "review", 0, &agg) != 0, "group zero is refused");
+   must(db1_roundtable_pass_max_group(run_id, "review") == 1, "and one is the highest group");
+
+   printf("  PASS: a roundtable run round trips and swaps once\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1314,6 +1430,7 @@ int main(int argc, char **argv)
    test_a_pipeline_row_survives_a_nine_parameter_update();
    test_the_roadmap_selector_keeps_all_three_answers();
    test_a_plan_carries_its_steps_and_their_dependencies();
+   test_a_roundtable_run_round_trips_and_swaps_once();
 
    stop_module();
    obs_bus_stop();

@@ -250,13 +250,12 @@
    "active": true,
    "doc": "the workflow engine's plans, traces, pipelines and bindings -- everything the engine stores that no multi-call transaction spans.",
    "client_doc": "",
-   "covers": "execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline, wfe_binding",
+   "covers": "execution_plans, execution_trace, pipelines, roadmap_runtime, wfe_binding",
    "sources": [
     "execution_plans",
     "execution_trace",
     "pipelines",
     "roadmap_runtime",
-    "roundtable_pipeline",
     "wfe_binding"
    ],
    "retired_sources": [
@@ -269,8 +268,23 @@
   },
   {
    "id": 12,
-   "name": "identity",
+   "name": "roundtable",
    "event_kind": 11788,
+   "active": true,
+   "doc": "roundtable pipeline runs, passes, attempts and gates: the review pipeline's own state machine, split from workflow because one family's generated client cannot hold both.",
+   "client_doc": "",
+   "covers": "roundtable_pipeline",
+   "sources": [
+    "roundtable_pipeline"
+   ],
+   "retired_sources": [
+    "roundtable_pipeline.c"
+   ]
+  },
+  {
+   "id": 13,
+   "name": "identity",
+   "event_kind": 11789,
    "active": false,
    "doc": "secrets and the replay stores behind token consumption.",
    "client_doc": "",
@@ -284,9 +298,9 @@
    "retired_sources": []
   },
   {
-   "id": 13,
+   "id": 14,
    "name": "lifecycle",
-   "event_kind": 11789,
+   "event_kind": 11790,
    "active": false,
    "doc": "work-item state and its audit log. Split from workflow because wfe_engine.c wraps sixteen of these writes in two transactions it opens and commits across separate calls, which is a redesign of that engine's write path rather than a wire question.",
    "client_doc": "",
@@ -3862,7 +3876,8 @@
      {
       "name": "since",
       "type": "text",
-      "required": false
+      "required": false,
+      "null_when_empty": true
      },
      {
       "name": "max",
@@ -4242,7 +4257,8 @@
      {
       "name": "agent_name",
       "type": "text",
-      "required": false
+      "required": false,
+      "null_when_empty": true
      },
      {
       "name": "max",
@@ -4513,7 +4529,8 @@
      {
       "name": "since",
       "type": "text",
-      "required": false
+      "required": false,
+      "null_when_empty": true
      }
     ]
    },
@@ -8874,7 +8891,8 @@
      {
       "name": "since_or_null",
       "type": "text",
-      "required": false
+      "required": false,
+      "null_when_empty": true
      }
     ]
    },
@@ -14474,7 +14492,8 @@
      {
       "name": "suite_or_null",
       "type": "text",
-      "required": false
+      "required": false,
+      "null_when_empty": true
      },
      {
       "name": "max",
@@ -18891,6 +18910,2372 @@
      }
     ],
     "max_bytes": 1024
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 1,
+   "name": "roundtable_run_create",
+   "c_name": "db1_roundtable_run_create",
+   "c_params": [
+    "idea",
+    "done_bar",
+    "repo_root",
+    "base_branch",
+    "out_id"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "idea",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "done_bar",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "repo_root",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "base_branch",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 2,
+   "name": "roundtable_run_get",
+   "c_name": "db1_roundtable_run_get",
+   "c_params": [
+    "id",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_run_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "idea",
+      "type": "text"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "phase",
+      "type": "text"
+     },
+     {
+      "name": "admission_class",
+      "type": "text"
+     },
+     {
+      "name": "schema_version",
+      "type": "int"
+     },
+     {
+      "name": "done_bar",
+      "type": "text"
+     },
+     {
+      "name": "brief",
+      "type": "text"
+     },
+     {
+      "name": "gate_digest",
+      "type": "text"
+     },
+     {
+      "name": "proposal_ref",
+      "type": "text"
+     },
+     {
+      "name": "proposal_origin_hash",
+      "type": "text"
+     },
+     {
+      "name": "diff_ref",
+      "type": "text"
+     },
+     {
+      "name": "diff_origin_hash",
+      "type": "text"
+     },
+     {
+      "name": "chunk_index_ref",
+      "type": "text"
+     },
+     {
+      "name": "repo_root",
+      "type": "text"
+     },
+     {
+      "name": "remote",
+      "type": "text"
+     },
+     {
+      "name": "base_branch",
+      "type": "text"
+     },
+     {
+      "name": "head_branch",
+      "type": "text"
+     },
+     {
+      "name": "workspace_id",
+      "type": "text"
+     },
+     {
+      "name": "workspace_provider",
+      "type": "text"
+     },
+     {
+      "name": "worktree_path",
+      "type": "text"
+     },
+     {
+      "name": "head_sha",
+      "type": "text"
+     },
+     {
+      "name": "base_sha",
+      "type": "text"
+     },
+     {
+      "name": "proposal_pr_number",
+      "type": "int"
+     },
+     {
+      "name": "proposal_pr_url",
+      "type": "text"
+     },
+     {
+      "name": "impl_pr_number",
+      "type": "int"
+     },
+     {
+      "name": "impl_pr_url",
+      "type": "text"
+     },
+     {
+      "name": "cost_scope",
+      "type": "text"
+     },
+     {
+      "name": "cost_source",
+      "type": "text"
+     },
+     {
+      "name": "cost_version",
+      "type": "int"
+     },
+     {
+      "name": "proposal_phase_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "impl_phase_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "total_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "accepted_question_count",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 3,
+   "name": "roundtable_run_update",
+   "c_name": "db1_roundtable_run_update",
+   "c_params": [
+    "run"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "rtp_run_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "idea",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "state",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "admission_class",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "schema_version",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "done_bar",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "brief",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "gate_digest",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "proposal_ref",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "proposal_origin_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "diff_ref",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "diff_origin_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "chunk_index_ref",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "repo_root",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "remote",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "base_branch",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "head_branch",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "workspace_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "workspace_provider",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "worktree_path",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "head_sha",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "base_sha",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "proposal_pr_number",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "proposal_pr_url",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "impl_pr_number",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "impl_pr_url",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost_scope",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost_source",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost_version",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "proposal_phase_cost_usd",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "impl_phase_cost_usd",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "total_cost_usd",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "accepted_question_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "updated_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 4,
+   "name": "roundtable_run_set_state",
+   "c_name": "db1_roundtable_run_set_state",
+   "c_params": [
+    "id",
+    "state",
+    "phase"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "state",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 5,
+   "name": "roundtable_run_cas_state",
+   "c_name": "db1_roundtable_run_cas_state",
+   "c_params": [
+    "id",
+    "expected",
+    "next"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "expected",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "next",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 6,
+   "name": "roundtable_run_list",
+   "c_name": "db1_roundtable_run_list",
+   "c_params": [
+    "state_filter",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_filter",
+      "type": "text",
+      "required": false,
+      "null_when_empty": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_run_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "idea",
+      "type": "text"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "phase",
+      "type": "text"
+     },
+     {
+      "name": "admission_class",
+      "type": "text"
+     },
+     {
+      "name": "schema_version",
+      "type": "int"
+     },
+     {
+      "name": "done_bar",
+      "type": "text"
+     },
+     {
+      "name": "brief",
+      "type": "text"
+     },
+     {
+      "name": "gate_digest",
+      "type": "text"
+     },
+     {
+      "name": "proposal_ref",
+      "type": "text"
+     },
+     {
+      "name": "proposal_origin_hash",
+      "type": "text"
+     },
+     {
+      "name": "diff_ref",
+      "type": "text"
+     },
+     {
+      "name": "diff_origin_hash",
+      "type": "text"
+     },
+     {
+      "name": "chunk_index_ref",
+      "type": "text"
+     },
+     {
+      "name": "repo_root",
+      "type": "text"
+     },
+     {
+      "name": "remote",
+      "type": "text"
+     },
+     {
+      "name": "base_branch",
+      "type": "text"
+     },
+     {
+      "name": "head_branch",
+      "type": "text"
+     },
+     {
+      "name": "workspace_id",
+      "type": "text"
+     },
+     {
+      "name": "workspace_provider",
+      "type": "text"
+     },
+     {
+      "name": "worktree_path",
+      "type": "text"
+     },
+     {
+      "name": "head_sha",
+      "type": "text"
+     },
+     {
+      "name": "base_sha",
+      "type": "text"
+     },
+     {
+      "name": "proposal_pr_number",
+      "type": "int"
+     },
+     {
+      "name": "proposal_pr_url",
+      "type": "text"
+     },
+     {
+      "name": "impl_pr_number",
+      "type": "int"
+     },
+     {
+      "name": "impl_pr_url",
+      "type": "text"
+     },
+     {
+      "name": "cost_scope",
+      "type": "text"
+     },
+     {
+      "name": "cost_source",
+      "type": "text"
+     },
+     {
+      "name": "cost_version",
+      "type": "int"
+     },
+     {
+      "name": "proposal_phase_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "impl_phase_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "total_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "accepted_question_count",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1048576
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 7,
+   "name": "roundtable_run_count_active",
+   "c_name": "db1_roundtable_run_count_active",
+   "c_params": [],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "active",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 8,
+   "name": "roundtable_run_branch_owner",
+   "c_name": "db1_roundtable_run_branch_owner",
+   "c_params": [
+    "repo_root",
+    "head_branch",
+    "exclude_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "repo_root",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "head_branch",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "exclude_id",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "owner_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 9,
+   "name": "roundtable_pass_create",
+   "c_name": "db1_roundtable_pass_create",
+   "c_params": [
+    "pipeline_id",
+    "phase",
+    "mode",
+    "pass_no",
+    "artifact_hash",
+    "out_id"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "pass_no",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "artifact_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 10,
+   "name": "roundtable_pass_get",
+   "c_name": "db1_roundtable_pass_get",
+   "c_params": [
+    "id",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_pass_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "pipeline_id",
+      "type": "int"
+     },
+     {
+      "name": "phase",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "pass_no",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "artifact_hash",
+      "type": "text"
+     },
+     {
+      "name": "converged",
+      "type": "int"
+     },
+     {
+      "name": "envelope_valid",
+      "type": "int"
+     },
+     {
+      "name": "blocking_count",
+      "type": "int"
+     },
+     {
+      "name": "suggestion_count",
+      "type": "int"
+     },
+     {
+      "name": "nit_count",
+      "type": "int"
+     },
+     {
+      "name": "open_questions",
+      "type": "int"
+     },
+     {
+      "name": "coverage_gaps",
+      "type": "int"
+     },
+     {
+      "name": "items_round",
+      "type": "int"
+     },
+     {
+      "name": "artifact_round",
+      "type": "int"
+     },
+     {
+      "name": "best_round",
+      "type": "int"
+     },
+     {
+      "name": "rounds_run",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "result_hash",
+      "type": "text"
+     },
+     {
+      "name": "is_chunked",
+      "type": "int"
+     },
+     {
+      "name": "chunk_total",
+      "type": "int"
+     },
+     {
+      "name": "chunk_done",
+      "type": "int"
+     },
+     {
+      "name": "synthesis_done",
+      "type": "int"
+     },
+     {
+      "name": "chunk_group",
+      "type": "int"
+     },
+     {
+      "name": "chunk_index",
+      "type": "int"
+     },
+     {
+      "name": "answered_count",
+      "type": "int"
+     },
+     {
+      "name": "chunk_offset",
+      "type": "int"
+     },
+     {
+      "name": "chunk_len",
+      "type": "int"
+     },
+     {
+      "name": "chunk_omitted",
+      "type": "int"
+     },
+     {
+      "name": "chunk_over_budget",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 11,
+   "name": "roundtable_pass_update",
+   "c_name": "db1_roundtable_pass_update",
+   "c_params": [
+    "pass"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "rtp_pass_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "pass_no",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "artifact_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "converged",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "envelope_valid",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "blocking_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "suggestion_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "nit_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "open_questions",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "coverage_gaps",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "items_round",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "artifact_round",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "best_round",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "rounds_run",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "cost_usd",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "result_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "is_chunked",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_total",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_done",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "synthesis_done",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_group",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_index",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "answered_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_offset",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_len",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_omitted",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "chunk_over_budget",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "updated_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 12,
+   "name": "roundtable_pass_latest",
+   "c_name": "db1_roundtable_pass_latest",
+   "c_params": [
+    "pipeline_id",
+    "phase",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_pass_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "pipeline_id",
+      "type": "int"
+     },
+     {
+      "name": "phase",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "pass_no",
+      "type": "int"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "artifact_hash",
+      "type": "text"
+     },
+     {
+      "name": "converged",
+      "type": "int"
+     },
+     {
+      "name": "envelope_valid",
+      "type": "int"
+     },
+     {
+      "name": "blocking_count",
+      "type": "int"
+     },
+     {
+      "name": "suggestion_count",
+      "type": "int"
+     },
+     {
+      "name": "nit_count",
+      "type": "int"
+     },
+     {
+      "name": "open_questions",
+      "type": "int"
+     },
+     {
+      "name": "coverage_gaps",
+      "type": "int"
+     },
+     {
+      "name": "items_round",
+      "type": "int"
+     },
+     {
+      "name": "artifact_round",
+      "type": "int"
+     },
+     {
+      "name": "best_round",
+      "type": "int"
+     },
+     {
+      "name": "rounds_run",
+      "type": "int"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "result_hash",
+      "type": "text"
+     },
+     {
+      "name": "is_chunked",
+      "type": "int"
+     },
+     {
+      "name": "chunk_total",
+      "type": "int"
+     },
+     {
+      "name": "chunk_done",
+      "type": "int"
+     },
+     {
+      "name": "synthesis_done",
+      "type": "int"
+     },
+     {
+      "name": "chunk_group",
+      "type": "int"
+     },
+     {
+      "name": "chunk_index",
+      "type": "int"
+     },
+     {
+      "name": "answered_count",
+      "type": "int"
+     },
+     {
+      "name": "chunk_offset",
+      "type": "int"
+     },
+     {
+      "name": "chunk_len",
+      "type": "int"
+     },
+     {
+      "name": "chunk_omitted",
+      "type": "int"
+     },
+     {
+      "name": "chunk_over_budget",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 13,
+   "name": "roundtable_pass_max_no",
+   "c_name": "db1_roundtable_pass_max_no",
+   "c_params": [
+    "pipeline_id",
+    "phase"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "pass_no",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 14,
+   "name": "roundtable_pass_max_group",
+   "c_name": "db1_roundtable_pass_max_group",
+   "c_params": [
+    "pipeline_id",
+    "phase"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "chunk_group",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 15,
+   "name": "roundtable_pass_group_agg",
+   "c_name": "db1_roundtable_pass_group_agg",
+   "c_params": [
+    "pipeline_id",
+    "phase",
+    "chunk_group",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "phase",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "chunk_group",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_group_agg_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "total",
+      "type": "int"
+     },
+     {
+      "name": "done",
+      "type": "int"
+     },
+     {
+      "name": "invalid",
+      "type": "int"
+     },
+     {
+      "name": "synthesis_present",
+      "type": "int"
+     },
+     {
+      "name": "synthesis_done",
+      "type": "int"
+     },
+     {
+      "name": "blocking_count",
+      "type": "int"
+     },
+     {
+      "name": "suggestion_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 16,
+   "name": "roundtable_attempt_create",
+   "c_name": "db1_roundtable_attempt_create",
+   "c_params": [
+    "pass_id",
+    "attempt_no",
+    "run_id",
+    "out_id"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pass_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "attempt_no",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "run_id",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 17,
+   "name": "roundtable_attempt_get_by_run",
+   "c_name": "db1_roundtable_attempt_get_by_run",
+   "c_params": [
+    "run_id",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "run_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_attempt_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "pass_id",
+      "type": "int"
+     },
+     {
+      "name": "attempt_no",
+      "type": "int"
+     },
+     {
+      "name": "run_id",
+      "type": "text"
+     },
+     {
+      "name": "is_current",
+      "type": "int"
+     },
+     {
+      "name": "capture_status",
+      "type": "text"
+     },
+     {
+      "name": "terminal_status",
+      "type": "text"
+     },
+     {
+      "name": "parse_status",
+      "type": "text"
+     },
+     {
+      "name": "envelope_valid",
+      "type": "int"
+     },
+     {
+      "name": "items_truncated",
+      "type": "int"
+     },
+     {
+      "name": "truncated",
+      "type": "int"
+     },
+     {
+      "name": "degraded",
+      "type": "int"
+     },
+     {
+      "name": "cost_capped",
+      "type": "int"
+     },
+     {
+      "name": "deadline_hit",
+      "type": "int"
+     },
+     {
+      "name": "cancelled",
+      "type": "int"
+     },
+     {
+      "name": "lost_result",
+      "type": "int"
+     },
+     {
+      "name": "result_hash",
+      "type": "text"
+     },
+     {
+      "name": "result_snapshot",
+      "type": "text"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "submitted_at",
+      "type": "text"
+     },
+     {
+      "name": "terminal_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 32768
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 18,
+   "name": "roundtable_attempt_current",
+   "c_name": "db1_roundtable_attempt_current",
+   "c_params": [
+    "pass_id",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "pass_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_attempt_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "pass_id",
+      "type": "int"
+     },
+     {
+      "name": "attempt_no",
+      "type": "int"
+     },
+     {
+      "name": "run_id",
+      "type": "text"
+     },
+     {
+      "name": "is_current",
+      "type": "int"
+     },
+     {
+      "name": "capture_status",
+      "type": "text"
+     },
+     {
+      "name": "terminal_status",
+      "type": "text"
+     },
+     {
+      "name": "parse_status",
+      "type": "text"
+     },
+     {
+      "name": "envelope_valid",
+      "type": "int"
+     },
+     {
+      "name": "items_truncated",
+      "type": "int"
+     },
+     {
+      "name": "truncated",
+      "type": "int"
+     },
+     {
+      "name": "degraded",
+      "type": "int"
+     },
+     {
+      "name": "cost_capped",
+      "type": "int"
+     },
+     {
+      "name": "deadline_hit",
+      "type": "int"
+     },
+     {
+      "name": "cancelled",
+      "type": "int"
+     },
+     {
+      "name": "lost_result",
+      "type": "int"
+     },
+     {
+      "name": "result_hash",
+      "type": "text"
+     },
+     {
+      "name": "result_snapshot",
+      "type": "text"
+     },
+     {
+      "name": "cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "cost_known",
+      "type": "int"
+     },
+     {
+      "name": "submitted_at",
+      "type": "text"
+     },
+     {
+      "name": "terminal_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 32768
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 19,
+   "name": "roundtable_attempt_update",
+   "c_name": "db1_roundtable_attempt_update",
+   "c_params": [
+    "attempt"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "rtp_attempt_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pass_id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "attempt_no",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "run_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "is_current",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "capture_status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "terminal_status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "parse_status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "envelope_valid",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "items_truncated",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "truncated",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "degraded",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "cost_capped",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deadline_hit",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "cancelled",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "lost_result",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "result_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "result_snapshot",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost_usd",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "cost_known",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "submitted_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "terminal_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 20,
+   "name": "roundtable_attempt_max_no",
+   "c_name": "db1_roundtable_attempt_max_no",
+   "c_params": [
+    "pass_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pass_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "attempt_no",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 21,
+   "name": "roundtable_attempt_supersede_others",
+   "c_name": "db1_roundtable_attempt_supersede_others",
+   "c_params": [
+    "pass_id",
+    "keep_attempt_id"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pass_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "keep_attempt_id",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 22,
+   "name": "roundtable_gate_create",
+   "c_name": "db1_roundtable_gate_create",
+   "c_params": [
+    "pipeline_id",
+    "gate_no",
+    "pr_number",
+    "expected_head_sha",
+    "out_id"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "gate_no",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pr_number",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "expected_head_sha",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 23,
+   "name": "roundtable_gate_get",
+   "c_name": "db1_roundtable_gate_get",
+   "c_params": [
+    "pipeline_id",
+    "gate_no",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "gate_no",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "rtp_gate_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "pipeline_id",
+      "type": "int"
+     },
+     {
+      "name": "gate_no",
+      "type": "int"
+     },
+     {
+      "name": "verdict",
+      "type": "text"
+     },
+     {
+      "name": "reason",
+      "type": "text"
+     },
+     {
+      "name": "actor",
+      "type": "text"
+     },
+     {
+      "name": "pr_number",
+      "type": "int"
+     },
+     {
+      "name": "expected_head_sha",
+      "type": "text"
+     },
+     {
+      "name": "merge_sha",
+      "type": "text"
+     },
+     {
+      "name": "merge_executor",
+      "type": "text"
+     },
+     {
+      "name": "merge_command",
+      "type": "text"
+     },
+     {
+      "name": "merge_output",
+      "type": "text"
+     },
+     {
+      "name": "merge_exit_code",
+      "type": "int"
+     },
+     {
+      "name": "resolved_at",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 32768
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 24,
+   "name": "roundtable_gate_update",
+   "c_name": "db1_roundtable_gate_update",
+   "c_params": [
+    "gate"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "rtp_gate_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "gate_no",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "verdict",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "actor",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "pr_number",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "expected_head_sha",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "merge_sha",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "merge_executor",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "merge_command",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "merge_output",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "merge_exit_code",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "resolved_at",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "roundtable",
+   "id": 25,
+   "name": "roundtable_gate_age_exceeds_hours",
+   "c_name": "db1_roundtable_gate_age_exceeds_hours",
+   "c_params": [
+    "pipeline_id",
+    "gate_no",
+    "hours"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "gate_no",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "hours",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "exceeded",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
    }
   }
  ]

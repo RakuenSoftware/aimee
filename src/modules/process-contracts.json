@@ -704,6 +704,11 @@
           "id": 11,
           "name": "db1-workflow",
           "event_kind": 11787
+        },
+        {
+          "id": 12,
+          "name": "db1-roundtable",
+          "event_kind": 11788
         }
       ]
     }
