@@ -22689,9 +22689,15 @@
           "line": 31
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "custody",
+        "reason": "Commits or rolls back a transaction the caller began earlier through a separate call. A transaction cannot span bus calls: the caller holds no connection, and the module has no way to know which caller's work a later commit refers to. Startup work that must be atomic belongs in one operation that owns its whole transaction."
+      },
       "signature": "int db2_vault_control_startup_end ( int commit )",
       "signature_sha256": "28e24701717ad0945c03443d15f4e761d821892a941a526cfe19c14947a73476",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_vault_control_startup_end"
     },
     {
@@ -22983,9 +22989,15 @@
           "line": 125
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "custody",
+        "reason": "Destroys the caller-held runtime object opened above, including its mutex. It operates entirely on memory the caller owns and has nothing to send."
+      },
       "signature": "void db2_vault_operator_runtime_close ( db2_vault_operator_runtime_t * )",
       "signature_sha256": "41fec7a051b5fca0d278bdd03d73f58ec8390cb5b3640508f3f9b5dbbc452505",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_vault_operator_runtime_close"
     },
     {
@@ -22998,9 +23010,15 @@
           "line": 118
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "custody",
+        "reason": "Opens a caller-held runtime object: a struct carrying a pthread mutex and its own Postgres connection, both created for and owned by the calling process. Neither can be represented on the wire, for the same reason db2_conn cannot. A caller needing operator status across the boundary needs an operation that returns the status, not one that hands back a handle."
+      },
       "signature": "int db2_vault_operator_runtime_open ( db2_vault_operator_runtime_t * , const char * conninfo , char * errbuf , size_t errlen )",
       "signature_sha256": "11df15482e64b5b890a231619820cbcdcc7ec920bab984f74f5a50d0558d7ae3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_vault_operator_runtime_open"
     },
     {
@@ -23042,9 +23060,15 @@
           "line": 133
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "custody",
+        "reason": "Reads status through the caller-held runtime under its mutex, sampling twice and comparing to reject a torn read. Both the lock and the retry are properties of holding the object locally; across a bus the caller holds nothing to lock, so this stays private and a status operation would have to own that sampling itself."
+      },
       "signature": "int db2_vault_operator_runtime_status ( db2_vault_operator_runtime_t * , db2_vault_provider_status_fn , void * provider_context , db2_vault_operator_status_t * )",
       "signature_sha256": "f5e650a26513e4ba0146c884ae9406dd34319adaff54b2f8916407daa1f5d21a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_vault_operator_runtime_status"
     },
     {
@@ -26262,15 +26286,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "030f1c98693576075f92ad328dda04815036a569259f4d653e7a54045f203595",
+  "fingerprint": "245dfef3d884fa4daba5a150201d6dbb7c5f24bd94e78b4ffa4df996a2ae84a3",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 585,
+    "audit_pending": 581,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 373
+    "reviewed": 377
   }
 }

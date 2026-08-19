@@ -2484,6 +2484,38 @@
       "reason": "The typed learning.trace_mining_last_id operation reads the high-water mark the next mining pass resumes from. A never-mined corpus and a failed read are both zero, and the consequence is worth naming: a zero sends the next pass back to the beginning, so a read failure costs a full rescan rather than losing anything. That is recorded because it makes the collapse cheap in one direction and expensive in the other."
     },
     {
+      "symbol": "db2_vault_control_startup_end",
+      "signature_sha256": "28e24701717ad0945c03443d15f4e761d821892a941a526cfe19c14947a73476",
+      "disposition": "private-db2",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "Commits or rolls back a transaction the caller began earlier through a separate call. A transaction cannot span bus calls: the caller holds no connection, and the module has no way to know which caller's work a later commit refers to. Startup work that must be atomic belongs in one operation that owns its whole transaction."
+    },
+    {
+      "symbol": "db2_vault_operator_runtime_close",
+      "signature_sha256": "41fec7a051b5fca0d278bdd03d73f58ec8390cb5b3640508f3f9b5dbbc452505",
+      "disposition": "private-db2",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "Destroys the caller-held runtime object opened above, including its mutex. It operates entirely on memory the caller owns and has nothing to send."
+    },
+    {
+      "symbol": "db2_vault_operator_runtime_open",
+      "signature_sha256": "11df15482e64b5b890a231619820cbcdcc7ec920bab984f74f5a50d0558d7ae3",
+      "disposition": "private-db2",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "Opens a caller-held runtime object: a struct carrying a pthread mutex and its own Postgres connection, both created for and owned by the calling process. Neither can be represented on the wire, for the same reason db2_conn cannot. A caller needing operator status across the boundary needs an operation that returns the status, not one that hands back a handle."
+    },
+    {
+      "symbol": "db2_vault_operator_runtime_status",
+      "signature_sha256": "f5e650a26513e4ba0146c884ae9406dd34319adaff54b2f8916407daa1f5d21a",
+      "disposition": "private-db2",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "Reads status through the caller-held runtime under its mutex, sampling twice and comparing to reject a torn read. Both the lock and the retry are properties of holding the object locally; across a bus the caller holds nothing to lock, so this stays private and a status operation would have to own that sampling itself."
+    },
+    {
       "symbol": "db2_vault_operator_snapshot_equal",
       "signature_sha256": "ed734ac0bf2c5f1eaecb384910b9f2dd182f1050db2e317d6c20cac1c15c5b2f",
       "disposition": "private-db2",
