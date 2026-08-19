@@ -109,10 +109,12 @@ int main(int argc, char **argv)
    char socket_path[512];
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
 
-   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT,
+   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH,
+                              AIMEE_DB2_EVENT_LEVEL3_COUNT,
                               AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
                               AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
-                              AIMEE_DB2_EVENT_RULES_DECAY};
+                              AIMEE_DB2_EVENT_RULES_DECAY,
+                              AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -634,6 +636,15 @@ int main(int argc, char **argv)
    assert(aimee_db2_mining_seed_job_defaults_call(call_client, &client, 9112, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(aimee_db2_mining_seed_job_defaults_call(call_client, &client, 9113, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+
+   /* The organization family reaching the real process for the first time, and
+    * the first seed here that writes rows the module does not own: the
+    * relation-type ontology is declared elsewhere and only persisted here.
+    * Seeding twice is the same acknowledgement both times. */
+   assert(aimee_db2_rel_types_ensure_seed_call(call_client, &client, 9114, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_rel_types_ensure_seed_call(call_client, &client, 9115, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
    /* The maintenance family reaching the real process for the first time. No

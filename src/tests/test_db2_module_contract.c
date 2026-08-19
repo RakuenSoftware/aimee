@@ -93,6 +93,8 @@ static int curiosity_rescore_value;
 static int curiosity_rescore_calls;
 static int mining_seed_value;
 static int mining_seed_calls;
+static int rel_types_seed_value;
+static int rel_types_seed_calls;
 static int prospective_sweep_value;
 static int prospective_sweep_calls;
 static int directive_sweep_value;
@@ -748,6 +750,17 @@ static int mining_seed_job_defaults(void)
 {
    mining_seed_calls++;
    return mining_seed_value;
+}
+
+int db2_rel_types_ensure_seed(void)
+{
+   return 0;
+}
+
+static int rel_types_ensure_seed(void)
+{
+   rel_types_seed_calls++;
+   return rel_types_seed_value;
 }
 
 int db2_prospective_sweep_expired(void)
@@ -1557,6 +1570,8 @@ static void reset(void)
    curiosity_rescore_calls = 0;
    mining_seed_value = 0;
    mining_seed_calls = 0;
+   rel_types_seed_value = 0;
+   rel_types_seed_calls = 0;
    prospective_sweep_value = 7;
    prospective_sweep_calls = 0;
    directive_sweep_value = 8;
@@ -3123,6 +3138,37 @@ static void test_prospective_sweep_expired_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prospective_sweep_expired_reply_decode(reply, reply_len, &expired) == -1 &&
           expired == 0);
+}
+
+static void test_rel_types_ensure_seed_wire(void)
+{
+   uint8_t request[AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN] = {0};
+   assert(aimee_db2_rel_types_ensure_seed_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_rel_types_ensure_seed_request_decode(request, sizeof(request)) == 0);
+   /* First operation of the organization family, so it carries number 1 and
+    * shares its bytes with the first operation of every other open family.
+    * The stage separates them; the handler test pins that. */
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == 0);
+   assert(aimee_db2_prospective_sweep_expired_request_decode(request, sizeof(request)) == 0);
+   assert(aimee_db2_rules_decay_request_decode(request, sizeof(request)) == 0);
+   /* An acknowledgement request is not distinguishable from a counted one at
+    * this point either: only the reply shapes differ. */
+   assert(aimee_db2_mining_seed_job_defaults_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_rel_types_ensure_seed_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN + 4] = {0};
+   uint32_t reply_len = 99;
+   assert(aimee_db2_rel_types_ensure_seed_reply_encode(reply, sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN);
+   assert(aimee_db2_rel_types_ensure_seed_reply_decode(reply, reply_len) == 0);
+   assert(aimee_db2_rel_types_ensure_seed_reply_decode(reply, reply_len + 4) == -1);
+   assert(aimee_db2_rel_types_ensure_seed_reply_decode(reply, reply_len - 1) == -1);
+   assert(aimee_db2_rel_types_ensure_seed_reply_encode(
+              reply, AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN - 1, &reply_len) == -1);
+   assert(aimee_db2_rel_types_ensure_seed_reply_encode(reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_rel_types_ensure_seed_reply_decode(reply, reply_len) == -1);
 }
 
 static void test_mining_seed_job_defaults_wire(void)
@@ -5842,6 +5888,60 @@ static void test_prospective_sweep_expired_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_rel_types_ensure_seed_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.rel_types_ensure_seed = rel_types_ensure_seed};
+   uint8_t request[AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED};
+   assert(aimee_db2_rel_types_ensure_seed_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(rel_types_seed_calls == 1);
+   assert(aimee_db2_rel_types_ensure_seed_reply_decode(response, response_len) == 0);
+
+   /* Four families now share operation number 1, so these bytes decode on any
+    * of their first stages. Sent elsewhere they are refused, but not always
+    * for the reason one would guess: the response buffer sized for an
+    * acknowledgement is too small for a counted reply, and the capacity check
+    * runs before the capability check. So the index and learning stages answer
+    * invalid_request rather than capability_absent. Pinned as it behaves. */
+   aimee_module_invocation_t as_index = {.stage_id = AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS};
+   assert(invoke(&backend, &as_index, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   aimee_module_invocation_t as_learning = {.stage_id = AIMEE_DB2_STAGE_RULES_DECAY};
+   assert(invoke(&backend, &as_learning, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   /* Given a buffer large enough for a counted reply, the same bytes on the
+    * index stage get as far as the capability check and stop there. */
+   uint8_t wide[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN];
+   assert(invoke(&backend, &as_index, request, sizeof(request), wide, sizeof(wide),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(rel_types_seed_calls == 1);
+
+   /* Reseeding is the ordinary case: every relation type already exists, every
+    * insert conflicts and does nothing, and the answer is unchanged. */
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(rel_types_seed_calls == 2);
+
+   /* The backend reports failure if any single seed statement fails, and there
+    * is no count to turn that into a partial success. */
+   rel_types_seed_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   rel_types_seed_value = 0;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_mining_seed_job_defaults_handler(void)
 {
    reset();
@@ -7938,6 +8038,7 @@ int main(void)
    test_rules_decay_wire();
    test_curiosity_rescore_all_wire();
    test_mining_seed_job_defaults_wire();
+   test_rel_types_ensure_seed_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
    test_mark_revisit_due_wire();
@@ -8009,6 +8110,7 @@ int main(void)
    test_rules_decay_handler();
    test_curiosity_rescore_all_handler();
    test_mining_seed_job_defaults_handler();
+   test_rel_types_ensure_seed_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
    test_mark_revisit_due_handler();

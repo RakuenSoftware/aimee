@@ -98,6 +98,7 @@ typedef struct
    int (*rules_decay)(void);
    int (*curiosity_rescore_all)(void);
    int (*mining_seed_job_defaults)(void);
+   int (*rel_types_ensure_seed)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);
@@ -186,6 +187,7 @@ static int rebuild_build_deps_calls;
 static int rules_decay_calls;
 static int curiosity_rescore_calls;
 static int mining_seed_calls;
+static int rel_types_seed_calls;
 static int prospective_sweep_calls;
 static int directive_sweep_calls;
 static int mark_revisit_calls;
@@ -1147,6 +1149,17 @@ static int mining_seed_job_defaults(void)
    return 0;
 }
 
+int db2_rel_types_ensure_seed(void)
+{
+   return 0;
+}
+
+static int rel_types_ensure_seed(void)
+{
+   rel_types_seed_calls++;
+   return 0;
+}
+
 int db2_prospective_sweep_expired(void)
 {
    return 0;
@@ -1502,6 +1515,7 @@ int main(void)
                               AIMEE_DB2_EVENT_RULES_DECAY,
                               AIMEE_DB2_EVENT_CURIOSITY_RESCORE_ALL,
                               AIMEE_DB2_EVENT_MINING_SEED_JOB_DEFAULTS,
+                              AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED,
                               AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_MARK_REVISIT_DUE,
@@ -1558,6 +1572,7 @@ int main(void)
        {AIMEE_DB2_EVENT_RULES_DECAY, AIMEE_DB2_STAGE_RULES_DECAY},
        {AIMEE_DB2_EVENT_CURIOSITY_RESCORE_ALL, AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL},
        {AIMEE_DB2_EVENT_MINING_SEED_JOB_DEFAULTS, AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS},
+       {AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED, AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED},
        {AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_MARK_REVISIT_DUE, AIMEE_DB2_STAGE_MARK_REVISIT_DUE},
@@ -1638,6 +1653,7 @@ int main(void)
        .rules_decay = rules_decay,
        .curiosity_rescore_all = curiosity_rescore_all,
        .mining_seed_job_defaults = mining_seed_job_defaults,
+       .rel_types_ensure_seed = rel_types_ensure_seed,
        .prospective_sweep_expired = prospective_sweep_expired,
        .directive_sweep_expired = directive_sweep_expired,
        .mark_revisit_due = mark_revisit_due,
@@ -2034,6 +2050,11 @@ int main(void)
    assert(aimee_db2_mining_seed_job_defaults_call(call_client, &client, 7095, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(mining_seed_calls == 1);
+
+   /* The organization family's first crossing of the bus. */
+   assert(aimee_db2_rel_types_ensure_seed_call(call_client, &client, 7096, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(rel_types_seed_calls == 1);
 
    /* The maintenance family's first crossing of the bus: a new event kind
     * and a new stage, not another operation on one already carrying work. */

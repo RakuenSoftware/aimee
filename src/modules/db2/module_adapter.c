@@ -21,6 +21,7 @@
 #include "c/kb_service_backend.h"
 #include "c/evidence_vectors.h"
 #include "c/prospective_memories.h"
+#include "c/rel_types_store.h"
 #include "c/rules.h"
 #include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
@@ -329,6 +330,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .rules_decay = db2_rules_decay,
        .curiosity_rescore_all = db2_curiosity_rescore_all,
        .mining_seed_job_defaults = db2_mining_seed_job_defaults,
+       .rel_types_ensure_seed = db2_rel_types_ensure_seed,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        /* Of the two identical sweeps, bind the one that reports failure:
         * db2_directive_sweep_expired collapses a failed statement into
@@ -378,6 +380,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_RULES_DECAY &&
         invocation->stage_id != AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL &&
         invocation->stage_id != AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS &&
+        invocation->stage_id != AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1471,6 +1474,32 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_cross_repo_rebuild_build_deps_reply_encode(
                  (uint32_t)build_deps_written, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   }
+
+   if (invocation->stage_id == AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED)
+   {
+      if (aimee_db2_rel_types_ensure_seed_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->rel_types_ensure_seed)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The organization family's first stage. What this seeds is not
+          * DB2's to decide: the relation-type ontology is declared by the
+          * ontology module and only persisted here, so the policy pins the
+          * persistence rule and stops there. Any failed statement fails the
+          * whole pass, and the acknowledgement shape leaves no room to report
+          * that as a partial success. */
+         if (backend->rel_types_ensure_seed() != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_rel_types_ensure_seed_reply_encode(response_body, response_capacity,
+                                                          response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

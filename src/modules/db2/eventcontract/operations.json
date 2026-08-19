@@ -1729,6 +1729,30 @@
       }
     },
     {
+      "family": "organization",
+      "id": 1,
+      "name": "rel_types_ensure_seed",
+      "wire_format": "db2-envelope-ack-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The relation-type ontology is a canonical relational DB2 table, not portable ANN state.",
+      "c_symbols": ["db2_rel_types_ensure_seed"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"seed_source": "ontology-module", "status": "active",
+                   "on_conflict": "do-nothing", "seed_owned_by_db2": false}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "payload": "none"
+      }
+    },
+    {
       "family": "maintenance",
       "id": 1,
       "name": "prospective_sweep_expired",

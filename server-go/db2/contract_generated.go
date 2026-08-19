@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "c8da2995c1be3fc892342a647dc4a3077730b8ad1b259db33521b0b340e3c9d0"
+const ContractSHA256 = "b73becfa9ff1a9d007de824256464e103f089bd0cd38725436f5c8d22f32ed26"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -364,6 +364,9 @@ const CuriosityRescoreAllMax uint32 = 2147483647
 const EventMiningSeedJobDefaults = EventLearning
 const StageMiningSeedJobDefaults = FamilyLearning
 const OperationMiningSeedJobDefaults uint32 = 3
+const EventRelTypesEnsureSeed = EventOrganization
+const StageRelTypesEnsureSeed = FamilyOrganization
+const OperationRelTypesEnsureSeed uint32 = 1
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2487,6 +2490,48 @@ func EncodeMiningSeedJobDefaultsReply() []byte {
 func DecodeMiningSeedJobDefaultsReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationMiningSeedJobDefaults ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeRelTypesEnsureSeedRequest emits the empty request envelope. The
+// persistence rule is policy; the seed set itself belongs to the ontology
+// module and never travels either.
+func EncodeRelTypesEnsureSeedRequest() []byte {
+	header, err := EncodeRequestHeader(OperationRelTypesEnsureSeed, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeRelTypesEnsureSeedRequest validates the exact organization-family
+// envelope.
+func DecodeRelTypesEnsureSeedRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeRelTypesEnsureSeedReply emits a bare acknowledgement.
+func EncodeRelTypesEnsureSeedReply() []byte {
+	header, err := EncodeReplyHeader(OperationRelTypesEnsureSeed, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeRelTypesEnsureSeedReply validates the acknowledgement envelope.
+func DecodeRelTypesEnsureSeedReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != EnvelopeHeaderLen {
 		return ErrMalformedEnvelope

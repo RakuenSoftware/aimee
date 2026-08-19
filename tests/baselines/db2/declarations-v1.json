@@ -20508,9 +20508,15 @@
           "line": 35
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.rel_types_ensure_seed operation persists the relation-type ontology on first run. What it can pin is only the persistence rule -- active status and do-nothing conflicts -- because the seed set itself is declared by the ontology module outside DB2. The catalog records that boundary rather than copying a table it does not own and would then have to keep in step."
+      },
       "signature": "int db2_rel_types_ensure_seed ( void )",
       "signature_sha256": "89136e750d8abcb243767053305dfc9ee9cadcbd6f374135219c3f549902cf7b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rel_types_ensure_seed"
     },
     {
@@ -26166,15 +26172,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "57c151cc571f02ec0ca5c773ce0fcc4b88552a45b3398a478b684a2da7807426",
+  "fingerprint": "7327d11dbb65f295731fe795dd584a50815e8bc79601e55f592bdfe995ceafff",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 601,
+    "audit_pending": 600,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 357
+    "reviewed": 358
   }
 }

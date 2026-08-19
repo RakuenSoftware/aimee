@@ -2276,6 +2276,14 @@
       "reason": "The typed lifecycle.reembed_status operation replaces direct reads of the canonical maintenance marker while retaining DB2 schema and rebuild authority."
     },
     {
+      "symbol": "db2_rel_types_ensure_seed",
+      "signature_sha256": "89136e750d8abcb243767053305dfc9ee9cadcbd6f374135219c3f549902cf7b",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.rel_types_ensure_seed operation persists the relation-type ontology on first run. What it can pin is only the persistence rule -- active status and do-nothing conflicts -- because the seed set itself is declared by the ontology module outside DB2. The catalog records that boundary rather than copying a table it does not own and would then have to keep in step."
+    },
+    {
       "symbol": "db2_rules_decay",
       "signature_sha256": "146869aae9e72b950bbc51634d23fe92ed7cadcaff63e8f59ab3c320366f0ae6",
       "disposition": "wire-operation",

@@ -260,7 +260,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 if name in ("curator_reenqueue_extract_all",
                                             "rules_decay",
                                             "curiosity_rescore_all",
-                                            "mining_seed_job_defaults") else "none")
+                                            "mining_seed_job_defaults",
+                                            "rel_types_ensure_seed") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
         # observationally neutral the way every other operation here is.
         expected_idempotency = ("unsafe"
@@ -2303,6 +2304,36 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["payload"] != "none"):
                 fail("mining-seed-job-defaults-reply",
                      "reply must be a bare acknowledgement envelope")
+        elif key == ("organization", 1) and name == "rel_types_ensure_seed" and \
+                operation["wire_format"] == "db2-envelope-ack-v1":
+            # Unlike the mining seed, this one's content is not DB2's. The
+            # ontology module declares the relation types; DB2 only persists
+            # them. So the policy pins the persistence rule and says plainly
+            # that the seed set is owned elsewhere, rather than copying a table
+            # this catalog would then have to keep in step with.
+            if operation["c_symbols"] != ["db2_rel_types_ensure_seed"]:
+                fail("operation-c-symbols",
+                     "rel_types_ensure_seed C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "rel_types_ensure_seed results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "rel_types_ensure_seed.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"seed_source": "ontology-module",
+                                          "status": "active",
+                                          "on_conflict": "do-nothing",
+                                          "seed_owned_by_db2": False}):
+                fail("rel-types-ensure-seed-request",
+                     "request must carry no payload and fix the persistence rule")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "payload"},
+                          "rel_types_ensure_seed.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["payload"] != "none"):
+                fail("rel-types-ensure-seed-reply",
+                     "reply must be a bare acknowledgement envelope")
         elif key == ("maintenance", 1) and name == "prospective_sweep_expired" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # The clock is the database's, not the caller's. A caller-supplied
@@ -2564,7 +2595,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 71 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 72 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2584,12 +2615,12 @@ def validate_catalog(value: object) -> dict[str, object]:
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
             "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
-            "prospective_sweep_expired",
+            "rel_types_ensure_seed", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the seventy-one supported operations exactly once")
+             "the partial generator requires the seventy-two supported operations exactly once")
     return catalog
 
 
@@ -2776,14 +2807,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     rules_decay = catalog["operations"][60]
     curiosity_rescore_all = catalog["operations"][61]
     mining_seed_job_defaults = catalog["operations"][62]
-    prospective_sweep_expired = catalog["operations"][63]
-    directive_sweep_expired = catalog["operations"][64]
-    mark_revisit_due = catalog["operations"][65]
-    ingest_queue_reset_running = catalog["operations"][66]
-    evidence_reembed_all = catalog["operations"][67]
-    curator_reembed_all = catalog["operations"][68]
-    synth_reenqueue_all = catalog["operations"][69]
-    curator_reenqueue_extract_all = catalog["operations"][70]
+    rel_types_ensure_seed = catalog["operations"][63]
+    prospective_sweep_expired = catalog["operations"][64]
+    directive_sweep_expired = catalog["operations"][65]
+    mark_revisit_due = catalog["operations"][66]
+    ingest_queue_reset_running = catalog["operations"][67]
+    evidence_reembed_all = catalog["operations"][68]
+    curator_reembed_all = catalog["operations"][69]
+    synth_reenqueue_all = catalog["operations"][70]
+    curator_reenqueue_extract_all = catalog["operations"][71]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3208,6 +3240,12 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     mining_seed_job_defaults_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(mining_seed_job_defaults["id"]), 0, b"",
+    )
+    rel_types_ensure_seed_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(rel_types_ensure_seed["id"]), 0, b"",
+    )
+    rel_types_ensure_seed_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(rel_types_ensure_seed["id"]), 0, b"",
     )
     prospective_sweep_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(prospective_sweep_expired["id"]), 0, b"",
@@ -6228,6 +6266,39 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": rel_types_ensure_seed["family"],
+            "id": rel_types_ensure_seed["id"],
+            "name": rel_types_ensure_seed["name"],
+            "request": {
+                "positive": rel_types_ensure_seed_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(rel_types_ensure_seed_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(rel_types_ensure_seed_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     rel_types_ensure_seed_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (rel_types_ensure_seed_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": rel_types_ensure_seed_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(rel_types_ensure_seed_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(rel_types_ensure_seed_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(rel_types_ensure_seed_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex": rel_types_ensure_seed_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (rel_types_ensure_seed_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": prospective_sweep_expired["family"],
             "id": prospective_sweep_expired["id"],
             "name": prospective_sweep_expired["name"],
@@ -6606,14 +6677,15 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     rules_decay = catalog["operations"][60]
     curiosity_rescore_all = catalog["operations"][61]
     mining_seed_job_defaults = catalog["operations"][62]
-    prospective_sweep_expired = catalog["operations"][63]
-    directive_sweep_expired = catalog["operations"][64]
-    mark_revisit_due = catalog["operations"][65]
-    ingest_queue_reset_running = catalog["operations"][66]
-    evidence_reembed_all = catalog["operations"][67]
-    curator_reembed_all = catalog["operations"][68]
-    synth_reenqueue_all = catalog["operations"][69]
-    curator_reenqueue_extract_all = catalog["operations"][70]
+    rel_types_ensure_seed = catalog["operations"][63]
+    prospective_sweep_expired = catalog["operations"][64]
+    directive_sweep_expired = catalog["operations"][65]
+    mark_revisit_due = catalog["operations"][66]
+    ingest_queue_reset_running = catalog["operations"][67]
+    evidence_reembed_all = catalog["operations"][68]
+    curator_reembed_all = catalog["operations"][69]
+    synth_reenqueue_all = catalog["operations"][70]
+    curator_reenqueue_extract_all = catalog["operations"][71]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -7486,6 +7558,16 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{mining_seed_job_defaults['reply']['encoded_size_ok']}u"),
         ("AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_ERROR_LEN",
          f"{mining_seed_job_defaults['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED", "AIMEE_DB2_EVENT_ORGANIZATION"),
+        ("AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED", "AIMEE_DB2_FAMILY_ORGANIZATION"),
+        ("AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED",
+         f"{rel_types_ensure_seed['id']}u"),
+        ("AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN",
+         f"{rel_types_ensure_seed['request']['encoded_size']}u"),
+        ("AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN",
+         f"{rel_types_ensure_seed['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_REL_TYPES_ENSURE_SEED_ERROR_LEN",
+         f"{rel_types_ensure_seed['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_EVENT_MAINTENANCE"),
         ("AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_FAMILY_MAINTENANCE"),
         ("AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED",
@@ -9962,6 +10044,50 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
  * code and nothing else. For operations whose only honest answer is whether
  * they completed -- any count they could return would describe something other
  * than the work they did. */
+static inline int aimee_db2_rel_types_ensure_seed_request_encode(uint8_t *output,
+                                                                 size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED, 0u, 0u,
+                                          output, capacity);
+}}
+
+static inline int aimee_db2_rel_types_ensure_seed_request_decode(const uint8_t *input,
+                                                                 size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_rel_types_ensure_seed_reply_encode(uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED,
+                                     AIMEE_DB2_RESULT_OK, 0u, output, capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_rel_types_ensure_seed_reply_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
 static inline int aimee_db2_mining_seed_job_defaults_request_encode(uint8_t *output,
                                                                     size_t capacity)
 {{
@@ -13181,6 +13307,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_rel_types_ensure_seed_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -14733,6 +14863,30 @@ aimee_db2_mining_seed_job_defaults_call(aimee_db2_call_fn call, void *call_conte
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_rel_types_ensure_seed_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, aimee_module_cancelled_fn cancelled,
+                                     void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_rel_types_ensure_seed_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED,
+            AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_rel_types_ensure_seed_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -15233,14 +15387,15 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     rules_decay = catalog["operations"][60]
     curiosity_rescore_all = catalog["operations"][61]
     mining_seed_job_defaults = catalog["operations"][62]
-    prospective_sweep_expired = catalog["operations"][63]
-    directive_sweep_expired = catalog["operations"][64]
-    mark_revisit_due = catalog["operations"][65]
-    ingest_queue_reset_running = catalog["operations"][66]
-    evidence_reembed_all = catalog["operations"][67]
-    curator_reembed_all = catalog["operations"][68]
-    synth_reenqueue_all = catalog["operations"][69]
-    curator_reenqueue_extract_all = catalog["operations"][70]
+    rel_types_ensure_seed = catalog["operations"][63]
+    prospective_sweep_expired = catalog["operations"][64]
+    directive_sweep_expired = catalog["operations"][65]
+    mark_revisit_due = catalog["operations"][66]
+    ingest_queue_reset_running = catalog["operations"][67]
+    evidence_reembed_all = catalog["operations"][68]
+    curator_reembed_all = catalog["operations"][69]
+    synth_reenqueue_all = catalog["operations"][70]
+    curator_reenqueue_extract_all = catalog["operations"][71]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -15606,6 +15761,9 @@ const CuriosityRescoreAllMax uint32 = {curiosity_rescore_all['reply']['field']['
 const EventMiningSeedJobDefaults = EventLearning
 const StageMiningSeedJobDefaults = FamilyLearning
 const OperationMiningSeedJobDefaults uint32 = {mining_seed_job_defaults['id']}
+const EventRelTypesEnsureSeed = EventOrganization
+const StageRelTypesEnsureSeed = FamilyOrganization
+const OperationRelTypesEnsureSeed uint32 = {rel_types_ensure_seed['id']}
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = {prospective_sweep_expired['id']}
@@ -17727,6 +17885,48 @@ func EncodeMiningSeedJobDefaultsReply() []byte {{
 func DecodeMiningSeedJobDefaultsReply(reply []byte) error {{
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationMiningSeedJobDefaults ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeRelTypesEnsureSeedRequest emits the empty request envelope. The
+// persistence rule is policy; the seed set itself belongs to the ontology
+// module and never travels either.
+func EncodeRelTypesEnsureSeedRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationRelTypesEnsureSeed, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeRelTypesEnsureSeedRequest validates the exact organization-family
+// envelope.
+func DecodeRelTypesEnsureSeedRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeRelTypesEnsureSeedReply emits a bare acknowledgement.
+func EncodeRelTypesEnsureSeedReply() []byte {{
+	header, err := EncodeReplyHeader(OperationRelTypesEnsureSeed, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeRelTypesEnsureSeedReply validates the acknowledgement envelope.
+func DecodeRelTypesEnsureSeedReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != EnvelopeHeaderLen {{
 		return ErrMalformedEnvelope

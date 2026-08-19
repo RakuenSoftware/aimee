@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "c8da2995c1be3fc892342a647dc4a3077730b8ad1b259db33521b0b340e3c9d0"
+#define AIMEE_DB2_CONTRACT_SHA256 "b73becfa9ff1a9d007de824256464e103f089bd0cd38725436f5c8d22f32ed26"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -568,6 +568,12 @@
 #define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_REQUEST_LEN       24u
 #define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_RESPONSE_LEN      24u
 #define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_ERROR_LEN         24u
+#define AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED                AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED                AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED            1u
+#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN          24u
+#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN         24u
+#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_ERROR_LEN            24u
 #define AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_EVENT_MAINTENANCE
 #define AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_FAMILY_MAINTENANCE
 #define AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED        1u
@@ -2982,6 +2988,50 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
  * code and nothing else. For operations whose only honest answer is whether
  * they completed -- any count they could return would describe something other
  * than the work they did. */
+static inline int aimee_db2_rel_types_ensure_seed_request_encode(uint8_t *output,
+                                                                 size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED, 0u, 0u,
+                                          output, capacity);
+}
+
+static inline int aimee_db2_rel_types_ensure_seed_request_decode(const uint8_t *input,
+                                                                 size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_rel_types_ensure_seed_reply_encode(uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED,
+                                     AIMEE_DB2_RESULT_OK, 0u, output, capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_rel_types_ensure_seed_reply_decode(const uint8_t *input,
+                                                               size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
 static inline int aimee_db2_mining_seed_job_defaults_request_encode(uint8_t *output,
                                                                     size_t capacity)
 {
