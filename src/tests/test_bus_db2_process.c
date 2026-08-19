@@ -407,6 +407,37 @@ int main(int argc, char **argv)
                                    NULL) == AIMEE_MODULE_CALL_OK);
    assert(list_count == 0);
 
+   /* All three aggregate statements are replayed, because which one runs depends
+    * on which selector is set and only a real database proves each parses. */
+   uint64_t aggregate_ids[AIMEE_DB2_AGGREGATE_MAX];
+   uint32_t aggregate_count = 99, aggregate_truncated = 99;
+   assert(aimee_db2_aggregate_call(call_client, &client, 9100, 0, "replay-entity", "", 4u,
+                                   &aggregate_truncated, aggregate_ids, AIMEE_DB2_AGGREGATE_MAX,
+                                   &aggregate_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aggregate_count == 0 && aggregate_truncated == 0);
+
+   aggregate_count = 99;
+   assert(aimee_db2_aggregate_call(call_client, &client, 9101, 0, "", "replay-keyword", 4u,
+                                   &aggregate_truncated, aggregate_ids, AIMEE_DB2_AGGREGATE_MAX,
+                                   &aggregate_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aggregate_count == 0);
+
+   aggregate_count = 99;
+   assert(aimee_db2_aggregate_call(call_client, &client, 9102, 0, "", "", 4u, &aggregate_truncated,
+                                   aggregate_ids, AIMEE_DB2_AGGREGATE_MAX, &aggregate_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aggregate_count == 0);
+
+   /* An empty corpus matches no plan, so the label comes back empty too. */
+   uint64_t eval_corpus_ids[AIMEE_DB2_LOAD_EVAL_CORPUS_MAX];
+   uint32_t eval_corpus_count = 99;
+   char eval_corpus_label[AIMEE_DB2_LOAD_EVAL_CORPUS_LABEL_MAX + 1] = "unset";
+   assert(aimee_db2_load_eval_corpus_call(call_client, &client, 9103, 0, 4u, eval_corpus_label,
+                                          sizeof(eval_corpus_label), eval_corpus_ids,
+                                          AIMEE_DB2_LOAD_EVAL_CORPUS_MAX, &eval_corpus_count, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   assert(eval_corpus_count == 0 && eval_corpus_label[0] == '\0');
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

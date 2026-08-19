@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "b27f23394c44c4444a0c33e6c80e7223e4c47de7dfb2f01fe77ce821bf47f786"
+const ContractSHA256 = "1c1983ed4ce7f6f4ae16cd09bd16f4723c891a9bc8103c175caa3d9be4fa46d4"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4211,6 +4211,212 @@ func DecodeListRowsReply(reply []byte) ([]uint64, error) {
 		memoryIDs[index] = id
 	}
 	return memoryIDs, nil
+}
+
+const EventAggregate = EventMemory
+const StageAggregate = FamilyMemory
+const OperationAggregate uint32 = 61
+const AggregateLimitMin uint32 = 1
+const AggregateLimitMax uint32 = 64
+const AggregateEntitySeedMax = 127
+const AggregateKeywordMax = 127
+const AggregateTruncatedMax uint32 = 1
+const AggregateMax uint32 = 64
+const AggregateIDMin uint64 = 1
+const AggregateIDMax uint64 = 9223372036854775807
+
+// EncodeAggregateRequest carries both selectors; either or both may be empty.
+func EncodeAggregateRequest(entitySeed string, keyword string, limit uint32) ([]byte, error) {
+	if limit < AggregateLimitMin || limit > AggregateLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := make([]byte, 4)
+	binary.LittleEndian.PutUint32(payload, limit)
+	if err := putRowText(&payload, entitySeed, AggregateEntitySeedMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, keyword, AggregateKeywordMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAggregate, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAggregateRequest validates the limit and walks both selectors.
+func DecodeAggregateRequest(request []byte) (string, string, uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAggregate || header.Flags != 0 ||
+		header.PayloadLen < 12 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	if limit < AggregateLimitMin || limit > AggregateLimitMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	cursor := 4
+	entitySeed, err := takeRowText(payload, &cursor, AggregateEntitySeedMax)
+	if err != nil {
+		return "", "", 0, err
+	}
+	keyword, err := takeRowText(payload, &cursor, AggregateKeywordMax)
+	if err != nil || cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return entitySeed, keyword, limit, nil
+}
+
+// EncodeAggregateReply carries the truncation flag beside the list, because a full
+// list and a truncated one are otherwise identical.
+func EncodeAggregateReply(truncated uint32, memoryIDs []uint64) ([]byte, error) {
+	if truncated > AggregateTruncatedMax || uint32(len(memoryIDs)) > AggregateMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < AggregateIDMin || id > AggregateIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 8 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationAggregate, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, truncated)
+	binary.LittleEndian.PutUint32(payload[4:], uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[8+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeAggregateReply validates the flag, the count and every identifier.
+func DecodeAggregateReply(reply []byte) (uint32, []uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAggregate || header.Result != ResultOK ||
+		header.PayloadLen < 8 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	truncated := binary.LittleEndian.Uint32(payload)
+	count := binary.LittleEndian.Uint32(payload[4:])
+	if truncated > AggregateTruncatedMax || count > AggregateMax ||
+		header.PayloadLen != 8+count*8 {
+		return 0, nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[8+index*8:])
+		if id < AggregateIDMin || id > AggregateIDMax {
+			return 0, nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return truncated, memoryIDs, nil
+}
+
+const EventLoadEvalCorpus = EventMemory
+const StageLoadEvalCorpus = FamilyMemory
+const OperationLoadEvalCorpus uint32 = 62
+const LoadEvalCorpusLimitMin uint32 = 1
+const LoadEvalCorpusLimitMax uint32 = 64
+const LoadEvalCorpusLabelMax = 31
+const LoadEvalCorpusMax uint32 = 64
+const LoadEvalCorpusIDMin uint64 = 1
+const LoadEvalCorpusIDMax uint64 = 9223372036854775807
+
+// EncodeLoadEvalCorpusRequest carries the read-back limit.
+func EncodeLoadEvalCorpusRequest(limit uint32) ([]byte, error) {
+	if limit < LoadEvalCorpusLimitMin || limit > LoadEvalCorpusLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationLoadEvalCorpus, 0, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], limit)
+	return request, nil
+}
+
+// DecodeLoadEvalCorpusRequest validates the limit against its bound.
+func DecodeLoadEvalCorpusRequest(request []byte) (uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLoadEvalCorpus || header.Flags != 0 ||
+		header.PayloadLen != 4 || len(request) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	limit := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if limit < LoadEvalCorpusLimitMin || limit > LoadEvalCorpusLimitMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return limit, nil
+}
+
+// EncodeLoadEvalCorpusReply names the plan that answered; the identifiers do not.
+func EncodeLoadEvalCorpusReply(label string, memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > LoadEvalCorpusMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < LoadEvalCorpusIDMin || id > LoadEvalCorpusIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	var payload []byte
+	if err := putRowText(&payload, label, LoadEvalCorpusLabelMax); err != nil {
+		return nil, err
+	}
+	var countBytes [4]byte
+	binary.LittleEndian.PutUint32(countBytes[:], uint32(len(memoryIDs)))
+	payload = append(payload, countBytes[:]...)
+	for _, id := range memoryIDs {
+		var idBytes [8]byte
+		binary.LittleEndian.PutUint64(idBytes[:], id)
+		payload = append(payload, idBytes[:]...)
+	}
+	header, err := EncodeReplyHeader(OperationLoadEvalCorpus, ResultOK, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLoadEvalCorpusReply reads the label, then the counted list behind it.
+func DecodeLoadEvalCorpusReply(reply []byte) (string, []uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationLoadEvalCorpus || header.Result != ResultOK ||
+		header.PayloadLen < 8 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	cursor := 0
+	label, err := takeRowText(payload, &cursor, LoadEvalCorpusLabelMax)
+	if err != nil || cursor+4 > len(payload) {
+		return "", nil, ErrMalformedEnvelope
+	}
+	count := binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if count > LoadEvalCorpusMax || len(payload) != cursor+int(count)*8 {
+		return "", nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[cursor+index*8:])
+		if id < LoadEvalCorpusIDMin || id > LoadEvalCorpusIDMax {
+			return "", nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return label, memoryIDs, nil
 }
 
 // EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The

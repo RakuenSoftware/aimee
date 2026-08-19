@@ -66,6 +66,12 @@ typedef struct
    int (*list_rows)(const char *tier, const char *kind, int hide_archived, int limit,
                     int scope_active, int include_all, const char *workspace, const char *project,
                     int64_t *out, int max);
+   /* The aggregate reports truncation separately: a full list and a truncated
+    * one are the same list. */
+   int (*aggregate)(const char *entity_seed, const char *keyword, int limit, int *truncated_out,
+                    int64_t *out, int max);
+   /* The corpus reports which of its three plans answered. */
+   int (*load_eval_corpus)(int limit, char *label_out, size_t label_len, int64_t *out, int max);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);

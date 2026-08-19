@@ -2100,6 +2100,73 @@
       }
     },
     {
+      "family": "memory",
+      "id": 61,
+      "name": "aggregate",
+      "wire_format": "db2-envelope-string-pair-u32-truncated-list-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The canonical memory rows and the entity table the seed is matched against are both relational DB2 state, so the selection stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_aggregate"],
+      "request": {
+        "encoded_size_min": 36,
+        "encoded_size_max": 290,
+        "policy": {"maximum_ids": 64,
+                   "argument_precedence": "an entity seed wins outright; the keyword is only consulted when the seed is empty, and neither being set selects every kind but scratch",
+                   "ranking": "last use, falling back to the update stamp, then identifier, both descending"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "entity_seed", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 127},
+          {"name": "keyword", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 127}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 32,
+        "encoded_size_max_ok": 544,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "truncated", "type": "u32", "minimum": 0, "maximum": 1},
+          {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+           "maximum_items": 64, "item_minimum": 1,
+           "item_maximum": 9223372036854775807}
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 62,
+      "name": "load_eval_corpus",
+      "wire_format": "db2-envelope-u32-labelled-list-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Which rows make an evaluation corpus, and in which order the fallbacks are tried, are DB2 policy over relational DB2 state; identifiers cross with the label of the plan that produced them.",
+      "c_symbols": ["db2_memory_load_eval_corpus"],
+      "request": {
+        "encoded_size": 28,
+        "policy": {"maximum_ids": 64,
+                   "plans": "L2 facts, then facts in L1 to L3, then durable memories excluding scratch; the first plan that returns a row wins",
+                   "plan_limit": "each plan carries its own LIMIT of 100, so the request limit bounds what is read back, not what the plan selects"},
+        "field": {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64}
+      },
+      "reply": {
+        "encoded_size_min_ok": 32,
+        "encoded_size_max_ok": 575,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "label", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 31},
+          {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+           "maximum_items": 64, "item_minimum": 1,
+           "item_maximum": 9223372036854775807}
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

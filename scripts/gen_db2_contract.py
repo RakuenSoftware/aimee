@@ -2338,6 +2338,119 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
                 fail("list-rows-reply",
                      "reply must be a counted identifier list bounded by the request policy")
+        elif key == ("memory", 61) and name == "aggregate" and \
+                operation["wire_format"] == "db2-envelope-string-pair-u32-truncated-list-v1":
+            # Three statements behind one name, chosen by which argument is set,
+            # and a truncation flag that a full list cannot be told from.
+            if operation["c_symbols"] != ["db2_memory_aggregate"]:
+                fail("operation-c-symbols", "aggregate C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "aggregate results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "policy", "fields"},
+                            "aggregate.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 3:
+                fail("aggregate-request", "request must carry the limit and both selectors")
+            limit_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                "aggregate.request.fields[0]")
+            selectors = [_keys(field, {"name", "type", "minimum_bytes", "maximum_bytes"},
+                               f"aggregate.request.fields[{index}]")
+                         for index, field in enumerate(request_fields[1:], start=1)]
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"maximum_ids",
+                                                               "argument_precedence", "ranking"}:
+                fail("aggregate-request",
+                     "request policy must bound the reply, state which argument wins, and state "
+                     "the ordering")
+            maximum_ids = policy["maximum_ids"]
+            # Both selectors may be empty and both may be set; which one the
+            # statement uses is not visible in the reply, so it is written down.
+            _string(policy["argument_precedence"],
+                    "aggregate.request.policy.argument_precedence", 200)
+            _string(policy["ranking"], "aggregate.request.policy.ranking", 120)
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 12 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 127 + 127 or
+                    limit_field != {"name": "limit", "type": "u32", "minimum": 1,
+                                    "maximum": maximum_ids} or
+                    selectors != [{"name": field, "type": "utf8", "minimum_bytes": 0,
+                                   "maximum_bytes": 127}
+                                  for field in ("entity_seed", "keyword")]):
+                fail("aggregate-request",
+                     "request must carry a bounded limit and two bounded, optional selectors")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "fields"}, "aggregate.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("aggregate-reply", "reply must carry the truncation flag and the list")
+            truncated_field = _keys(reply_fields[0], {"name", "type", "minimum", "maximum"},
+                                    "aggregate.reply.fields[0]")
+            list_field = _keys(reply_fields[1],
+                               {"name", "type", "minimum_items", "maximum_items",
+                                "item_minimum", "item_maximum"}, "aggregate.reply.fields[1]")
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 8 + maximum_ids * 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    truncated_field != {"name": "truncated", "type": "u32", "minimum": 0,
+                                        "maximum": 1} or
+                    list_field != {"name": "memory_ids", "type": "u64-list",
+                                   "minimum_items": 0, "maximum_items": maximum_ids,
+                                   "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
+                fail("aggregate-reply",
+                     "reply must carry the truncation flag and a bounded identifier list")
+        elif key == ("memory", 62) and name == "load_eval_corpus" and \
+                operation["wire_format"] == "db2-envelope-u32-labelled-list-v1":
+            # Three plans tried in order; the label says which one answered,
+            # because the identifiers alone do not.
+            if operation["c_symbols"] != ["db2_memory_load_eval_corpus"]:
+                fail("operation-c-symbols",
+                     "load_eval_corpus C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "load_eval_corpus results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "policy", "field"},
+                            "load_eval_corpus.request")
+            limit_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                "load_eval_corpus.request.field")
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"maximum_ids", "plans",
+                                                               "plan_limit"}:
+                fail("load-eval-corpus-request",
+                     "request policy must bound the reply, name the plans in order, and say what "
+                     "the request limit does and does not bound")
+            maximum_ids = policy["maximum_ids"]
+            _string(policy["plans"], "load_eval_corpus.request.policy.plans", 200)
+            _string(policy["plan_limit"], "load_eval_corpus.request.policy.plan_limit", 200)
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 4 or
+                    limit_field != {"name": "limit", "type": "u32", "minimum": 1,
+                                    "maximum": maximum_ids}):
+                fail("load-eval-corpus-request", "request must carry one bounded limit")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "fields"}, "load_eval_corpus.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("load-eval-corpus-reply", "reply must carry the label and the list")
+            label_field = _keys(reply_fields[0],
+                                {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                "load_eval_corpus.reply.fields[0]")
+            list_field = _keys(reply_fields[1],
+                               {"name", "type", "minimum_items", "maximum_items",
+                                "item_minimum", "item_maximum"},
+                               "load_eval_corpus.reply.fields[1]")
+            # An empty label with an empty list is the honest answer when no
+            # plan matched, so the label is zero-minimum.
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 8 + 31 +
+                    maximum_ids * 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    label_field != {"name": "label", "type": "utf8", "minimum_bytes": 0,
+                                    "maximum_bytes": 31} or
+                    list_field != {"name": "memory_ids", "type": "u64-list",
+                                   "minimum_items": 0, "maximum_items": maximum_ids,
+                                   "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
+                fail("load-eval-corpus-reply",
+                     "reply must carry the bounded plan label and a bounded identifier list")
         elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # First operation of the index family. The tiers that count as a
@@ -3448,7 +3561,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 105 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 107 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3470,6 +3583,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "list_session_scope_priority_like", "negation_fts_search",
             "session_neighbors_before", "session_neighbors_after", "row_get",
             "row_get_by_unit_id", "search_facts_patterns_by_keyword", "fact_history", "list_rows",
+            "aggregate", "load_eval_corpus",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
@@ -3484,7 +3598,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the one hundred and five supported operations exactly once")
+             "the partial generator requires the one hundred and seven supported operations exactly once")
     return catalog
 
 
@@ -3679,6 +3793,8 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     search_facts_patterns_by_keyword = named["search_facts_patterns_by_keyword"]
     fact_history = named["fact_history"]
     list_rows = named["list_rows"]
+    aggregate = named["aggregate"]
+    load_eval_corpus = named["load_eval_corpus"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -4064,6 +4180,8 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
         catalog, search_facts_patterns_by_keyword)
     fact_history_vectors = _key_list_vectors(catalog, fact_history)
     list_rows_vectors = _filter_list_vectors(catalog, list_rows)
+    aggregate_vectors = _aggregate_vectors(catalog, aggregate)
+    load_eval_corpus_vectors = _corpus_vectors(catalog, load_eval_corpus)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -6889,7 +7007,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (count_and_max_updated_ok + b"\0").hex()},
                 ],
             },
-        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, row_get_vectors, row_get_by_unit_id_vectors, search_facts_patterns_by_keyword_vectors, fact_history_vectors, list_rows_vectors, {
+        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, row_get_vectors, row_get_by_unit_id_vectors, search_facts_patterns_by_keyword_vectors, fact_history_vectors, list_rows_vectors, aggregate_vectors, load_eval_corpus_vectors, {
             "family": entity_edge_prune_orphans["family"],
             "id": entity_edge_prune_orphans["id"],
             "name": entity_edge_prune_orphans["name"],
@@ -10682,6 +10800,653 @@ func Decode{name}Reply(reply []byte) ([]uint64, error) {{
 """
 
 
+
+def _aggregate_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-string-pair-u32-truncated-list-v1."""
+    upper = str(operation["name"]).upper()
+    request, reply = operation["request"], operation["reply"]
+    limit, entity, keyword = request["fields"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", "AIMEE_DB2_EVENT_MEMORY"),
+        (f"AIMEE_DB2_STAGE_{upper}", "AIMEE_DB2_FAMILY_MEMORY"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MIN_LEN", f"{request['encoded_size_min']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MAX_LEN", f"{request['encoded_size_max']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MIN", f"{limit['minimum']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MAX", f"{limit['maximum']}u"),
+        (f"AIMEE_DB2_{upper}_ENTITY_SEED_MAX", f"{entity['maximum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_KEYWORD_MAX", f"{keyword['maximum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MIN_LEN", f"{reply['encoded_size_min_ok']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MAX_LEN", f"{reply['encoded_size_max_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+        (f"AIMEE_DB2_{upper}_TRUNCATED_MAX", f"{reply['fields'][0]['maximum']}u"),
+        (f"AIMEE_DB2_{upper}_MAX", f"{reply['fields'][1]['maximum_items']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MIN", f"{reply['fields'][1]['item_minimum']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MAX", f"{reply['fields'][1]['item_maximum']}ull"),
+    ]
+
+
+def _aggregate_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-string-pair-u32-truncated-list-v1."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(const char *entity_seed, const char *keyword,
+                                                   uint32_t limit, uint8_t *output,
+                                                   size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!entity_seed || !keyword || !output || !output_len ||
+       limit < AIMEE_DB2_{upper}_LIMIT_MIN || limit > AIMEE_DB2_{upper}_LIMIT_MAX)
+      return -1;
+   size_t entity_len = 0u, keyword_len = 0u;
+   while (entity_len <= AIMEE_DB2_{upper}_ENTITY_SEED_MAX && entity_seed[entity_len])
+      ++entity_len;
+   while (keyword_len <= AIMEE_DB2_{upper}_KEYWORD_MAX && keyword[keyword_len])
+      ++keyword_len;
+   size_t payload_len = 12u + entity_len + keyword_len;
+   if (entity_len > AIMEE_DB2_{upper}_ENTITY_SEED_MAX ||
+       keyword_len > AIMEE_DB2_{upper}_KEYWORD_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, limit);
+   aimee_db2_put_u32(payload + 4u, (uint32_t)entity_len);
+   memcpy(payload + 8u, entity_seed, entity_len);
+   aimee_db2_put_u32(payload + 8u + entity_len, (uint32_t)keyword_len);
+   memcpy(payload + 12u + entity_len, keyword, keyword_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *entity_seed, size_t entity_capacity,
+                                                   char *keyword, size_t keyword_capacity,
+                                                   uint32_t *limit)
+{{
+   if (entity_seed && entity_capacity)
+      entity_seed[0] = '\\0';
+   if (keyword && keyword_capacity)
+      keyword[0] = '\\0';
+   if (limit)
+      *limit = 0u;
+   if (!entity_seed || !keyword || !limit ||
+       entity_capacity < (size_t)AIMEE_DB2_{upper}_ENTITY_SEED_MAX + 1u ||
+       keyword_capacity < (size_t)AIMEE_DB2_{upper}_KEYWORD_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       input_len < AIMEE_DB2_{upper}_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_{upper}_REQUEST_MAX_LEN || header.payload_len < 12u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_limit = aimee_db2_get_u32(payload);
+   if (decoded_limit < AIMEE_DB2_{upper}_LIMIT_MIN || decoded_limit > AIMEE_DB2_{upper}_LIMIT_MAX)
+      return -1;
+   uint32_t cursor = 4u;
+   if (aimee_db2_memory_row_take(payload, header.payload_len, &cursor, entity_seed,
+                                 AIMEE_DB2_{upper}_ENTITY_SEED_MAX) != 0 ||
+       aimee_db2_memory_row_take(payload, header.payload_len, &cursor, keyword,
+                                 AIMEE_DB2_{upper}_KEYWORD_MAX) != 0 ||
+       cursor != header.payload_len)
+      return -1;
+   *limit = decoded_limit;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_encode(uint32_t truncated, const uint64_t *memory_ids,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) ||
+       truncated > AIMEE_DB2_{upper}_TRUNCATED_MAX || count > AIMEE_DB2_{upper}_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_{upper}_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+   uint32_t payload_len = 8u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, truncated);
+   aimee_db2_put_u32(payload + 4u, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 8u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *truncated, uint64_t *memory_ids,
+                                                 uint32_t capacity, uint32_t *count)
+{{
+   if (truncated)
+      *truncated = 0u;
+   if (count)
+      *count = 0u;
+   if (!truncated || !count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 8u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_truncated = aimee_db2_get_u32(payload);
+   uint32_t decoded = aimee_db2_get_u32(payload + 4u);
+   if (decoded_truncated > AIMEE_DB2_{upper}_TRUNCATED_MAX || decoded > AIMEE_DB2_{upper}_MAX ||
+       header.payload_len != 8u + decoded * 8u || decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {{
+      uint64_t value = aimee_db2_get_u64(payload + 8u + index * 8u);
+      if (value < AIMEE_DB2_{upper}_ID_MIN || value > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }}
+   *truncated = decoded_truncated;
+   *count = decoded;
+   return 0;
+}}
+"""
+
+
+def _corpus_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-u32-labelled-list-v1."""
+    upper = str(operation["name"]).upper()
+    request, reply = operation["request"], operation["reply"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", "AIMEE_DB2_EVENT_MEMORY"),
+        (f"AIMEE_DB2_STAGE_{upper}", "AIMEE_DB2_FAMILY_MEMORY"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_LEN", f"{request['encoded_size']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MIN", f"{request['field']['minimum']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MAX", f"{request['field']['maximum']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MIN_LEN", f"{reply['encoded_size_min_ok']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MAX_LEN", f"{reply['encoded_size_max_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+        (f"AIMEE_DB2_{upper}_LABEL_MAX", f"{reply['fields'][0]['maximum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_MAX", f"{reply['fields'][1]['maximum_items']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MIN", f"{reply['fields'][1]['item_minimum']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MAX", f"{reply['fields'][1]['item_maximum']}ull"),
+    ]
+
+
+def _corpus_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-u32-labelled-list-v1."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(uint32_t limit, uint8_t *output,
+                                                   size_t capacity)
+{{
+   if (!output || limit < AIMEE_DB2_{upper}_LIMIT_MIN || limit > AIMEE_DB2_{upper}_LIMIT_MAX ||
+       capacity < AIMEE_DB2_{upper}_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, limit);
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *limit)
+{{
+   if (limit)
+      *limit = 0u;
+   if (!limit)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       header.payload_len != 4u || input_len != AIMEE_DB2_{upper}_REQUEST_LEN)
+      return -1;
+   uint32_t value = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value < AIMEE_DB2_{upper}_LIMIT_MIN || value > AIMEE_DB2_{upper}_LIMIT_MAX)
+      return -1;
+   *limit = value;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_encode(const char *label, const uint64_t *memory_ids,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!label || !output || !output_len || (count > 0u && !memory_ids) ||
+       count > AIMEE_DB2_{upper}_MAX)
+      return -1;
+   size_t label_len = 0u;
+   while (label_len <= AIMEE_DB2_{upper}_LABEL_MAX && label[label_len])
+      ++label_len;
+   if (label_len > AIMEE_DB2_{upper}_LABEL_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_{upper}_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+   uint32_t payload_len = (uint32_t)(8u + label_len + count * 8u);
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)label_len);
+   memcpy(payload + 4u, label, label_len);
+   aimee_db2_put_u32(payload + 4u + label_len, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 8u + label_len + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 char *label, size_t label_capacity,
+                                                 uint64_t *memory_ids, uint32_t capacity,
+                                                 uint32_t *count)
+{{
+   if (label && label_capacity)
+      label[0] = '\\0';
+   if (count)
+      *count = 0u;
+   if (!label || !count || label_capacity < (size_t)AIMEE_DB2_{upper}_LABEL_MAX + 1u ||
+       (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 8u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, header.payload_len, &cursor, label,
+                                 AIMEE_DB2_{upper}_LABEL_MAX) != 0 ||
+       cursor + 4u > header.payload_len)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (decoded > AIMEE_DB2_{upper}_MAX || header.payload_len != cursor + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {{
+      uint64_t value = aimee_db2_get_u64(payload + cursor + index * 8u);
+      if (value < AIMEE_DB2_{upper}_ID_MIN || value > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }}
+   *count = decoded;
+   return 0;
+}}
+"""
+
+
+def _aggregate_vectors(catalog: dict[str, object],
+                       operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for db2-envelope-string-pair-u32-truncated-list-v1."""
+    identifier = int(operation["id"])
+    limit_max = int(operation["request"]["fields"][0]["maximum"])
+    entity, keyword = b"deployment", b"rollout"
+
+    def request_bytes(limit: int, entity_value: bytes, keyword_value: bytes) -> bytes:
+        payload = (_put_u32(limit) + _put_u32(len(entity_value)) + entity_value +
+                   _put_u32(len(keyword_value)) + keyword_value)
+        return _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0, payload)
+
+    request = request_bytes(6, entity, keyword)
+    entity_length_at = ENVELOPE_HEADER_LEN + 4
+    ids = (7, 19, 9223372036854775807)
+    body = _put_u32(1) + _put_u32(len(ids)) + b"".join(_put_u64(value) for value in ids)
+    reply_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, body)
+    reply_empty = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0,
+                            _put_u32(0) + _put_u32(0))
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {
+            "positive": request.hex(),
+            "limit": 6,
+            "entity_seed": entity.decode("ascii"),
+            "keyword": keyword.decode("ascii"),
+            "maximum_ids": operation["request"]["policy"]["maximum_ids"],
+            # Both selectors empty is a legal request -- it is the third
+            # statement -- so it is a positive rather than a mutation.
+            "unselected": request_bytes(6, b"", b"").hex(),
+            "negative": [
+                {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+                {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+                {"mutation": "limit_zero", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, 0).hex()},
+                {"mutation": "limit_above_maximum", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, limit_max + 1).hex()},
+                {"mutation": "entity_length_exceeds_payload", "hex":
+                 _mutate_u32(request, entity_length_at, len(entity) + 1).hex()},
+                {"mutation": "entity_embedded_nul", "hex":
+                 request_bytes(6, b"deploy\0ment", keyword).hex()},
+                {"mutation": "short", "hex": request[:-1].hex()},
+                {"mutation": "long", "hex": (request + b"\0").hex()},
+            ],
+        },
+        "reply": {
+            "positive": [
+                {"result": 0, "truncated": 1, "memory_ids": list(ids), "hex": reply_ok.hex()},
+                {"result": 0, "truncated": 0, "memory_ids": [], "hex": reply_empty.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
+                {"mutation": "ok_without_count", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0)).hex()},
+                {"mutation": "truncated_above_maximum", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, 2).hex()},
+                {"mutation": "count_exceeds_payload", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN + 4, 4).hex()},
+                {"mutation": "count_above_maximum", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN + 4, limit_max + 1).hex()},
+                {"mutation": "identifier_zero", "hex":
+                 (reply_ok[:ENVELOPE_HEADER_LEN + 8] + _put_u64(0) +
+                  reply_ok[ENVELOPE_HEADER_LEN + 16:]).hex()},
+                {"mutation": "short", "hex": reply_ok[:-1].hex()},
+                {"mutation": "long", "hex": (reply_ok + b"\0").hex()},
+            ],
+        },
+    }
+
+
+def _corpus_vectors(catalog: dict[str, object],
+                    operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for db2-envelope-u32-labelled-list-v1."""
+    identifier = int(operation["id"])
+    limit_max = int(operation["request"]["field"]["maximum"])
+    request = _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0, _put_u32(12))
+    label = b"L2 facts"
+    ids = (7, 19, 9223372036854775807)
+    body = (_put_u32(len(label)) + label + _put_u32(len(ids)) +
+            b"".join(_put_u64(value) for value in ids))
+    reply_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, body)
+    # No plan matched: an empty label and an empty list, which is the honest
+    # answer rather than an error.
+    reply_empty = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0,
+                            _put_u32(0) + _put_u32(0))
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {
+            "positive": request.hex(),
+            "limit": 12,
+            "maximum_ids": operation["request"]["policy"]["maximum_ids"],
+            "negative": [
+                {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+                {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+                {"mutation": "limit_zero", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, 0).hex()},
+                {"mutation": "limit_above_maximum", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, limit_max + 1).hex()},
+                {"mutation": "short", "hex": request[:-1].hex()},
+                {"mutation": "long", "hex": (request + b"\0").hex()},
+            ],
+        },
+        "reply": {
+            "positive": [
+                {"result": 0, "label": label.decode("ascii"), "memory_ids": list(ids),
+                 "hex": reply_ok.hex()},
+                {"result": 0, "label": "", "memory_ids": [], "hex": reply_empty.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
+                {"mutation": "ok_without_label", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0)).hex()},
+                {"mutation": "label_length_exceeds_payload", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, len(label) + 1).hex()},
+                {"mutation": "count_above_maximum", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN + 4 + len(label),
+                             limit_max + 1).hex()},
+                {"mutation": "identifier_zero", "hex":
+                 (reply_ok[:ENVELOPE_HEADER_LEN + 8 + len(label)] + _put_u64(0) +
+                  reply_ok[ENVELOPE_HEADER_LEN + 16 + len(label):]).hex()},
+                {"mutation": "short", "hex": reply_ok[:-1].hex()},
+                {"mutation": "long", "hex": (reply_ok + b"\0").hex()},
+            ],
+        },
+    }
+
+
+
+def _aggregate_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for db2-envelope-string-pair-u32-truncated-list-v1."""
+    name = _go_name(str(operation["name"]))
+    request, reply = operation["request"], operation["reply"]
+    limit, entity, keyword = request["fields"]
+    return f"""const Event{name} = EventMemory
+const Stage{name} = FamilyMemory
+const Operation{name} uint32 = {operation['id']}
+const {name}LimitMin uint32 = {limit['minimum']}
+const {name}LimitMax uint32 = {limit['maximum']}
+const {name}EntitySeedMax = {entity['maximum_bytes']}
+const {name}KeywordMax = {keyword['maximum_bytes']}
+const {name}TruncatedMax uint32 = {reply['fields'][0]['maximum']}
+const {name}Max uint32 = {reply['fields'][1]['maximum_items']}
+const {name}IDMin uint64 = {reply['fields'][1]['item_minimum']}
+const {name}IDMax uint64 = {reply['fields'][1]['item_maximum']}
+
+// Encode{name}Request carries both selectors; either or both may be empty.
+func Encode{name}Request(entitySeed string, keyword string, limit uint32) ([]byte, error) {{
+	if limit < {name}LimitMin || limit > {name}LimitMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload := make([]byte, 4)
+	binary.LittleEndian.PutUint32(payload, limit)
+	if err := putRowText(&payload, entitySeed, {name}EntitySeedMax); err != nil {{
+		return nil, err
+	}}
+	if err := putRowText(&payload, keyword, {name}KeywordMax); err != nil {{
+		return nil, err
+	}}
+	header, err := EncodeRequestHeader(Operation{name}, 0, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Request validates the limit and walks both selectors.
+func Decode{name}Request(request []byte) (string, string, uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen < 12 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return "", "", 0, ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	if limit < {name}LimitMin || limit > {name}LimitMax {{
+		return "", "", 0, ErrMalformedEnvelope
+	}}
+	cursor := 4
+	entitySeed, err := takeRowText(payload, &cursor, {name}EntitySeedMax)
+	if err != nil {{
+		return "", "", 0, err
+	}}
+	keyword, err := takeRowText(payload, &cursor, {name}KeywordMax)
+	if err != nil || cursor != len(payload) {{
+		return "", "", 0, ErrMalformedEnvelope
+	}}
+	return entitySeed, keyword, limit, nil
+}}
+
+// Encode{name}Reply carries the truncation flag beside the list, because a full
+// list and a truncated one are otherwise identical.
+func Encode{name}Reply(truncated uint32, memoryIDs []uint64) ([]byte, error) {{
+	if truncated > {name}TruncatedMax || uint32(len(memoryIDs)) > {name}Max {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for _, id := range memoryIDs {{
+		if id < {name}IDMin || id > {name}IDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	payloadLen := 8 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, truncated)
+	binary.LittleEndian.PutUint32(payload[4:], uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {{
+		binary.LittleEndian.PutUint64(payload[8+index*8:], id)
+	}}
+	return reply, nil
+}}
+
+// Decode{name}Reply validates the flag, the count and every identifier.
+func Decode{name}Reply(reply []byte) (uint32, []uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		header.PayloadLen < 8 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, nil, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	truncated := binary.LittleEndian.Uint32(payload)
+	count := binary.LittleEndian.Uint32(payload[4:])
+	if truncated > {name}TruncatedMax || count > {name}Max ||
+		header.PayloadLen != 8+count*8 {{
+		return 0, nil, ErrMalformedEnvelope
+	}}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {{
+		id := binary.LittleEndian.Uint64(payload[8+index*8:])
+		if id < {name}IDMin || id > {name}IDMax {{
+			return 0, nil, ErrMalformedEnvelope
+		}}
+		memoryIDs[index] = id
+	}}
+	return truncated, memoryIDs, nil
+}}
+
+"""
+
+
+def _corpus_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for db2-envelope-u32-labelled-list-v1."""
+    name = _go_name(str(operation["name"]))
+    request, reply = operation["request"], operation["reply"]
+    return f"""const Event{name} = EventMemory
+const Stage{name} = FamilyMemory
+const Operation{name} uint32 = {operation['id']}
+const {name}LimitMin uint32 = {request['field']['minimum']}
+const {name}LimitMax uint32 = {request['field']['maximum']}
+const {name}LabelMax = {reply['fields'][0]['maximum_bytes']}
+const {name}Max uint32 = {reply['fields'][1]['maximum_items']}
+const {name}IDMin uint64 = {reply['fields'][1]['item_minimum']}
+const {name}IDMax uint64 = {reply['fields'][1]['item_maximum']}
+
+// Encode{name}Request carries the read-back limit.
+func Encode{name}Request(limit uint32) ([]byte, error) {{
+	if limit < {name}LimitMin || limit > {name}LimitMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(Operation{name}, 0, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], limit)
+	return request, nil
+}}
+
+// Decode{name}Request validates the limit against its bound.
+func Decode{name}Request(request []byte) (uint32, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen != 4 || len(request) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	limit := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if limit < {name}LimitMin || limit > {name}LimitMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return limit, nil
+}}
+
+// Encode{name}Reply names the plan that answered; the identifiers do not.
+func Encode{name}Reply(label string, memoryIDs []uint64) ([]byte, error) {{
+	if uint32(len(memoryIDs)) > {name}Max {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for _, id := range memoryIDs {{
+		if id < {name}IDMin || id > {name}IDMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	var payload []byte
+	if err := putRowText(&payload, label, {name}LabelMax); err != nil {{
+		return nil, err
+	}}
+	var countBytes [4]byte
+	binary.LittleEndian.PutUint32(countBytes[:], uint32(len(memoryIDs)))
+	payload = append(payload, countBytes[:]...)
+	for _, id := range memoryIDs {{
+		var idBytes [8]byte
+		binary.LittleEndian.PutUint64(idBytes[:], id)
+		payload = append(payload, idBytes[:]...)
+	}}
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Reply reads the label, then the counted list behind it.
+func Decode{name}Reply(reply []byte) (string, []uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		header.PayloadLen < 8 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return "", nil, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	cursor := 0
+	label, err := takeRowText(payload, &cursor, {name}LabelMax)
+	if err != nil || cursor+4 > len(payload) {{
+		return "", nil, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if count > {name}Max || len(payload) != cursor+int(count)*8 {{
+		return "", nil, ErrMalformedEnvelope
+	}}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {{
+		id := binary.LittleEndian.Uint64(payload[cursor+index*8:])
+		if id < {name}IDMin || id > {name}IDMax {{
+			return "", nil, ErrMalformedEnvelope
+		}}
+		memoryIDs[index] = id
+	}}
+	return label, memoryIDs, nil
+}}
+
+"""
+
+
 def header_bytes(catalog: dict[str, object]) -> bytes:
     def macros(rows: list[tuple[str, str]]) -> str:
         width = max(len(name) for name, _ in rows)
@@ -10760,6 +11525,8 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     search_facts_patterns_by_keyword = named["search_facts_patterns_by_keyword"]
     fact_history = named["fact_history"]
     list_rows = named["list_rows"]
+    aggregate = named["aggregate"]
+    load_eval_corpus = named["load_eval_corpus"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -11557,6 +12324,8 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         *_scoped_term_list_constants(search_facts_patterns_by_keyword),
         *_key_list_constants(fact_history),
         *_filter_list_constants(list_rows),
+        *_aggregate_constants(aggregate),
+        *_corpus_constants(load_eval_corpus),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -15959,7 +16728,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
 }}
 
 {_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
-{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}
+{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}{_aggregate_codecs(aggregate)}{_corpus_codecs(load_eval_corpus)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -18552,6 +19321,18 @@ extern "C"
        uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_aggregate_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *entity_seed, const char *keyword, uint32_t limit, uint32_t *truncated,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_load_eval_corpus_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t limit, char *label, size_t label_capacity, uint64_t *memory_ids,
+       uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -20486,6 +21267,69 @@ aimee_module_call_result_t aimee_db2_list_rows_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_aggregate_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                         uint64_t deadline_ns, const char *entity_seed, const char *keyword,
+                         uint32_t limit, uint32_t *truncated, uint64_t *memory_ids,
+                         uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+                         void *cancel_context)
+{
+   if (truncated)
+      *truncated = 0u;
+   if (count)
+      *count = 0u;
+   if (!call || !count || !truncated || !entity_seed || !keyword || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_AGGREGATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_AGGREGATE_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_aggregate_request_encode(entity_seed, keyword, limit, request, sizeof(request),
+                                          &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_AGGREGATE, AIMEE_DB2_STAGE_AGGREGATE, trace_id, deadline_ns,
+       request, request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_aggregate_reply_decode(response, response_len, truncated, memory_ids, capacity,
+                                        count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_load_eval_corpus_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t limit, char *label, size_t label_capacity, uint64_t *memory_ids, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (label && label_capacity)
+      label[0] = '\\0';
+   if (count)
+      *count = 0u;
+   if (!call || !count || !label ||
+       label_capacity < (size_t)AIMEE_DB2_LOAD_EVAL_CORPUS_LABEL_MAX + 1u ||
+       (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LOAD_EVAL_CORPUS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_LOAD_EVAL_CORPUS_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_load_eval_corpus_request_encode(limit, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LOAD_EVAL_CORPUS, AIMEE_DB2_STAGE_LOAD_EVAL_CORPUS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_load_eval_corpus_reply_decode(response, response_len, label, label_capacity,
+                                               memory_ids, capacity, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -21669,6 +22513,8 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     search_facts_patterns_by_keyword = named["search_facts_patterns_by_keyword"]
     fact_history = named["fact_history"]
     list_rows = named["list_rows"]
+    aggregate = named["aggregate"]
+    load_eval_corpus = named["load_eval_corpus"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -23723,7 +24569,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}{_aggregate_go(aggregate)}{_corpus_go(load_eval_corpus)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)

@@ -79,6 +79,9 @@ typedef struct
    int (*list_rows)(const char *tier, const char *kind, int hide_archived, int limit,
                     int scope_active, int include_all, const char *workspace, const char *project,
                     int64_t *out, int max);
+   int (*aggregate)(const char *entity_seed, const char *keyword, int limit, int *truncated_out,
+                    int64_t *out, int max);
+   int (*load_eval_corpus)(int limit, char *label_out, size_t label_len, int64_t *out, int max);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -291,6 +294,11 @@ static int list_session_scope_priority_calls;
 static int term_probe_calls[10];
 static int history_calls;
 static int list_rows_calls;
+static int aggregate_calls;
+static char aggregate_entity_seen[64];
+static char aggregate_keyword_seen[64];
+static int corpus_calls;
+static int corpus_limit_seen;
 static char list_tier_seen[8];
 static char list_kind_seen[24];
 static int list_hide_seen;
@@ -671,6 +679,32 @@ static int search_facts_patterns_by_keyword(const char *term, int limit, int sco
    return term_probe_impl(9, term, limit, scope_active, include_all, workspace, project, out, max);
 }
 
+static int aggregate(const char *entity_seed, const char *keyword, int limit, int *truncated_out,
+                     int64_t *out, int max)
+{
+   aggregate_calls++;
+   snprintf(aggregate_entity_seen, sizeof(aggregate_entity_seen), "%s",
+            entity_seed ? entity_seed : "");
+   snprintf(aggregate_keyword_seen, sizeof(aggregate_keyword_seen), "%s", keyword ? keyword : "");
+   if (truncated_out)
+      *truncated_out = 1;
+   int listed = 0;
+   for (; listed < 2 && listed < max && listed < limit; listed++)
+      out[listed] = 7000 + listed;
+   return listed;
+}
+
+static int load_eval_corpus(int limit, char *label_out, size_t label_len, int64_t *out, int max)
+{
+   corpus_calls++;
+   corpus_limit_seen = limit;
+   snprintf(label_out, label_len, "%s", "L2 facts");
+   int listed = 0;
+   for (; listed < 2 && listed < max && listed < limit; listed++)
+      out[listed] = 8000 + listed;
+   return listed;
+}
+
 static int list_rows(const char *tier, const char *kind, int hide_archived, int limit,
                      int scope_active, int include_all, const char *workspace, const char *project,
                      int64_t *out, int max)
@@ -963,6 +997,27 @@ int db2_memory_list(const char *tier, const char *kind, int hide_archived, int l
    (void)limit;
    (void)out;
    (void)max;
+   return 0;
+}
+
+int db2_memory_aggregate(const char *entity_seed, const char *keyword, void *out, int max,
+                         int *truncated_out)
+{
+   (void)entity_seed;
+   (void)keyword;
+   (void)out;
+   (void)max;
+   if (truncated_out)
+      *truncated_out = 0;
+   return 0;
+}
+
+int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t label_len)
+{
+   (void)out;
+   (void)max;
+   if (label_out && label_len)
+      label_out[0] = '\0';
    return 0;
 }
 
@@ -2242,6 +2297,8 @@ int main(void)
        .search_facts_patterns_by_keyword = search_facts_patterns_by_keyword,
        .fact_history = fact_history,
        .list_rows = list_rows,
+       .aggregate = aggregate,
+       .load_eval_corpus = load_eval_corpus,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -2662,6 +2719,35 @@ int main(void)
                                    list_ids, AIMEE_DB2_LIST_ROWS_MAX, &list_count, NULL,
                                    NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
    assert(list_rows_calls == 2);
+
+   /* Truncation is the whole reason the aggregate's reply is not a bare list. */
+   uint64_t aggregate_ids[AIMEE_DB2_AGGREGATE_MAX];
+   uint32_t aggregate_count = 99, aggregate_truncated = 99;
+   assert(aimee_db2_aggregate_call(call_client, &client, 7130, 0, "deployment", "rollout", 5u,
+                                   &aggregate_truncated, aggregate_ids, AIMEE_DB2_AGGREGATE_MAX,
+                                   &aggregate_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aggregate_count == 2 && aggregate_truncated == 1 && aggregate_ids[0] == 7000 &&
+          aggregate_calls == 1 && strcmp(aggregate_entity_seen, "deployment") == 0 &&
+          strcmp(aggregate_keyword_seen, "rollout") == 0);
+
+   /* Both selectors empty is the third statement, not a missing argument. */
+   aggregate_count = 99;
+   assert(aimee_db2_aggregate_call(call_client, &client, 7131, 0, "", "", 5u, &aggregate_truncated,
+                                   aggregate_ids, AIMEE_DB2_AGGREGATE_MAX, &aggregate_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aggregate_count == 2 && aggregate_calls == 2 && aggregate_entity_seen[0] == '\0' &&
+          aggregate_keyword_seen[0] == '\0');
+
+   /* The corpus names the plan that answered; the identifiers do not. */
+   uint64_t eval_corpus_ids[AIMEE_DB2_LOAD_EVAL_CORPUS_MAX];
+   uint32_t eval_corpus_count = 99;
+   char eval_corpus_label[AIMEE_DB2_LOAD_EVAL_CORPUS_LABEL_MAX + 1] = "";
+   assert(aimee_db2_load_eval_corpus_call(call_client, &client, 7132, 0, 9u, eval_corpus_label,
+                                          sizeof(eval_corpus_label), eval_corpus_ids,
+                                          AIMEE_DB2_LOAD_EVAL_CORPUS_MAX, &eval_corpus_count, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   assert(eval_corpus_count == 2 && eval_corpus_ids[0] == 8000 && corpus_calls == 1 &&
+          corpus_limit_seen == 9 && strcmp(eval_corpus_label, "L2 facts") == 0);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

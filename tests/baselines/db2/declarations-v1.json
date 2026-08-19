@@ -15443,9 +15443,15 @@
           "line": 678
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.aggregate operation replaces the aggregation read. Three statements hide behind it, chosen by which argument is set: an entity seed wins outright, the keyword is consulted only when the seed is empty, and neither selects every kind but scratch. That precedence is invisible to a caller sending both. It over-fetches by one row to learn whether it truncated and reports that separately, because a full list and a truncated one look the same. Identifiers cross; it is unscoped."
+      },
       "signature": "int db2_memory_aggregate ( const char * entity_seed , const char * keyword , memory_t * out , int max , int * truncated_out )",
       "signature_sha256": "2b4bbe10bbd4148aad468434802c105c23b04b24d00775c01125f187b5062375",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_aggregate"
     },
     {
@@ -17677,9 +17683,15 @@
           "line": 737
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.load_eval_corpus operation replaces the corpus loader. It tries three plans in order and the first to return a row wins, so the reply carries the label of the plan that answered: which corpus a caller got is not recoverable from the identifiers. Each plan carries its own LIMIT of 100, so the request limit bounds what is read back rather than what the plan selects. Identifiers cross; it is unscoped."
+      },
       "signature": "int db2_memory_load_eval_corpus ( memory_t * out , int max , char * label_out , size_t label_len )",
       "signature_sha256": "de7c0d4b67926ea284b993710763ed484437d1d4d86719426cf90ce4ed9352a5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_load_eval_corpus"
     },
     {
@@ -26454,15 +26466,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3407725bd0b5c3b4d4a3e63fafc585764a1edfdfa585c63a06d47cbf617cd6fa",
+  "fingerprint": "3894e57be50015dc287e288c22c2f1a26d889aeee9e5e0b3c3a969a9a5c65ed9",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 553,
+    "audit_pending": 551,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 405
+    "reviewed": 407
   }
 }

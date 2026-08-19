@@ -339,6 +339,45 @@ static int production_list_rows(const char *tier, const char *kind, int hide_arc
    return listed;
 }
 
+static int production_aggregate(const char *entity_seed, const char *keyword, int limit,
+                                int *truncated_out, int64_t *out, int max)
+{
+   if (truncated_out)
+      *truncated_out = 0;
+   if (!entity_seed || !keyword || !out || max <= 0 || limit <= 0)
+      return -1;
+   memory_t *rows = calloc((size_t)max, sizeof(*rows));
+   if (!rows)
+      return -1;
+   int listed =
+       db2_memory_aggregate(entity_seed, keyword, rows, limit < max ? limit : max, truncated_out);
+   if (listed > max)
+      listed = max;
+   for (int index = 0; index < listed; index++)
+      out[index] = rows[index].id;
+   free(rows);
+   return listed;
+}
+
+static int production_load_eval_corpus(int limit, char *label_out, size_t label_len, int64_t *out,
+                                       int max)
+{
+   if (label_out && label_len)
+      label_out[0] = '\0';
+   if (!label_out || !out || max <= 0 || limit <= 0)
+      return -1;
+   memory_t *rows = calloc((size_t)max, sizeof(*rows));
+   if (!rows)
+      return -1;
+   int listed = db2_memory_load_eval_corpus(rows, limit < max ? limit : max, label_out, label_len);
+   if (listed > max)
+      listed = max;
+   for (int index = 0; index < listed; index++)
+      out[index] = rows[index].id;
+   free(rows);
+   return listed;
+}
+
 static int production_collect_alias_matches(const char *term, int limit, int scope_active,
                                             int include_all, const char *workspace,
                                             const char *project, int64_t *out, int max)
@@ -627,6 +666,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .search_facts_patterns_by_keyword = production_search_facts_patterns_by_keyword,
        .fact_history = production_fact_history,
        .list_rows = production_list_rows,
+       .aggregate = production_aggregate,
+       .load_eval_corpus = production_load_eval_corpus,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -1344,6 +1385,72 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_list_rows_reply_encode(memory_ids, (uint32_t)listed, response_body,
                                                  response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t aggregate_limit = 0u;
+         char aggregate_entity[AIMEE_DB2_AGGREGATE_ENTITY_SEED_MAX + 1];
+         char aggregate_keyword[AIMEE_DB2_AGGREGATE_KEYWORD_MAX + 1];
+         if (aimee_db2_aggregate_request_decode(request_body, request_len, aggregate_entity,
+                                                sizeof(aggregate_entity), aggregate_keyword,
+                                                sizeof(aggregate_keyword), &aggregate_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_AGGREGATE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->aggregate)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int64_t rows[AIMEE_DB2_AGGREGATE_MAX];
+            int truncated = 0;
+            int listed =
+                backend->aggregate(aggregate_entity, aggregate_keyword, (int)aggregate_limit,
+                                   &truncated, rows, (int)aggregate_limit);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (listed < 0 || listed > (int)aggregate_limit)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint64_t memory_ids[AIMEE_DB2_AGGREGATE_MAX];
+            for (int index = 0; index < listed; index++)
+            {
+               if (rows[index] < (int64_t)AIMEE_DB2_AGGREGATE_ID_MIN)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               memory_ids[index] = (uint64_t)rows[index];
+            }
+            if (aimee_db2_aggregate_reply_encode(truncated ? 1u : 0u, memory_ids, (uint32_t)listed,
+                                                 response_body, response_capacity,
+                                                 response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t corpus_limit = 0u;
+         if (aimee_db2_load_eval_corpus_request_decode(request_body, request_len, &corpus_limit) ==
+             0)
+         {
+            if (response_capacity < AIMEE_DB2_LOAD_EVAL_CORPUS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->load_eval_corpus)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int64_t rows[AIMEE_DB2_LOAD_EVAL_CORPUS_MAX];
+            char label[AIMEE_DB2_LOAD_EVAL_CORPUS_LABEL_MAX + 1] = "";
+            int listed = backend->load_eval_corpus((int)corpus_limit, label, sizeof(label), rows,
+                                                   (int)corpus_limit);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (listed < 0 || listed > (int)corpus_limit)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint64_t memory_ids[AIMEE_DB2_LOAD_EVAL_CORPUS_MAX];
+            for (int index = 0; index < listed; index++)
+            {
+               if (rows[index] < (int64_t)AIMEE_DB2_LOAD_EVAL_CORPUS_ID_MIN)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               memory_ids[index] = (uint64_t)rows[index];
+            }
+            if (aimee_db2_load_eval_corpus_reply_encode(label, memory_ids, (uint32_t)listed,
+                                                        response_body, response_capacity,
+                                                        response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

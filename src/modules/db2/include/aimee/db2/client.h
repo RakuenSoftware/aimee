@@ -333,6 +333,18 @@ extern "C"
        uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_aggregate_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *entity_seed, const char *keyword, uint32_t limit, uint32_t *truncated,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_load_eval_corpus_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t limit, char *label, size_t label_capacity, uint64_t *memory_ids,
+       uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);

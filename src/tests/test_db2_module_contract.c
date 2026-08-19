@@ -1449,6 +1449,27 @@ int db2_memory_list(const char *tier, const char *kind, int hide_archived, int l
    return 0;
 }
 
+int db2_memory_aggregate(const char *entity_seed, const char *keyword, void *out, int max,
+                         int *truncated_out)
+{
+   (void)entity_seed;
+   (void)keyword;
+   (void)out;
+   (void)max;
+   if (truncated_out)
+      *truncated_out = 0;
+   return 0;
+}
+
+int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t label_len)
+{
+   (void)out;
+   (void)max;
+   if (label_out && label_len)
+      label_out[0] = '\0';
+   return 0;
+}
+
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
 {
    (void)term;
