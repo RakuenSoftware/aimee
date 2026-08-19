@@ -14,54 +14,56 @@
  * NOT here, and never: anything reading the client's own disk or environment.
  * That is the thin client's own job, not knowledge of what the server can do.
  *
- * WHY THE REST ARE NOT HERE YET. 102 of the 166 CLI-reachable methods are
- * served (33 no-argument, 69 specs). The remaining 64 break down as:
+ * WHY THE REST ARE NOT HERE YET. 115 of the 166 CLI-reachable methods are
+ * served (33 no-argument, 82 specs). Every one of the remaining 51 has a
+ * reason, and the reasons are of exactly three kinds:
  *
- *   37  NEVER serveable -- the client's own state
- *   16  a shape the spec deliberately cannot express
- *   11  describable only if the marshaller changes
+ *   38  NEVER serveable -- the client's own state
+ *    7  a field-SET branch: which fields exist depends on the input
+ *    6  a transformation of a value, not a choice of where it comes from
  *
- * THE 37 ARE THE POINT, not a shortfall. They read getcwd(),
+ * THE 38 ARE THE POINT, not a shortfall. They read getcwd(),
  * $AIMEE_SESSION_ID, the filesystem, or vault key material. A thin client
  * reading its own disk to build a request is doing its own job, not obeying the
- * server; serving those would be the defect this whole exercise exists to
- * prevent. Six of them were found only after the generator learned to follow
- * helper calls -- marshal_add_memory_scope() adds cwd and returns void, so an
- * earlier pass would have served memory.list with that field silently dropped.
+ * server; serving them would be the defect this exercise exists to prevent. Six
+ * were found only after the generator learned to follow helper calls, and one
+ * (init.run) only after it stopped filing custom bodies under "no marshaller".
  *
- * THE 16 are rules rather than shapes, and each is a deliberate line:
+ * THE LINE, stated once so the next addition can be judged against it: a
+ * field's rule may depend on ITS OWN value and its own flags, and nothing else.
+ * No field's presence may depend on another field, and no branch may decide
+ * which fields exist. Everything admitted so far meets it -- empty:"drop",
+ * omit_if_nonpositive, bool_inverted, tristate_flag, skip_if_dash,
+ * repeated_flag -- and the seven field-set branches do not:
  *
- *   - CROSS-FIELD ALTERNATIVES. trigger.fire needs --source AND (--task OR
- *     --proposal); cron.enable/disable accept an id OR --all. `required` is
- *     per-field and cannot say "one of these two".
- *   - INVERTED FLAGS. trajectory.export sends compress:true by default and
- *     --no-compress clears it. The vocabulary has no negation.
- *   - REFUSALS THAT ARE NOT ABOUT A FIELD. delegate.log rejects any positional
- *     argument; memory.user_capture refuses a key over 512 characters. Both are
- *     rules about the invocation, not about a value.
- *   - DERIVED FIELDS. catalog.show splits "provider:model"; user_capture joins
- *     the positionals from index 1 and prefixes the key; cron.add collects
- *     repeated --skill flags into an array and inverts --disabled into
- *     enabled:false.
- *   - RAW ARGV. mcp.recheck and provider.set read argv[0] directly, so
- *     `provider set --json openai` sends name="--json". Describing that would
- *     enshrine semantics that look like a bug.
+ *   - cron.enable/disable send job_id OR all:true, never both.
+ *   - delegate.status sends job_ids (array) or job_id (scalar) by count.
+ *   - trigger.fire needs --source AND (--task OR --proposal).
+ *   - pipeline.start splits --questions on "||".
+ *   - delegate.log refuses ANY positional -- a rule about the invocation.
  *
- * Any of these could be served by growing the vocabulary, and each addition
- * would move it further from data toward a program transmitted over the wire.
- * That line is the reason the served form is safe to trust, so it is held here
- * rather than argued away one method at a time.
- *
- * THE 11 need marshaller behaviour to change, which is a product decision
- * rather than a description.
+ * THE 6 are transformations: catalog.show splits "provider:model" on a colon
+ * with a 64-byte truncation; memory.user_capture joins the positionals from
+ * index 1, prefixes the key, and refuses one over 512 characters. The spec says
+ * where a value comes from and how it is typed. Encoding string surgery would
+ * make it a program transmitted over the wire, which is the property that makes
+ * the served form safe to trust.
  *
  * ADDING A METHOD: write the spec, add samples INCLUDING the awkward input for
- * whatever convention it uses (empty string, non-numeric, flag-vs-positional),
- * and let test_cli_argspec decide. It compares the built body against the real
- * marshaller, so a spec that is merely plausible fails. When it does, the fix
- * usually belongs in the generator: every mismatch this session traced back to
- * reading the wrong part of the source -- the value instead of the guard, a
- * field-name list instead of the branch, a direct body instead of its helpers.
+ * whatever convention it uses, and let test_cli_argspec decide -- it compares
+ * the built body against the real marshaller, so a merely plausible spec fails.
+ * When it does, the fix usually belongs in the GENERATOR: every mismatch in
+ * this work traced back to reading the wrong part of the source -- the value
+ * instead of the guard, a field-name list instead of the branch, a direct body
+ * instead of its helpers.
+ *
+ * AND NOTE WHAT THE TEST CANNOT SEE. Its samples are generated FROM the spec,
+ * so a marshaller rule the spec omits is invisible to it: user_capture's
+ * 512-character limit would have passed unnoticed. That is why the suite also
+ * carries adversarial samples (oversized values, flag-shaped words, a bare
+ * "--") and samples supplying BOTH sources of a two-source field at once. The
+ * first set caught kb.build reading --path before positional[0]; the second
+ * exists because the two orders differ only when both are given.
  */
 
 {"provider.list",
