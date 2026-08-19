@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "97b7dd88b5c98f86b6722fd07e551ed53cc0de33f1388ff881e40419e7918bd0"
+#define AIMEE_DB2_CONTRACT_SHA256 "0e855a1eee2c4eab3cf5d1937626e406ce8b3e29ee4b2b4b2b2e1755b9ed4c72"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -541,6 +541,13 @@
 #define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_RESPONSE_LEN 28u
 #define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_ERROR_LEN    24u
 #define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_MAX          2147483647u
+#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_BUILD_DEPS        AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS        AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_BUILD_DEPS    8u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_REQUEST_LEN  24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN 28u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_ERROR_LEN    24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX          2147483647u
 #define AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_EVENT_MAINTENANCE
 #define AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_FAMILY_MAINTENANCE
 #define AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED        1u
@@ -2948,6 +2955,60 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
    if (decoded > AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX)
       return -1;
    *expired_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_cross_repo_rebuild_build_deps_request_encode(uint8_t *output,
+                                                                         size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_BUILD_DEPS, 0u,
+                                          0u, output, capacity);
+}
+
+static inline int aimee_db2_cross_repo_rebuild_build_deps_request_decode(const uint8_t *input,
+                                                                         size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_BUILD_DEPS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_cross_repo_rebuild_build_deps_reply_encode(
+    uint32_t build_deps_written, uint8_t *output, size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len ||
+       build_deps_written > AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX ||
+       capacity < AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_BUILD_DEPS,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, build_deps_written);
+   *output_len = AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_cross_repo_rebuild_build_deps_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *build_deps_written)
+{
+   if (build_deps_written)
+      *build_deps_written = 0u;
+   if (!build_deps_written)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_BUILD_DEPS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX)
+      return -1;
+   *build_deps_written = decoded;
    return 0;
 }
 

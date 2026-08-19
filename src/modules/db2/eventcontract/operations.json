@@ -1612,6 +1612,37 @@
       }
     },
     {
+      "family": "index",
+      "id": 8,
+      "name": "cross_repo_rebuild_build_deps",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Cross-repo build dependencies are derived relational DB2 records rebuilt from indexed manifests, not portable ANN state.",
+      "c_symbols": ["db2_cross_repo_rebuild_build_deps"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"replaces_table": true, "excludes_vendored": true,
+                   "lifecycle_state": "current", "generation": "current",
+                   "manifests": ["CMakeLists.txt", ".cmake", ".gitmodules",
+                                 "Cargo.toml"],
+                   "excluded_subtrees": ["_deps", "build", ".git", ".aimee"],
+                   "skips_self_and_external_refs": true,
+                   "max_projects": 256}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "build_deps_written", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647},
+        "count_source": "insert-attempts"
+      }
+    },
+    {
       "family": "maintenance",
       "id": 1,
       "name": "prospective_sweep_expired",

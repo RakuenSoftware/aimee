@@ -107,6 +107,7 @@ type wireBaseline struct {
 				ExtractJobs           uint32            `json:"extract_jobs"`
 				RouteCount            uint32            `json:"route_count"`
 				IdentitiesWritten     uint32            `json:"identities_written"`
+				BuildDepsWritten      uint32            `json:"build_deps_written"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -252,7 +253,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 67 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 68 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -311,14 +312,15 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[56].Name != "requeue_drifted" ||
 		baseline.Operations[57].Name != "cross_repo_rebuild_routes" ||
 		baseline.Operations[58].Name != "cross_repo_rebuild_identities" ||
-		baseline.Operations[59].Name != "prospective_sweep_expired" ||
-		baseline.Operations[60].Name != "directive_sweep_expired" ||
-		baseline.Operations[61].Name != "mark_revisit_due" ||
-		baseline.Operations[62].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[63].Name != "evidence_reembed_all" ||
-		baseline.Operations[64].Name != "curator_reembed_all" ||
-		baseline.Operations[65].Name != "synth_reenqueue_all" ||
-		baseline.Operations[66].Name != "curator_reenqueue_extract_all" {
+		baseline.Operations[59].Name != "cross_repo_rebuild_build_deps" ||
+		baseline.Operations[60].Name != "prospective_sweep_expired" ||
+		baseline.Operations[61].Name != "directive_sweep_expired" ||
+		baseline.Operations[62].Name != "mark_revisit_due" ||
+		baseline.Operations[63].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[64].Name != "evidence_reembed_all" ||
+		baseline.Operations[65].Name != "curator_reembed_all" ||
+		baseline.Operations[66].Name != "synth_reenqueue_all" ||
+		baseline.Operations[67].Name != "curator_reenqueue_extract_all" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -519,7 +521,7 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[66]
+	operation := loadWireBaseline(t).Operations[67]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -561,7 +563,7 @@ func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
 
 func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	operation := baseline.Operations[65]
+	operation := baseline.Operations[66]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -602,7 +604,7 @@ func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestCuratorReembedAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[64]
+	operation := loadWireBaseline(t).Operations[65]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -643,7 +645,7 @@ func TestCuratorReembedAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestEvidenceReembedAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[63]
+	operation := loadWireBaseline(t).Operations[64]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -687,7 +689,7 @@ func TestEvidenceReembedAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestIngestQueueResetRunningMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[62]
+	operation := loadWireBaseline(t).Operations[63]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -731,7 +733,7 @@ func TestIngestQueueResetRunningMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestMarkRevisitDueMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[61]
+	operation := loadWireBaseline(t).Operations[62]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -772,7 +774,7 @@ func TestMarkRevisitDueMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestDirectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[60]
+	operation := loadWireBaseline(t).Operations[61]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -815,7 +817,7 @@ func TestDirectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestProspectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[59]
+	operation := loadWireBaseline(t).Operations[60]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -856,6 +858,49 @@ func TestProspectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
 		expired, err := DecodeProspectiveSweepExpiredReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || expired != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, expired, err)
+		}
+	}
+}
+
+func TestCrossRepoRebuildBuildDepsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[59]
+	if operation.Family != "index" {
+		t.Fatalf("family = %q, want index", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeCrossRepoRebuildBuildDepsRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeCrossRepoRebuildBuildDepsRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	if err := DecodeCrossRepoRebuildIdentitiesRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("identity decoder accepted a build-dep request: %v", err)
+	}
+	// Operation 8 of the maintenance family shares these bytes; the stage
+	// separates them, not the envelope.
+	if err := DecodeCuratorReenqueueExtractAllRequest(wantRequest); err != nil {
+		t.Fatalf("expected the maintenance family's eighth operation to share these bytes: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeCrossRepoRebuildBuildDepsRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeCrossRepoRebuildBuildDepsReply(vector.BuildDepsWritten)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		deps, err := DecodeCrossRepoRebuildBuildDepsReply(got)
+		if err != nil || deps != vector.BuildDepsWritten {
+			t.Fatalf("decode = (%d, %v)", deps, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		deps, err := DecodeCrossRepoRebuildBuildDepsReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || deps != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, deps, err)
 		}
 	}
 }

@@ -7,6 +7,7 @@
 #include "c/db2_pool.h"
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
+#include "c/cross_repo_build.h"
 #include "c/cross_repo_identity.h"
 #include "c/cross_repo_route.h"
 #include "c/artifacts.h"
@@ -320,6 +321,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .requeue_drifted = db2_code_index_requeue_drifted,
        .cross_repo_rebuild_routes = db2_cross_repo_rebuild_routes,
        .cross_repo_rebuild_identities = db2_cross_repo_rebuild_identities,
+       .cross_repo_rebuild_build_deps = db2_cross_repo_rebuild_build_deps,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        .directive_sweep_expired = db2_directive_sweep_expired,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
@@ -362,6 +364,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES &&
+        invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1293,7 +1296,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        invocation->stage_id == AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION ||
        invocation->stage_id == AIMEE_DB2_STAGE_REQUEUE_DRIFTED ||
        invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES ||
-       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES)
+       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES ||
+       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS)
    {
       if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
       {
@@ -1432,6 +1436,28 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_cross_repo_rebuild_identities_reply_encode(
                  (uint32_t)identities_written, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_cross_repo_rebuild_build_deps_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->cross_repo_rebuild_build_deps)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The last of the three cross-repo rebuilds and the strictest about
+          * partial results: a mid-cursor error on either the project list or
+          * the manifest scan rolls back rather than committing a table that is
+          * missing the repositories it never reached. That arrives as -1 and
+          * stays a failure. Insert attempts again, not rows stored. */
+         int build_deps_written = backend->cross_repo_rebuild_build_deps();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (build_deps_written < 0 ||
+             (uint32_t)build_deps_written > AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_cross_repo_rebuild_build_deps_reply_encode(
+                 (uint32_t)build_deps_written, response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

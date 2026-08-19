@@ -156,6 +156,14 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_cross_repo_rebuild_build_deps",
+      "signature_sha256": "3f17417b0a4e269b782569ff5e2d26fc27c70c01af00fa6eff95a25ddaa671ba",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.cross_repo_rebuild_build_deps operation replaces the pass that rebuilds cross-repo build dependencies from indexed manifests inside one transaction. Every filter is fixed policy: the manifest list, the vendored exclusion, the build-output subtrees, and the skip for self and external refs. The project cap is recorded too, because exceeding it makes tail repositories unmappable rather than merely slow."
+    },
+    {
       "symbol": "db2_cross_repo_rebuild_identities",
       "signature_sha256": "254f5fa6d4a6311d15a0869356166daa645d68c99a26830145d5a2f81bc86d5c",
       "disposition": "wire-operation",

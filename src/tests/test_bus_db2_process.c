@@ -603,6 +603,14 @@ int main(int argc, char **argv)
                                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(identities_written == 0);
 
+   /* The third cross-repo rebuild. No project exists, so the project list is
+    * empty rather than truncated, and the rebuild commits an empty table. */
+   uint32_t build_deps_written = 99;
+   assert(aimee_db2_cross_repo_rebuild_build_deps_call(call_client, &client, 9109, 0,
+                                                       &build_deps_written, NULL,
+                                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(build_deps_written == 0);
+
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and
     * the second call returning the same zero is what the catalog's safe

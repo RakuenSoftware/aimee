@@ -5519,9 +5519,15 @@
           "line": 39
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.cross_repo_rebuild_build_deps operation replaces the pass that rebuilds cross-repo build dependencies from indexed manifests inside one transaction. Every filter is fixed policy: the manifest list, the vendored exclusion, the build-output subtrees, and the skip for self and external refs. The project cap is recorded too, because exceeding it makes tail repositories unmappable rather than merely slow."
+      },
       "signature": "int db2_cross_repo_rebuild_build_deps ( void )",
       "signature_sha256": "3f17417b0a4e269b782569ff5e2d26fc27c70c01af00fa6eff95a25ddaa671ba",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_cross_repo_rebuild_build_deps"
     },
     {
@@ -26136,15 +26142,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "eaa03711096d48efa8dbd55e72130707ba0b4297d1d1259fbf92b9a05b9c17c0",
+  "fingerprint": "11f9c00d5caaae34426df81884cac7584a14e5a1db1d4a3ac1bf89f5748b57bf",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 606,
+    "audit_pending": 605,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 352
+    "reviewed": 353
   }
 }
