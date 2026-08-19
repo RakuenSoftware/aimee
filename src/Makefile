@@ -978,6 +978,18 @@ go-unit-tests:
 # would pass CI", and it does not. A branch that added a client help entry
 # passed this target and then failed build-integrity in CI, because the banned
 # term it introduced is only visible once the shipped client is inspected.
+# The set a branch is actually judged by. verify-local deliberately omits the
+# two heavy gates; this one includes them, so there is a command that means
+# "this would pass CI" rather than a command that only looks like it does.
+# Opt-in, so the fast loop stays fast.
+.PHONY: verify-ci
+verify-ci: all
+	@$(MAKE) verify-local
+	@$(MAKE) build-integrity
+	@$(MAKE) integration-tests
+	@$(MAKE) docs-gen-check
+	@echo "verify-ci: ok (verify-local + build-integrity + integration-tests + docs-gen-check)"
+
 verify-local: all
 	@$(MAKE) check-linking
 	@$(MAKE) lint
@@ -985,7 +997,7 @@ verify-local: all
 	@$(MAKE) go-unit-tests
 	@echo "verify-local: ok (lint, unit, go-unit, linking)"
 	@echo "verify-local: NOT run here -- build-integrity, integration-tests;" \
-	      "run those before pushing anything that changes the shipped surface"
+	      "use 'make verify-ci' before pushing a change to the shipped surface"
 
 server: retire-obsolete-binaries $(SERVER) $(KB) $(KB_RESOLVER) $(FORWARDER)
 
