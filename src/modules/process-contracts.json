@@ -739,6 +739,11 @@
           "id": 18,
           "name": "db1-mgmt-nonce",
           "event_kind": 11794
+        },
+        {
+          "id": 19,
+          "name": "db1-pki",
+          "event_kind": 11795
         }
       ]
     }

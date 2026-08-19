@@ -583,6 +583,24 @@
 #define AIMEE_DB1_OP_MGMT_STATUS_HWM_READ 4u
 #define AIMEE_DB1_OP_MGMT_STATUS_HWM_SET  5u
 
+/* Family 19: the client-certificate roster and the mTLS ramp: which
+ * certificates exist, when each was last presented, and how far the ramp from
+ * optional to required has come. */
+
+#define AIMEE_DB1_EVENT_PKI 11795u
+#define AIMEE_DB1_STAGE_PKI 19u
+
+#define AIMEE_DB1_OP_PKI_CERT_UPSERT       1u
+#define AIMEE_DB1_OP_PKI_CERT_LIST         2u
+#define AIMEE_DB1_OP_PKI_REVOKED_SERIALS   3u
+#define AIMEE_DB1_OP_PKI_CERT_REVOKE       4u
+#define AIMEE_DB1_OP_PKI_CERT_CHECK        5u
+#define AIMEE_DB1_OP_PKI_NOTE_PRESENTATION 6u
+#define AIMEE_DB1_OP_PKI_RAMP_INIT         7u
+#define AIMEE_DB1_OP_PKI_RAMP_READY        8u
+#define AIMEE_DB1_OP_PKI_RAMP_ADVANCE      9u
+#define AIMEE_DB1_OP_PKI_RAMP_GET          10u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

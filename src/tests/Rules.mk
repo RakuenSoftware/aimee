@@ -5316,6 +5316,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_stage.o \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_cache.o \
                                        $(OBJDIR)/modules/db1/mgmt_nonce_stage.o \
+                                       $(OBJDIR)/modules/db1/pki_stage.o \
+                                       $(OBJDIR)/modules/db1/pki_store.o \
                                        $(OBJDIR)/modules/db1/mgmt_nonce.o \
                                        $(OBJDIR)/modules/db1/server_identity_jti.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/wfe_store_lists.o \
@@ -6075,6 +6077,7 @@ $(TESTPREFIX)/unit-test-vault-bootstrap-privilege: \
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-pki: $(OBJDIR)/tests/test_pki.o $(OBJDIR)/server/pki.o \
+$(OBJDIR)/modules/db1/pki_store.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o $(OBJDIR)/modules/vault/vault_principal.o \

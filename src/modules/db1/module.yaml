@@ -68,6 +68,8 @@
     "src/modules/db1/module_adapter.c",
     "src/modules/db1/payload_rewrite_state.c",
     "src/modules/db1/pipelines.c",
+    "src/modules/db1/pki_stage.c",
+    "src/modules/db1/pki_store.c",
     "src/modules/db1/primary_sessions.c",
     "src/modules/db1/project_clones.c",
     "src/modules/db1/remote_client_grant.c",
@@ -142,6 +144,7 @@
     "src/modules/db1/model_pricing.h",
     "src/modules/db1/payload_rewrite_state.h",
     "src/modules/db1/pipelines.h",
+    "src/modules/db1/pki_store.h",
     "src/modules/db1/primary_sessions.h",
     "src/modules/db1/project_clones.h",
     "src/modules/db1/remote_client_grant.h",
@@ -180,6 +183,7 @@
       "src/vendor/headers"
     ],
     "pkg_config": [
+      "openssl",
       "sqlite3"
     ],
     "vendor_sources": [

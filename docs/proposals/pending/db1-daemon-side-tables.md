@@ -1,8 +1,8 @@
 # Proposal: the DB1 tables the daemon still opens directly
 
-- **State:** OPEN. Every DECLARED family is served and `catalog_complete` is
-  true, which is a weaker claim than it sounds: it means every family in the
-  catalog is active, not that every DB1 table has a family. These do not.
+- **State:** RESOLVED. All three are migrated and served; no daemon source calls
+  `db1_conn()` any more. What follows is what the work actually cost, since the
+  estimate below was wrong in an instructive direction.
 
 Three files under `src/server/` still call `db1_conn()` and run SQL, and no
 family claims them:
@@ -51,7 +51,23 @@ possible place for one.
 
 `pki_certs` will have the same shape (certificates and keys are bytes).
 
-## The decision that is owed
+## What the blob question turned out to be (resolved)
+
+A `blob` payload kind was the obvious answer and is not the one taken. Thirty
+four places in the generator test for `"text"`, and auditing all of them is a
+poor trade against encoding at the seam: the two stores that hold bytes speak
+lowercase hex and convert only where they bind SQLite. Hex is a bijection with a
+self-checking length, the daemon still holds bytes, and the JWKS comparison is
+still `CRYPTO_memcmp` over the same 32 bytes.
+
+`pki_certs` -- predicted below to be "bytes all the way down" -- turned out to
+hold no blobs at all. Serial and CN are TEXT and the timestamps are integers;
+the certificates themselves live on disk, not in the row. The prediction was
+made from what the table is *for* rather than from its columns.
+
+A blob kind may still be worth having. Nothing in DB1 needs it today.
+
+## The decision that was owed
 
 A `blob` payload kind, almost certainly hex on the wire: a fixed doubling, no
 escaping rules to get wrong, and a digest that arrives short fails to parse
@@ -66,9 +82,22 @@ touches is the cache that decides whether a management token is trusted, and
 without failing loudly. It wants its own change, with a round-trip test that
 puts a digest containing an embedded zero byte through the wire and back.
 
-## What that unblocks
+## What it unblocked
 
-All three files, and with them the last direct `db1_conn()` calls in the daemon.
-After that the only DB1 sources it links are `db1_init`, `db1_write`,
-`diagnostics` and `maintenance` -- infrastructure rather than storage -- and
-`secrets.c`, which never touched DB1 at all.
+All three, and with them the last direct `db1_conn()` calls in the daemon. The
+only DB1 sources it links now are `db1_init`, `db1_write`, `diagnostics` and
+`maintenance` -- infrastructure rather than storage -- and `secrets.c`, which
+never touched DB1 at all.
+
+Two things were harder than this document expected, and neither was binary:
+
+- The mTLS ramp hashes the roster INSIDE the transaction that may advance it,
+  so the hash could not stay in the daemon: computed outside, a certificate
+  added in between would let a server advance on a roster that no longer
+  exists. The module links OpenSSL for that digest, which is consistent with
+  how it already treats third-party dependencies (sqlite3 by pkg-config,
+  cJSON vendored) and is not a dependency on the core tree.
+
+- `pki_list` took a callback, and a function pointer does not cross a process
+  boundary. The rows come back and the loop runs on the caller's side, which is
+  the same split `db1_execution_plan_list` needed.

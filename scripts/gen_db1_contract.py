@@ -2952,10 +2952,19 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     args += [f"scalar{index}", f"(size_t){width}"]
                 else:
                     ctype = {"int": "int", "int64": "int64_t", "double": "double", "float": "float"}[kind]
+                    # A text scalar takes TWO parameters -- the buffer and its
+                    # capacity -- so the parameter that matches this field is
+                    # not at `index`. Counting them is the difference between
+                    # reading the caller's spelling for `advanced_at_out` and
+                    # reading it for the `hash_len` that precedes it, which is
+                    # how this emitted `size_t hash_len scalar2 = 0;`.
+                    at = len(request["fields"])
+                    for before, (_, before_kind) in enumerate(members[:index]):
+                        at += 2 if (before_kind == "text" and before not in stage_alloc) else 1
+                    params = operation.get("c_params") or []
                     spelled_out = declared_parameters(
                         root, str(operation.get("c_name", ""))).get(
-                            str(operation["c_params"][len(request["fields"]) + index])
-                            if "c_params" in operation else "")
+                            str(params[at]) if at < len(params) else "")
                     if spelled_out:
                         ctype = spelled_out.rsplit("*", 1)[0].strip()
                     parse.append(f"      {ctype} scalar{index} = 0;\n")

@@ -44,6 +44,7 @@
 #include "server_identity_jti.h"
 #include "mgmt_jwks_cache.h"
 #include "mgmt_nonce.h"
+#include "pki_store.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -85,7 +86,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_WORKFLOW,         AIMEE_DB1_EVENT_ROUNDTABLE,
     AIMEE_DB1_EVENT_IDENTITY,         AIMEE_DB1_EVENT_CHECKPOINTS,
     AIMEE_DB1_EVENT_JTI_REPLAY,       AIMEE_DB1_EVENT_MGMT_JWKS,
-    AIMEE_DB1_EVENT_MGMT_NONCE,
+    AIMEE_DB1_EVENT_MGMT_NONCE,       AIMEE_DB1_EVENT_PKI,
 };
 
 static pid_t g_module = -1;
@@ -1610,6 +1611,62 @@ static void test_a_challenge_is_spent_once(void)
    printf("  PASS: a challenge is spent once\n");
 }
 
+/* The ramp decides whether mTLS becomes required, so its answers have to be
+   exact: a revoked certificate must leave the roster, an unpresented one must
+   hold the ramp back, and advancing must be the one thing that changes state.
+   The roster hash is taken inside the same transaction that may advance, which
+   is why the certificates here are added and revoked around the checks. */
+static void test_the_mtls_ramp_only_advances_on_a_ready_roster(void)
+{
+   must(db1_pki_cert_upsert("aa01", "client-one", 100, 0) == 0, "remembered a certificate");
+   must(db1_pki_cert_upsert("aa02", "client-two", 100, 0) == 0, "and a second");
+
+   db1_pki_cert_t rows[8];
+   memset(rows, 0, sizeof rows);
+   int n = db1_pki_cert_list(rows, 8);
+   must(n == 2, "both are on the roster");
+
+   must(db1_pki_cert_check("aa01", 200) == DB1_PKI_CERT_VALID, "an issued cert is valid");
+   must(db1_pki_cert_check("nosuch", 200) == DB1_PKI_CERT_UNKNOWN,
+        "an unknown serial is unknown, not an error");
+
+   /* Nothing has been presented, so the ramp is not ready. */
+   must(db1_pki_ramp_init(1) >= 1, "opened the ramp in permissive mode");
+   must(db1_pki_ramp_ready(300) == 0, "a roster nobody has presented is not ready");
+   must(db1_pki_ramp_advance(300) == 0, "and advancing does not move it");
+
+   must(db1_pki_note_presentation("aa01", 310) == 0, "one certificate presented");
+   must(db1_pki_ramp_ready(320) == 0, "one of two is still not ready");
+
+   must(db1_pki_note_presentation("aa02", 330) == 0, "and the other");
+   must(db1_pki_ramp_ready(340) == 1, "now every certificate has been presented");
+
+   int state = 0;
+   char hash[DB1_PKI_HASH_LEN] = "";
+   long advanced = 0;
+   must(db1_pki_ramp_get(&state, hash, sizeof hash, &advanced) == 0, "read the ramp row");
+   must(state == 1, "which is still permissive until something advances it");
+   must(strlen(hash) == 64, "and carries a roster hash");
+
+   must(db1_pki_ramp_advance(350) == 1, "advanced it");
+   memset(hash, 0, sizeof hash);
+   must(db1_pki_ramp_get(&state, hash, sizeof hash, &advanced) == 0, "re-read the ramp");
+   must(state == 2, "now required");
+   must(advanced == 350, "and it recorded when");
+
+   must(db1_pki_cert_revoke("aa01") == 0, "revoked one");
+   must(db1_pki_cert_check("aa01", 400) == DB1_PKI_CERT_REVOKED,
+        "which reads as revoked rather than unknown -- a different thing to log");
+
+   char serials[8][DB1_PKI_SERIAL_MAX];
+   memset(serials, 0, sizeof serials);
+   int revoked = db1_pki_revoked_serials(serials, 8);
+   must(revoked == 1 && strcmp(serials[0], "aa01") == 0,
+        "and it is the one the caller's snapshot will hold");
+
+   printf("  PASS: the mTLS ramp only advances on a ready roster\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1666,6 +1723,7 @@ int main(int argc, char **argv)
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();
    test_a_challenge_is_spent_once();
+   test_the_mtls_ramp_only_advances_on_a_ready_roster();
 
    stop_module();
    obs_bus_stop();
