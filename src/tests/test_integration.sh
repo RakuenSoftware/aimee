@@ -740,6 +740,41 @@ s.close()
 sys.stdout.write(data.partition(b'\r\n\r\n')[2].decode().strip())
 " 2>/dev/null) || true
 
+# Every served body, not just the one that prompted this.
+#
+# The manifest carries four: routes, commands, dispatch, marshal. A broken
+# emitter for any of the last three makes the client fall back to its compiled
+# copy SILENTLY -- the same failure the marshal check below exists for. (routes
+# is the exception: losing it fails loudly with "has no /v1 route".)
+#
+# Checked by SHAPE, not by naming commands: a count floor catches an emitter
+# that returns nothing, and the expected keys on one row catch a rename that
+# would keep the count and break every client. Neither breaks when a command is
+# added or retired, which a "contains init.run" assertion would.
+MANIFEST_BODIES=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    print('unparseable'); raise SystemExit
+want = {
+    'routes':   {'op', 'verb', 'path'},
+    'commands': {'name'},
+    'dispatch': {'cmd', 'method'},
+    'marshal':  {'method', 'args'},
+}
+bad = []
+for key, keys in want.items():
+    rows = doc.get(key)
+    if not isinstance(rows, list) or len(rows) < 10:
+        bad.append(key + ':empty')
+        continue
+    if not any(keys <= set(r) for r in rows if isinstance(r, dict)):
+        bad.append(key + ':shape')
+print(','.join(bad) if bad else 'ok')
+" 2>/dev/null) || true
+check_output "every served manifest body is present and shaped" "ok" echo "$MANIFEST_BODIES"
+
 MANIFEST_SPECS=$(printf '%s' "$MANIFEST" | python3 -c "
 import json, sys
 try:
