@@ -106,3 +106,54 @@ that wfe_engine.c opens and commits across separate calls. The three ways out
 below still stand, and the first is still the right one -- with the correction
 that making each critical section a single operation is a change to
 wfe_engine.c and wfe_store.c only, not to the six sources listed above.
+
+## The operation the first way out needs, written down
+
+"Make each critical section one operation" is the right answer and it is not a
+one-line change, so here is the shape it takes, from reading the two sections
+rather than from imagining them.
+
+The branching in wfe_engine.c is not the problem. Every branch is pure decision
+-- which pause reason, whether a PENDING in an autonomous run is a dead end,
+which failure class maps to which reason string -- and all of it can stay in the
+engine. What must move is the applying, which is always some subset of the same
+six writes:
+
+    add_cost                  optional, when the step reported one
+    set_pause | set_terminal  exactly one, or neither on a plain advance
+    abandon_children          only alongside an abandoned terminal
+    set_stage                 on advance
+    stage_attempt_inc         on advance
+    lifecycle_event_add       always, and audit rather than state
+
+So the operation is one call taking the decision the engine already made:
+
+    typedef struct
+    {
+       const char *work_item_id;
+       const char *node_id;
+       int disposition;        /* pause | terminal | advance */
+       const char *reason;     /* pause reason, or terminal state */
+       const char *next_stage; /* advance only */
+       double cost_usd;        /* 0 = no cost write */
+       int abandon_children;
+       const char *event_kind, *event_detail, *content_hash;
+    } db1_work_item_step_outcome_t;
+
+    int db1_work_item_record_step_outcome(const db1_work_item_step_outcome_t *outcome);
+
+with the BEGIN/COMMIT inside it, where a module boundary wants them. The engine
+loses db1_lifecycle_txn_begin/_commit/_rollback, the WFE_CKW macro and every
+`goto txn_fail`, because there is no longer a window in which a step can be
+half-applied.
+
+The reason this is still not done here: the failure mode is silent. A wrong
+subset leaves a work item in a state no single write produces -- a cost recorded
+without the outcome that justified it, a stage advanced without the cost, a
+PENDING parked with an empty reason (which the code comments note reads as "not
+parked" and re-runs a gate forever). None of that shows up as a link error or a
+failing assertion, which is how every other mistake in this migration announced
+itself. It wants tests written against the state machine, by someone reviewing
+it as a change to the engine.
+
+The other two ways out below are unchanged, and both still look worse.
