@@ -25,6 +25,14 @@ typedef struct
    int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
                               int *low_effectiveness, int *high_impact);
    int (*list_l2_memory_ids)(int64_t *out, int max);
+   /* These two return identifiers rather than rows: the generated client sizes
+    * its reply buffer as a local array, and sixty-four memory rows do not
+    * belong on a caller's stack. The scope travels because the backend reads
+    * it from a thread-local that does not follow a call between processes. */
+   int (*top_l2_facts)(int scope_active, int include_all, const char *workspace,
+                       const char *project, int64_t *out, int max);
+   int (*list_session_scope_priority)(int scope_active, int include_all, const char *workspace,
+                                      const char *project, int64_t *out, int max);
    /* health_record composes these three: DB2 owns the corpus total and the
     * fixed conflict window, so only the cycle counters cross the bus. */
    int (*count_memories)(void);

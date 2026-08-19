@@ -1194,6 +1194,67 @@ aimee_db2_count_and_max_updated_call(aimee_db2_call_fn call, void *call_context,
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_top_l2_facts_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                            uint64_t deadline_ns, uint32_t limit, uint32_t scope_flags,
+                            const char *workspace, const char *project, uint64_t *memory_ids,
+                            uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+                            void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_TOP_L2_FACTS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_TOP_L2_FACTS_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_top_l2_facts_request_encode(limit, scope_flags, workspace, project, request,
+                                             sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_TOP_L2_FACTS, AIMEE_DB2_STAGE_TOP_L2_FACTS, trace_id,
+            deadline_ns, request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_top_l2_facts_reply_decode(response, response_len, memory_ids, capacity, count) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_list_session_scope_priority_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
+    uint64_t *memory_ids, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_list_session_scope_priority_request_encode(
+           limit, scope_flags, workspace, project, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY,
+            AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY, trace_id, deadline_ns, request,
+            request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_list_session_scope_priority_reply_decode(response, response_len, memory_ids,
+                                                          capacity, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)

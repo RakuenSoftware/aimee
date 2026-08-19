@@ -267,6 +267,20 @@ int main(int argc, char **argv)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(l2_count == 0);
 
+   uint64_t scoped_ids[AIMEE_DB2_TOP_L2_FACTS_MAX];
+   uint32_t scoped_count = 99;
+   assert(aimee_db2_top_l2_facts_call(call_client, &client, 9038, 0, 8u, 3u, "replay-workspace",
+                                      "replay-project", scoped_ids, AIMEE_DB2_TOP_L2_FACTS_MAX,
+                                      &scoped_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(scoped_count == 0);
+
+   scoped_count = 99;
+   assert(aimee_db2_list_session_scope_priority_call(
+              call_client, &client, 9039, 0, 8u, 0u, "", "", scoped_ids,
+              AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_MAX, &scoped_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(scoped_count == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

@@ -1435,6 +1435,72 @@
       }
     },
     {
+      "family": "memory",
+      "id": 43,
+      "name": "top_l2_facts",
+      "wire_format": "db2-envelope-scoped-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "L2 fact rows and the scope tables they are ranked against are both relational DB2 state, so the ranking is DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_top_l2_facts"],
+      "request": {
+        "encoded_size_min": 40,
+        "encoded_size_max": 1062,
+        "policy": {"maximum_ids": 64,
+                   "ranking": "session-scope rank, then use_count, then confidence, all descending"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 44,
+      "name": "list_session_scope_priority",
+      "wire_format": "db2-envelope-scoped-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Session-scope priority ranks canonical memory rows against DB2's own scope tables, so the ordering is DB2 authority; identifiers cross in that order and the caller reattaches content.",
+      "c_symbols": ["db2_memory_list_session_scope_priority"],
+      "request": {
+        "encoded_size_min": 40,
+        "encoded_size_max": 1062,
+        "policy": {"maximum_ids": 64,
+                   "ranking": "session-scope rank, then kind (workflow, decision, other), then tier (L3, L2, other), then use_count, all descending"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

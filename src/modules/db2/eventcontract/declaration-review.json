@@ -2020,6 +2020,14 @@
       "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
     },
     {
+      "symbol": "db2_memory_list_session_scope_priority",
+      "signature_sha256": "b0110278348371f632b08e96afb7a3771dd2eaaf39ee1786757de0c27c6ec0aa",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.list_session_scope_priority operation replaces the row reader. Two decisions are on the record with it. The ordering is DB2's, computed against DB2's own scope tables, so it stays behind the handler. And the scope the ordering depends on now travels in the request: the backend reads it from a thread-local that db2_memory_scope_context_set writes, which does not follow a call into another process."
+    },
+    {
       "symbol": "db2_memory_lookup_primary_entity",
       "signature_sha256": "bb2933e3d46abd9dade0a0ffdf3abd166ff7ff30133ba3e828e4a173297ff39f",
       "disposition": "private-db2",
@@ -2306,6 +2314,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of the temporal-reference refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_top_l2_facts",
+      "signature_sha256": "c27a355ded77ece3f4ce80e0ec4db2adda6c23276260fc0b6859d095349f403a",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.top_l2_facts operation replaces the row reader. It returns identifiers rather than rows, because the generated client sizes its reply buffer as a local array and sixty-four memory rows do not belong on a caller's stack; the caller reattaches content through memory.get_content. The session scope travels in the request for the same reason as list_session_scope_priority."
     },
     {
       "symbol": "db2_memory_touch",

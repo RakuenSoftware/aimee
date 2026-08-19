@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "4db866595a5fa726e082b78c1ad9f56bf606393898925a9a462d73e4a9a39710"
+const ContractSHA256 = "69389ad2fdf85a6130e0ad3dedcb582774c60bc440b94cf52a81f8fbad968163"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -320,6 +320,28 @@ const StageCountAndMaxUpdated = FamilyMemory
 const OperationCountAndMaxUpdated uint32 = 42
 const CountAndMaxUpdatedCountMax uint32 = 2147483647
 const CountAndMaxUpdatedStampMax = 31
+const EventTopL2Facts = EventMemory
+const StageTopL2Facts = FamilyMemory
+const OperationTopL2Facts uint32 = 43
+const TopL2FactsLimitMin uint32 = 1
+const TopL2FactsLimitMax uint32 = 64
+const TopL2FactsScopeFlagsMax uint32 = 3
+const TopL2FactsWorkspaceMax = 511
+const TopL2FactsProjectMax = 511
+const TopL2FactsMax uint32 = 64
+const TopL2FactsIDMin uint64 = 1
+const TopL2FactsIDMax uint64 = 9223372036854775807
+const EventListSessionScopePriority = EventMemory
+const StageListSessionScopePriority = FamilyMemory
+const OperationListSessionScopePriority uint32 = 44
+const ListSessionScopePriorityLimitMin uint32 = 1
+const ListSessionScopePriorityLimitMax uint32 = 64
+const ListSessionScopePriorityScopeFlagsMax uint32 = 3
+const ListSessionScopePriorityWorkspaceMax = 511
+const ListSessionScopePriorityProjectMax = 511
+const ListSessionScopePriorityMax uint32 = 64
+const ListSessionScopePriorityIDMin uint64 = 1
+const ListSessionScopePriorityIDMax uint64 = 9223372036854775807
 const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = 1
@@ -2018,6 +2040,206 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 		return 0, 0, "", ErrMalformedEnvelope
 	}
 	return header.Result, count, maxUpdatedAt, nil
+}
+
+// EncodeTopL2FactsRequest carries the limit and the scope the backend would
+// otherwise read from thread-local state.
+func EncodeTopL2FactsRequest(limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < TopL2FactsLimitMin || limit > TopL2FactsLimitMax || scopeFlags > TopL2FactsScopeFlagsMax ||
+		len(workspace) > TopL2FactsWorkspaceMax || len(project) > TopL2FactsProjectMax ||
+		hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 16 + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationTopL2Facts, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(workspace)))
+	copy(payload[12:], workspace)
+	binary.LittleEndian.PutUint32(payload[12+len(workspace):], uint32(len(project)))
+	copy(payload[16+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeTopL2FactsRequest validates the limit, the flag word and both scope names.
+func DecodeTopL2FactsRequest(request []byte) (uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTopL2Facts || header.Flags != 0 ||
+		header.PayloadLen < 16 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	workspaceLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < TopL2FactsLimitMin || limit > TopL2FactsLimitMax || scopeFlags > TopL2FactsScopeFlagsMax ||
+		workspaceLen > TopL2FactsWorkspaceMax || header.PayloadLen < 16+workspaceLen {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[12+workspaceLen:])
+	if projectLen > TopL2FactsProjectMax || header.PayloadLen != 16+workspaceLen+projectLen {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspace := string(payload[12 : 12+workspaceLen])
+	project := string(payload[16+workspaceLen : 16+workspaceLen+projectLen])
+	if hasNUL(workspace) || hasNUL(project) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeTopL2FactsReply emits the counted, bounded identifier list.
+func EncodeTopL2FactsReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > TopL2FactsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < TopL2FactsIDMin || id > TopL2FactsIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationTopL2Facts, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeTopL2FactsReply validates the operation and every bounded identifier.
+func DecodeTopL2FactsReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTopL2Facts || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > TopL2FactsMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < TopL2FactsIDMin || id > TopL2FactsIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeListSessionScopePriorityRequest carries the limit and the scope the backend would
+// otherwise read from thread-local state.
+func EncodeListSessionScopePriorityRequest(limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < ListSessionScopePriorityLimitMin || limit > ListSessionScopePriorityLimitMax || scopeFlags > ListSessionScopePriorityScopeFlagsMax ||
+		len(workspace) > ListSessionScopePriorityWorkspaceMax || len(project) > ListSessionScopePriorityProjectMax ||
+		hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 16 + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationListSessionScopePriority, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(workspace)))
+	copy(payload[12:], workspace)
+	binary.LittleEndian.PutUint32(payload[12+len(workspace):], uint32(len(project)))
+	copy(payload[16+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeListSessionScopePriorityRequest validates the limit, the flag word and both scope names.
+func DecodeListSessionScopePriorityRequest(request []byte) (uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationListSessionScopePriority || header.Flags != 0 ||
+		header.PayloadLen < 16 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	workspaceLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < ListSessionScopePriorityLimitMin || limit > ListSessionScopePriorityLimitMax || scopeFlags > ListSessionScopePriorityScopeFlagsMax ||
+		workspaceLen > ListSessionScopePriorityWorkspaceMax || header.PayloadLen < 16+workspaceLen {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[12+workspaceLen:])
+	if projectLen > ListSessionScopePriorityProjectMax || header.PayloadLen != 16+workspaceLen+projectLen {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspace := string(payload[12 : 12+workspaceLen])
+	project := string(payload[16+workspaceLen : 16+workspaceLen+projectLen])
+	if hasNUL(workspace) || hasNUL(project) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeListSessionScopePriorityReply emits the counted, bounded identifier list.
+func EncodeListSessionScopePriorityReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > ListSessionScopePriorityMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < ListSessionScopePriorityIDMin || id > ListSessionScopePriorityIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationListSessionScopePriority, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeListSessionScopePriorityReply validates the operation and every bounded identifier.
+func DecodeListSessionScopePriorityReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationListSessionScopePriority || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > ListSessionScopePriorityMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < ListSessionScopePriorityIDMin || id > ListSessionScopePriorityIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
 }
 
 // EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The

@@ -30,6 +30,7 @@
 #include "c/memory_payload.h"
 #include "c/memory_promotion.h"
 #include "c/memory_query.h"
+#include "c/memory_scope_query.h"
 #include "c/memory_relations.h"
 #include "c/mining.h"
 #include "c/prospective_memories.h"
@@ -37,6 +38,9 @@
 #include "c/rules.h"
 #include "c/tasks.h"
 #include "c/trace_mining.h"
+
+#include <stdlib.h>
+#include <string.h>
 
 static int production_health_counters(int promote_use_count, double promote_confidence,
                                       aimee_db2_health_counters_t *counters)
@@ -72,6 +76,60 @@ static int production_health_counters(int promote_use_count, double promote_conf
        .l2_stale_30_days = (uint32_t)raw.l2_stale_30_days,
    };
    return 0;
+}
+
+/* Read a scoped row list and hand back only the identifiers.
+ *
+ * The scope is set and then put back the way it was found rather than cleared:
+ * while the adapter still runs in the caller's process it shares the same
+ * thread-local as the caller, and clearing it would silently rescope whatever
+ * the caller does next. */
+static int production_scoped_ids(int (*read)(memory_t *out, int max), int scope_active,
+                                 int include_all, const char *workspace, const char *project,
+                                 int64_t *out, int max)
+{
+   if (!read || !out || max <= 0)
+      return -1;
+   memory_t *rows = calloc((size_t)max, sizeof(*rows));
+   if (!rows)
+      return -1;
+
+   db2_memory_scope_context_t saved;
+   memset(&saved, 0, sizeof(saved));
+   db2_memory_scope_context_get(&saved);
+   if (scope_active)
+      db2_memory_scope_context_set(workspace, project, include_all);
+   else
+      db2_memory_scope_context_clear();
+
+   int listed = read(rows, max);
+
+   if (saved.active)
+      db2_memory_scope_context_set(saved.workspace, saved.project, saved.include_all);
+   else
+      db2_memory_scope_context_clear();
+
+   if (listed > max)
+      listed = max;
+   for (int index = 0; index < listed; index++)
+      out[index] = rows[index].id;
+   free(rows);
+   return listed;
+}
+
+static int production_top_l2_facts(int scope_active, int include_all, const char *workspace,
+                                   const char *project, int64_t *out, int max)
+{
+   return production_scoped_ids(db2_memory_top_l2_facts, scope_active, include_all, workspace,
+                                project, out, max);
+}
+
+static int production_list_session_scope_priority(int scope_active, int include_all,
+                                                  const char *workspace, const char *project,
+                                                  int64_t *out, int max)
+{
+   return production_scoped_ids(db2_memory_list_session_scope_priority, scope_active, include_all,
+                                workspace, project, out, max);
 }
 
 static int production_stats_counts(aimee_db2_memory_stats_t *stats)
@@ -285,6 +343,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .demote_effectiveness = db2_memory_health_demote_low_effectiveness,
        .effectiveness_stats = db2_memory_health_effectiveness_stats,
        .list_l2_memory_ids = db2_memory_health_list_l2_memory_ids,
+       .top_l2_facts = production_top_l2_facts,
+       .list_session_scope_priority = production_list_session_scope_priority,
        .count_memories = db2_memory_health_count_memories,
        .count_recent_conflicts = db2_memory_health_count_recent_conflicts,
        .health_record = db2_memory_health_record,
@@ -694,6 +754,54 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                                                   response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
+      }
+      {
+         /* Both scoped identifier lists decode the same way and differ only in
+          * which reviewed backend they reach, so one branch serves both. */
+         uint32_t limit = 0u, scope_flags = 0u;
+         char workspace[AIMEE_DB2_TOP_L2_FACTS_WORKSPACE_MAX + 1];
+         char project[AIMEE_DB2_TOP_L2_FACTS_PROJECT_MAX + 1];
+         int (*read)(int, int, const char *, const char *, int64_t *, int) = NULL;
+         int (*encode)(const uint64_t *, uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         if (aimee_db2_top_l2_facts_request_decode(request_body, request_len, &limit, &scope_flags,
+                                                   workspace, sizeof(workspace), project,
+                                                   sizeof(project)) == 0)
+         {
+            read = backend ? backend->top_l2_facts : NULL;
+            encode = aimee_db2_top_l2_facts_reply_encode;
+         }
+         else if (aimee_db2_list_session_scope_priority_request_decode(
+                      request_body, request_len, &limit, &scope_flags, workspace,
+                      sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->list_session_scope_priority : NULL;
+            encode = aimee_db2_list_session_scope_priority_reply_encode;
+         }
+         if (encode)
+         {
+            if (response_capacity < AIMEE_DB2_TOP_L2_FACTS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int64_t rows[AIMEE_DB2_TOP_L2_FACTS_MAX];
+            int listed = read((int)(scope_flags & 1u), (int)((scope_flags >> 1) & 1u), workspace,
+                              project, rows, (int)limit);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (listed < 0 || listed > (int)limit)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint64_t memory_ids[AIMEE_DB2_TOP_L2_FACTS_MAX];
+            for (int index = 0; index < listed; index++)
+            {
+               if (rows[index] < (int64_t)AIMEE_DB2_TOP_L2_FACTS_ID_MIN)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               memory_ids[index] = (uint64_t)rows[index];
+            }
+            if (encode(memory_ids, (uint32_t)listed, response_body, response_capacity,
+                       response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
       }
       uint32_t promotions = 0u, demotions = 0u, expirations = 0u;
       if (aimee_db2_health_record_request_decode(request_body, request_len, &promotions, &demotions,

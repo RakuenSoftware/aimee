@@ -1355,6 +1355,38 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    return -1;
 }
 
+/* memory_t and the scope context are host types too. The adapter's scoped
+ * identifier readers reach these; the tests below drive the backend directly. */
+int db2_memory_top_l2_facts(void *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_session_scope_priority(void *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+void db2_memory_scope_context_set(const char *workspace, const char *project, int include_all)
+{
+   (void)workspace;
+   (void)project;
+   (void)include_all;
+}
+
+void db2_memory_scope_context_clear(void)
+{
+}
+
+void db2_memory_scope_context_get(void *out)
+{
+   (void)out;
+}
+
 /* memory_stats_t is a host type, so the production symbol takes void * here the
  * way db2_dim_change_reset does; these tests drive their own backend. */
 int db2_memory_stats_counts(void *out)

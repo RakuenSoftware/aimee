@@ -17538,9 +17538,15 @@
           "line": 771
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.list_session_scope_priority operation replaces the row reader. Two decisions are on the record with it. The ordering is DB2's, computed against DB2's own scope tables, so it stays behind the handler. And the scope the ordering depends on now travels in the request: the backend reads it from a thread-local that db2_memory_scope_context_set writes, which does not follow a call into another process."
+      },
       "signature": "int db2_memory_list_session_scope_priority ( memory_t * out , int max )",
       "signature_sha256": "b0110278348371f632b08e96afb7a3771dd2eaaf39ee1786757de0c27c6ec0aa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_session_scope_priority"
     },
     {
@@ -18999,9 +19005,15 @@
           "line": 764
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.top_l2_facts operation replaces the row reader. It returns identifiers rather than rows, because the generated client sizes its reply buffer as a local array and sixty-four memory rows do not belong on a caller's stack; the caller reattaches content through memory.get_content. The session scope travels in the request for the same reason as list_session_scope_priority."
+      },
       "signature": "int db2_memory_top_l2_facts ( memory_t * out , int max )",
       "signature_sha256": "c27a355ded77ece3f4ce80e0ec4db2adda6c23276260fc0b6859d095349f403a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_top_l2_facts"
     },
     {
@@ -26346,15 +26358,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d936518449f125aec7a032f772a868b58aeabcb35a1a15e142f2a36ad6a813fe",
+  "fingerprint": "36577825bf2fb4d56c49fd196c42e9d1cd12e41ea1493ddc53bc8563324554d3",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 571,
+    "audit_pending": 569,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 387
+    "reviewed": 389
   }
 }

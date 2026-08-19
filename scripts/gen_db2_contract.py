@@ -289,10 +289,26 @@ def validate_catalog(value: object) -> dict[str, object]:
                                             "doc_delete",
                                             "task_delete")
                                 else "safe")
-        if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
+        # `session` means the request carries the scope triple. It is not a label
+        # for "this operation happens to be scoped": db2_memory_scope_bind_current
+        # reads a __thread static that db2_memory_scope_context_set writes, and
+        # that static does not follow a call across a process boundary. An
+        # operation whose answer depends on it must be told the scope, so the
+        # scope has to be visible in the request shape.
+        expected_scope = "session" if name in ("top_l2_facts",
+                                               "list_session_scope_priority") else "none"
+        if operation["scope"] != expected_scope or \
+                operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
             fail("operation-semantics",
-                 f"{name} must be unscoped, {expected_transaction}, and {expected_idempotency}")
+                 f"{name} must be {expected_scope}-scoped, {expected_transaction}, and "
+                 f"{expected_idempotency}")
+        if expected_scope == "session":
+            names = [field["name"] for field in operation["request"].get("fields", [])]
+            if "scope_flags" not in names or "workspace" not in names or "project" not in names:
+                fail("operation-scope",
+                     f"{name} is session-scoped, so its request must carry scope_flags, "
+                     "workspace and project")
         if operation["db3_placement"] != "retained-db2":
             fail("db3-placement", f"{name} must remain in DB2")
         _string(operation["db3_reason"], f"{name}.db3_reason", 256)
@@ -1946,6 +1962,79 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "minimum_bytes": 0, "maximum_bytes": 31}):
                 fail("count-and-max-updated-reply",
                      "reply must carry a bounded count and a clearable bounded stamp")
+        elif key in (("memory", 43), ("memory", 44)) and \
+                name in ("top_l2_facts", "list_session_scope_priority") and \
+                operation["wire_format"] == "db2-envelope-scoped-u32-u64-list-v1":
+            # These two are the first scoped reads on the wire, and the first
+            # whose backend returns rows. Both properties are checked here
+            # because both are decisions rather than transcriptions.
+            #
+            # The rows do not cross. The generated client declares its reply
+            # buffer as a local array sized by the contract, so a reply wide
+            # enough to hold sixty-four memory_t rows would be a six-figure
+            # stack allocation in every caller. The identifiers cross instead
+            # and the caller reattaches content through memory.get_content,
+            # which is the shape l2_memory_ids already set.
+            expected_symbol = {"top_l2_facts": "db2_memory_top_l2_facts",
+                               "list_session_scope_priority":
+                                   "db2_memory_list_session_scope_priority"}[name]
+            if operation["c_symbols"] != [expected_symbol]:
+                fail("operation-c-symbols",
+                     f"{name} C symbol differs from the reviewed backend")
+            # The backend returns a row count and never distinguishes an empty
+            # result from a failed statement, so there is one result to report.
+            if operation["results"] != ["ok"]:
+                fail("operation-results", f"{name} results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "policy", "fields"},
+                            f"{name}.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 4:
+                fail(f"{name.replace('_', '-')}-request",
+                     "request must carry the limit and the whole scope triple")
+            limit_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                f"{name}.request.fields[0]")
+            flags_field = _keys(request_fields[1], {"name", "type", "minimum", "maximum"},
+                                f"{name}.request.fields[1]")
+            scope_text = [_keys(field, {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                f"{name}.request.fields[{index}]")
+                          for index, field in enumerate(request_fields[2:], start=2)]
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"maximum_ids", "ranking"}:
+                fail(f"{name.replace('_', '-')}-request",
+                     "request policy must bound the reply and state the ordering")
+            maximum_ids = policy["maximum_ids"]
+            _string(policy["ranking"], f"{name}.request.policy.ranking", 160)
+            # The scope is two flags rather than one: an inactive scope and an
+            # active scope that includes everything reach the same rows by
+            # different routes, and the handler has to be able to tell them
+            # apart to reproduce the backend's own binding.
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 16 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 16 + 511 + 511 or
+                    limit_field != {"name": "limit", "type": "u32", "minimum": 1,
+                                    "maximum": maximum_ids} or
+                    flags_field != {"name": "scope_flags", "type": "u32", "minimum": 0,
+                                    "maximum": 3} or
+                    scope_text != [{"name": field, "type": "utf8", "minimum_bytes": 0,
+                                    "maximum_bytes": 511}
+                                   for field in ("workspace", "project")]):
+                fail(f"{name.replace('_', '-')}-request",
+                     "request must carry a bounded limit and the scope the backend would "
+                     "otherwise read from thread-local state")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "field"}, f"{name}.reply")
+            reply_field = _keys(reply["field"],
+                                {"name", "type", "minimum_items", "maximum_items",
+                                 "item_minimum", "item_maximum"}, f"{name}.reply.field")
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + maximum_ids * 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "memory_ids", "type": "u64-list",
+                                    "minimum_items": 0, "maximum_items": maximum_ids,
+                                    "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
+                fail(f"{name.replace('_', '-')}-reply",
+                     "reply must be a counted identifier list bounded by the request policy")
         elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # First operation of the index family. The tiers that count as a
@@ -3056,7 +3145,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 87 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 89 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3071,7 +3160,8 @@ def validate_catalog(value: object) -> dict[str, object]:
             "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
             "workspace_tag_insert", "set_cognified_kind", "set_source_session",
             "negation_tokens_update", "get_content", "get_source_session",
-            "pick_first_temporal_ref", "count_and_max_updated",
+            "pick_first_temporal_ref", "count_and_max_updated", "top_l2_facts",
+            "list_session_scope_priority",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
@@ -3086,7 +3176,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the eighty-seven supported operations exactly once")
+             "the partial generator requires the eighty-nine supported operations exactly once")
     return catalog
 
 
@@ -3210,93 +3300,96 @@ def _envelope(
 
 
 def baseline_bytes(catalog: dict[str, object]) -> bytes:
-    health = catalog["operations"][0]
-    embedding_dimension = catalog["operations"][1]
-    pool_status = catalog["operations"][2]
-    embedding_refusals = catalog["operations"][3]
-    postgres_status = catalog["operations"][4]
-    reembed_status = catalog["operations"][5]
-    reembed_clear = catalog["operations"][6]
-    reembed_clear_maintenance = catalog["operations"][7]
-    embedder_serving_id = catalog["operations"][8]
-    dimension_reset = catalog["operations"][9]
-    level3_count = catalog["operations"][10]
-    level2_count = catalog["operations"][11]
-    orphaned_l0_count = catalog["operations"][12]
-    total_count = catalog["operations"][13]
-    session_l2_count = catalog["operations"][14]
-    key_exists = catalog["operations"][15]
-    find_id_by_key_kind = catalog["operations"][16]
-    key_exists_in_tier_pair = catalog["operations"][17]
-    effectiveness_update = catalog["operations"][18]
-    retention_enforce = catalog["operations"][19]
-    effectiveness_demote = catalog["operations"][20]
-    effectiveness_stats = catalog["operations"][21]
-    l2_memory_ids = catalog["operations"][22]
-    health_record = catalog["operations"][23]
-    health_retention = catalog["operations"][24]
-    health_counters = catalog["operations"][25]
-    stats_counts = catalog["operations"][26]
-    expire = catalog["operations"][27]
-    demote = catalog["operations"][28]
-    promote_stable = catalog["operations"][29]
-    reclassify_directives = catalog["operations"][30]
-    record_l4_approval = catalog["operations"][31]
-    prune_orphaned_l0 = catalog["operations"][32]
-    lifecycle_sweep_expired = catalog["operations"][33]
-    demote_id = catalog["operations"][34]
-    has_workspace_tag = catalog["operations"][35]
-    delete_row = catalog["operations"][36]
-    touch = catalog["operations"][37]
-    link_delete = catalog["operations"][38]
-    valid_at = catalog["operations"][39]
-    has_scope_type = catalog["operations"][40]
-    reject = catalog["operations"][41]
-    update_content = catalog["operations"][42]
-    decay_confidence = catalog["operations"][43]
-    workspace_tag_insert = catalog["operations"][44]
-    set_cognified_kind = catalog["operations"][45]
-    set_source_session = catalog["operations"][46]
-    negation_tokens_update = catalog["operations"][47]
-    get_content = catalog["operations"][48]
-    get_source_session = catalog["operations"][49]
-    pick_first_temporal_ref = catalog["operations"][50]
-    count_and_max_updated = catalog["operations"][51]
-    entity_edge_prune_orphans = catalog["operations"][52]
-    entity_edge_normalize_weights = catalog["operations"][53]
-    project_count = catalog["operations"][54]
-    purge_hidden_pollution = catalog["operations"][55]
-    requeue_drifted = catalog["operations"][56]
-    cross_repo_rebuild_routes = catalog["operations"][57]
-    cross_repo_rebuild_identities = catalog["operations"][58]
-    cross_repo_rebuild_build_deps = catalog["operations"][59]
-    drift_candidates = catalog["operations"][60]
-    file_index_delete_project = catalog["operations"][61]
-    rules_decay = catalog["operations"][62]
-    curiosity_rescore_all = catalog["operations"][63]
-    mining_seed_job_defaults = catalog["operations"][64]
-    proposals_archive_expired = catalog["operations"][65]
-    trace_mining_last_id = catalog["operations"][66]
-    anti_pattern_bump = catalog["operations"][67]
-    anti_pattern_delete = catalog["operations"][68]
-    rel_types_ensure_seed = catalog["operations"][69]
-    doc_delete = catalog["operations"][70]
-    task_delete = catalog["operations"][71]
-    clear_project = catalog["operations"][72]
-    clear_current_project = catalog["operations"][73]
-    vector_rebuild_lock_try_acquire = catalog["operations"][74]
-    vector_rebuild_lock_release = catalog["operations"][75]
-    release_get_active = catalog["operations"][76]
-    prospective_sweep_expired = catalog["operations"][77]
-    directive_sweep_expired = catalog["operations"][78]
-    mark_revisit_due = catalog["operations"][79]
-    ingest_queue_reset_running = catalog["operations"][80]
-    evidence_reembed_all = catalog["operations"][81]
-    curator_reembed_all = catalog["operations"][82]
-    synth_reenqueue_all = catalog["operations"][83]
-    curator_reenqueue_extract_all = catalog["operations"][84]
-    directive_suppress = catalog["operations"][85]
-    directive_record_surface = catalog["operations"][86]
+    named = {str(item["name"]): item for item in catalog["operations"]}
+    health = named["health"]
+    embedding_dimension = named["embedding_dimension"]
+    pool_status = named["pool_status"]
+    embedding_refusals = named["embedding_refusals"]
+    postgres_status = named["postgres_status"]
+    reembed_status = named["reembed_status"]
+    reembed_clear = named["reembed_clear"]
+    reembed_clear_maintenance = named["reembed_clear_maintenance"]
+    embedder_serving_id = named["embedder_serving_id"]
+    dimension_reset = named["dimension_reset"]
+    level3_count = named["level3_count"]
+    level2_count = named["level2_count"]
+    orphaned_l0_count = named["orphaned_l0_count"]
+    total_count = named["total_count"]
+    session_l2_count = named["session_l2_count"]
+    key_exists = named["key_exists"]
+    find_id_by_key_kind = named["find_id_by_key_kind"]
+    key_exists_in_tier_pair = named["key_exists_in_tier_pair"]
+    effectiveness_update = named["effectiveness_update"]
+    retention_enforce = named["retention_enforce"]
+    effectiveness_demote = named["effectiveness_demote"]
+    effectiveness_stats = named["effectiveness_stats"]
+    l2_memory_ids = named["l2_memory_ids"]
+    health_record = named["health_record"]
+    health_retention = named["health_retention"]
+    health_counters = named["health_counters"]
+    stats_counts = named["stats_counts"]
+    expire = named["expire"]
+    demote = named["demote"]
+    promote_stable = named["promote_stable"]
+    reclassify_directives = named["reclassify_directives"]
+    record_l4_approval = named["record_l4_approval"]
+    prune_orphaned_l0 = named["prune_orphaned_l0"]
+    lifecycle_sweep_expired = named["lifecycle_sweep_expired"]
+    demote_id = named["demote_id"]
+    has_workspace_tag = named["has_workspace_tag"]
+    delete_row = named["delete_row"]
+    touch = named["touch"]
+    link_delete = named["link_delete"]
+    valid_at = named["valid_at"]
+    has_scope_type = named["has_scope_type"]
+    reject = named["reject"]
+    update_content = named["update_content"]
+    decay_confidence = named["decay_confidence"]
+    workspace_tag_insert = named["workspace_tag_insert"]
+    set_cognified_kind = named["set_cognified_kind"]
+    set_source_session = named["set_source_session"]
+    negation_tokens_update = named["negation_tokens_update"]
+    get_content = named["get_content"]
+    get_source_session = named["get_source_session"]
+    pick_first_temporal_ref = named["pick_first_temporal_ref"]
+    count_and_max_updated = named["count_and_max_updated"]
+    top_l2_facts = named["top_l2_facts"]
+    list_session_scope_priority = named["list_session_scope_priority"]
+    entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
+    entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
+    project_count = named["project_count"]
+    purge_hidden_pollution = named["purge_hidden_pollution"]
+    requeue_drifted = named["requeue_drifted"]
+    cross_repo_rebuild_routes = named["cross_repo_rebuild_routes"]
+    cross_repo_rebuild_identities = named["cross_repo_rebuild_identities"]
+    cross_repo_rebuild_build_deps = named["cross_repo_rebuild_build_deps"]
+    drift_candidates = named["drift_candidates"]
+    file_index_delete_project = named["file_index_delete_project"]
+    rules_decay = named["rules_decay"]
+    curiosity_rescore_all = named["curiosity_rescore_all"]
+    mining_seed_job_defaults = named["mining_seed_job_defaults"]
+    proposals_archive_expired = named["proposals_archive_expired"]
+    trace_mining_last_id = named["trace_mining_last_id"]
+    anti_pattern_bump = named["anti_pattern_bump"]
+    anti_pattern_delete = named["anti_pattern_delete"]
+    rel_types_ensure_seed = named["rel_types_ensure_seed"]
+    doc_delete = named["doc_delete"]
+    task_delete = named["task_delete"]
+    clear_project = named["clear_project"]
+    clear_current_project = named["clear_current_project"]
+    vector_rebuild_lock_try_acquire = named["vector_rebuild_lock_try_acquire"]
+    vector_rebuild_lock_release = named["vector_rebuild_lock_release"]
+    release_get_active = named["release_get_active"]
+    prospective_sweep_expired = named["prospective_sweep_expired"]
+    directive_sweep_expired = named["directive_sweep_expired"]
+    mark_revisit_due = named["mark_revisit_due"]
+    ingest_queue_reset_running = named["ingest_queue_reset_running"]
+    evidence_reembed_all = named["evidence_reembed_all"]
+    curator_reembed_all = named["curator_reembed_all"]
+    synth_reenqueue_all = named["synth_reenqueue_all"]
+    curator_reenqueue_extract_all = named["curator_reenqueue_extract_all"]
+    directive_suppress = named["directive_suppress"]
+    directive_record_surface = named["directive_record_surface"]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3319,8 +3412,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     ]
     envelope_reply = bytes.fromhex(envelope_replies[0]["hex"])
 
-    def mutate_u32(frame: bytes, offset: int, value: int) -> bytes:
-        return frame[:offset] + _put_u32(value) + frame[offset + 4:]
+    mutate_u32 = _mutate_u32
 
     dimension_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(embedding_dimension["id"]), 0, b"",
@@ -3628,6 +3720,9 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     count_and_max_updated_unavailable = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(count_and_max_updated["id"]), 5, b"",
     )
+    top_l2_facts_vectors = _scoped_id_list_vectors(catalog, top_l2_facts)
+    list_session_scope_priority_vectors = _scoped_id_list_vectors(
+        catalog, list_session_scope_priority)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -6453,7 +6548,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (count_and_max_updated_ok + b"\0").hex()},
                 ],
             },
-        }, {
+        }, top_l2_facts_vectors, list_session_scope_priority_vectors, {
             "family": entity_edge_prune_orphans["family"],
             "id": entity_edge_prune_orphans["id"],
             "name": entity_edge_prune_orphans["name"],
@@ -7778,6 +7873,415 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+
+def _scoped_id_list_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-scoped-u32-u64-list-v1.
+
+    The two operations on this format differ only in identifier and bounds, so
+    the rows are derived rather than transcribed; transcription is what let an
+    earlier operation bind its neighbour's numbers.
+    """
+    upper = str(operation["name"]).upper()
+    request = operation["request"]
+    reply = operation["reply"]
+    limit, flags, workspace, project = request["fields"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", "AIMEE_DB2_EVENT_MEMORY"),
+        (f"AIMEE_DB2_STAGE_{upper}", "AIMEE_DB2_FAMILY_MEMORY"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MIN_LEN", f"{request['encoded_size_min']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MAX_LEN", f"{request['encoded_size_max']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MIN", f"{limit['minimum']}u"),
+        (f"AIMEE_DB2_{upper}_LIMIT_MAX", f"{limit['maximum']}u"),
+        (f"AIMEE_DB2_{upper}_SCOPE_FLAGS_MAX", f"{flags['maximum']}u"),
+        (f"AIMEE_DB2_{upper}_WORKSPACE_MAX", f"{workspace['maximum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_PROJECT_MAX", f"{project['maximum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MIN_LEN", f"{reply['encoded_size_min_ok']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MAX_LEN", f"{reply['encoded_size_max_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+        (f"AIMEE_DB2_{upper}_MAX", f"{reply['field']['maximum_items']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MIN", f"{reply['field']['item_minimum']}u"),
+        (f"AIMEE_DB2_{upper}_ID_MAX", f"{reply['field']['item_maximum']}ull"),
+    ]
+
+
+
+def _scoped_id_list_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-scoped-u32-u64-list-v1.
+
+    The request carries the scope the backend would otherwise read from a
+    thread-local, so the decoder is what makes a scoped read reproducible on
+    the far side of a process boundary. `active` and `include_all` are separate
+    bits because an inactive scope and an all-inclusive scope reach the same
+    rows by different routes and the handler binds them differently.
+    """
+    lower = str(operation["name"])
+    upper = lower.upper()
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(uint32_t limit, uint32_t scope_flags,
+                                                   const char *workspace, const char *project,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!workspace || !project || !output || !output_len ||
+       limit < AIMEE_DB2_{upper}_LIMIT_MIN || limit > AIMEE_DB2_{upper}_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_{upper}_SCOPE_FLAGS_MAX)
+      return -1;
+   size_t workspace_len = 0u, project_len = 0u;
+   while (workspace_len <= AIMEE_DB2_{upper}_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   while (project_len <= AIMEE_DB2_{upper}_PROJECT_MAX && project[project_len])
+      ++project_len;
+   size_t payload_len = 16u + workspace_len + project_len;
+   if (workspace_len > AIMEE_DB2_{upper}_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_{upper}_PROJECT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, limit);
+   aimee_db2_put_u32(payload + 4u, scope_flags);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)workspace_len);
+   memcpy(payload + 12u, workspace, workspace_len);
+   aimee_db2_put_u32(payload + 12u + workspace_len, (uint32_t)project_len);
+   memcpy(payload + 16u + workspace_len, project, project_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *limit, uint32_t *scope_flags,
+                                                   char *workspace, size_t workspace_capacity,
+                                                   char *project, size_t project_capacity)
+{{
+   if (limit)
+      *limit = 0u;
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\\0';
+   if (project && project_capacity)
+      project[0] = '\\0';
+   if (!limit || !scope_flags || !workspace || !project ||
+       workspace_capacity < (size_t)AIMEE_DB2_{upper}_WORKSPACE_MAX + 1u ||
+       project_capacity < (size_t)AIMEE_DB2_{upper}_PROJECT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       input_len < AIMEE_DB2_{upper}_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_{upper}_REQUEST_MAX_LEN || header.payload_len < 16u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_limit = aimee_db2_get_u32(payload);
+   uint32_t decoded_flags = aimee_db2_get_u32(payload + 4u);
+   uint32_t workspace_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_limit < AIMEE_DB2_{upper}_LIMIT_MIN ||
+       decoded_limit > AIMEE_DB2_{upper}_LIMIT_MAX ||
+       decoded_flags > AIMEE_DB2_{upper}_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_{upper}_WORKSPACE_MAX ||
+       header.payload_len < 16u + workspace_len)
+      return -1;
+   uint32_t project_len = aimee_db2_get_u32(payload + 12u + workspace_len);
+   if (project_len > AIMEE_DB2_{upper}_PROJECT_MAX ||
+       header.payload_len != 16u + workspace_len + project_len ||
+       memchr(payload + 12u, '\\0', workspace_len) != NULL ||
+       memchr(payload + 16u + workspace_len, '\\0', project_len) != NULL)
+      return -1;
+   memcpy(workspace, payload + 12u, workspace_len);
+   workspace[workspace_len] = '\\0';
+   memcpy(project, payload + 16u + workspace_len, project_len);
+   project[project_len] = '\\0';
+   *limit = decoded_limit;
+   *scope_flags = decoded_flags;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_encode(const uint64_t *memory_ids, uint32_t count,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) || count > AIMEE_DB2_{upper}_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_{upper}_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+   uint32_t payload_len = 4u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 4u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint64_t *memory_ids, uint32_t capacity,
+                                                 uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_{upper}_MAX || header.payload_len != 4u + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {{
+      uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
+      if (value < AIMEE_DB2_{upper}_ID_MIN || value > AIMEE_DB2_{upper}_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }}
+   *count = decoded;
+   return 0;
+}}
+"""
+
+def _scoped_id_list_vectors(catalog: dict[str, object],
+                            operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for one db2-envelope-scoped-u32-u64-list-v1 operation."""
+    identifier = int(operation["id"])
+    limit_max = int(operation["request"]["fields"][0]["maximum"])
+    workspace, project = b"alpha-workspace", b"beta-project"
+
+    def request_bytes(limit: int, flags: int, workspace_value: bytes,
+                      project_value: bytes) -> bytes:
+        payload = (_put_u32(limit) + _put_u32(flags) +
+                   _put_u32(len(workspace_value)) + workspace_value +
+                   _put_u32(len(project_value)) + project_value)
+        return _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0, payload)
+
+    request = request_bytes(5, 3, workspace, project)
+    # The scope prefixes sit at fixed offsets only until the workspace bytes
+    # begin, so the project length is addressed from the end of the workspace.
+    workspace_length_at = ENVELOPE_HEADER_LEN + 8
+    project_length_at = workspace_length_at + 4 + len(workspace)
+    values = (7, 19, 9223372036854775807)
+    reply_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0,
+                         _put_u32(len(values)) + b"".join(_put_u64(value) for value in values))
+    reply_empty = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0))
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {
+            "positive": request.hex(),
+            "limit": 5,
+            "scope_flags": 3,
+            "workspace": workspace.decode("ascii"),
+            "project": project.decode("ascii"),
+            "maximum_ids": operation["request"]["policy"]["maximum_ids"],
+            "negative": [
+                {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+                {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+                {"mutation": "limit_zero", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, 0).hex()},
+                {"mutation": "limit_above_maximum", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, limit_max + 1).hex()},
+                {"mutation": "scope_flags_undefined_bit", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN + 4, 4).hex()},
+                {"mutation": "workspace_length_exceeds_payload", "hex":
+                 _mutate_u32(request, workspace_length_at, len(workspace) + 1).hex()},
+                {"mutation": "project_length_exceeds_payload", "hex":
+                 _mutate_u32(request, project_length_at, len(project) + 1).hex()},
+                {"mutation": "workspace_embedded_nul", "hex":
+                 request_bytes(5, 3, b"alpha\0workspace", project).hex()},
+                {"mutation": "project_embedded_nul", "hex":
+                 request_bytes(5, 3, workspace, b"beta\0project").hex()},
+                {"mutation": "short", "hex": request[:-1].hex()},
+                {"mutation": "long", "hex": (request + b"\0").hex()},
+            ],
+        },
+        "reply": {
+            "positive": [
+                {"result": 0, "memory_ids": list(values), "hex": reply_ok.hex()},
+                {"result": 0, "memory_ids": [], "hex": reply_empty.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
+                {"mutation": "ok_without_count", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
+                {"mutation": "count_exceeds_payload", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, 4).hex()},
+                {"mutation": "count_below_payload", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, 2).hex()},
+                {"mutation": "count_above_maximum", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN, limit_max + 1).hex()},
+                {"mutation": "identifier_zero", "hex":
+                 (reply_ok[:ENVELOPE_HEADER_LEN + 4] + _put_u64(0) +
+                  reply_ok[ENVELOPE_HEADER_LEN + 12:]).hex()},
+                {"mutation": "identifier_above_maximum", "hex":
+                 (reply_ok[:-8] + _put_u64(0x8000000000000000)).hex()},
+                {"mutation": "short", "hex": reply_ok[:-1].hex()},
+                {"mutation": "long", "hex": (reply_ok + b"\0").hex()},
+            ],
+        },
+    }
+
+
+
+def _mutate_u32(frame: bytes, offset: int, value: int) -> bytes:
+    """Overwrite one big-endian u32 in an encoded envelope."""
+    return frame[:offset] + _put_u32(value) + frame[offset + 4:]
+
+
+
+def _scoped_id_list_go_constants(operation: dict[str, object]) -> str:
+    """Go constants for db2-envelope-scoped-u32-u64-list-v1."""
+    name = _go_name(str(operation["name"]))
+    request = operation["request"]
+    reply = operation["reply"]
+    limit, flags, workspace, project = request["fields"]
+    return f"""const Event{name} = EventMemory
+const Stage{name} = FamilyMemory
+const Operation{name} uint32 = {operation['id']}
+const {name}LimitMin uint32 = {limit['minimum']}
+const {name}LimitMax uint32 = {limit['maximum']}
+const {name}ScopeFlagsMax uint32 = {flags['maximum']}
+const {name}WorkspaceMax = {workspace['maximum_bytes']}
+const {name}ProjectMax = {project['maximum_bytes']}
+const {name}Max uint32 = {reply['field']['maximum_items']}
+const {name}IDMin uint64 = {reply['field']['item_minimum']}
+const {name}IDMax uint64 = {reply['field']['item_maximum']}
+"""
+
+
+def _scoped_id_list_go_codecs(operation: dict[str, object]) -> str:
+    """Go codecs for db2-envelope-scoped-u32-u64-list-v1.
+
+    The scope triple is validated on decode rather than trusted, because it
+    selects which rows the answer is drawn from: a request that survives with
+    a scope the caller did not send is a wrong answer, not a malformed one.
+    """
+    name = _go_name(str(operation["name"]))
+    return f"""// Encode{name}Request carries the limit and the scope the backend would
+// otherwise read from thread-local state.
+func Encode{name}Request(limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {{
+\tif limit < {name}LimitMin || limit > {name}LimitMax || scopeFlags > {name}ScopeFlagsMax ||
+\t\tlen(workspace) > {name}WorkspaceMax || len(project) > {name}ProjectMax ||
+\t\thasNUL(workspace) || hasNUL(project) {{
+\t\treturn nil, ErrMalformedEnvelope
+\t}}
+\tpayloadLen := 16 + len(workspace) + len(project)
+\theader, err := EncodeRequestHeader(Operation{name}, 0, uint32(payloadLen))
+\tif err != nil {{
+\t\treturn nil, ErrMalformedEnvelope
+\t}}
+\trequest := append(header, make([]byte, payloadLen)...)
+\tpayload := request[EnvelopeHeaderLen:]
+\tbinary.LittleEndian.PutUint32(payload, limit)
+\tbinary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+\tbinary.LittleEndian.PutUint32(payload[8:], uint32(len(workspace)))
+\tcopy(payload[12:], workspace)
+\tbinary.LittleEndian.PutUint32(payload[12+len(workspace):], uint32(len(project)))
+\tcopy(payload[16+len(workspace):], project)
+\treturn request, nil
+}}
+
+// Decode{name}Request validates the limit, the flag word and both scope names.
+func Decode{name}Request(request []byte) (uint32, uint32, string, string, error) {{
+\theader, err := DecodeRequestHeader(request)
+\tif err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+\t\theader.PayloadLen < 16 ||
+\t\tlen(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+\t\treturn 0, 0, "", "", ErrMalformedEnvelope
+\t}}
+\tpayload := request[EnvelopeHeaderLen:]
+\tlimit := binary.LittleEndian.Uint32(payload)
+\tscopeFlags := binary.LittleEndian.Uint32(payload[4:])
+\tworkspaceLen := binary.LittleEndian.Uint32(payload[8:])
+\tif limit < {name}LimitMin || limit > {name}LimitMax || scopeFlags > {name}ScopeFlagsMax ||
+\t\tworkspaceLen > {name}WorkspaceMax || header.PayloadLen < 16+workspaceLen {{
+\t\treturn 0, 0, "", "", ErrMalformedEnvelope
+\t}}
+\tprojectLen := binary.LittleEndian.Uint32(payload[12+workspaceLen:])
+\tif projectLen > {name}ProjectMax || header.PayloadLen != 16+workspaceLen+projectLen {{
+\t\treturn 0, 0, "", "", ErrMalformedEnvelope
+\t}}
+\tworkspace := string(payload[12 : 12+workspaceLen])
+\tproject := string(payload[16+workspaceLen : 16+workspaceLen+projectLen])
+\tif hasNUL(workspace) || hasNUL(project) {{
+\t\treturn 0, 0, "", "", ErrMalformedEnvelope
+\t}}
+\treturn limit, scopeFlags, workspace, project, nil
+}}
+
+// Encode{name}Reply emits the counted, bounded identifier list.
+func Encode{name}Reply(memoryIDs []uint64) ([]byte, error) {{
+\tif uint32(len(memoryIDs)) > {name}Max {{
+\t\treturn nil, ErrMalformedEnvelope
+\t}}
+\tfor _, id := range memoryIDs {{
+\t\tif id < {name}IDMin || id > {name}IDMax {{
+\t\t\treturn nil, ErrMalformedEnvelope
+\t\t}}
+\t}}
+\tpayloadLen := 4 + len(memoryIDs)*8
+\theader, err := EncodeReplyHeader(Operation{name}, ResultOK, uint32(payloadLen))
+\tif err != nil {{
+\t\treturn nil, ErrMalformedEnvelope
+\t}}
+\treply := append(header, make([]byte, payloadLen)...)
+\tpayload := reply[EnvelopeHeaderLen:]
+\tbinary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+\tfor index, id := range memoryIDs {{
+\t\tbinary.LittleEndian.PutUint64(payload[4+index*8:], id)
+\t}}
+\treturn reply, nil
+}}
+
+// Decode{name}Reply validates the operation and every bounded identifier.
+func Decode{name}Reply(reply []byte) ([]uint64, error) {{
+\theader, err := DecodeReplyHeader(reply)
+\tif err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+\t\theader.PayloadLen < 4 ||
+\t\tlen(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+\t\treturn nil, ErrMalformedEnvelope
+\t}}
+\tpayload := reply[EnvelopeHeaderLen:]
+\tcount := binary.LittleEndian.Uint32(payload)
+\tif count > {name}Max || header.PayloadLen != 4+count*8 {{
+\t\treturn nil, ErrMalformedEnvelope
+\t}}
+\tmemoryIDs := make([]uint64, count)
+\tfor index := range memoryIDs {{
+\t\tid := binary.LittleEndian.Uint64(payload[4+index*8:])
+\t\tif id < {name}IDMin || id > {name}IDMax {{
+\t\t\treturn nil, ErrMalformedEnvelope
+\t\t}}
+\t\tmemoryIDs[index] = id
+\t}}
+\treturn memoryIDs, nil
+}}
+
+"""
+
+def _go_name(value: str) -> str:
+    """The Go identifier for an operation name."""
+    initialisms = {"id": "ID", "kb": "KB", "ok": "OK", "pg": "PG", "url": "URL"}
+    return "".join(initialisms.get(part, part.title()) for part in value.split("_"))
+
+
 def header_bytes(catalog: dict[str, object]) -> bytes:
     def macros(rows: list[tuple[str, str]]) -> str:
         width = max(len(name) for name, _ in rows)
@@ -7785,93 +8289,96 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
 
     fingerprint = catalog_fingerprint(catalog)
     families = catalog["families"]
-    health = catalog["operations"][0]
-    embedding_dimension = catalog["operations"][1]
-    pool_status = catalog["operations"][2]
-    embedding_refusals = catalog["operations"][3]
-    postgres_status = catalog["operations"][4]
-    reembed_status = catalog["operations"][5]
-    reembed_clear = catalog["operations"][6]
-    reembed_clear_maintenance = catalog["operations"][7]
-    embedder_serving_id = catalog["operations"][8]
-    dimension_reset = catalog["operations"][9]
-    level3_count = catalog["operations"][10]
-    level2_count = catalog["operations"][11]
-    orphaned_l0_count = catalog["operations"][12]
-    total_count = catalog["operations"][13]
-    session_l2_count = catalog["operations"][14]
-    key_exists = catalog["operations"][15]
-    find_id_by_key_kind = catalog["operations"][16]
-    key_exists_in_tier_pair = catalog["operations"][17]
-    effectiveness_update = catalog["operations"][18]
-    retention_enforce = catalog["operations"][19]
-    effectiveness_demote = catalog["operations"][20]
-    effectiveness_stats = catalog["operations"][21]
-    l2_memory_ids = catalog["operations"][22]
-    health_record = catalog["operations"][23]
-    health_retention = catalog["operations"][24]
-    health_counters = catalog["operations"][25]
-    stats_counts = catalog["operations"][26]
-    expire = catalog["operations"][27]
-    demote = catalog["operations"][28]
-    promote_stable = catalog["operations"][29]
-    reclassify_directives = catalog["operations"][30]
-    record_l4_approval = catalog["operations"][31]
-    prune_orphaned_l0 = catalog["operations"][32]
-    lifecycle_sweep_expired = catalog["operations"][33]
-    demote_id = catalog["operations"][34]
-    has_workspace_tag = catalog["operations"][35]
-    delete_row = catalog["operations"][36]
-    touch = catalog["operations"][37]
-    link_delete = catalog["operations"][38]
-    valid_at = catalog["operations"][39]
-    has_scope_type = catalog["operations"][40]
-    reject = catalog["operations"][41]
-    update_content = catalog["operations"][42]
-    decay_confidence = catalog["operations"][43]
-    workspace_tag_insert = catalog["operations"][44]
-    set_cognified_kind = catalog["operations"][45]
-    set_source_session = catalog["operations"][46]
-    negation_tokens_update = catalog["operations"][47]
-    get_content = catalog["operations"][48]
-    get_source_session = catalog["operations"][49]
-    pick_first_temporal_ref = catalog["operations"][50]
-    count_and_max_updated = catalog["operations"][51]
-    entity_edge_prune_orphans = catalog["operations"][52]
-    entity_edge_normalize_weights = catalog["operations"][53]
-    project_count = catalog["operations"][54]
-    purge_hidden_pollution = catalog["operations"][55]
-    requeue_drifted = catalog["operations"][56]
-    cross_repo_rebuild_routes = catalog["operations"][57]
-    cross_repo_rebuild_identities = catalog["operations"][58]
-    cross_repo_rebuild_build_deps = catalog["operations"][59]
-    drift_candidates = catalog["operations"][60]
-    file_index_delete_project = catalog["operations"][61]
-    rules_decay = catalog["operations"][62]
-    curiosity_rescore_all = catalog["operations"][63]
-    mining_seed_job_defaults = catalog["operations"][64]
-    proposals_archive_expired = catalog["operations"][65]
-    trace_mining_last_id = catalog["operations"][66]
-    anti_pattern_bump = catalog["operations"][67]
-    anti_pattern_delete = catalog["operations"][68]
-    rel_types_ensure_seed = catalog["operations"][69]
-    doc_delete = catalog["operations"][70]
-    task_delete = catalog["operations"][71]
-    clear_project = catalog["operations"][72]
-    clear_current_project = catalog["operations"][73]
-    vector_rebuild_lock_try_acquire = catalog["operations"][74]
-    vector_rebuild_lock_release = catalog["operations"][75]
-    release_get_active = catalog["operations"][76]
-    prospective_sweep_expired = catalog["operations"][77]
-    directive_sweep_expired = catalog["operations"][78]
-    mark_revisit_due = catalog["operations"][79]
-    ingest_queue_reset_running = catalog["operations"][80]
-    evidence_reembed_all = catalog["operations"][81]
-    curator_reembed_all = catalog["operations"][82]
-    synth_reenqueue_all = catalog["operations"][83]
-    curator_reenqueue_extract_all = catalog["operations"][84]
-    directive_suppress = catalog["operations"][85]
-    directive_record_surface = catalog["operations"][86]
+    named = {str(item["name"]): item for item in catalog["operations"]}
+    health = named["health"]
+    embedding_dimension = named["embedding_dimension"]
+    pool_status = named["pool_status"]
+    embedding_refusals = named["embedding_refusals"]
+    postgres_status = named["postgres_status"]
+    reembed_status = named["reembed_status"]
+    reembed_clear = named["reembed_clear"]
+    reembed_clear_maintenance = named["reembed_clear_maintenance"]
+    embedder_serving_id = named["embedder_serving_id"]
+    dimension_reset = named["dimension_reset"]
+    level3_count = named["level3_count"]
+    level2_count = named["level2_count"]
+    orphaned_l0_count = named["orphaned_l0_count"]
+    total_count = named["total_count"]
+    session_l2_count = named["session_l2_count"]
+    key_exists = named["key_exists"]
+    find_id_by_key_kind = named["find_id_by_key_kind"]
+    key_exists_in_tier_pair = named["key_exists_in_tier_pair"]
+    effectiveness_update = named["effectiveness_update"]
+    retention_enforce = named["retention_enforce"]
+    effectiveness_demote = named["effectiveness_demote"]
+    effectiveness_stats = named["effectiveness_stats"]
+    l2_memory_ids = named["l2_memory_ids"]
+    health_record = named["health_record"]
+    health_retention = named["health_retention"]
+    health_counters = named["health_counters"]
+    stats_counts = named["stats_counts"]
+    expire = named["expire"]
+    demote = named["demote"]
+    promote_stable = named["promote_stable"]
+    reclassify_directives = named["reclassify_directives"]
+    record_l4_approval = named["record_l4_approval"]
+    prune_orphaned_l0 = named["prune_orphaned_l0"]
+    lifecycle_sweep_expired = named["lifecycle_sweep_expired"]
+    demote_id = named["demote_id"]
+    has_workspace_tag = named["has_workspace_tag"]
+    delete_row = named["delete_row"]
+    touch = named["touch"]
+    link_delete = named["link_delete"]
+    valid_at = named["valid_at"]
+    has_scope_type = named["has_scope_type"]
+    reject = named["reject"]
+    update_content = named["update_content"]
+    decay_confidence = named["decay_confidence"]
+    workspace_tag_insert = named["workspace_tag_insert"]
+    set_cognified_kind = named["set_cognified_kind"]
+    set_source_session = named["set_source_session"]
+    negation_tokens_update = named["negation_tokens_update"]
+    get_content = named["get_content"]
+    get_source_session = named["get_source_session"]
+    pick_first_temporal_ref = named["pick_first_temporal_ref"]
+    count_and_max_updated = named["count_and_max_updated"]
+    top_l2_facts = named["top_l2_facts"]
+    list_session_scope_priority = named["list_session_scope_priority"]
+    entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
+    entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
+    project_count = named["project_count"]
+    purge_hidden_pollution = named["purge_hidden_pollution"]
+    requeue_drifted = named["requeue_drifted"]
+    cross_repo_rebuild_routes = named["cross_repo_rebuild_routes"]
+    cross_repo_rebuild_identities = named["cross_repo_rebuild_identities"]
+    cross_repo_rebuild_build_deps = named["cross_repo_rebuild_build_deps"]
+    drift_candidates = named["drift_candidates"]
+    file_index_delete_project = named["file_index_delete_project"]
+    rules_decay = named["rules_decay"]
+    curiosity_rescore_all = named["curiosity_rescore_all"]
+    mining_seed_job_defaults = named["mining_seed_job_defaults"]
+    proposals_archive_expired = named["proposals_archive_expired"]
+    trace_mining_last_id = named["trace_mining_last_id"]
+    anti_pattern_bump = named["anti_pattern_bump"]
+    anti_pattern_delete = named["anti_pattern_delete"]
+    rel_types_ensure_seed = named["rel_types_ensure_seed"]
+    doc_delete = named["doc_delete"]
+    task_delete = named["task_delete"]
+    clear_project = named["clear_project"]
+    clear_current_project = named["clear_current_project"]
+    vector_rebuild_lock_try_acquire = named["vector_rebuild_lock_try_acquire"]
+    vector_rebuild_lock_release = named["vector_rebuild_lock_release"]
+    release_get_active = named["release_get_active"]
+    prospective_sweep_expired = named["prospective_sweep_expired"]
+    directive_sweep_expired = named["directive_sweep_expired"]
+    mark_revisit_due = named["mark_revisit_due"]
+    ingest_queue_reset_running = named["ingest_queue_reset_running"]
+    evidence_reembed_all = named["evidence_reembed_all"]
+    curator_reembed_all = named["curator_reembed_all"]
+    synth_reenqueue_all = named["synth_reenqueue_all"]
+    curator_reenqueue_extract_all = named["curator_reenqueue_extract_all"]
+    directive_suppress = named["directive_suppress"]
+    directive_record_surface = named["directive_record_surface"]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -8615,6 +9122,8 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{count_and_max_updated['reply']['fields'][0]['maximum']}u"),
         ("AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX",
          f"{count_and_max_updated['reply']['fields'][1]['maximum_bytes']}u"),
+        *_scoped_id_list_constants(top_l2_facts),
+        *_scoped_id_list_constants(list_session_scope_priority),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -13016,6 +13525,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
    return 0;
 }}
 
+{_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -15499,6 +16009,21 @@ extern "C"
        uint32_t *domain_result, uint32_t *count, char *max_updated_at, size_t stamp_capacity,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   /* The scope travels with the request because the backend would otherwise
+    * read it from a thread-local the caller cannot reach across a process
+    * boundary. scope_flags is bit 0 active, bit 1 include-all. */
+   aimee_module_call_result_t aimee_db2_top_l2_facts_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_list_session_scope_priority_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -16888,6 +17413,67 @@ aimee_db2_count_and_max_updated_call(aimee_db2_call_fn call, void *call_context,
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_top_l2_facts_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                            uint64_t deadline_ns, uint32_t limit, uint32_t scope_flags,
+                            const char *workspace, const char *project, uint64_t *memory_ids,
+                            uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+                            void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_TOP_L2_FACTS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_TOP_L2_FACTS_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_top_l2_facts_request_encode(limit, scope_flags, workspace, project, request,
+                                             sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_TOP_L2_FACTS, AIMEE_DB2_STAGE_TOP_L2_FACTS, trace_id,
+            deadline_ns, request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_top_l2_facts_reply_decode(response, response_len, memory_ids, capacity, count) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_list_session_scope_priority_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
+    uint64_t *memory_ids, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_list_session_scope_priority_request_encode(
+           limit, scope_flags, workspace, project, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY,
+            AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY, trace_id, deadline_ns, request,
+            request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_list_session_scope_priority_reply_decode(response, response_len, memory_ids,
+                                                          capacity, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -17996,99 +18582,100 @@ aimee_module_call_result_t aimee_db2_dimension_reset_call(
 
 
 def go_contract_bytes(catalog: dict[str, object]) -> bytes:
-    def go_name(value: str) -> str:
-        initialisms = {"id": "ID", "kb": "KB", "ok": "OK", "pg": "PG", "url": "URL"}
-        return "".join(initialisms.get(part, part.title()) for part in value.split("_"))
+    go_name = _go_name
 
     fingerprint = catalog_fingerprint(catalog)
     families = catalog["families"]
-    health = catalog["operations"][0]
-    embedding_dimension = catalog["operations"][1]
-    pool_status = catalog["operations"][2]
-    embedding_refusals = catalog["operations"][3]
-    postgres_status = catalog["operations"][4]
-    reembed_status = catalog["operations"][5]
-    reembed_clear = catalog["operations"][6]
-    reembed_clear_maintenance = catalog["operations"][7]
-    embedder_serving_id = catalog["operations"][8]
-    dimension_reset = catalog["operations"][9]
-    level3_count = catalog["operations"][10]
-    level2_count = catalog["operations"][11]
-    orphaned_l0_count = catalog["operations"][12]
-    total_count = catalog["operations"][13]
-    session_l2_count = catalog["operations"][14]
-    key_exists = catalog["operations"][15]
-    find_id_by_key_kind = catalog["operations"][16]
-    key_exists_in_tier_pair = catalog["operations"][17]
-    effectiveness_update = catalog["operations"][18]
-    retention_enforce = catalog["operations"][19]
-    effectiveness_demote = catalog["operations"][20]
-    effectiveness_stats = catalog["operations"][21]
-    l2_memory_ids = catalog["operations"][22]
-    health_record = catalog["operations"][23]
-    health_retention = catalog["operations"][24]
-    health_counters = catalog["operations"][25]
-    stats_counts = catalog["operations"][26]
-    expire = catalog["operations"][27]
-    demote = catalog["operations"][28]
-    promote_stable = catalog["operations"][29]
-    reclassify_directives = catalog["operations"][30]
-    record_l4_approval = catalog["operations"][31]
-    prune_orphaned_l0 = catalog["operations"][32]
-    lifecycle_sweep_expired = catalog["operations"][33]
-    demote_id = catalog["operations"][34]
-    has_workspace_tag = catalog["operations"][35]
-    delete_row = catalog["operations"][36]
-    touch = catalog["operations"][37]
-    link_delete = catalog["operations"][38]
-    valid_at = catalog["operations"][39]
-    has_scope_type = catalog["operations"][40]
-    reject = catalog["operations"][41]
-    update_content = catalog["operations"][42]
-    decay_confidence = catalog["operations"][43]
-    workspace_tag_insert = catalog["operations"][44]
-    set_cognified_kind = catalog["operations"][45]
-    set_source_session = catalog["operations"][46]
-    negation_tokens_update = catalog["operations"][47]
-    get_content = catalog["operations"][48]
-    get_source_session = catalog["operations"][49]
-    pick_first_temporal_ref = catalog["operations"][50]
-    count_and_max_updated = catalog["operations"][51]
-    entity_edge_prune_orphans = catalog["operations"][52]
-    entity_edge_normalize_weights = catalog["operations"][53]
-    project_count = catalog["operations"][54]
-    purge_hidden_pollution = catalog["operations"][55]
-    requeue_drifted = catalog["operations"][56]
-    cross_repo_rebuild_routes = catalog["operations"][57]
-    cross_repo_rebuild_identities = catalog["operations"][58]
-    cross_repo_rebuild_build_deps = catalog["operations"][59]
-    drift_candidates = catalog["operations"][60]
-    file_index_delete_project = catalog["operations"][61]
-    rules_decay = catalog["operations"][62]
-    curiosity_rescore_all = catalog["operations"][63]
-    mining_seed_job_defaults = catalog["operations"][64]
-    proposals_archive_expired = catalog["operations"][65]
-    trace_mining_last_id = catalog["operations"][66]
-    anti_pattern_bump = catalog["operations"][67]
-    anti_pattern_delete = catalog["operations"][68]
-    rel_types_ensure_seed = catalog["operations"][69]
-    doc_delete = catalog["operations"][70]
-    task_delete = catalog["operations"][71]
-    clear_project = catalog["operations"][72]
-    clear_current_project = catalog["operations"][73]
-    vector_rebuild_lock_try_acquire = catalog["operations"][74]
-    vector_rebuild_lock_release = catalog["operations"][75]
-    release_get_active = catalog["operations"][76]
-    prospective_sweep_expired = catalog["operations"][77]
-    directive_sweep_expired = catalog["operations"][78]
-    mark_revisit_due = catalog["operations"][79]
-    ingest_queue_reset_running = catalog["operations"][80]
-    evidence_reembed_all = catalog["operations"][81]
-    curator_reembed_all = catalog["operations"][82]
-    synth_reenqueue_all = catalog["operations"][83]
-    curator_reenqueue_extract_all = catalog["operations"][84]
-    directive_suppress = catalog["operations"][85]
-    directive_record_surface = catalog["operations"][86]
+    named = {str(item["name"]): item for item in catalog["operations"]}
+    health = named["health"]
+    embedding_dimension = named["embedding_dimension"]
+    pool_status = named["pool_status"]
+    embedding_refusals = named["embedding_refusals"]
+    postgres_status = named["postgres_status"]
+    reembed_status = named["reembed_status"]
+    reembed_clear = named["reembed_clear"]
+    reembed_clear_maintenance = named["reembed_clear_maintenance"]
+    embedder_serving_id = named["embedder_serving_id"]
+    dimension_reset = named["dimension_reset"]
+    level3_count = named["level3_count"]
+    level2_count = named["level2_count"]
+    orphaned_l0_count = named["orphaned_l0_count"]
+    total_count = named["total_count"]
+    session_l2_count = named["session_l2_count"]
+    key_exists = named["key_exists"]
+    find_id_by_key_kind = named["find_id_by_key_kind"]
+    key_exists_in_tier_pair = named["key_exists_in_tier_pair"]
+    effectiveness_update = named["effectiveness_update"]
+    retention_enforce = named["retention_enforce"]
+    effectiveness_demote = named["effectiveness_demote"]
+    effectiveness_stats = named["effectiveness_stats"]
+    l2_memory_ids = named["l2_memory_ids"]
+    health_record = named["health_record"]
+    health_retention = named["health_retention"]
+    health_counters = named["health_counters"]
+    stats_counts = named["stats_counts"]
+    expire = named["expire"]
+    demote = named["demote"]
+    promote_stable = named["promote_stable"]
+    reclassify_directives = named["reclassify_directives"]
+    record_l4_approval = named["record_l4_approval"]
+    prune_orphaned_l0 = named["prune_orphaned_l0"]
+    lifecycle_sweep_expired = named["lifecycle_sweep_expired"]
+    demote_id = named["demote_id"]
+    has_workspace_tag = named["has_workspace_tag"]
+    delete_row = named["delete_row"]
+    touch = named["touch"]
+    link_delete = named["link_delete"]
+    valid_at = named["valid_at"]
+    has_scope_type = named["has_scope_type"]
+    reject = named["reject"]
+    update_content = named["update_content"]
+    decay_confidence = named["decay_confidence"]
+    workspace_tag_insert = named["workspace_tag_insert"]
+    set_cognified_kind = named["set_cognified_kind"]
+    set_source_session = named["set_source_session"]
+    negation_tokens_update = named["negation_tokens_update"]
+    get_content = named["get_content"]
+    get_source_session = named["get_source_session"]
+    pick_first_temporal_ref = named["pick_first_temporal_ref"]
+    count_and_max_updated = named["count_and_max_updated"]
+    top_l2_facts = named["top_l2_facts"]
+    list_session_scope_priority = named["list_session_scope_priority"]
+    entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
+    entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
+    project_count = named["project_count"]
+    purge_hidden_pollution = named["purge_hidden_pollution"]
+    requeue_drifted = named["requeue_drifted"]
+    cross_repo_rebuild_routes = named["cross_repo_rebuild_routes"]
+    cross_repo_rebuild_identities = named["cross_repo_rebuild_identities"]
+    cross_repo_rebuild_build_deps = named["cross_repo_rebuild_build_deps"]
+    drift_candidates = named["drift_candidates"]
+    file_index_delete_project = named["file_index_delete_project"]
+    rules_decay = named["rules_decay"]
+    curiosity_rescore_all = named["curiosity_rescore_all"]
+    mining_seed_job_defaults = named["mining_seed_job_defaults"]
+    proposals_archive_expired = named["proposals_archive_expired"]
+    trace_mining_last_id = named["trace_mining_last_id"]
+    anti_pattern_bump = named["anti_pattern_bump"]
+    anti_pattern_delete = named["anti_pattern_delete"]
+    rel_types_ensure_seed = named["rel_types_ensure_seed"]
+    doc_delete = named["doc_delete"]
+    task_delete = named["task_delete"]
+    clear_project = named["clear_project"]
+    clear_current_project = named["clear_current_project"]
+    vector_rebuild_lock_try_acquire = named["vector_rebuild_lock_try_acquire"]
+    vector_rebuild_lock_release = named["vector_rebuild_lock_release"]
+    release_get_active = named["release_get_active"]
+    prospective_sweep_expired = named["prospective_sweep_expired"]
+    directive_sweep_expired = named["directive_sweep_expired"]
+    mark_revisit_due = named["mark_revisit_due"]
+    ingest_queue_reset_running = named["ingest_queue_reset_running"]
+    evidence_reembed_all = named["evidence_reembed_all"]
+    curator_reembed_all = named["curator_reembed_all"]
+    synth_reenqueue_all = named["synth_reenqueue_all"]
+    curator_reenqueue_extract_all = named["curator_reenqueue_extract_all"]
+    directive_suppress = named["directive_suppress"]
+    directive_record_surface = named["directive_record_surface"]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -18410,7 +18997,7 @@ const StageCountAndMaxUpdated = FamilyMemory
 const OperationCountAndMaxUpdated uint32 = {count_and_max_updated['id']}
 const CountAndMaxUpdatedCountMax uint32 = {count_and_max_updated['reply']['fields'][0]['maximum']}
 const CountAndMaxUpdatedStampMax = {count_and_max_updated['reply']['fields'][1]['maximum_bytes']}
-const EventEntityEdgePruneOrphans = EventIndex
+{_scoped_id_list_go_constants(top_l2_facts)}{_scoped_id_list_go_constants(list_session_scope_priority)}const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = {entity_edge_prune_orphans['id']}
 const EntityEdgePruneOrphansCountMax uint32 = {entity_edge_prune_orphans['reply']['field']['maximum']}
@@ -20108,7 +20695,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)

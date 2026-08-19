@@ -45,6 +45,10 @@ typedef struct
    int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
                               int *low_effectiveness, int *high_impact);
    int (*list_l2_memory_ids)(int64_t *out, int max);
+   int (*top_l2_facts)(int scope_active, int include_all, const char *workspace,
+                       const char *project, int64_t *out, int max);
+   int (*list_session_scope_priority)(int scope_active, int include_all, const char *workspace,
+                                      const char *project, int64_t *out, int max);
    int (*count_memories)(void);
    int (*count_recent_conflicts)(int days);
    void (*health_record)(int total_memories, int contradictions_detected, int promotions,
@@ -246,6 +250,13 @@ static int retention_delete_calls;
 static int demote_effectiveness_calls;
 static int effectiveness_stats_calls;
 static int list_l2_memory_ids_calls;
+static int top_l2_facts_calls;
+static int list_session_scope_priority_calls;
+static int scoped_active_seen;
+static int scoped_include_all_seen;
+static int scoped_limit_seen;
+static char scoped_workspace_seen[64];
+static char scoped_project_seen[64];
 static int health_record_calls;
 static int health_record_total;
 static int health_record_contradictions;
@@ -508,6 +519,34 @@ static int effectiveness_stats(double low_threshold, double *avg_effectiveness,
                                    high_impact);
 }
 
+static int scoped_ids_impl(int scope_active, int include_all, const char *workspace,
+                           const char *project, int64_t *out, int max, int64_t first)
+{
+   scoped_active_seen = scope_active;
+   scoped_include_all_seen = include_all;
+   scoped_limit_seen = max;
+   snprintf(scoped_workspace_seen, sizeof(scoped_workspace_seen), "%s", workspace ? workspace : "");
+   snprintf(scoped_project_seen, sizeof(scoped_project_seen), "%s", project ? project : "");
+   int listed = 0;
+   for (; listed < 2 && listed < max; listed++)
+      out[listed] = first + listed;
+   return listed;
+}
+
+static int top_l2_facts(int scope_active, int include_all, const char *workspace,
+                        const char *project, int64_t *out, int max)
+{
+   top_l2_facts_calls++;
+   return scoped_ids_impl(scope_active, include_all, workspace, project, out, max, 31);
+}
+
+static int list_session_scope_priority(int scope_active, int include_all, const char *workspace,
+                                       const char *project, int64_t *out, int max)
+{
+   list_session_scope_priority_calls++;
+   return scoped_ids_impl(scope_active, include_all, workspace, project, out, max, 71);
+}
+
 static int list_l2_memory_ids_impl(int64_t *out, int max)
 {
    list_l2_memory_ids_calls++;
@@ -611,6 +650,38 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    (void)promote_confidence;
    (void)out;
    return -1;
+}
+
+/* memory_t and the scope context are host types too. The adapter's scoped
+ * identifier readers reach these; the tests below drive the backend directly. */
+int db2_memory_top_l2_facts(void *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_session_scope_priority(void *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+void db2_memory_scope_context_set(const char *workspace, const char *project, int include_all)
+{
+   (void)workspace;
+   (void)project;
+   (void)include_all;
+}
+
+void db2_memory_scope_context_clear(void)
+{
+}
+
+void db2_memory_scope_context_get(void *out)
+{
+   (void)out;
 }
 
 /* memory_stats_t is a host type, so the production symbol takes void * here the
@@ -1789,6 +1860,8 @@ int main(void)
        .demote_effectiveness = demote_effectiveness,
        .effectiveness_stats = effectiveness_stats,
        .list_l2_memory_ids = list_l2_memory_ids,
+       .top_l2_facts = top_l2_facts,
+       .list_session_scope_priority = list_session_scope_priority,
        .count_memories = count_memories,
        .count_recent_conflicts = count_recent_conflicts,
        .health_record = health_record,
@@ -1983,6 +2056,37 @@ int main(void)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(l2_count == 3 && l2_ids[0] == 7 && l2_ids[1] == 19 && l2_ids[2] == 4242 &&
           list_l2_memory_ids_calls == 1);
+
+   uint64_t scoped_ids[AIMEE_DB2_TOP_L2_FACTS_MAX];
+   uint32_t scoped_count = 99;
+   assert(aimee_db2_top_l2_facts_call(call_client, &client, 7040, 0, 5u, 3u, "alpha-workspace",
+                                      "beta-project", scoped_ids, AIMEE_DB2_TOP_L2_FACTS_MAX,
+                                      &scoped_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The scope the caller sent is the scope the backend was given: this is the
+    * whole reason it travels rather than being read from a thread-local. */
+   assert(scoped_count == 2 && scoped_ids[0] == 31 && scoped_ids[1] == 32 &&
+          top_l2_facts_calls == 1 && scoped_active_seen == 1 && scoped_include_all_seen == 1 &&
+          scoped_limit_seen == 5 && strcmp(scoped_workspace_seen, "alpha-workspace") == 0 &&
+          strcmp(scoped_project_seen, "beta-project") == 0);
+
+   scoped_count = 99;
+   assert(aimee_db2_list_session_scope_priority_call(
+              call_client, &client, 7041, 0, 4u, 0u, "", "", scoped_ids,
+              AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_MAX, &scoped_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* An inactive scope with empty names is a distinct request, not a missing
+    * one, and it reaches the second backend rather than the first. */
+   assert(scoped_count == 2 && scoped_ids[0] == 71 && scoped_ids[1] == 72 &&
+          list_session_scope_priority_calls == 1 && top_l2_facts_calls == 1 &&
+          scoped_active_seen == 0 && scoped_include_all_seen == 0 && scoped_limit_seen == 4 &&
+          scoped_workspace_seen[0] == '\0' && scoped_project_seen[0] == '\0');
+
+   /* A limit of zero is outside the contract, so the encoder refuses it before
+    * anything reaches the bus. */
+   assert(aimee_db2_top_l2_facts_call(call_client, &client, 7042, 0, 0u, 0u, "", "", scoped_ids,
+                                      AIMEE_DB2_TOP_L2_FACTS_MAX, &scoped_count, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(top_l2_facts_calls == 1);
 
    assert(aimee_db2_health_record_call(call_client, &client, 7033, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);

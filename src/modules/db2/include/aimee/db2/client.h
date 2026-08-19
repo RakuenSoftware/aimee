@@ -224,6 +224,21 @@ extern "C"
        uint32_t *domain_result, uint32_t *count, char *max_updated_at, size_t stamp_capacity,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   /* The scope travels with the request because the backend would otherwise
+    * read it from a thread-local the caller cannot reach across a process
+    * boundary. scope_flags is bit 0 active, bit 1 include-all. */
+   aimee_module_call_result_t aimee_db2_top_l2_facts_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_list_session_scope_priority_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
+       uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
