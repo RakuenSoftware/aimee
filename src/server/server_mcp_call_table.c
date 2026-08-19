@@ -1269,6 +1269,10 @@ static int code_span_resolve_root(const char *project, char *out, size_t out_len
  * item so the caller can read the range without a second lookup, and returns an
  * explicit answerable/no_answer decision. The route fixes max_results=4 and a
  * 1200-token budget, so this cannot become the expensive call. */
+/* MCP and the command share ONE investigation packet. This handler used to
+ * carry its own retrieval and code attachment with no typed verdict, so an
+ * unreachable knowledge service arrived over MCP as a bare error_status --
+ * the same confusion the command surface was fixed for. */
 static cJSON *mcph_index_investigate(struct mcp_call *c)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
@@ -1283,6 +1287,11 @@ static cJSON *mcph_index_investigate(struct mcp_call *c)
    if (!project)
       return text_content("error: no active project determined from cwd; pass 'project'");
 
+   cJSON *inc = cJSON_GetObjectItemCaseSensitive(c->jargs, "include_code");
+   int include_code = !cJSON_IsBool(inc) || cJSON_IsTrue(inc);
+   cJSON *fallback_arg = cJSON_GetObjectItemCaseSensitive(c->jargs, "fallback");
+   int fallback_enabled = !cJSON_IsBool(fallback_arg) || cJSON_IsTrue(fallback_arg);
+
    if (batch)
    {
       cJSON *out = cJSON_CreateArray();
@@ -1293,90 +1302,16 @@ static cJSON *mcph_index_investigate(struct mcp_call *c)
       {
          if (!cJSON_IsString(e) || !e->valuestring[0])
             continue; /* skip the malformed entry; the rest of the batch still answers */
-         int st = -1;
-         char *j = kb_client_code_context(e->valuestring, symbol, project, &st);
-         cJSON *row = cJSON_CreateObject();
-         cJSON_AddStringToObject(row, "query", e->valuestring);
-         if (j)
-         {
-            cJSON *parsed = cJSON_Parse(j);
-            if (parsed)
-               cJSON_AddItemToObject(row, "result", parsed);
-            else
-               cJSON_AddStringToObject(row, "result_raw", j);
-            free(j);
-         }
-         else
-            cJSON_AddNumberToObject(row, "error_status", st);
-         cJSON_AddItemToArray(out, row);
+         cJSON *row = server_index_investigate_packet(e->valuestring, symbol, project, include_code,
+                                                      fallback_enabled);
+         if (row)
+            cJSON_AddItemToArray(out, row);
       }
       return json_result_content(out);
    }
-
-   int status = -1;
-   char *json = kb_client_code_context(jq->valuestring, symbol, project, &status);
-   if (!json)
-      return code_graph_passthrough(json, status, "index_investigate");
-
-   /* FULL investigate: attach the code, not just a pointer to it.
-    *
-    * The packet ranks evidence and hands back file_path + a single anchor line.
-    * An agent then has to spend a second round trip reading each one -- which is
-    * the two-call discovery shape this command exists to collapse. Read a bounded
-    * window around each anchor here, in-process, so orienting and reading are one
-    * call. Budget is deliberately small: at most INV_ITEMS items and INV_WINDOW
-    * lines each, because a composed call that can flood the context is worse than
-    * the two calls it replaced. `include_code: false` opts out. */
-   cJSON *inc = cJSON_GetObjectItemCaseSensitive(c->jargs, "include_code");
-   int want_code = !cJSON_IsBool(inc) || cJSON_IsTrue(inc);
-   cJSON *root = want_code ? cJSON_Parse(json) : NULL;
-   cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
-   if (!cJSON_IsArray(results))
-   {
-      cJSON_Delete(root);
-      return code_graph_passthrough(json, status, "index_investigate");
-   }
-   free(json);
-
-   enum
-   {
-      INV_ITEMS = 4,
-      INV_WINDOW = 60
-   };
-   char rootdir[MAX_PATH_LEN] = "";
-   if (code_span_resolve_root(project, rootdir, sizeof(rootdir)) == 0)
-   {
-      int attached = 0;
-      cJSON *row;
-      cJSON_ArrayForEach(row, results)
-      {
-         if (attached >= INV_ITEMS)
-            break;
-         cJSON *fp = cJSON_GetObjectItemCaseSensitive(row, "file_path");
-         cJSON *sp = cJSON_GetObjectItemCaseSensitive(row, "span");
-         if (!cJSON_IsString(fp) || !fp->valuestring[0] || !cJSON_IsObject(sp))
-            continue;
-         cJSON *ls = cJSON_GetObjectItemCaseSensitive(sp, "line_start");
-         int anchor = cJSON_IsNumber(ls) ? ls->valueint : 0;
-         /* kind:"file" means the packet had no line anchor -- read from the top
-          * rather than guessing a window around zero. */
-         int from = anchor > INV_WINDOW / 2 ? anchor - INV_WINDOW / 2 : 1;
-         int to = from + INV_WINDOW - 1;
-         cJSON *span = code_span_read(project, rootdir, fp->valuestring, from, to, INV_WINDOW);
-         if (!span)
-            continue;
-         cJSON *content = cJSON_DetachItemFromObjectCaseSensitive(span, "content");
-         if (content)
-         {
-            cJSON_AddItemToObject(row, "code", content);
-            cJSON_AddNumberToObject(row, "code_line_start", from);
-            cJSON_AddNumberToObject(row, "code_line_end", to);
-            attached++;
-         }
-         cJSON_Delete(span);
-      }
-   }
-   return json_result_content(root); /* takes ownership of root */
+   cJSON *packet = server_index_investigate_packet(jq->valuestring, symbol, project, include_code,
+                                                   fallback_enabled);
+   return packet ? json_result_content(packet) : text_content("error: out of memory");
 }
 
 static cJSON *mcph_index_graph_hubs(struct mcp_call *c)
@@ -1627,6 +1562,26 @@ static cJSON *mcph_code_span_get(struct mcp_call *c)
             decoded = cJSON_Parse(sp->valuestring);
             if (decoded)
                sp = decoded;
+         }
+         else if (cJSON_IsString(sp) && sp->valuestring)
+         {
+            /* The other shape a model reaches for is the CLI spelling it just
+             * read in the help text, path:start-end. Accept it rather than
+             * returning nothing for an entry whose intent is unambiguous. */
+            char sh_path[MAX_PATH_LEN];
+            int sh_start = 0, sh_end = 0;
+            if (server_mcp_span_shorthand_parse(sp->valuestring, sh_path, sizeof(sh_path),
+                                                &sh_start, &sh_end))
+            {
+               decoded = cJSON_CreateObject();
+               if (decoded)
+               {
+                  cJSON_AddStringToObject(decoded, "file_path", sh_path);
+                  cJSON_AddNumberToObject(decoded, "line_start", (double)sh_start);
+                  cJSON_AddNumberToObject(decoded, "line_end", (double)sh_end);
+                  sp = decoded;
+               }
+            }
          }
          cJSON *sf = cJSON_GetObjectItemCaseSensitive(sp, "file_path");
          if (!cJSON_IsString(sf) || !sf->valuestring[0])

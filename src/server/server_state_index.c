@@ -782,9 +782,19 @@ int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
 
-   const char *project;
-   if (jo_need_str(req, "project", &project) < 0 || !project[0])
-      return server_send_error(conn, "missing project", NULL);
+   /* Resolve the project the way every sibling index command does. deps names
+    * its project as a positional, but an agent working inside a checkout should
+    * not have to discover that -- if the caller did not name one, fall back to
+    * the active project for the caller cwd. */
+   char deps_project[MAX_PATH_LEN] = "";
+   const char *project = jo_str(req, "project", NULL);
+   if (!project || !project[0])
+   {
+      const char *cwd = jo_str(req, "cwd", NULL);
+      if (!cwd || server_active_project_from_cwd(cwd, deps_project, sizeof(deps_project)) != 0)
+         return server_send_error(conn, "scope_required: no active project", NULL);
+      project = deps_project;
+   }
 
    const char *direction = jo_str(req, "direction", NULL);
    if (direction && strcmp(direction, "out") != 0 && strcmp(direction, "in") != 0 &&

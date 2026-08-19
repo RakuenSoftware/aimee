@@ -793,6 +793,7 @@ cJSON *marshal_index_deps(int argc, char **argv)
       cJSON_AddStringToObject(req, "direction", "in");
    if (cli_args_get(&opts, "dry-run"))
       cJSON_AddBoolToObject(req, "dry_run", 1);
+   marshal_add_index_context(req, &opts);
    return req;
 }
 

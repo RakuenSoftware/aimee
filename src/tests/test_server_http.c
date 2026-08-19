@@ -410,6 +410,52 @@ static void test_role_template_show_reports_what_the_role_came_to(void)
    printf("  PASS: test_role_template_show_reports_what_the_role_came_to\n");
 }
 
+/* TLS seams the identity capture reaches through. This suite drives capture
+ * with fd = -1 on a TCP-shaped request, so no connection is ever TLS and these
+ * only need to answer "not TLS" -- linking the real TLS stack here would pull in
+ * the whole connection layer to test header parsing. */
+#include "server_conn_io.h"
+#include "server_tls.h"
+
+int server_conn_io_has_ssl(int fd)
+{
+   (void)fd;
+   return 0;
+}
+
+SSL *server_conn_io_get_ssl(int fd)
+{
+   (void)fd;
+   return NULL;
+}
+
+int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
+                             size_t serial_len)
+{
+   (void)ssl;
+   if (cn_out && cn_len)
+      cn_out[0] = 0;
+   if (serial_out && serial_len)
+      serial_out[0] = 0;
+   return 0;
+}
+
+int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   (void)ssl;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int server_tls_local_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   (void)ssl;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
 int main(void)
 {
    test_role_template_show_reports_what_the_role_came_to();
@@ -1184,6 +1230,34 @@ int main(void)
       assert(
           server_http_session_bearer_unbind("secret.aimee-session.0123456789abcdef0123456789abcdef",
                                             unbound, sizeof(unbound), bound_sid, 32) == 0);
+
+      /* The connection bearer may ride in x-api-key while Authorization carries a
+       * caller identity JWT. The session binding has to be recovered from either
+       * header, or a client that scopes itself through x-api-key authenticates
+       * while presenting no session at all -- and everything keyed on the session
+       * (persona delivery, economizer session keys) then treats every request as
+       * a brand new session. */
+      {
+         const char *only_api_key =
+             "GET /v1/health HTTP/1.1\r\nHost: h\r\n"
+             "x-api-key: secret.aimee-session.fedcba9876543210fedcba9876543210\r\n\r\n";
+         server_http_identity_capture(-1, 1, only_api_key);
+         assert(strcmp(server_http_identity_session_hdr(), "fedcba9876543210fedcba9876543210") ==
+                0);
+
+         /* An explicit session header still wins over the bearer suffix. */
+         const char *explicit_hdr =
+             "GET /v1/health HTTP/1.1\r\nHost: h\r\naimee-session-id: explicit-sid\r\n"
+             "x-api-key: secret.aimee-session.fedcba9876543210fedcba9876543210\r\n\r\n";
+         server_http_identity_capture(-1, 1, explicit_hdr);
+         assert(strcmp(server_http_identity_session_hdr(), "explicit-sid") == 0);
+
+         /* An unsuffixed key leaves no session behind. */
+         const char *plain = "GET /v1/health HTTP/1.1\r\nHost: h\r\nx-api-key: secret\r\n\r\n";
+         server_http_identity_capture(-1, 1, plain);
+         assert(server_http_identity_session_hdr()[0] == 0);
+         printf("server_http:   PASS: x-api-key carries the session binding too\n");
+      }
 
       /* UDS is always authorized regardless of token, when no session key. */
       assert(server_http_authorize(0, "", NULL, NULL, 0) == 0);

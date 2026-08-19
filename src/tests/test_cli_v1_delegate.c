@@ -1258,6 +1258,24 @@ static void test_index_current_project_proxy_context(void)
    cJSON_Delete(investigate);
    unsetenv("AIMEE_PROJECT_ID");
 
+   /* index deps is part of the same family: an agent inside a checkout must be
+    * able to ask without naming the project, or the one command that reports
+    * cross-repo dependencies is the one that demands a flag the others do not. */
+   setenv("AIMEE_PROJECT_ID", "session-project", 1);
+   char *deps_argv[] = {"--reverse"};
+   cJSON *deps = marshal_index_deps(1, deps_argv);
+   assert(deps != NULL);
+   assert(cJSON_IsString(cJSON_GetObjectItem(deps, "project")));
+   assert(strcmp(cJSON_GetObjectItem(deps, "project")->valuestring, "session-project") == 0);
+   assert(cJSON_IsString(cJSON_GetObjectItem(deps, "cwd")));
+   cJSON_Delete(deps);
+
+   char *deps_named[] = {"named-project"};
+   deps = marshal_index_deps(1, deps_named);
+   assert(cJSON_IsString(cJSON_GetObjectItem(deps, "project")));
+   assert(strcmp(cJSON_GetObjectItem(deps, "project")->valuestring, "named-project") == 0);
+   cJSON_Delete(deps);
+   unsetenv("AIMEE_PROJECT_ID");
    printf("  PASS: test_index_current_project_proxy_context\n");
 }
 

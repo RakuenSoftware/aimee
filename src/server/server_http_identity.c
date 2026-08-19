@@ -153,6 +153,22 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
                snprintf(tl_session_hdr, sizeof(tl_session_hdr), "%s", bound_sid);
          }
       }
+      /* The connection bearer may arrive in x-api-key instead of Authorization
+       * -- that split is the supported shape when Authorization carries a caller
+       * identity JWT. Recover the session binding from there too, or a client
+       * that scopes itself that way authenticates but presents NO session, and
+       * every per-session decision keyed on it (persona delivery, economizer
+       * session keys) silently treats each request as a brand new session. */
+      char api_key[512] = "";
+      if (!tl_session_hdr[0] && http_header(buf, "x-api-key", api_key, sizeof(api_key)) &&
+          api_key[0])
+      {
+         char base[sizeof(tl_bearer)], bound_sid[80];
+         if (server_http_session_bearer_unbind(api_key, base, sizeof(base), bound_sid,
+                                               sizeof(bound_sid)) &&
+             bound_sid[0])
+            snprintf(tl_session_hdr, sizeof(tl_session_hdr), "%s", bound_sid);
+      }
       http_header(buf, "X-Aimee-Management-Status", tl_status_staple, sizeof(tl_status_staple));
    }
 }
