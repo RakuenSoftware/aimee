@@ -1837,6 +1837,54 @@ aimee_module_call_result_t aimee_db2_curator_reenqueue_extract_all_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_directive_suppress_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t directive_id,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_directive_suppress_request_encode(directive_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DIRECTIVE_SUPPRESS, AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_directive_suppress_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_directive_record_surface_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t directive_id, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_directive_record_surface_request_encode(directive_id, request, sizeof(request)) !=
+       0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DIRECTIVE_RECORD_SURFACE,
+            AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_directive_record_surface_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,

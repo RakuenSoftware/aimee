@@ -259,7 +259,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 78 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 80 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -336,7 +336,9 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[74].Name != "evidence_reembed_all" ||
 		baseline.Operations[75].Name != "curator_reembed_all" ||
 		baseline.Operations[76].Name != "synth_reenqueue_all" ||
-		baseline.Operations[77].Name != "curator_reenqueue_extract_all" {
+		baseline.Operations[77].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[78].Name != "directive_suppress" ||
+		baseline.Operations[79].Name != "directive_record_surface" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -874,6 +876,65 @@ func TestProspectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
 		expired, err := DecodeProspectiveSweepExpiredReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || expired != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, expired, err)
+		}
+	}
+}
+
+func TestDirectiveIDOperationsMatchEverySharedCVector(t *testing.T) {
+	baseline := loadWireBaseline(t)
+	suppress := baseline.Operations[78]
+	surface := baseline.Operations[79]
+	if suppress.Family != "maintenance" || surface.Family != "maintenance" {
+		t.Fatalf("families = %q/%q, want maintenance", suppress.Family, surface.Family)
+	}
+	wantSuppress := decodeHex(t, suppress.Request.Positive)
+	got, err := EncodeDirectiveSuppressRequest(31)
+	if err != nil || string(got) != string(wantSuppress) {
+		t.Fatalf("suppress request = (%x, %v), want %x", got, err, wantSuppress)
+	}
+	if id, err := DecodeDirectiveSuppressRequest(wantSuppress); err != nil || id != 31 {
+		t.Fatalf("suppress decode = (%d, %v)", id, err)
+	}
+	wantSurface := decodeHex(t, surface.Request.Positive)
+	// Same payload shape on the same stage, so each decoder must refuse the
+	// other: a surfacing read as a suppression would close the directive.
+	if _, err := DecodeDirectiveSuppressRequest(wantSurface); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("suppress decoder accepted a surfacing request: %v", err)
+	}
+	if _, err := DecodeDirectiveRecordSurfaceRequest(wantSuppress); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("surfacing decoder accepted a suppression request: %v", err)
+	}
+	for _, operation := range []struct {
+		name    string
+		vectors []struct {
+			Mutation string `json:"mutation"`
+			Hex      string `json:"hex"`
+		}
+		decode func([]byte) (uint64, error)
+	}{
+		{"directive_suppress", suppress.Request.Negative, DecodeDirectiveSuppressRequest},
+		{"directive_record_surface", surface.Request.Negative, DecodeDirectiveRecordSurfaceRequest},
+	} {
+		for _, vector := range operation.vectors {
+			if _, err := operation.decode(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+				t.Fatalf("%s negative request %s: %v", operation.name, vector.Mutation, err)
+			}
+		}
+	}
+	if err := DecodeDirectiveSuppressReply(decodeHex(t, suppress.Reply.Positive[0].Hex)); err != nil {
+		t.Fatalf("positive suppress reply: %v", err)
+	}
+	if err := DecodeDirectiveRecordSurfaceReply(decodeHex(t, surface.Reply.Positive[0].Hex)); err != nil {
+		t.Fatalf("positive surfacing reply: %v", err)
+	}
+	for _, vector := range suppress.Reply.Negative {
+		if err := DecodeDirectiveSuppressReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative suppress reply %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range surface.Reply.Negative {
+		if err := DecodeDirectiveRecordSurfaceReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative surfacing reply %s: %v", vector.Mutation, err)
 		}
 	}
 }

@@ -94,6 +94,8 @@ typedef struct
    int64_t (*release_get_active)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
+   int (*directive_suppress)(int64_t directive_id);
+   int (*directive_record_surface)(int64_t directive_id);
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);

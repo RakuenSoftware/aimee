@@ -345,6 +345,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
         * db2_directive_sweep_expired collapses a failed statement into
         * the same zero an empty sweep produces. */
        .directive_sweep_expired = db2_kb_service_directive_sweep_expired,
+       /* Of the two suppressions, bind the one whose single statement
+        * carries the state guard rather than checking it separately. */
+       .directive_suppress = db2_directive_suppress,
+       .directive_record_surface = db2_directive_record_surface,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
        .ingest_queue_reset_running = db2_kb_ingest_queue_reset_running,
        .evidence_reembed_all = db2_evidence_reembed_all,
@@ -398,6 +402,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
+        invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS &&
+        invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
         invocation->stage_id != AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING &&
         invocation->stage_id != AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL &&
@@ -1768,6 +1774,45 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_directive_sweep_expired_reply_encode((uint32_t)directives, response_body,
                                                             response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t directive_id = 0u;
+      if (aimee_db2_directive_suppress_request_decode(request_body, request_len, &directive_id) ==
+          0)
+      {
+         if (response_capacity < AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->directive_suppress)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The statement carries its own state guard, so deciding and writing
+          * are one action rather than a check a caller could lose a race
+          * against. A directive that was not open and a failed statement come
+          * back the same way, and the backend keeps nothing that would let the
+          * boundary say not_found instead -- recorded in the catalog. */
+         if (backend->directive_suppress((int64_t)directive_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_directive_suppress_reply_encode(response_body, response_capacity,
+                                                       response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_directive_record_surface_request_decode(request_body, request_len,
+                                                            &directive_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->directive_record_surface)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Same guard and same collapse as the suppression above. */
+         if (backend->directive_record_surface((int64_t)directive_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_directive_record_surface_reply_encode(response_body, response_capacity,
+                                                             response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

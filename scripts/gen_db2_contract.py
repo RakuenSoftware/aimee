@@ -241,6 +241,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "entity_edge_normalize_weights",
                                                                 "purge_hidden_pollution",
                                                                 "requeue_drifted",
+                                                                "directive_suppress",
+                                                                "directive_record_surface",
                                                                 "prospective_sweep_expired",
                                                                 "proposals_archive_expired",
                                                                 "vector_rebuild_lock_release",
@@ -273,7 +275,9 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 # first one wrote and answers differently.
                                 if name in ("health_record", "demote_id", "touch", "reject",
                                             "decay_confidence",
-                                            "vector_rebuild_lock_try_acquire")
+                                            "vector_rebuild_lock_try_acquire",
+                                            "directive_suppress",
+                                            "directive_record_surface")
                                 else "safe")
         if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
@@ -2797,9 +2801,47 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("curator-reenqueue-extract-all-reply",
                      "reply must contain one bounded u32 queue size from its own query")
+        elif key in (("maintenance", 9), ("maintenance", 10)) and \
+                name in ("directive_suppress", "directive_record_surface") and \
+                operation["wire_format"] == "db2-envelope-u64-ack-v1":
+            # Both statements carry their own `state = 'open'` guard, so the
+            # decision and the write are one action rather than a check the
+            # caller could lose a race against. Both also return the same error
+            # whether the statement failed or simply matched no open directive,
+            # and neither backend keeps enough to separate them -- recorded as
+            # absent_collapsed_into_error rather than left for a caller to
+            # discover that "failed" sometimes means "already suppressed".
+            expected_symbols = (["db2_directive_suppress",
+                                 "db2_kb_service_directive_suppress"]
+                                if name == "directive_suppress" else
+                                ["db2_directive_record_surface"])
+            if operation["c_symbols"] != expected_symbols:
+                fail("operation-c-symbols",
+                     f"{name} C symbols differ from the reviewed backends")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", f"{name} results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "field"},
+                            f"{name}.request")
+            field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                          f"{name}.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    field != {"name": "directive_id", "type": "u64", "minimum": 1,
+                              "maximum": 0x7fffffffffffffff}):
+                fail(f"{name.replace('_', '-')}-request",
+                     "request must carry one positive u64 directive id")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields",
+                           "absent_collapsed_into_error"},
+                          f"{name}.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != [] or
+                    reply["absent_collapsed_into_error"] is not True):
+                fail(f"{name.replace('_', '-')}-reply",
+                     "reply must be an acknowledgement that records the absent collapse")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 78 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 80 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2824,9 +2866,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
-            "curator_reenqueue_extract_all"]:
+            "curator_reenqueue_extract_all", "directive_suppress",
+            "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the seventy-eight supported operations exactly once")
+             "the partial generator requires the eighty supported operations exactly once")
     return catalog
 
 
@@ -3028,6 +3071,8 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     curator_reembed_all = catalog["operations"][75]
     synth_reenqueue_all = catalog["operations"][76]
     curator_reenqueue_extract_all = catalog["operations"][77]
+    directive_suppress = catalog["operations"][78]
+    directive_record_surface = catalog["operations"][79]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3582,6 +3627,18 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     curator_reenqueue_extract_all_none = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(curator_reenqueue_extract_all["id"]), 0,
         _put_u32(0),
+    )
+    directive_suppress_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(directive_suppress["id"]), 0, _put_u64(31),
+    )
+    directive_suppress_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(directive_suppress["id"]), 0, b"",
+    )
+    directive_record_surface_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(directive_record_surface["id"]), 0, _put_u64(31),
+    )
+    directive_record_surface_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(directive_record_surface["id"]), 0, b"",
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -7091,6 +7148,74 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                      (curator_reenqueue_extract_all_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": directive_suppress["family"],
+            "id": directive_suppress["id"],
+            "name": directive_suppress["name"],
+            "request": {
+                "positive": directive_suppress_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(directive_suppress_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(directive_suppress_request, 16, 1).hex()},
+                    {"mutation": "zero_id", "hex":
+                     (directive_suppress_request[:-8] + _put_u64(0)).hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (directive_suppress_request[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": directive_suppress_request[:-1].hex()},
+                    {"mutation": "long", "hex": (directive_suppress_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": directive_suppress_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(directive_suppress_ok, 8, int(directive_suppress["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(directive_suppress_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(directive_suppress_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex": directive_suppress_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (directive_suppress_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": directive_record_surface["family"],
+            "id": directive_record_surface["id"],
+            "name": directive_record_surface["name"],
+            "request": {
+                "positive": directive_record_surface_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(directive_record_surface_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(directive_record_surface_request, 16, 1).hex()},
+                    {"mutation": "zero_id", "hex":
+                     (directive_record_surface_request[:-8] + _put_u64(0)).hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (directive_record_surface_request[:-8] + _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": directive_record_surface_request[:-1].hex()},
+                    {"mutation": "long", "hex": (directive_record_surface_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": directive_record_surface_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(directive_record_surface_ok, 8, int(directive_record_surface["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(directive_record_surface_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(directive_record_surface_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex": directive_record_surface_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (directive_record_surface_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     # The fixture blocks above are hand-sequenced, so their order is not the
@@ -7213,6 +7338,8 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     curator_reembed_all = catalog["operations"][75]
     synth_reenqueue_all = catalog["operations"][76]
     curator_reenqueue_extract_all = catalog["operations"][77]
+    directive_suppress = catalog["operations"][78]
+    directive_record_surface = catalog["operations"][79]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -8253,6 +8380,28 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{curator_reenqueue_extract_all['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_MAX",
          f"{curator_reenqueue_extract_all['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_DIRECTIVE_SUPPRESS", "AIMEE_DB2_EVENT_MAINTENANCE"),
+        ("AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS", "AIMEE_DB2_FAMILY_MAINTENANCE"),
+        ("AIMEE_DB2_OPERATION_DIRECTIVE_SUPPRESS", f"{directive_suppress['id']}u"),
+        ("AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN",
+         f"{directive_suppress['request']['encoded_size']}u"),
+        ("AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN",
+         f"{directive_suppress['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_DIRECTIVE_SUPPRESS_ERROR_LEN",
+         f"{directive_suppress['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_DIRECTIVE_SUPPRESS_ID_MAX",
+         f"{directive_suppress['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_DIRECTIVE_RECORD_SURFACE", "AIMEE_DB2_EVENT_MAINTENANCE"),
+        ("AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE", "AIMEE_DB2_FAMILY_MAINTENANCE"),
+        ("AIMEE_DB2_OPERATION_DIRECTIVE_RECORD_SURFACE", f"{directive_record_surface['id']}u"),
+        ("AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN",
+         f"{directive_record_surface['request']['encoded_size']}u"),
+        ("AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN",
+         f"{directive_record_surface['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ERROR_LEN",
+         f"{directive_record_surface['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ID_MAX",
+         f"{directive_record_surface['request']['field']['maximum']}ull"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -10193,6 +10342,116 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}}
+
+static inline int aimee_db2_directive_suppress_request_encode(uint64_t directive_id, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || directive_id == 0u || directive_id > AIMEE_DB2_DIRECTIVE_SUPPRESS_ID_MAX ||
+       capacity < AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DIRECTIVE_SUPPRESS, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, directive_id);
+   return 0;
+}}
+
+static inline int aimee_db2_directive_suppress_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *directive_id)
+{{
+   if (directive_id)
+      *directive_id = 0u;
+   if (!directive_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DIRECTIVE_SUPPRESS || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_DIRECTIVE_SUPPRESS_ID_MAX)
+      return -1;
+   *directive_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_directive_suppress_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DIRECTIVE_SUPPRESS, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_directive_suppress_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DIRECTIVE_SUPPRESS &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_directive_record_surface_request_encode(uint64_t directive_id, uint8_t *output,
+                                                  size_t capacity)
+{{
+   if (!output || directive_id == 0u || directive_id > AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ID_MAX ||
+       capacity < AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DIRECTIVE_RECORD_SURFACE, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, directive_id);
+   return 0;
+}}
+
+static inline int aimee_db2_directive_record_surface_request_decode(const uint8_t *input, size_t input_len,
+                                                  uint64_t *directive_id)
+{{
+   if (directive_id)
+      *directive_id = 0u;
+   if (!directive_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DIRECTIVE_RECORD_SURFACE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ID_MAX)
+      return -1;
+   *directive_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_directive_record_surface_reply_encode(uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DIRECTIVE_RECORD_SURFACE, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_directive_record_surface_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DIRECTIVE_RECORD_SURFACE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }}
 
 static inline int aimee_db2_curator_reenqueue_extract_all_request_encode(uint8_t *output,
@@ -14269,6 +14528,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *extract_jobs, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_directive_suppress_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t directive_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_directive_record_surface_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t directive_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -16158,6 +16425,54 @@ aimee_module_call_result_t aimee_db2_curator_reenqueue_extract_all_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_directive_suppress_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t directive_id,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_directive_suppress_request_encode(directive_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DIRECTIVE_SUPPRESS, AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_directive_suppress_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_directive_record_surface_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t directive_id, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_directive_record_surface_request_encode(directive_id, request, sizeof(request)) !=
+       0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DIRECTIVE_RECORD_SURFACE,
+            AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_directive_record_surface_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -16475,6 +16790,8 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     curator_reembed_all = catalog["operations"][75]
     synth_reenqueue_all = catalog["operations"][76]
     curator_reenqueue_extract_all = catalog["operations"][77]
+    directive_suppress = catalog["operations"][78]
+    directive_record_surface = catalog["operations"][79]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -16897,6 +17214,14 @@ const EventCuratorReenqueueExtractAll = EventMaintenance
 const StageCuratorReenqueueExtractAll = FamilyMaintenance
 const OperationCuratorReenqueueExtractAll uint32 = {curator_reenqueue_extract_all['id']}
 const CuratorReenqueueExtractAllMax uint32 = {curator_reenqueue_extract_all['reply']['field']['maximum']}
+const EventDirectiveSuppress = EventMaintenance
+const StageDirectiveSuppress = FamilyMaintenance
+const OperationDirectiveSuppress uint32 = {directive_suppress['id']}
+const DirectiveSuppressIDMax uint64 = {directive_suppress['request']['field']['maximum']}
+const EventDirectiveRecordSurface = EventMaintenance
+const StageDirectiveRecordSurface = FamilyMaintenance
+const OperationDirectiveRecordSurface uint32 = {directive_record_surface['id']}
+const DirectiveRecordSurfaceIDMax uint64 = {directive_record_surface['request']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -19709,6 +20034,106 @@ func DecodeCuratorReenqueueExtractAllReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return extractJobs, nil
+}}
+
+// EncodeDirectiveSuppressRequest emits the directive id. Which states the statement will
+// act on is policy and never travels.
+func EncodeDirectiveSuppressRequest(directiveID uint64) ([]byte, error) {{
+	if directiveID == 0 || directiveID > DirectiveSuppressIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationDirectiveSuppress, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], directiveID)
+	return request, nil
+}}
+
+// DecodeDirectiveSuppressRequest validates the exact maintenance-family envelope.
+func DecodeDirectiveSuppressRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveSuppress || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	directiveID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if directiveID == 0 || directiveID > DirectiveSuppressIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return directiveID, nil
+}}
+
+// EncodeDirectiveSuppressReply emits a bare acknowledgement. A directive that was not
+// open is reported the same way a failed statement is; the backend keeps
+// nothing that would separate them.
+func EncodeDirectiveSuppressReply() []byte {{
+	header, err := EncodeReplyHeader(OperationDirectiveSuppress, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeDirectiveSuppressReply validates the acknowledgement envelope.
+func DecodeDirectiveSuppressReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDirectiveSuppress || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeDirectiveRecordSurfaceRequest emits the directive id. Which states the statement will
+// act on is policy and never travels.
+func EncodeDirectiveRecordSurfaceRequest(directiveID uint64) ([]byte, error) {{
+	if directiveID == 0 || directiveID > DirectiveRecordSurfaceIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationDirectiveRecordSurface, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], directiveID)
+	return request, nil
+}}
+
+// DecodeDirectiveRecordSurfaceRequest validates the exact maintenance-family envelope.
+func DecodeDirectiveRecordSurfaceRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveRecordSurface || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	directiveID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if directiveID == 0 || directiveID > DirectiveRecordSurfaceIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return directiveID, nil
+}}
+
+// EncodeDirectiveRecordSurfaceReply emits a bare acknowledgement. A directive that was not
+// open is reported the same way a failed statement is; the backend keeps
+// nothing that would separate them.
+func EncodeDirectiveRecordSurfaceReply() []byte {{
+	header, err := EncodeReplyHeader(OperationDirectiveRecordSurface, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeDirectiveRecordSurfaceReply validates the acknowledgement envelope.
+func DecodeDirectiveRecordSurfaceReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDirectiveRecordSurface || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

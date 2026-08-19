@@ -2106,6 +2106,54 @@
                   "maximum": 2147483647},
         "count_source": "separate-query"
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 9,
+      "name": "directive_suppress",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Epistemic directive state is a canonical relational DB2 record, not portable ANN state.",
+      "c_symbols": ["db2_directive_suppress", "db2_kb_service_directive_suppress"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "directive_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": [],
+        "absent_collapsed_into_error": true
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 10,
+      "name": "directive_record_surface",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Directive surfacing counters are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_directive_record_surface"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "directive_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": [],
+        "absent_collapsed_into_error": true
+      }
     }
   ]
 }

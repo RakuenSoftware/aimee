@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "21bd0985bb8770597d6bcb505e63d226263fe62940f2c7a3281901d9990aacee"
+const ContractSHA256 = "9cda39ca129ab14875d9cd1ad6579837e11fc7df8b668119912f1e537a23ca66"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -421,6 +421,14 @@ const EventCuratorReenqueueExtractAll = EventMaintenance
 const StageCuratorReenqueueExtractAll = FamilyMaintenance
 const OperationCuratorReenqueueExtractAll uint32 = 8
 const CuratorReenqueueExtractAllMax uint32 = 2147483647
+const EventDirectiveSuppress = EventMaintenance
+const StageDirectiveSuppress = FamilyMaintenance
+const OperationDirectiveSuppress uint32 = 9
+const DirectiveSuppressIDMax uint64 = 9223372036854775807
+const EventDirectiveRecordSurface = EventMaintenance
+const StageDirectiveRecordSurface = FamilyMaintenance
+const OperationDirectiveRecordSurface uint32 = 10
+const DirectiveRecordSurfaceIDMax uint64 = 9223372036854775807
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -3235,6 +3243,106 @@ func DecodeCuratorReenqueueExtractAllReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return extractJobs, nil
+}
+
+// EncodeDirectiveSuppressRequest emits the directive id. Which states the statement will
+// act on is policy and never travels.
+func EncodeDirectiveSuppressRequest(directiveID uint64) ([]byte, error) {
+	if directiveID == 0 || directiveID > DirectiveSuppressIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDirectiveSuppress, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], directiveID)
+	return request, nil
+}
+
+// DecodeDirectiveSuppressRequest validates the exact maintenance-family envelope.
+func DecodeDirectiveSuppressRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveSuppress || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	directiveID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if directiveID == 0 || directiveID > DirectiveSuppressIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return directiveID, nil
+}
+
+// EncodeDirectiveSuppressReply emits a bare acknowledgement. A directive that was not
+// open is reported the same way a failed statement is; the backend keeps
+// nothing that would separate them.
+func EncodeDirectiveSuppressReply() []byte {
+	header, err := EncodeReplyHeader(OperationDirectiveSuppress, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeDirectiveSuppressReply validates the acknowledgement envelope.
+func DecodeDirectiveSuppressReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDirectiveSuppress || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeDirectiveRecordSurfaceRequest emits the directive id. Which states the statement will
+// act on is policy and never travels.
+func EncodeDirectiveRecordSurfaceRequest(directiveID uint64) ([]byte, error) {
+	if directiveID == 0 || directiveID > DirectiveRecordSurfaceIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDirectiveRecordSurface, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], directiveID)
+	return request, nil
+}
+
+// DecodeDirectiveRecordSurfaceRequest validates the exact maintenance-family envelope.
+func DecodeDirectiveRecordSurfaceRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveRecordSurface || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != EnvelopeHeaderLen+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	directiveID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if directiveID == 0 || directiveID > DirectiveRecordSurfaceIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return directiveID, nil
+}
+
+// EncodeDirectiveRecordSurfaceReply emits a bare acknowledgement. A directive that was not
+// open is reported the same way a failed statement is; the backend keeps
+// nothing that would separate them.
+func EncodeDirectiveRecordSurfaceReply() []byte {
+	header, err := EncodeReplyHeader(OperationDirectiveRecordSurface, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeDirectiveRecordSurfaceReply validates the acknowledgement envelope.
+func DecodeDirectiveRecordSurfaceReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDirectiveRecordSurface || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

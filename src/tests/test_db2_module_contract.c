@@ -109,6 +109,12 @@ static int prospective_sweep_value;
 static int prospective_sweep_calls;
 static int directive_sweep_value;
 static int directive_sweep_calls;
+static int directive_suppress_value;
+static int directive_suppress_calls;
+static int64_t directive_suppress_id;
+static int directive_surface_value;
+static int directive_surface_calls;
+static int64_t directive_surface_id;
 static int mark_revisit_value;
 static int mark_revisit_calls;
 static int queue_reset_value;
@@ -854,6 +860,32 @@ int db2_directive_sweep_expired(void)
 int db2_kb_service_directive_sweep_expired(void)
 {
    return 0;
+}
+
+int db2_directive_suppress(int64_t directive_id)
+{
+   (void)directive_id;
+   return 0;
+}
+
+int db2_directive_record_surface(int64_t directive_id)
+{
+   (void)directive_id;
+   return 0;
+}
+
+static int directive_suppress(int64_t directive_id)
+{
+   directive_suppress_calls++;
+   directive_suppress_id = directive_id;
+   return directive_suppress_value;
+}
+
+static int directive_record_surface(int64_t directive_id)
+{
+   directive_surface_calls++;
+   directive_surface_id = directive_id;
+   return directive_surface_value;
 }
 
 static int directive_sweep_expired(void)
@@ -1658,6 +1690,12 @@ static void reset(void)
    prospective_sweep_calls = 0;
    directive_sweep_value = 8;
    directive_sweep_calls = 0;
+   directive_suppress_value = 0;
+   directive_suppress_calls = 0;
+   directive_suppress_id = 0;
+   directive_surface_value = 0;
+   directive_surface_calls = 0;
+   directive_surface_id = 0;
    mark_revisit_value = 9;
    mark_revisit_calls = 0;
    queue_reset_value = 10;
@@ -3151,6 +3189,37 @@ static void test_mark_revisit_due_wire(void)
    assert(aimee_db2_mark_revisit_due_reply_encode(9, reply, sizeof(reply), &reply_len) == 0);
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_mark_revisit_due_reply_decode(reply, reply_len, &marked) == -1 && marked == 0);
+}
+
+static void test_directive_id_operations_wire(void)
+{
+   uint8_t suppress[AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN] = {0};
+   assert(aimee_db2_directive_suppress_request_encode(31, suppress, sizeof(suppress)) == 0);
+   uint64_t decoded = 0;
+   assert(aimee_db2_directive_suppress_request_decode(suppress, sizeof(suppress), &decoded) == 0 &&
+          decoded == 31);
+   /* Zero is not an identifier and the encoder refuses it rather than sending
+    * a request the statement would match nothing for. */
+   assert(aimee_db2_directive_suppress_request_encode(0, suppress, sizeof(suppress)) == -1);
+   assert(aimee_db2_directive_suppress_request_encode(AIMEE_DB2_DIRECTIVE_SUPPRESS_ID_MAX + 1ull,
+                                                      suppress, sizeof(suppress)) == -1);
+   assert(aimee_db2_directive_suppress_request_encode(31, suppress, sizeof(suppress)) == 0);
+
+   uint8_t surface[AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN] = {0};
+   assert(aimee_db2_directive_record_surface_request_encode(32, surface, sizeof(surface)) == 0);
+   /* Two operations on one stage carrying the same payload shape: each must
+    * refuse the other, or a surfacing would suppress the directive instead. */
+   assert(aimee_db2_directive_suppress_request_decode(surface, sizeof(surface), &decoded) == -1);
+   assert(aimee_db2_directive_record_surface_request_decode(suppress, sizeof(suppress), &decoded) ==
+          -1);
+
+   uint8_t reply[AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99;
+   assert(aimee_db2_directive_suppress_reply_encode(reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_directive_suppress_reply_decode(reply, reply_len) == 0);
+   assert(aimee_db2_directive_record_surface_reply_decode(reply, reply_len) == -1);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_directive_suppress_reply_decode(reply, reply_len) == -1);
 }
 
 static void test_directive_sweep_expired_wire(void)
@@ -6052,6 +6121,56 @@ static void test_mark_revisit_due_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_directive_id_operations_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.directive_suppress = directive_suppress,
+                                               .directive_record_surface =
+                                                   directive_record_surface};
+   uint8_t request[AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS};
+   assert(aimee_db2_directive_suppress_request_encode(31, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(directive_suppress_calls == 1 && directive_suppress_id == 31);
+   assert(aimee_db2_directive_suppress_reply_decode(response, response_len) == 0);
+
+   /* A directive that was not open and a statement that failed produce the
+    * same negative from this backend, so both arrive as internal. The wire
+    * could carry not_found, but the backend keeps nothing to build it from,
+    * and inventing the distinction here would be a claim the data cannot
+    * support. Recorded in the catalog as absent_collapsed_into_error. */
+   directive_suppress_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   directive_suppress_value = 0;
+
+   aimee_module_invocation_t surfacing = {.stage_id = AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE};
+   uint8_t surface_request[AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN];
+   assert(aimee_db2_directive_record_surface_request_encode(32, surface_request,
+                                                            sizeof(surface_request)) == 0);
+   assert(invoke(&backend, &surfacing, surface_request, sizeof(surface_request), response,
+                 sizeof(response), &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(directive_surface_calls == 1 && directive_surface_id == 32);
+
+   /* Both stages resolve to the same family, so a suppression request sent on
+    * the surfacing stage still reaches this branch. It is the operation number
+    * in the envelope that keeps it from being surfaced instead. */
+   assert(invoke(&backend, &surfacing, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   /* Three suppressions have now reached the backend: the first, the one
+    * that returned a failure, and this one arriving on the other stage. */
+   assert(directive_suppress_calls == 3 && directive_surface_calls == 1);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_directive_sweep_expired_handler(void)
 {
    reset();
@@ -8509,6 +8628,7 @@ int main(void)
    test_release_get_active_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
+   test_directive_id_operations_wire();
    test_mark_revisit_due_wire();
    test_ingest_queue_reset_running_wire();
    test_evidence_reembed_all_wire();
@@ -8586,6 +8706,7 @@ int main(void)
    test_release_get_active_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
+   test_directive_id_operations_handler();
    test_mark_revisit_due_handler();
    test_ingest_queue_reset_running_handler();
    test_evidence_reembed_all_handler();

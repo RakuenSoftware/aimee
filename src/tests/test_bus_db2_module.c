@@ -107,6 +107,8 @@ typedef struct
    int64_t (*release_get_active)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
+   int (*directive_suppress)(int64_t directive_id);
+   int (*directive_record_surface)(int64_t directive_id);
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);
@@ -202,6 +204,10 @@ static int lock_release_calls;
 static int release_active_calls;
 static int prospective_sweep_calls;
 static int directive_sweep_calls;
+static int64_t directive_suppress_id;
+static int directive_suppress_calls;
+static int64_t directive_surface_id;
+static int directive_surface_calls;
 static int mark_revisit_calls;
 static int queue_reset_calls;
 static int evidence_reembed_calls;
@@ -1255,6 +1261,32 @@ int db2_kb_service_directive_sweep_expired(void)
    return 0;
 }
 
+int db2_directive_suppress(int64_t directive_id)
+{
+   (void)directive_id;
+   return 0;
+}
+
+int db2_directive_record_surface(int64_t directive_id)
+{
+   (void)directive_id;
+   return 0;
+}
+
+static int directive_suppress(int64_t directive_id)
+{
+   directive_suppress_calls++;
+   directive_suppress_id = directive_id;
+   return 0;
+}
+
+static int directive_record_surface(int64_t directive_id)
+{
+   directive_surface_calls++;
+   directive_surface_id = directive_id;
+   return 0;
+}
+
 static int directive_sweep_expired(void)
 {
    directive_sweep_calls++;
@@ -1703,6 +1735,8 @@ int main(void)
        .release_get_active = release_get_active,
        .prospective_sweep_expired = prospective_sweep_expired,
        .directive_sweep_expired = directive_sweep_expired,
+       .directive_suppress = directive_suppress,
+       .directive_record_surface = directive_record_surface,
        .mark_revisit_due = mark_revisit_due,
        .ingest_queue_reset_running = ingest_queue_reset_running,
        .evidence_reembed_all = evidence_reembed_all,
@@ -2143,6 +2177,15 @@ int main(void)
    assert(aimee_db2_directive_sweep_expired_call(call_client, &client, 7083, 0, &directives, NULL,
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(directives == 8 && directive_sweep_calls == 1);
+
+   /* The first operations on this bus that carry an argument to a
+    * maintenance stage: the id has to arrive intact, not merely arrive. */
+   assert(aimee_db2_directive_suppress_call(call_client, &client, 7103, 0, 31, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(directive_suppress_calls == 1 && directive_suppress_id == 31);
+   assert(aimee_db2_directive_record_surface_call(call_client, &client, 7104, 0, 32, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(directive_surface_calls == 1 && directive_surface_id == 32);
 
    uint32_t marked = 99u;
    assert(aimee_db2_mark_revisit_due_call(call_client, &client, 7084, 0, &marked, NULL, NULL) ==

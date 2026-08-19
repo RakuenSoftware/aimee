@@ -723,6 +723,14 @@ int main(int argc, char **argv)
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(directives == 0);
 
+   /* No directive exists, so neither the suppression nor the surfacing matches
+    * a row. Both report that the same way they report a failed statement,
+    * which is the collapse the catalog records. */
+   assert(aimee_db2_directive_suppress_call(call_client, &client, 9125, 0, 1, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
+   assert(aimee_db2_directive_record_surface_call(call_client, &client, 9126, 0, 1, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
+
    /* No decision is logged on a fresh schema, so none is due for review. This
     * backend reports a failed statement as -1 rather than as zero, so the zero
     * arriving here is the sweep having genuinely run and found nothing. */

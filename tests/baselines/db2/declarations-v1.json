@@ -6901,9 +6901,15 @@
           "line": 63
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_record_surface operation counts a surfacing of an open directive and stamps when it happened. Like the suppression beside it the state guard lives in the statement, and a directive that was not open is indistinguishable from a failed write in what the backend returns."
+      },
       "signature": "int db2_directive_record_surface ( int64_t id )",
       "signature_sha256": "3159c3262d33f6bd45c8978d70c55072b7af1a5fe03882b902a87553773fc008",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_record_surface"
     },
     {
@@ -6946,9 +6952,15 @@
           "line": 55
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_suppress operation closes an open epistemic directive. The statement carries its own state = 'open' guard, so deciding and writing are one action. A directive that was not open is reported exactly as a failed statement is, because the backend returns the same value for both; the catalog records that collapse rather than leaving a caller to discover that failed sometimes means already suppressed."
+      },
       "signature": "int db2_directive_suppress ( int64_t id )",
       "signature_sha256": "e39bdc3089eab0be1e0f2af41d17d6836e67ec6b2a5132d61d7af7ef4951bd2e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_suppress"
     },
     {
@@ -11371,9 +11383,15 @@
           "line": 110
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The same suppression reached through a second header, and the reason it gets no operation of its own. This variant checks that the directive is open in a separate query and then updates without the guard, so the state can change between the two. The boundary binds the variant whose single statement carries the guard, and listing both symbols on one operation keeps the pair from diverging unnoticed."
+      },
       "signature": "int db2_kb_service_directive_suppress ( int64_t id )",
       "signature_sha256": "8f89bff7fa7c4028e4d96eefae59c5bb129f1c8b25671d9730f902ca3e84be5e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_directive_suppress"
     },
     {
@@ -26286,15 +26304,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "245dfef3d884fa4daba5a150201d6dbb7c5f24bd94e78b4ffa4df996a2ae84a3",
+  "fingerprint": "b8220acd0bc6dc756983946df5b15ed39056b4d34ae791c879195ec3fab8ccb6",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 581,
+    "audit_pending": 578,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 377
+    "reviewed": 380
   }
 }
