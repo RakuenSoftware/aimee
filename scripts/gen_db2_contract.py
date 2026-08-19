@@ -302,7 +302,10 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                "collect_event_frame_matches",
                                                "collect_relation_token_matches",
                                                "collect_summary_matches",
-                                               "collect_temporal_matches") else "none"
+                                               "collect_temporal_matches",
+                                               "find_facts_like",
+                                               "list_session_scope_priority_like",
+                                               "negation_fts_search") else "none"
         if operation["scope"] != expected_scope or \
                 operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
@@ -2041,10 +2044,12 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
                 fail(f"{name.replace('_', '-')}-reply",
                      "reply must be a counted identifier list bounded by the request policy")
-        elif key in tuple(("memory", identifier) for identifier in range(45, 51)) and \
+        elif key in tuple(("memory", identifier) for identifier in range(45, 54)) and \
                 name in ("collect_alias_matches", "collect_entity_matches",
                          "collect_event_frame_matches", "collect_relation_token_matches",
-                         "collect_summary_matches", "collect_temporal_matches") and \
+                         "collect_summary_matches", "collect_temporal_matches",
+                         "find_facts_like", "list_session_scope_priority_like",
+                         "negation_fts_search") and \
                 operation["wire_format"] == "db2-envelope-scoped-string-u32-u64-list-v1":
             # Six probes, one shape: one search term, one limit, the session
             # scope, and a bounded identifier list back. What differs between
@@ -3218,7 +3223,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 95 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 98 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3236,7 +3241,8 @@ def validate_catalog(value: object) -> dict[str, object]:
             "pick_first_temporal_ref", "count_and_max_updated", "top_l2_facts",
             "list_session_scope_priority", "collect_alias_matches", "collect_entity_matches",
             "collect_event_frame_matches", "collect_relation_token_matches",
-            "collect_summary_matches", "collect_temporal_matches",
+            "collect_summary_matches", "collect_temporal_matches", "find_facts_like",
+            "list_session_scope_priority_like", "negation_fts_search",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
@@ -3251,7 +3257,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the ninety-five supported operations exactly once")
+             "the partial generator requires the ninety-eight supported operations exactly once")
     return catalog
 
 
@@ -3436,6 +3442,9 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     collect_relation_token_matches = named["collect_relation_token_matches"]
     collect_summary_matches = named["collect_summary_matches"]
     collect_temporal_matches = named["collect_temporal_matches"]
+    find_facts_like = named["find_facts_like"]
+    list_session_scope_priority_like = named["list_session_scope_priority_like"]
+    negation_fts_search = named["negation_fts_search"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -3810,6 +3819,9 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     collect_relation_token_matches_vectors = _scoped_term_list_vectors(catalog, collect_relation_token_matches)
     collect_summary_matches_vectors = _scoped_term_list_vectors(catalog, collect_summary_matches)
     collect_temporal_matches_vectors = _scoped_term_list_vectors(catalog, collect_temporal_matches)
+    find_facts_like_vectors = _scoped_term_list_vectors(catalog, find_facts_like)
+    list_session_scope_priority_like_vectors = _scoped_term_list_vectors(catalog, list_session_scope_priority_like)
+    negation_fts_search_vectors = _scoped_term_list_vectors(catalog, negation_fts_search)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -6635,7 +6647,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (count_and_max_updated_ok + b"\0").hex()},
                 ],
             },
-        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, {
+        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, {
             "family": entity_edge_prune_orphans["family"],
             "id": entity_edge_prune_orphans["id"],
             "name": entity_edge_prune_orphans["name"],
@@ -8856,6 +8868,9 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     collect_relation_token_matches = named["collect_relation_token_matches"]
     collect_summary_matches = named["collect_summary_matches"]
     collect_temporal_matches = named["collect_temporal_matches"]
+    find_facts_like = named["find_facts_like"]
+    list_session_scope_priority_like = named["list_session_scope_priority_like"]
+    negation_fts_search = named["negation_fts_search"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -9642,6 +9657,9 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         *_scoped_term_list_constants(collect_relation_token_matches),
         *_scoped_term_list_constants(collect_summary_matches),
         *_scoped_term_list_constants(collect_temporal_matches),
+        *_scoped_term_list_constants(find_facts_like),
+        *_scoped_term_list_constants(list_session_scope_priority_like),
+        *_scoped_term_list_constants(negation_fts_search),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -14044,7 +14062,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
 }}
 
 {_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
-{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}
+{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -16579,6 +16597,24 @@ extern "C"
        const char *project, uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_find_facts_like_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *term, uint32_t limit, uint32_t scope_flags, const char *workspace,
+       const char *project, uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_list_session_scope_priority_like_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *term, uint32_t limit, uint32_t scope_flags, const char *workspace,
+       const char *project, uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_negation_fts_search_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *term, uint32_t limit, uint32_t scope_flags, const char *workspace,
+       const char *project, uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -18213,6 +18249,99 @@ aimee_module_call_result_t aimee_db2_collect_temporal_matches_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_find_facts_like_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                               uint64_t deadline_ns, const char *term, uint32_t limit,
+                               uint32_t scope_flags, const char *workspace, const char *project,
+                               uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+                               aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !term || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FIND_FACTS_LIKE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FIND_FACTS_LIKE_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_find_facts_like_request_encode(term, limit, scope_flags, workspace, project,
+                                                request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FIND_FACTS_LIKE, AIMEE_DB2_STAGE_FIND_FACTS_LIKE,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_find_facts_like_reply_decode(response, response_len, memory_ids, capacity,
+                                              count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_list_session_scope_priority_like_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *term, uint32_t limit, uint32_t scope_flags, const char *workspace,
+    const char *project, uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !term || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_list_session_scope_priority_like_request_encode(
+           term, limit, scope_flags, workspace, project, request, sizeof(request), &request_len) !=
+       0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY_LIKE,
+            AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY_LIKE, trace_id, deadline_ns, request,
+            request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_list_session_scope_priority_like_reply_decode(response, response_len, memory_ids,
+                                                               capacity, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_negation_fts_search_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *term, uint32_t limit,
+                                   uint32_t scope_flags, const char *workspace, const char *project,
+                                   uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !term || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_NEGATION_FTS_SEARCH_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_NEGATION_FTS_SEARCH_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_negation_fts_search_request_encode(term, limit, scope_flags, workspace, project,
+                                                    request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_NEGATION_FTS_SEARCH, AIMEE_DB2_STAGE_NEGATION_FTS_SEARCH,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_negation_fts_search_reply_decode(response, response_len, memory_ids, capacity,
+                                                  count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -19386,6 +19515,9 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     collect_relation_token_matches = named["collect_relation_token_matches"]
     collect_summary_matches = named["collect_summary_matches"]
     collect_temporal_matches = named["collect_temporal_matches"]
+    find_facts_like = named["find_facts_like"]
+    list_session_scope_priority_like = named["list_session_scope_priority_like"]
+    negation_fts_search = named["negation_fts_search"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -19742,7 +19874,7 @@ const StageCountAndMaxUpdated = FamilyMemory
 const OperationCountAndMaxUpdated uint32 = {count_and_max_updated['id']}
 const CountAndMaxUpdatedCountMax uint32 = {count_and_max_updated['reply']['fields'][0]['maximum']}
 const CountAndMaxUpdatedStampMax = {count_and_max_updated['reply']['fields'][1]['maximum_bytes']}
-{_scoped_id_list_go_constants(top_l2_facts)}{_scoped_id_list_go_constants(list_session_scope_priority)}{_scoped_term_list_go_constants(collect_alias_matches)}{_scoped_term_list_go_constants(collect_entity_matches)}{_scoped_term_list_go_constants(collect_event_frame_matches)}{_scoped_term_list_go_constants(collect_relation_token_matches)}{_scoped_term_list_go_constants(collect_summary_matches)}{_scoped_term_list_go_constants(collect_temporal_matches)}const EventEntityEdgePruneOrphans = EventIndex
+{_scoped_id_list_go_constants(top_l2_facts)}{_scoped_id_list_go_constants(list_session_scope_priority)}{_scoped_term_list_go_constants(collect_alias_matches)}{_scoped_term_list_go_constants(collect_entity_matches)}{_scoped_term_list_go_constants(collect_event_frame_matches)}{_scoped_term_list_go_constants(collect_relation_token_matches)}{_scoped_term_list_go_constants(collect_summary_matches)}{_scoped_term_list_go_constants(collect_temporal_matches)}{_scoped_term_list_go_constants(find_facts_like)}{_scoped_term_list_go_constants(list_session_scope_priority_like)}{_scoped_term_list_go_constants(negation_fts_search)}const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = {entity_edge_prune_orphans['id']}
 const EntityEdgePruneOrphansCountMax uint32 = {entity_edge_prune_orphans['reply']['field']['maximum']}
@@ -21440,7 +21572,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)

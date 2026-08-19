@@ -1884,6 +1884,14 @@
       "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
     },
     {
+      "symbol": "db2_memory_find_facts_like",
+      "signature_sha256": "e8c8fcd777337efcf964e3bb39a9a55b1e9300eb3abf4f9c4a8f26dfc46dfd77",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.find_facts_like operation replaces the fact search. One term is matched case-insensitively against the key, the content and the use cases, and the five-way ranking that decides which of those wins is DB2's; a caller given a plain list could not reconstruct it. It returns identifiers for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+    },
+    {
       "symbol": "db2_memory_find_id_by_key_kind",
       "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
       "disposition": "wire-operation",
@@ -2076,6 +2084,14 @@
       "reason": "The typed memory.list_session_scope_priority operation replaces the row reader. Two decisions are on the record with it. The ordering is DB2's, computed against DB2's own scope tables, so it stays behind the handler. And the scope the ordering depends on now travels in the request: the backend reads it from a thread-local that db2_memory_scope_context_set writes, which does not follow a call into another process."
     },
     {
+      "symbol": "db2_memory_list_session_scope_priority_like",
+      "signature_sha256": "f98db4067f01052772b105a9b369b84a48708c5a91e7444c98a4f1acf971e0e3",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.list_session_scope_priority_like operation replaces the filtered variant of the priority list. The term is bound as a SQL LIKE pattern rather than a literal, so a wildcard the caller writes is significant and a caller sending a literal percent sign gets a wider result than it asked for -- that is on the record because the wire cannot show it. Identifiers cross and the scope travels, as for the unfiltered variant."
+    },
+    {
       "symbol": "db2_memory_lookup_primary_entity",
       "signature_sha256": "bb2933e3d46abd9dade0a0ffdf3abd166ff7ff30133ba3e828e4a173297ff39f",
       "disposition": "private-db2",
@@ -2090,6 +2106,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
+    },
+    {
+      "symbol": "db2_memory_negation_fts_search",
+      "signature_sha256": "2801882c88b2d3a42e9ebb09bc7c198e4d60b032260e9a7e89e1c855354164f0",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.negation_fts_search operation replaces the negation search. The tokens cross; joining them with OR and building the tsquery is the handler's, and so is the 1600-byte bound on the joined query, which truncates silently once the tokens exceed it. websearch_to_tsquery is used precisely because it does not syntax-error on arbitrary input. Identifiers cross and the scope travels, as for the other scoped searches."
     },
     {
       "symbol": "db2_memory_negation_tokens_update",

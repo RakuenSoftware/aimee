@@ -153,6 +153,41 @@ production_scoped_term_ids(int (*read)(const char *term, int limit, memory_t *ou
    return listed;
 }
 
+static int production_find_facts_like(const char *term, int limit, int scope_active,
+                                      int include_all, const char *workspace, const char *project,
+                                      int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_find_facts_like, term, limit, scope_active,
+                                     include_all, workspace, project, out, max);
+}
+
+/* This one takes no separate limit: its statement binds the caller's buffer
+ * size as the LIMIT, so the wire limit arrives as the buffer size and the two
+ * are necessarily the same number. */
+static int list_session_scope_priority_like_read(const char *pattern, int limit, memory_t *out,
+                                                 int max)
+{
+   (void)limit;
+   return db2_memory_list_session_scope_priority_like(pattern, out, max);
+}
+
+static int production_list_session_scope_priority_like(const char *term, int limit,
+                                                       int scope_active, int include_all,
+                                                       const char *workspace, const char *project,
+                                                       int64_t *out, int max)
+{
+   return production_scoped_term_ids(list_session_scope_priority_like_read, term, limit,
+                                     scope_active, include_all, workspace, project, out, max);
+}
+
+static int production_negation_fts_search(const char *term, int limit, int scope_active,
+                                          int include_all, const char *workspace,
+                                          const char *project, int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_negation_fts_search, term, limit, scope_active,
+                                     include_all, workspace, project, out, max);
+}
+
 static int production_collect_alias_matches(const char *term, int limit, int scope_active,
                                             int include_all, const char *workspace,
                                             const char *project, int64_t *out, int max)
@@ -435,6 +470,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .collect_relation_token_matches = production_collect_relation_token_matches,
        .collect_summary_matches = production_collect_summary_matches,
        .collect_temporal_matches = production_collect_temporal_matches,
+       .find_facts_like = production_find_facts_like,
+       .list_session_scope_priority_like = production_list_session_scope_priority_like,
+       .negation_fts_search = production_negation_fts_search,
        .count_memories = db2_memory_health_count_memories,
        .count_recent_conflicts = db2_memory_health_count_recent_conflicts,
        .health_record = db2_memory_health_record,
@@ -944,6 +982,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          {
             read = backend ? backend->collect_temporal_matches : NULL;
             encode = aimee_db2_collect_temporal_matches_reply_encode;
+         }
+         if (!encode && aimee_db2_find_facts_like_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->find_facts_like : NULL;
+            encode = aimee_db2_find_facts_like_reply_encode;
+         }
+         if (!encode && aimee_db2_list_session_scope_priority_like_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->list_session_scope_priority_like : NULL;
+            encode = aimee_db2_list_session_scope_priority_like_reply_encode;
+         }
+         if (!encode && aimee_db2_negation_fts_search_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->negation_fts_search : NULL;
+            encode = aimee_db2_negation_fts_search_reply_encode;
          }
          if (encode)
          {

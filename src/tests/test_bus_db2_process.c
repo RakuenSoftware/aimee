@@ -325,6 +325,27 @@ int main(int argc, char **argv)
               NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(probe_count == 0);
 
+   probe_count = 99;
+   assert(aimee_db2_find_facts_like_call(call_client, &client, 9050, 0, "replay-term", 4u, 1u,
+                                         "replay-workspace", "replay-project", probe_ids,
+                                         AIMEE_DB2_FIND_FACTS_LIKE_MAX, &probe_count, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_list_session_scope_priority_like_call(
+              call_client, &client, 9051, 0, "replay-term", 4u, 1u, "replay-workspace",
+              "replay-project", probe_ids, AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_MAX,
+              &probe_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_negation_fts_search_call(call_client, &client, 9052, 0, "replay-term", 4u, 1u,
+                                             "replay-workspace", "replay-project", probe_ids,
+                                             AIMEE_DB2_NEGATION_FTS_SEARCH_MAX, &probe_count, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

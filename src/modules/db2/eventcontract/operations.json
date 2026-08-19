@@ -1711,6 +1711,111 @@
       }
     },
     {
+      "family": "memory",
+      "id": 51,
+      "name": "find_facts_like",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Canonical memory rows and the scope tables the match is ranked against are both relational DB2 state, so the ranking is DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_find_facts_like"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the key, the content or the use cases anywhere within them, case-insensitively",
+                   "ranking": "session-scope rank, then exact key, exact content, exact use cases, key prefix, anything else; then tier (L3, L2, L1, other), then use_count, then confidence"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 52,
+      "name": "list_session_scope_priority_like",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Session-scope priority ranks canonical memory rows against DB2's own scope tables, so the ordering is DB2 authority; identifiers cross in that order and the caller reattaches content.",
+      "c_symbols": ["db2_memory_list_session_scope_priority_like"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the key or the content against the term used as a SQL LIKE pattern, so any wildcard the caller writes is significant",
+                   "ranking": "session-scope rank, then kind (workflow, decision, other), then tier (L3, L2, other), then use_count"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 53,
+      "name": "negation_fts_search",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The negation text index is a relational DB2 column on the canonical rows, so the search stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_negation_fts_search"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the whitespace-separated negation tokens, which the handler joins with OR into one websearch_to_tsquery over the negation index",
+                   "ranking": "session-scope rank, then text-search rank, then use_count, then confidence"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

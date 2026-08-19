@@ -16457,9 +16457,15 @@
           "line": 43
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.find_facts_like operation replaces the fact search. One term is matched case-insensitively against the key, the content and the use cases, and the five-way ranking that decides which of those wins is DB2's; a caller given a plain list could not reconstruct it. It returns identifiers for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+      },
       "signature": "int db2_memory_find_facts_like ( const char * query , int limit , memory_t * out , int max )",
       "signature_sha256": "e8c8fcd777337efcf964e3bb39a9a55b1e9300eb3abf4f9c4a8f26dfc46dfd77",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_find_facts_like"
     },
     {
@@ -17596,9 +17602,15 @@
           "line": 779
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.list_session_scope_priority_like operation replaces the filtered variant of the priority list. The term is bound as a SQL LIKE pattern rather than a literal, so a wildcard the caller writes is significant and a caller sending a literal percent sign gets a wider result than it asked for -- that is on the record because the wire cannot show it. Identifiers cross and the scope travels, as for the unfiltered variant."
+      },
       "signature": "int db2_memory_list_session_scope_priority_like ( const char * pattern , memory_t * out , int max )",
       "signature_sha256": "f98db4067f01052772b105a9b369b84a48708c5a91e7444c98a4f1acf971e0e3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_session_scope_priority_like"
     },
     {
@@ -17771,9 +17783,15 @@
           "line": 48
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.negation_fts_search operation replaces the negation search. The tokens cross; joining them with OR and building the tsquery is the handler's, and so is the 1600-byte bound on the joined query, which truncates silently once the tokens exceed it. websearch_to_tsquery is used precisely because it does not syntax-error on arbitrary input. Identifiers cross and the scope travels, as for the other scoped searches."
+      },
       "signature": "int db2_memory_negation_fts_search ( const char * neg_tokens , int limit , memory_t * out , int max )",
       "signature_sha256": "2801882c88b2d3a42e9ebb09bc7c198e4d60b032260e9a7e89e1c855354164f0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_negation_fts_search"
     },
     {
@@ -26394,15 +26412,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f5c4e35e095c6e21d09d2d1d688141a1ddc79cbf2a27e4d98c122f35a11cef3c",
+  "fingerprint": "1290b4417cd3592b4d504f3a9ceca33d91032ba330b486df33b5ce1756642a1e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 563,
+    "audit_pending": 560,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 395
+    "reviewed": 398
   }
 }

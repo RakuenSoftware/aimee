@@ -65,6 +65,13 @@ typedef struct
    int (*collect_temporal_matches)(const char *term, int limit, int scope_active, int include_all,
                                    const char *workspace, const char *project, int64_t *out,
                                    int max);
+   int (*find_facts_like)(const char *term, int limit, int scope_active, int include_all,
+                          const char *workspace, const char *project, int64_t *out, int max);
+   int (*list_session_scope_priority_like)(const char *term, int limit, int scope_active,
+                                           int include_all, const char *workspace,
+                                           const char *project, int64_t *out, int max);
+   int (*negation_fts_search)(const char *term, int limit, int scope_active, int include_all,
+                              const char *workspace, const char *project, int64_t *out, int max);
    int (*count_memories)(void);
    int (*count_recent_conflicts)(int days);
    void (*health_record)(int total_memories, int contradictions_detected, int promotions,
@@ -268,7 +275,7 @@ static int effectiveness_stats_calls;
 static int list_l2_memory_ids_calls;
 static int top_l2_facts_calls;
 static int list_session_scope_priority_calls;
-static int term_probe_calls[6];
+static int term_probe_calls[9];
 static char term_probe_term_seen[64];
 static int term_probe_limit_seen;
 static int term_probe_active_seen;
@@ -558,6 +565,25 @@ static int term_probe_impl(int which, const char *term, int limit, int scope_act
    return listed;
 }
 
+static int find_facts_like(const char *term, int limit, int scope_active, int include_all,
+                           const char *workspace, const char *project, int64_t *out, int max)
+{
+   return term_probe_impl(6, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int list_session_scope_priority_like(const char *term, int limit, int scope_active,
+                                            int include_all, const char *workspace,
+                                            const char *project, int64_t *out, int max)
+{
+   return term_probe_impl(7, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int negation_fts_search(const char *term, int limit, int scope_active, int include_all,
+                               const char *workspace, const char *project, int64_t *out, int max)
+{
+   return term_probe_impl(8, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
 static int collect_alias_matches(const char *term, int limit, int scope_active, int include_all,
                                  const char *workspace, const char *project, int64_t *out, int max)
 {
@@ -729,6 +755,34 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    (void)promote_confidence;
    (void)out;
    return -1;
+}
+
+int db2_memory_find_facts_like(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+/* Three arguments, not four: this one binds the caller's buffer size as its
+ * own LIMIT rather than taking a separate one. */
+int db2_memory_list_session_scope_priority_like(const char *pattern, void *out, int max)
+{
+   (void)pattern;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_negation_fts_search(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
 }
 
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
@@ -2001,6 +2055,9 @@ int main(void)
        .collect_relation_token_matches = collect_relation_token_matches,
        .collect_summary_matches = collect_summary_matches,
        .collect_temporal_matches = collect_temporal_matches,
+       .find_facts_like = find_facts_like,
+       .list_session_scope_priority_like = list_session_scope_priority_like,
+       .negation_fts_search = negation_fts_search,
        .count_memories = count_memories,
        .count_recent_conflicts = count_recent_conflicts,
        .health_record = health_record,
@@ -2278,6 +2335,33 @@ int main(void)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(probe_count == 2 && probe_ids[0] == 600 && probe_ids[1] == 601 &&
           term_probe_calls[5] == 1 && term_probe_limit_seen == 7 && term_probe_active_seen == 1 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_find_facts_like_call(call_client, &client, 7070, 0, "needle", 2u, 1u,
+                                         "probe-workspace", "probe-project", probe_ids,
+                                         AIMEE_DB2_FIND_FACTS_LIKE_MAX, &probe_count, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 700 && probe_ids[1] == 701 &&
+          term_probe_calls[6] == 1 && term_probe_limit_seen == 2 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_list_session_scope_priority_like_call(
+              call_client, &client, 7071, 0, "needle", 3u, 1u, "probe-workspace", "probe-project",
+              probe_ids, AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_MAX, &probe_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 800 && probe_ids[1] == 801 &&
+          term_probe_calls[7] == 1 && term_probe_limit_seen == 3 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_negation_fts_search_call(call_client, &client, 7072, 0, "needle", 4u, 1u,
+                                             "probe-workspace", "probe-project", probe_ids,
+                                             AIMEE_DB2_NEGATION_FTS_SEARCH_MAX, &probe_count, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 900 && probe_ids[1] == 901 &&
+          term_probe_calls[8] == 1 && term_probe_limit_seen == 4 &&
           strcmp(term_probe_term_seen, "needle") == 0);
 
    /* An empty term is not a wildcard: every one of these statements would match

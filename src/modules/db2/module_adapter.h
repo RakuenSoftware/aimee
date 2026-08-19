@@ -51,6 +51,13 @@ typedef struct
    int (*collect_temporal_matches)(const char *term, int limit, int scope_active, int include_all,
                                    const char *workspace, const char *project, int64_t *out,
                                    int max);
+   int (*find_facts_like)(const char *term, int limit, int scope_active, int include_all,
+                          const char *workspace, const char *project, int64_t *out, int max);
+   int (*list_session_scope_priority_like)(const char *term, int limit, int scope_active,
+                                           int include_all, const char *workspace,
+                                           const char *project, int64_t *out, int max);
+   int (*negation_fts_search)(const char *term, int limit, int scope_active, int include_all,
+                              const char *workspace, const char *project, int64_t *out, int max);
    /* health_record composes these three: DB2 owns the corpus total and the
     * fixed conflict window, so only the cycle counters cross the bus. */
    int (*count_memories)(void);

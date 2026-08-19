@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "de57df0da005b0d4cf533d01d7c9762e2f399199a66960253ff590de44607c96"
+const ContractSHA256 = "7c43066fbfd6e173e17ca7719579c89f27cb71025d9bb842786b2c85d843f068"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -420,6 +420,45 @@ const CollectTemporalMatchesProjectMax = 511
 const CollectTemporalMatchesMax uint32 = 64
 const CollectTemporalMatchesIDMin uint64 = 1
 const CollectTemporalMatchesIDMax uint64 = 9223372036854775807
+const EventFindFactsLike = EventMemory
+const StageFindFactsLike = FamilyMemory
+const OperationFindFactsLike uint32 = 51
+const FindFactsLikeLimitMin uint32 = 1
+const FindFactsLikeLimitMax uint32 = 64
+const FindFactsLikeScopeFlagsMax uint32 = 3
+const FindFactsLikeTermMin = 1
+const FindFactsLikeTermMax = 511
+const FindFactsLikeWorkspaceMax = 511
+const FindFactsLikeProjectMax = 511
+const FindFactsLikeMax uint32 = 64
+const FindFactsLikeIDMin uint64 = 1
+const FindFactsLikeIDMax uint64 = 9223372036854775807
+const EventListSessionScopePriorityLike = EventMemory
+const StageListSessionScopePriorityLike = FamilyMemory
+const OperationListSessionScopePriorityLike uint32 = 52
+const ListSessionScopePriorityLikeLimitMin uint32 = 1
+const ListSessionScopePriorityLikeLimitMax uint32 = 64
+const ListSessionScopePriorityLikeScopeFlagsMax uint32 = 3
+const ListSessionScopePriorityLikeTermMin = 1
+const ListSessionScopePriorityLikeTermMax = 511
+const ListSessionScopePriorityLikeWorkspaceMax = 511
+const ListSessionScopePriorityLikeProjectMax = 511
+const ListSessionScopePriorityLikeMax uint32 = 64
+const ListSessionScopePriorityLikeIDMin uint64 = 1
+const ListSessionScopePriorityLikeIDMax uint64 = 9223372036854775807
+const EventNegationFtsSearch = EventMemory
+const StageNegationFtsSearch = FamilyMemory
+const OperationNegationFtsSearch uint32 = 53
+const NegationFtsSearchLimitMin uint32 = 1
+const NegationFtsSearchLimitMax uint32 = 64
+const NegationFtsSearchScopeFlagsMax uint32 = 3
+const NegationFtsSearchTermMin = 1
+const NegationFtsSearchTermMax = 511
+const NegationFtsSearchWorkspaceMax = 511
+const NegationFtsSearchProjectMax = 511
+const NegationFtsSearchMax uint32 = 64
+const NegationFtsSearchIDMin uint64 = 1
+const NegationFtsSearchIDMax uint64 = 9223372036854775807
 const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = 1
@@ -2967,6 +3006,333 @@ func DecodeCollectTemporalMatchesReply(reply []byte) ([]uint64, error) {
 	for index := range memoryIDs {
 		id := binary.LittleEndian.Uint64(payload[4+index*8:])
 		if id < CollectTemporalMatchesIDMin || id > CollectTemporalMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeFindFactsLikeRequest carries the term, the limit and the session scope.
+func EncodeFindFactsLikeRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < FindFactsLikeLimitMin || limit > FindFactsLikeLimitMax || scopeFlags > FindFactsLikeScopeFlagsMax ||
+		len(term) < FindFactsLikeTermMin || len(term) > FindFactsLikeTermMax ||
+		len(workspace) > FindFactsLikeWorkspaceMax || len(project) > FindFactsLikeProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationFindFactsLike, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeFindFactsLikeRequest walks the three length prefixes rather than trusting them.
+func DecodeFindFactsLikeRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFindFactsLike || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < FindFactsLikeLimitMin || limit > FindFactsLikeLimitMax || scopeFlags > FindFactsLikeScopeFlagsMax ||
+		termLen < FindFactsLikeTermMin || termLen > FindFactsLikeTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > FindFactsLikeWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > FindFactsLikeProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeFindFactsLikeReply emits the counted, bounded identifier list.
+func EncodeFindFactsLikeReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > FindFactsLikeMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < FindFactsLikeIDMin || id > FindFactsLikeIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationFindFactsLike, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeFindFactsLikeReply validates the operation and every bounded identifier.
+func DecodeFindFactsLikeReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationFindFactsLike || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > FindFactsLikeMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < FindFactsLikeIDMin || id > FindFactsLikeIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeListSessionScopePriorityLikeRequest carries the term, the limit and the session scope.
+func EncodeListSessionScopePriorityLikeRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < ListSessionScopePriorityLikeLimitMin || limit > ListSessionScopePriorityLikeLimitMax || scopeFlags > ListSessionScopePriorityLikeScopeFlagsMax ||
+		len(term) < ListSessionScopePriorityLikeTermMin || len(term) > ListSessionScopePriorityLikeTermMax ||
+		len(workspace) > ListSessionScopePriorityLikeWorkspaceMax || len(project) > ListSessionScopePriorityLikeProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationListSessionScopePriorityLike, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeListSessionScopePriorityLikeRequest walks the three length prefixes rather than trusting them.
+func DecodeListSessionScopePriorityLikeRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationListSessionScopePriorityLike || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < ListSessionScopePriorityLikeLimitMin || limit > ListSessionScopePriorityLikeLimitMax || scopeFlags > ListSessionScopePriorityLikeScopeFlagsMax ||
+		termLen < ListSessionScopePriorityLikeTermMin || termLen > ListSessionScopePriorityLikeTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > ListSessionScopePriorityLikeWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > ListSessionScopePriorityLikeProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeListSessionScopePriorityLikeReply emits the counted, bounded identifier list.
+func EncodeListSessionScopePriorityLikeReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > ListSessionScopePriorityLikeMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < ListSessionScopePriorityLikeIDMin || id > ListSessionScopePriorityLikeIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationListSessionScopePriorityLike, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeListSessionScopePriorityLikeReply validates the operation and every bounded identifier.
+func DecodeListSessionScopePriorityLikeReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationListSessionScopePriorityLike || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > ListSessionScopePriorityLikeMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < ListSessionScopePriorityLikeIDMin || id > ListSessionScopePriorityLikeIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeNegationFtsSearchRequest carries the term, the limit and the session scope.
+func EncodeNegationFtsSearchRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < NegationFtsSearchLimitMin || limit > NegationFtsSearchLimitMax || scopeFlags > NegationFtsSearchScopeFlagsMax ||
+		len(term) < NegationFtsSearchTermMin || len(term) > NegationFtsSearchTermMax ||
+		len(workspace) > NegationFtsSearchWorkspaceMax || len(project) > NegationFtsSearchProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationNegationFtsSearch, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeNegationFtsSearchRequest walks the three length prefixes rather than trusting them.
+func DecodeNegationFtsSearchRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationNegationFtsSearch || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < NegationFtsSearchLimitMin || limit > NegationFtsSearchLimitMax || scopeFlags > NegationFtsSearchScopeFlagsMax ||
+		termLen < NegationFtsSearchTermMin || termLen > NegationFtsSearchTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > NegationFtsSearchWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > NegationFtsSearchProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeNegationFtsSearchReply emits the counted, bounded identifier list.
+func EncodeNegationFtsSearchReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > NegationFtsSearchMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < NegationFtsSearchIDMin || id > NegationFtsSearchIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationNegationFtsSearch, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeNegationFtsSearchReply validates the operation and every bounded identifier.
+func DecodeNegationFtsSearchReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationNegationFtsSearch || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > NegationFtsSearchMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < NegationFtsSearchIDMin || id > NegationFtsSearchIDMax {
 			return nil, ErrMalformedEnvelope
 		}
 		memoryIDs[index] = id

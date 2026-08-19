@@ -1355,6 +1355,34 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    return -1;
 }
 
+int db2_memory_find_facts_like(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+/* Three arguments, not four: this one binds the caller's buffer size as its
+ * own LIMIT rather than taking a separate one. */
+int db2_memory_list_session_scope_priority_like(const char *pattern, void *out, int max)
+{
+   (void)pattern;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_negation_fts_search(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
 {
    (void)term;

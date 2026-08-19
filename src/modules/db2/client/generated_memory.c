@@ -1376,3 +1376,96 @@ aimee_module_call_result_t aimee_db2_collect_temporal_matches_call(
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_find_facts_like_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                               uint64_t deadline_ns, const char *term, uint32_t limit,
+                               uint32_t scope_flags, const char *workspace, const char *project,
+                               uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+                               aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !term || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FIND_FACTS_LIKE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FIND_FACTS_LIKE_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_find_facts_like_request_encode(term, limit, scope_flags, workspace, project,
+                                                request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FIND_FACTS_LIKE, AIMEE_DB2_STAGE_FIND_FACTS_LIKE,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_find_facts_like_reply_decode(response, response_len, memory_ids, capacity,
+                                              count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_list_session_scope_priority_like_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *term, uint32_t limit, uint32_t scope_flags, const char *workspace,
+    const char *project, uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !term || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_list_session_scope_priority_like_request_encode(
+           term, limit, scope_flags, workspace, project, request, sizeof(request), &request_len) !=
+       0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY_LIKE,
+            AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY_LIKE, trace_id, deadline_ns, request,
+            request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_list_session_scope_priority_like_reply_decode(response, response_len, memory_ids,
+                                                               capacity, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_negation_fts_search_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *term, uint32_t limit,
+                                   uint32_t scope_flags, const char *workspace, const char *project,
+                                   uint64_t *memory_ids, uint32_t capacity, uint32_t *count,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !term || !workspace || !project || (capacity > 0u && !memory_ids))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_NEGATION_FTS_SEARCH_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_NEGATION_FTS_SEARCH_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_negation_fts_search_request_encode(term, limit, scope_flags, workspace, project,
+                                                    request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_NEGATION_FTS_SEARCH, AIMEE_DB2_STAGE_NEGATION_FTS_SEARCH,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_negation_fts_search_reply_decode(response, response_len, memory_ids, capacity,
+                                                  count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
