@@ -489,6 +489,16 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
          return -1;
       return pool[selected];
    }
+   if (g_route_selection_authority)
+   {
+      /* Same rule as agent_pick_balanced: an authority that lost its provider
+       * refuses rather than reverting to the built-in random pick. */
+      aimee_log(LOG_ERROR, "routing",
+                "selection authority declared but no provider is installed; refusing to pick "
+                "among %d role candidates",
+                pool_n);
+      return -1;
+   }
    return pool[delegate_role_rand() % (unsigned)pool_n];
 }
 

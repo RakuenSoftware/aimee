@@ -540,8 +540,11 @@ static void test_route_authority_refuses_without_provider(void)
    agent_set_route_selection_provider(test_route_selector);
    agent_set_route_selection_provider(NULL);
    assert(agent_route(&cfg, "review") == NULL);
+   /* The role picker is the second seam with the same shape and must refuse too. */
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
    agent_reset_route_selection_authority();
    assert(agent_route(&cfg, "review") != NULL);
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) != -1);
 }
 
 static void test_agent_route_selection_provider(void)
