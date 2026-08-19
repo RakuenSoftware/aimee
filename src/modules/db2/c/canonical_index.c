@@ -1521,6 +1521,11 @@ int canonical_index_scan_files(const char *name, const char *root_label,
 
 int canonical_index_list_projects(project_info_t *out, int max)
 {
+   /* Guard the arguments the way db2_code_index_project_list does. This runs
+    * the same statement and fills the same rows, and without the check a null
+    * destination is written through as soon as the first row arrives. */
+   if (!out || max <= 0)
+      return -1;
    void *conn = ci_conn();
    if (!conn)
       return -1;

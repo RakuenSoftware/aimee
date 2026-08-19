@@ -7,6 +7,16 @@ apart by nothing, and no test can see that they are the same. Both duplicate
 pairs found so far were exactly that, and both differed only in how they
 reported failure -- which decided which implementation the boundary binds.
 
+One pair it found is folded but not yet on the wire.
+canonical_index_list_projects and db2_code_index_project_list run the same
+statement and fill the same rows, and comparing them is what showed the
+canonical one was missing the argument guard its sibling had. Their operation is
+still pending, and not for want of a decision: a project row carries a path of
+up to four kilobytes and the number of current projects has no bound, so a
+listing does not fit a reply the generated client can hold on a caller's stack,
+and there is no single-project read to reattach a bare name through. It needs a
+reply path the module does not have yet.
+
 Run before reviewing a declaration:
 
     python3 scripts/db2_duplicate_sql.py
