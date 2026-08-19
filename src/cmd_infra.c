@@ -960,7 +960,6 @@ static void session_subcmd_list(app_ctx_t *ctx, int argc, char **argv)
    (void)argv;
 
    {
-      db1_init(config_db1_path());
    }
 
    db1_session_state_summary_t rows[128];
@@ -1016,8 +1015,6 @@ static void session_subcmd_clean(app_ctx_t *ctx, int argc, char **argv)
 
    int threshold = (config_worktree_stale_secs() > 0) ? config_worktree_stale_secs()
                                                       : CONFIG_DEFAULT_STALE_SESSION_SECS;
-
-   db1_init(config_db1_path());
 
    db1_session_state_summary_t rows[256];
    int total = db1_session_state_list(rows, 256);

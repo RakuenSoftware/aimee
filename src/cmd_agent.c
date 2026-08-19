@@ -733,7 +733,7 @@ static void ag_parallel(app_ctx_t *ctx, int argc, char **argv)
 
 static void ag_stats(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("agent stats: could not initialize DB1");
    const char *name = (argc >= 1) ? argv[0] : NULL;
    agent_stats_t stats[MAX_AGENTS];
@@ -1391,7 +1391,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(argv[0], "list") == 0)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans list: could not initialize DB1");
       plan_t plans[20];
       int count = db1_execution_plan_list(plans, 20);
@@ -1404,7 +1404,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "show") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans show: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1442,7 +1442,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "verify") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans verify: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1458,7 +1458,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "replay") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans replay: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
