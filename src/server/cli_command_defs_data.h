@@ -351,4 +351,34 @@
      "  batch            Export trajectories in batch\n"},
     {"episode", "Delegation episodes", AIMEE_CMD_TIER_ADVANCED, 0,
      "  list             List recent delegation episodes\n"},
+
+    /* These six route and work, and `aimee help <cmd>` answered "Unknown
+       command" for every one of them. The coverage gate could not see them: it
+       required the dispatch row's VERB to be a quoted string, and each of these
+       is either a bare group whose verb is NULL (`aimee use`, `aimee presence`)
+       or an alias of a subcommand. So the gate exempted precisely the commands
+       an operator types first -- a bare group name -- while reading as coverage
+       of the whole surface. */
+
+    {"use", "Select the active model provider", AIMEE_CMD_TIER_CORE, 0,
+     "  <name>           Make <name> the active provider\n"
+     "  Same command as `aimee provider set`; both spellings route to\n"
+     "  provider.set, so `aimee use ollama` and `aimee provider set ollama`\n"
+     "  do the same thing.\n"},
+    {"presence", "Show who and what is currently active", AIMEE_CMD_TIER_CORE, 0,
+     "  --owner <who>    Limit the listing to one owner\n"},
+    {"primary", "Session's active primary agent", AIMEE_CMD_TIER_CORE, 0,
+     "  <name>           Set the session's primary agent\n"
+     "  --show           Print the current primary (also the default with no\n"
+     "                   argument)\n"
+     "  --clear          Clear the session's primary agent\n"},
+    {"verify", "Verify the working tree against its remote", AIMEE_CMD_TIER_ADMIN, 0,
+     "  Same command as `aimee git verify`; both spellings route to git.verify.\n"},
+    {"get-help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 0,
+     "  <topic>          Explain a topic -- work queue, delegation, memory,\n"
+     "                   git, build, conventions. The words are joined, so\n"
+     "                   `aimee get-help work queue` is one topic.\n"},
+    {"get_help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 0,
+     "  Underscore spelling of `aimee get-help`; both route to help.get.\n"},
+
     {NULL, NULL, 0, 0, NULL},

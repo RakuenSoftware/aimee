@@ -54,8 +54,17 @@ def cli_routes():
         raise SystemExit(f"check_command_surface_parity: no dispatch rows in {CLI}; "
                          "the extractor has drifted from the source")
     out = {}
-    for m in re.finditer(r'\{"([a-z0-9_]+)",\s*"([a-z0-9_]*)",\s*"([a-z0-9_.]+)"', body):
+    # The verb may contain HYPHENS ("sync-code", "blast-radius", "set-server")
+    # or be the bare token NULL for a group that is itself a command ("aimee
+    # use", "aimee presence", "aimee git"). A verb class of [a-z0-9_]* matched
+    # neither, so this gate silently skipped 15 methods -- it reported parity
+    # over a subset while reading as parity over the surface. That is the same
+    # failure the docstring above warns about, one level down: not an empty
+    # read, but a SHORT one, which no "did I see any rows?" check can catch.
+    row = re.compile(r'\{\s*"([a-z0-9_.-]+)"\s*,\s*(?:"([a-z0-9_.-]*)"|NULL)\s*,\s*"([a-z0-9_.]+)"')
+    for m in row.finditer(body):
         group, verb, method = m.groups()
+        verb = verb or ""  # NULL verb: the group itself is the command
         # A LIST, not an assignment. This was `out[method] = (group, verb)`,
         # last-writer-wins, so a method reachable under two group names
         # collapsed to one entry and this report could not see aliasing at all
