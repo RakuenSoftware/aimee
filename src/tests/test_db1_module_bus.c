@@ -34,6 +34,7 @@
 
 #include "cognify_jobs.h"
 #include "ensemble.h"
+#include "execution_trace.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -72,6 +73,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
     AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
     AIMEE_DB1_EVENT_GUARDRAIL_STATE,  AIMEE_DB1_EVENT_ENSEMBLE,
+    AIMEE_DB1_EVENT_WORKFLOW,
 };
 
 static pid_t g_module = -1;
@@ -895,6 +897,74 @@ static void test_an_ensemble_verdict_crosses_as_a_sentence(void)
    printf("  PASS: an ensemble verdict crosses as a sentence\n");
 }
 
+/* A trace row is mostly 4KB text fields, and the reads come back as three
+   different row shapes over the same table. The risk here is not the crossing
+   but the shapes: a detail read that quietly returned the recent-row columns
+   would still look like a populated struct. */
+static void test_execution_trace_rows_keep_their_shapes(void)
+{
+   db1_execution_trace_insert_row_t row;
+   memset(&row, 0, sizeof row);
+   row.plan_id = 42;
+   row.session_id = "sess-trace";
+   row.turn = 7;
+   row.direction = "outbound";
+   row.content = "the content of a turn";
+   row.tool_name = "git";
+   row.tool_args = "{\"command\":\"status\"}";
+   row.tool_result = "clean";
+   row.context_hash = "hash-abc";
+   must(db1_execution_trace_insert(&row) == 0, "inserted a trace row");
+
+   row.turn = 8;
+   row.direction = "inbound";
+   row.tool_name = "";
+   row.tool_args = "";
+   row.tool_result = "";
+   must(db1_execution_trace_insert(&row) == 0, "inserted a second row with empty tool columns");
+
+   must(db1_execution_trace_count_for_session("sess-trace") == 2,
+        "the count came back as the return value rather than as a status");
+   must(db1_execution_trace_count_for_session("no-such-session") == 0,
+        "and an unknown session counts zero rather than failing");
+
+   db1_execution_trace_recent_row_t recent[8];
+   memset(recent, 0, sizeof recent);
+   int n = db1_execution_trace_list_recent(recent, 8);
+   must(n == 2, "listed both rows into the caller's array");
+
+   db1_execution_trace_tool_call_t calls[8];
+   memset(calls, 0, sizeof calls);
+   int c = db1_execution_trace_list_tool_calls(calls, 8);
+   must(c >= 1, "the row carrying a tool call is a tool call");
+   int saw_args = 0;
+   for (int at = 0; at < c; at++)
+   {
+      if (strstr(calls[at].tool_args, "status") != NULL)
+         saw_args = 1;
+   }
+   must(saw_args, "and its arguments crossed intact");
+
+   db1_execution_trace_detail_t detail;
+   memset(&detail, 0, sizeof detail);
+   must(db1_execution_trace_get(recent[0].id, &detail) == 0, "read one row in full");
+   must(detail.plan_id == 42, "the detail read carries columns the recent row does not");
+   must(strcmp(detail.content, "the content of a turn") == 0, "including the content");
+   must(strcmp(detail.context_hash, "hash-abc") == 0, "and the context hash");
+
+   db1_execution_trace_mining_row_t mining[8];
+   memset(mining, 0, sizeof mining);
+   int m = db1_execution_trace_list_after_id(0, mining, 8);
+   /* One, not two: this read is for trace mining and takes only rows that
+      name a tool, so the second row's empty tool_name excludes it. */
+   must(m == 1, "the mining read takes only the row that named a tool");
+   must(mining[0].id > 0, "and a mining row carries its 64-bit id");
+   int after = db1_execution_trace_list_after_id(mining[m - 1].id, mining, 8);
+   must(after == 0, "nothing is after the last one");
+
+   printf("  PASS: execution trace rows keep their shapes\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -941,6 +1011,7 @@ int main(int argc, char **argv)
    test_a_row_that_carries_rows();
    test_guardrail_state_crosses_with_its_collections();
    test_an_ensemble_verdict_crosses_as_a_sentence();
+   test_execution_trace_rows_keep_their_shapes();
 
    stop_module();
    obs_bus_stop();

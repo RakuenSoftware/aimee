@@ -84,6 +84,7 @@
     "src/modules/db1/wfe_store.c",
     "src/modules/db1/windows.c",
     "src/modules/db1/wm.c",
+    "src/modules/db1/workflow_stage.c",
     "src/modules/db1/working_profile_local.c"
   ],
   "private_headers": [

@@ -699,6 +699,11 @@
           "id": 10,
           "name": "db1-ensemble",
           "event_kind": 11786
+        },
+        {
+          "id": 11,
+          "name": "db1-workflow",
+          "event_kind": 11787
         }
       ]
     }

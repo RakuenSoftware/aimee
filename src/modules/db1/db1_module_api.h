@@ -396,6 +396,19 @@
 #define AIMEE_DB1_OP_ENSEMBLE_LIST                    5u
 #define AIMEE_DB1_OP_ENSEMBLE_FIND_CURRENT_BY_CHANNEL 6u
 
+/* Family 11: the workflow engine's plans, traces, pipelines and bindings --
+ * everything the engine stores that no multi-call transaction spans. */
+
+#define AIMEE_DB1_EVENT_WORKFLOW 11787u
+#define AIMEE_DB1_STAGE_WORKFLOW 11u
+
+#define AIMEE_DB1_OP_EXECUTION_TRACE_INSERT            1u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_COUNT_FOR_SESSION 2u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_RECENT       3u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_GET               4u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_TOOL_CALLS   5u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_AFTER_ID     6u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry
