@@ -246,7 +246,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "mark_revisit_due",
                                                                 "ingest_queue_reset_running",
                                                                 "evidence_reembed_all",
-                                                                "curator_reembed_all") else
+                                                                "curator_reembed_all",
+                                                                "synth_reenqueue_all") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -2247,9 +2248,42 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("curator-reembed-all-reply",
                      "reply must contain one bounded u32 demoted artifact count")
+        elif key == ("maintenance", 7) and name == "synth_reenqueue_all" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # Deliberately the same reach and discard as evidence_reembed_all.
+            # The same version bump drives both, so pinning them identically is
+            # what stops the pair drifting apart unnoticed.
+            if operation["c_symbols"] != ["db2_synth_reenqueue_all"]:
+                fail("operation-c-symbols",
+                     "synth_reenqueue_all C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "synth_reenqueue_all results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "synth_reenqueue_all.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"row_scope": "all", "to_state": "pending",
+                                          "resets_attempts": True,
+                                          "clears_last_error": True}):
+                fail("synth-reenqueue-all-request",
+                     "request must carry no payload and fix the total reach and the discard")
+            # evidence_reembed_all carries this same policy object literally.
+            # Both are driven by the same version bump; keeping the two literals
+            # identical is what stops the pair drifting apart unnoticed.
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "synth_reenqueue_all.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "synth_reenqueue_all.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "reenqueued_ops", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("synth-reenqueue-all-reply",
+                     "reply must contain one bounded u32 reenqueued operation count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 63 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 64 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2268,9 +2302,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
-            "evidence_reembed_all", "curator_reembed_all"]:
+            "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the sixty-three supported operations exactly once")
+             "the partial generator requires the sixty-four supported operations exactly once")
     return catalog
 
 
@@ -2457,6 +2491,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     ingest_queue_reset_running = catalog["operations"][60]
     evidence_reembed_all = catalog["operations"][61]
     curator_reembed_all = catalog["operations"][62]
+    synth_reenqueue_all = catalog["operations"][63]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2880,6 +2915,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     curator_reembed_all_none = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(curator_reembed_all["id"]), 0, _put_u32(0),
+    )
+    synth_reenqueue_all_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(synth_reenqueue_all["id"]), 0, b"",
+    )
+    synth_reenqueue_all_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(synth_reenqueue_all["id"]), 0, _put_u32(13),
+    )
+    synth_reenqueue_all_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(synth_reenqueue_all["id"]), 0, _put_u32(0),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -5823,6 +5867,43 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (curator_reembed_all_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": synth_reenqueue_all["family"],
+            "id": synth_reenqueue_all["id"],
+            "name": synth_reenqueue_all["name"],
+            "request": {
+                "positive": synth_reenqueue_all_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(synth_reenqueue_all_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(synth_reenqueue_all_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": synth_reenqueue_all_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (synth_reenqueue_all_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "reenqueued_ops": 13,
+                     "hex": synth_reenqueue_all_ok.hex()},
+                    {"result": 0, "reenqueued_ops": 0,
+                     "hex": synth_reenqueue_all_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(synth_reenqueue_all_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(synth_reenqueue_all_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(synth_reenqueue_all["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (synth_reenqueue_all_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": synth_reenqueue_all_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (synth_reenqueue_all_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -5898,6 +5979,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     ingest_queue_reset_running = catalog["operations"][60]
     evidence_reembed_all = catalog["operations"][61]
     curator_reembed_all = catalog["operations"][62]
+    synth_reenqueue_all = catalog["operations"][63]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -6770,6 +6852,17 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{curator_reembed_all['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_CURATOR_REEMBED_ALL_MAX",
          f"{curator_reembed_all['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_SYNTH_REENQUEUE_ALL", "AIMEE_DB2_EVENT_MAINTENANCE"),
+        ("AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL", "AIMEE_DB2_FAMILY_MAINTENANCE"),
+        ("AIMEE_DB2_OPERATION_SYNTH_REENQUEUE_ALL", f"{synth_reenqueue_all['id']}u"),
+        ("AIMEE_DB2_SYNTH_REENQUEUE_ALL_REQUEST_LEN",
+         f"{synth_reenqueue_all['request']['encoded_size']}u"),
+        ("AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN",
+         f"{synth_reenqueue_all['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_SYNTH_REENQUEUE_ALL_ERROR_LEN",
+         f"{synth_reenqueue_all['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_SYNTH_REENQUEUE_ALL_MAX",
+         f"{synth_reenqueue_all['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -8709,6 +8802,60 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_synth_reenqueue_all_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_SYNTH_REENQUEUE_ALL, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_synth_reenqueue_all_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_SYNTH_REENQUEUE_ALL_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_SYNTH_REENQUEUE_ALL &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_synth_reenqueue_all_reply_encode(uint32_t reenqueued_ops,
+                                                             uint8_t *output, size_t capacity,
+                                                             uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || reenqueued_ops > AIMEE_DB2_SYNTH_REENQUEUE_ALL_MAX ||
+       capacity < AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_SYNTH_REENQUEUE_ALL,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, reenqueued_ops);
+   *output_len = AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_synth_reenqueue_all_reply_decode(const uint8_t *input,
+                                                             size_t input_len,
+                                                             uint32_t *reenqueued_ops)
+{{
+   if (reenqueued_ops)
+      *reenqueued_ops = 0u;
+   if (!reenqueued_ops)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SYNTH_REENQUEUE_ALL ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_SYNTH_REENQUEUE_ALL_MAX)
+      return -1;
+   *reenqueued_ops = decoded;
    return 0;
 }}
 
@@ -11943,6 +12090,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *demoted_artifacts, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_synth_reenqueue_all_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *reenqueued_ops, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -13462,6 +13613,31 @@ aimee_db2_curator_reembed_all_call(aimee_db2_call_fn call, void *call_context, u
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_synth_reenqueue_all_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint32_t *reenqueued_ops,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !reenqueued_ops)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *reenqueued_ops = 0u;
+   uint8_t request[AIMEE_DB2_SYNTH_REENQUEUE_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_synth_reenqueue_all_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SYNTH_REENQUEUE_ALL, AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_synth_reenqueue_all_reply_decode(response, response_len, reenqueued_ops) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -13764,6 +13940,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     ingest_queue_reset_running = catalog["operations"][60]
     evidence_reembed_all = catalog["operations"][61]
     curator_reembed_all = catalog["operations"][62]
+    synth_reenqueue_all = catalog["operations"][63]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -14130,6 +14307,10 @@ const EventCuratorReembedAll = EventMaintenance
 const StageCuratorReembedAll = FamilyMaintenance
 const OperationCuratorReembedAll uint32 = {curator_reembed_all['id']}
 const CuratorReembedAllMax uint32 = {curator_reembed_all['reply']['field']['maximum']}
+const EventSynthReenqueueAll = EventMaintenance
+const StageSynthReenqueueAll = FamilyMaintenance
+const OperationSynthReenqueueAll uint32 = {synth_reenqueue_all['id']}
+const SynthReenqueueAllMax uint32 = {synth_reenqueue_all['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -16220,6 +16401,55 @@ func DecodeCuratorReembedAllReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return demotedArtifacts, nil
+}}
+
+// EncodeSynthReenqueueAllRequest emits the empty request envelope. The total
+// reach and the attempt-and-error discard are policy and never travel.
+func EncodeSynthReenqueueAllRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationSynthReenqueueAll, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeSynthReenqueueAllRequest validates the exact maintenance-family
+// envelope.
+func DecodeSynthReenqueueAllRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSynthReenqueueAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeSynthReenqueueAllReply emits one bounded u32 reenqueued op count.
+func EncodeSynthReenqueueAllReply(reenqueuedOps uint32) ([]byte, error) {{
+	if reenqueuedOps > SynthReenqueueAllMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationSynthReenqueueAll, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], reenqueuedOps)
+	return reply, nil
+}}
+
+// DecodeSynthReenqueueAllReply validates the operation and bounded count.
+func DecodeSynthReenqueueAllReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSynthReenqueueAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	reenqueuedOps := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if reenqueuedOps > SynthReenqueueAllMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return reenqueuedOps, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

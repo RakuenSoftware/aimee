@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "2431ba6566d693b20e90dcf5c61ea13ab5bcd5caad4e79a8d03c26d2cfd4b3f1"
+const ContractSHA256 = "00ccb33cfb7bfe288c0ab5cbbd9129b1ebd9dfbc1e19ad4e1b1b34bb3db56382"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -365,6 +365,10 @@ const EventCuratorReembedAll = EventMaintenance
 const StageCuratorReembedAll = FamilyMaintenance
 const OperationCuratorReembedAll uint32 = 6
 const CuratorReembedAllMax uint32 = 2147483647
+const EventSynthReenqueueAll = EventMaintenance
+const StageSynthReenqueueAll = FamilyMaintenance
+const OperationSynthReenqueueAll uint32 = 7
+const SynthReenqueueAllMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2457,6 +2461,55 @@ func DecodeCuratorReembedAllReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return demotedArtifacts, nil
+}
+
+// EncodeSynthReenqueueAllRequest emits the empty request envelope. The total
+// reach and the attempt-and-error discard are policy and never travel.
+func EncodeSynthReenqueueAllRequest() []byte {
+	header, err := EncodeRequestHeader(OperationSynthReenqueueAll, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeSynthReenqueueAllRequest validates the exact maintenance-family
+// envelope.
+func DecodeSynthReenqueueAllRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSynthReenqueueAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeSynthReenqueueAllReply emits one bounded u32 reenqueued op count.
+func EncodeSynthReenqueueAllReply(reenqueuedOps uint32) ([]byte, error) {
+	if reenqueuedOps > SynthReenqueueAllMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationSynthReenqueueAll, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], reenqueuedOps)
+	return reply, nil
+}
+
+// DecodeSynthReenqueueAllReply validates the operation and bounded count.
+func DecodeSynthReenqueueAllReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSynthReenqueueAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	reenqueuedOps := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if reenqueuedOps > SynthReenqueueAllMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return reenqueuedOps, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

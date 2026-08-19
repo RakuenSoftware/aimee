@@ -1706,6 +1706,31 @@
         "field": {"name": "demoted_artifacts", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 7,
+      "name": "synth_reenqueue_all",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning synthesis operation status, attempt counts and last error are canonical relational DB2 bookkeeping, not portable ANN state.",
+      "c_symbols": ["db2_synth_reenqueue_all"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"row_scope": "all", "to_state": "pending",
+                   "resets_attempts": true, "clears_last_error": true}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "reenqueued_ops", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }

@@ -639,6 +639,13 @@ int main(int argc, char **argv)
                                              NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(demoted_artifacts == 0);
 
+   /* No learning synthesis operation exists on a fresh schema, so the mirror
+    * of the evidence reset above touches nothing either. */
+   uint32_t reenqueued_ops = 99;
+   assert(aimee_db2_synth_reenqueue_all_call(call_client, &client, 9104, 0, &reenqueued_ops, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reenqueued_ops == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

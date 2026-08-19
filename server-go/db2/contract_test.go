@@ -103,6 +103,7 @@ type wireBaseline struct {
 				ResetCount            uint32            `json:"reset_count"`
 				RequeuedRows          uint32            `json:"requeued_rows"`
 				DemotedArtifacts      uint32            `json:"demoted_artifacts"`
+				ReenqueuedOps         uint32            `json:"reenqueued_ops"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -248,7 +249,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 63 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 64 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -310,7 +311,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[59].Name != "mark_revisit_due" ||
 		baseline.Operations[60].Name != "ingest_queue_reset_running" ||
 		baseline.Operations[61].Name != "evidence_reembed_all" ||
-		baseline.Operations[62].Name != "curator_reembed_all" {
+		baseline.Operations[62].Name != "curator_reembed_all" ||
+		baseline.Operations[63].Name != "synth_reenqueue_all" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -506,6 +508,48 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
+	baseline := loadWireBaseline(t)
+	operation := baseline.Operations[63]
+	if operation.Family != "maintenance" {
+		t.Fatalf("family = %q, want maintenance", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeSynthReenqueueAllRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeSynthReenqueueAllRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	if err := DecodeEvidenceReembedAllRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("evidence decoder accepted a synth request: %v", err)
+	}
+	if err := DecodeCuratorReembedAllRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("curator decoder accepted a synth request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeSynthReenqueueAllRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeSynthReenqueueAllReply(vector.ReenqueuedOps)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		ops, err := DecodeSynthReenqueueAllReply(got)
+		if err != nil || ops != vector.ReenqueuedOps {
+			t.Fatalf("decode = (%d, %v)", ops, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		ops, err := DecodeSynthReenqueueAllReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || ops != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, ops, err)
 		}
 	}
 }

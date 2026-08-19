@@ -21647,9 +21647,15 @@
           "line": 34
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.synth_reenqueue_all operation replaces the reset that requeues every learning synthesis operation after a learning version change. Its reach and its discard are identical to the evidence reset already on the bus: no predicate, attempts back to zero, last error cleared. Both are triggered by the same version bump and both are recorded as fixed policy, so the pair cannot drift apart without the gate noticing."
+      },
       "signature": "int db2_synth_reenqueue_all ( void )",
       "signature_sha256": "877307592b67f2a012f849942fd322f006cf8c5fe6280878d209988aa2430dcc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_synth_reenqueue_all"
     },
     {
@@ -26112,15 +26118,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "37a7fd2634d861538b1520294f83c1ac36862201b561e0a7acdd07c15a80eaf1",
+  "fingerprint": "1abddd17166667c9d897c96f1750549b9c2835000d0c5ff4711d85907d708a60",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 610,
+    "audit_pending": 609,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 348
+    "reviewed": 349
   }
 }

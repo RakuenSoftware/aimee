@@ -8,6 +8,7 @@
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
 #include "c/artifacts.h"
+#include "c/learning_synth_ops.h"
 #include "c/decision_log.h"
 #include "c/kb_service_backend.h"
 #include "c/epistemic_directives.h"
@@ -320,6 +321,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .ingest_queue_reset_running = db2_kb_ingest_queue_reset_running,
        .evidence_reembed_all = db2_evidence_reembed_all,
        .curator_reembed_all = db2_curator_reembed_all,
+       .synth_reenqueue_all = db2_synth_reenqueue_all,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -357,7 +359,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
         invocation->stage_id != AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING &&
         invocation->stage_id != AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL &&
-        invocation->stage_id != AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL))
+        invocation->stage_id != AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL &&
+        invocation->stage_id != AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1385,7 +1388,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        invocation->stage_id == AIMEE_DB2_STAGE_MARK_REVISIT_DUE ||
        invocation->stage_id == AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING ||
        invocation->stage_id == AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL ||
-       invocation->stage_id == AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL)
+       invocation->stage_id == AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL ||
+       invocation->stage_id == AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL)
    {
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {
@@ -1508,6 +1512,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
              (uint32_t)demoted_artifacts > AIMEE_DB2_CURATOR_REEMBED_ALL_MAX)
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_curator_reembed_all_reply_encode((uint32_t)demoted_artifacts, response_body,
+                                                        response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_synth_reenqueue_all_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->synth_reenqueue_all)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The same total reach and the same attempt-and-error discard as the
+          * evidence reset above, because the same version bump drives both.
+          * Neither travels. An empty table and a failed statement are both
+          * zero here, as they are there. */
+         int reenqueued_ops = backend->synth_reenqueue_all();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (reenqueued_ops < 0 || (uint32_t)reenqueued_ops > AIMEE_DB2_SYNTH_REENQUEUE_ALL_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_synth_reenqueue_all_reply_encode((uint32_t)reenqueued_ops, response_body,
                                                         response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;

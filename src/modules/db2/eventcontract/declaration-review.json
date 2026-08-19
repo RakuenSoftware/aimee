@@ -2276,6 +2276,14 @@
       "reason": "Connection and pool teardown belongs to supervised process termination; callers cannot remotely shut down the required DB2 capability."
     },
     {
+      "symbol": "db2_synth_reenqueue_all",
+      "signature_sha256": "877307592b67f2a012f849942fd322f006cf8c5fe6280878d209988aa2430dcc",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.synth_reenqueue_all operation replaces the reset that requeues every learning synthesis operation after a learning version change. Its reach and its discard are identical to the evidence reset already on the bus: no predicate, attempts back to zero, last error cleared. Both are triggered by the same version bump and both are recorded as fixed policy, so the pair cannot drift apart without the gate noticing."
+    },
+    {
       "symbol": "db2_tenant_scope_begin",
       "signature_sha256": "c1aed4cab1fc4d2813d1102f3cc7e77716752c5599de05af5592530a70775ef5",
       "disposition": "private-db2",

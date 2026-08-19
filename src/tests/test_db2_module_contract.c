@@ -93,6 +93,8 @@ static int evidence_reembed_value;
 static int evidence_reembed_calls;
 static int curator_reembed_value;
 static int curator_reembed_calls;
+static int synth_reenqueue_value;
+static int synth_reenqueue_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -732,6 +734,17 @@ static int curator_reembed_all(void)
 {
    curator_reembed_calls++;
    return curator_reembed_value;
+}
+
+int db2_synth_reenqueue_all(void)
+{
+   return 0;
+}
+
+static int synth_reenqueue_all(void)
+{
+   synth_reenqueue_calls++;
+   return synth_reenqueue_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1448,6 +1461,8 @@ static void reset(void)
    evidence_reembed_calls = 0;
    curator_reembed_value = 12;
    curator_reembed_calls = 0;
+   synth_reenqueue_value = 13;
+   synth_reenqueue_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2742,6 +2757,36 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_synth_reenqueue_all_wire(void)
+{
+   uint8_t request[AIMEE_DB2_SYNTH_REENQUEUE_ALL_REQUEST_LEN] = {0};
+   assert(aimee_db2_synth_reenqueue_all_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_synth_reenqueue_all_request_decode(request, sizeof(request)) == 0);
+   /* Seventh maintenance operation, so the six before it must refuse it. */
+   assert(aimee_db2_prospective_sweep_expired_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_directive_sweep_expired_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_mark_revisit_due_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_ingest_queue_reset_running_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_evidence_reembed_all_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_curator_reembed_all_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_synth_reenqueue_all_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, ops = 99;
+   assert(aimee_db2_synth_reenqueue_all_reply_encode(13, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_synth_reenqueue_all_reply_decode(reply, reply_len, &ops) == 0 && ops == 13);
+   assert(aimee_db2_synth_reenqueue_all_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_synth_reenqueue_all_reply_decode(reply, reply_len, &ops) == 0 && ops == 0);
+   assert(aimee_db2_synth_reenqueue_all_reply_encode(AIMEE_DB2_SYNTH_REENQUEUE_ALL_MAX + 1u, reply,
+                                                     sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_synth_reenqueue_all_reply_encode(13, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_synth_reenqueue_all_reply_encode(13, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_synth_reenqueue_all_reply_decode(reply, reply_len, &ops) == -1 && ops == 0);
 }
 
 static void test_curator_reembed_all_wire(void)
@@ -5120,6 +5165,41 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_synth_reenqueue_all_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.synth_reenqueue_all = synth_reenqueue_all};
+   uint8_t request[AIMEE_DB2_SYNTH_REENQUEUE_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN];
+   uint32_t response_len = 99, ops = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL};
+   assert(aimee_db2_synth_reenqueue_all_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(synth_reenqueue_calls == 1);
+   assert(aimee_db2_synth_reenqueue_all_reply_decode(response, response_len, &ops) == 0 &&
+          ops == 13);
+
+   /* Same shape as the evidence reset it mirrors: an empty table and a failed
+    * statement are both zero, and replaying loses no failure history that has
+    * already been cleared. */
+   synth_reenqueue_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_synth_reenqueue_all_reply_decode(response, response_len, &ops) == 0 &&
+          ops == 0);
+   synth_reenqueue_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   synth_reenqueue_value = 13;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_curator_reembed_all_handler(void)
 {
    reset();
@@ -7206,6 +7286,7 @@ int main(void)
    test_ingest_queue_reset_running_wire();
    test_evidence_reembed_all_wire();
    test_curator_reembed_all_wire();
+   test_synth_reenqueue_all_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -7269,6 +7350,7 @@ int main(void)
    test_ingest_queue_reset_running_handler();
    test_evidence_reembed_all_handler();
    test_curator_reembed_all_handler();
+   test_synth_reenqueue_all_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
