@@ -96,6 +96,8 @@ static int curiosity_rescore_calls;
 static int mining_seed_value;
 static int mining_seed_calls;
 static int proposals_archive_calls;
+static int64_t trace_watermark_value;
+static int trace_watermark_calls;
 static int rel_types_seed_value;
 static int rel_types_seed_calls;
 static int lock_acquire_value;
@@ -778,6 +780,17 @@ void db2_learning_proposals_archive_expired(void)
 static void proposals_archive_expired(void)
 {
    proposals_archive_calls++;
+}
+
+int64_t db2_trace_mining_last_id(void)
+{
+   return 0;
+}
+
+static int64_t trace_mining_last_id(void)
+{
+   trace_watermark_calls++;
+   return trace_watermark_value;
 }
 
 int db2_rel_types_ensure_seed(void)
@@ -1632,6 +1645,8 @@ static void reset(void)
    mining_seed_value = 0;
    mining_seed_calls = 0;
    proposals_archive_calls = 0;
+   trace_watermark_value = 22;
+   trace_watermark_calls = 0;
    rel_types_seed_value = 0;
    rel_types_seed_calls = 0;
    lock_acquire_value = 1;
@@ -3307,6 +3322,40 @@ static void test_rel_types_ensure_seed_wire(void)
    assert(aimee_db2_rel_types_ensure_seed_reply_encode(reply, sizeof(reply), &reply_len) == 0);
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_rel_types_ensure_seed_reply_decode(reply, reply_len) == -1);
+}
+
+static void test_trace_mining_last_id_wire(void)
+{
+   uint8_t request[AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN] = {0};
+   assert(aimee_db2_trace_mining_last_id_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_trace_mining_last_id_request_decode(request, sizeof(request)) == 0);
+   /* Fifth learning operation, so the four before it must refuse it. */
+   assert(aimee_db2_rules_decay_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_curiosity_rescore_all_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_mining_seed_job_defaults_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_proposals_archive_expired_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_trace_mining_last_id_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99;
+   uint64_t watermark = 99;
+   assert(aimee_db2_trace_mining_last_id_reply_encode(22, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_trace_mining_last_id_reply_decode(reply, reply_len, &watermark) == 0 &&
+          watermark == 22);
+   assert(aimee_db2_trace_mining_last_id_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_trace_mining_last_id_reply_decode(reply, reply_len, &watermark) == 0 &&
+          watermark == 0);
+   assert(aimee_db2_trace_mining_last_id_reply_encode(AIMEE_DB2_TRACE_MINING_LAST_ID_MAX, reply,
+                                                      sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_trace_mining_last_id_reply_encode(AIMEE_DB2_TRACE_MINING_LAST_ID_MAX + 1ull,
+                                                      reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_trace_mining_last_id_reply_encode(22, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_trace_mining_last_id_reply_encode(22, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_trace_mining_last_id_reply_decode(reply, reply_len, &watermark) == -1 &&
+          watermark == 0);
 }
 
 static void test_proposals_archive_expired_wire(void)
@@ -6252,6 +6301,43 @@ static void test_rel_types_ensure_seed_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_trace_mining_last_id_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.trace_mining_last_id = trace_mining_last_id};
+   uint8_t request[AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   uint64_t watermark = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_TRACE_MINING_LAST_ID};
+   assert(aimee_db2_trace_mining_last_id_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(trace_watermark_calls == 1);
+   assert(aimee_db2_trace_mining_last_id_reply_decode(response, response_len, &watermark) == 0 &&
+          watermark == 22);
+
+   /* Zero is a corpus never mined and also a read that failed. Unlike the
+    * other collapses on this bus the two are not equally cheap: a zero
+    * watermark restarts the next mining pass from the beginning, so a failed
+    * read buys a rescan of everything instead of losing anything. */
+   trace_watermark_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_trace_mining_last_id_reply_decode(response, response_len, &watermark) == 0 &&
+          watermark == 0);
+   trace_watermark_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   trace_watermark_value = 22;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_proposals_archive_expired_handler(void)
 {
    reset();
@@ -8417,6 +8503,7 @@ int main(void)
    test_curiosity_rescore_all_wire();
    test_mining_seed_job_defaults_wire();
    test_proposals_archive_expired_wire();
+   test_trace_mining_last_id_wire();
    test_rel_types_ensure_seed_wire();
    test_vector_rebuild_lock_wire();
    test_release_get_active_wire();
@@ -8493,6 +8580,7 @@ int main(void)
    test_curiosity_rescore_all_handler();
    test_mining_seed_job_defaults_handler();
    test_proposals_archive_expired_handler();
+   test_trace_mining_last_id_handler();
    test_rel_types_ensure_seed_handler();
    test_vector_rebuild_lock_handler();
    test_release_get_active_handler();

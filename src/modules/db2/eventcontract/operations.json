@@ -1778,6 +1778,31 @@
       }
     },
     {
+      "family": "learning",
+      "id": 5,
+      "name": "trace_mining_last_id",
+      "wire_format": "db2-envelope-u64-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The trace mining high-water mark is a canonical relational DB2 record, not portable ANN state.",
+      "c_symbols": ["db2_trace_mining_last_id"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"aggregate": "max", "empty_is_zero": true,
+                   "failure_is_zero": true, "zero_rescans_from_start": true}
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "field": {"name": "last_trace_id", "type": "u64", "minimum": 0,
+                  "maximum": 9223372036854775807}
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",

@@ -87,6 +87,7 @@ typedef struct
    int (*curiosity_rescore_all)(void);
    int (*mining_seed_job_defaults)(void);
    void (*proposals_archive_expired)(void);
+   int64_t (*trace_mining_last_id)(void);
    int (*rel_types_ensure_seed)(void);
    int (*vector_rebuild_lock_try_acquire)(void);
    void (*vector_rebuild_lock_release)(void);

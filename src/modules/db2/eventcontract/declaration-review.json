@@ -2420,6 +2420,14 @@
       "reason": "Rollback and tenant-GUC clearing remain DB2 process cleanup; failures, cancellation, and denied scope roll back before the typed operation returns."
     },
     {
+      "symbol": "db2_trace_mining_last_id",
+      "signature_sha256": "d2602b8adc4117f228ddd448a6f0184aa65553c1d4c1fe0d2dff30c83e0a0bdf",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.trace_mining_last_id operation reads the high-water mark the next mining pass resumes from. A never-mined corpus and a failed read are both zero, and the consequence is worth naming: a zero sends the next pass back to the beginning, so a read failure costs a full rescan rather than losing anything. That is recorded because it makes the collapse cheap in one direction and expensive in the other."
+    },
+    {
       "symbol": "pgvec_code_delete_project",
       "signature_sha256": "45c29c809f61b8e5477df2aeed71c164879447e1dabdc6ff27509b799384da9a",
       "disposition": "private-db2",

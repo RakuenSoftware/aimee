@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "6711129dbd83cc2e5d69eda9126e46ecde1e25cff06fc6029c003e0f1ffd56c4"
+#define AIMEE_DB2_CONTRACT_SHA256 "21bd0985bb8770597d6bcb505e63d226263fe62940f2c7a3281901d9990aacee"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -581,6 +581,13 @@
 #define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN        24u
 #define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN       24u
 #define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_ERROR_LEN          24u
+#define AIMEE_DB2_EVENT_TRACE_MINING_LAST_ID                   AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_TRACE_MINING_LAST_ID                   AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID               5u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN             24u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN            32u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_ERROR_LEN               24u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_MAX                     9223372036854775807ull
 #define AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED                  AIMEE_DB2_EVENT_ORGANIZATION
 #define AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED                  AIMEE_DB2_FAMILY_ORGANIZATION
 #define AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED              1u
@@ -3021,6 +3028,61 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
  * code and nothing else. For operations whose only honest answer is whether
  * they completed -- any count they could return would describe something other
  * than the work they did. */
+static inline int aimee_db2_trace_mining_last_id_request_encode(uint8_t *output,
+                                                                size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID, 0u, 0u,
+                                          output, capacity);
+}
+
+static inline int aimee_db2_trace_mining_last_id_request_decode(const uint8_t *input,
+                                                                size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_trace_mining_last_id_reply_encode(uint64_t last_trace_id,
+                                                              uint8_t *output, size_t capacity,
+                                                              uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || last_trace_id > AIMEE_DB2_TRACE_MINING_LAST_ID_MAX ||
+       capacity < AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID,
+                                     AIMEE_DB2_RESULT_OK, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, last_trace_id);
+   *output_len = AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_trace_mining_last_id_reply_decode(const uint8_t *input,
+                                                              size_t input_len,
+                                                              uint64_t *last_trace_id)
+{
+   if (last_trace_id)
+      *last_trace_id = 0u;
+   if (!last_trace_id)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_TRACE_MINING_LAST_ID_MAX)
+      return -1;
+   *last_trace_id = decoded;
+   return 0;
+}
+
 static inline int aimee_db2_proposals_archive_expired_request_encode(uint8_t *output,
                                                                      size_t capacity)
 {

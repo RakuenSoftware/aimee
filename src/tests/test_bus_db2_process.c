@@ -662,6 +662,14 @@ int main(int argc, char **argv)
    assert(aimee_db2_proposals_archive_expired_call(call_client, &client, 9116, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
+   /* Nothing has been mined on a fresh schema, so the watermark is zero and
+    * the next pass would start from the beginning. That is the correct answer
+    * here and the expensive one when it comes from a failed read instead. */
+   uint64_t watermark = 99;
+   assert(aimee_db2_trace_mining_last_id_call(call_client, &client, 9124, 0, &watermark, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(watermark == 0);
+
    /* The custody family against real Postgres. Sequentially the lock behaves:
     * the first acquire claims it, the second is refused because the row the
     * first wrote is inside its lease window, and after a release the next

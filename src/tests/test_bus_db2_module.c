@@ -100,6 +100,7 @@ typedef struct
    int (*curiosity_rescore_all)(void);
    int (*mining_seed_job_defaults)(void);
    void (*proposals_archive_expired)(void);
+   int64_t (*trace_mining_last_id)(void);
    int (*rel_types_ensure_seed)(void);
    int (*vector_rebuild_lock_try_acquire)(void);
    void (*vector_rebuild_lock_release)(void);
@@ -194,6 +195,7 @@ static int rules_decay_calls;
 static int curiosity_rescore_calls;
 static int mining_seed_calls;
 static int proposals_archive_calls;
+static int trace_watermark_calls;
 static int rel_types_seed_calls;
 static int lock_acquire_calls;
 static int lock_release_calls;
@@ -1179,6 +1181,17 @@ static void proposals_archive_expired(void)
    proposals_archive_calls++;
 }
 
+int64_t db2_trace_mining_last_id(void)
+{
+   return 0;
+}
+
+static int64_t trace_mining_last_id(void)
+{
+   trace_watermark_calls++;
+   return 22;
+}
+
 int db2_rel_types_ensure_seed(void)
 {
    return 0;
@@ -1683,6 +1696,7 @@ int main(void)
        .curiosity_rescore_all = curiosity_rescore_all,
        .mining_seed_job_defaults = mining_seed_job_defaults,
        .proposals_archive_expired = proposals_archive_expired,
+       .trace_mining_last_id = trace_mining_last_id,
        .rel_types_ensure_seed = rel_types_ensure_seed,
        .vector_rebuild_lock_try_acquire = vector_rebuild_lock_try_acquire,
        .vector_rebuild_lock_release = vector_rebuild_lock_release,
@@ -2092,6 +2106,11 @@ int main(void)
    assert(aimee_db2_proposals_archive_expired_call(call_client, &client, 7097, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(proposals_archive_calls == 1);
+
+   uint64_t watermark = 99u;
+   assert(aimee_db2_trace_mining_last_id_call(call_client, &client, 7102, 0, &watermark, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(watermark == 22 && trace_watermark_calls == 1);
 
    /* The organization family's first crossing of the bus. */
    assert(aimee_db2_rel_types_ensure_seed_call(call_client, &client, 7096, 0, NULL, NULL) ==

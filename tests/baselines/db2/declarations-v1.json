@@ -22499,9 +22499,15 @@
           "line": 17
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.trace_mining_last_id operation reads the high-water mark the next mining pass resumes from. A never-mined corpus and a failed read are both zero, and the consequence is worth naming: a zero sends the next pass back to the beginning, so a read failure costs a full rescan rather than losing anything. That is recorded because it makes the collapse cheap in one direction and expensive in the other."
+      },
       "signature": "int64_t db2_trace_mining_last_id ( void )",
       "signature_sha256": "d2602b8adc4117f228ddd448a6f0184aa65553c1d4c1fe0d2dff30c83e0a0bdf",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_trace_mining_last_id"
     },
     {
@@ -26202,15 +26208,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b97ffcce4120fa8133dda49a48b5688f740789094e200b70d450fe2a902851f2",
+  "fingerprint": "53beca6d37b87ad02acbbd72a204ef59d1b6034104413ce587a9a117f0955c8f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 595,
+    "audit_pending": 594,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 363
+    "reviewed": 364
   }
 }

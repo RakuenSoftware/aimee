@@ -2375,6 +2375,38 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["payload"] != "none"):
                 fail("proposals-archive-expired-reply",
                      "reply must be a bare acknowledgement envelope")
+        elif key == ("learning", 5) and name == "trace_mining_last_id" and \
+                operation["wire_format"] == "db2-envelope-u64-v1":
+            # A never-mined corpus and a failed read are both zero. Unusually,
+            # the consequence is asymmetric and worth writing down: a zero
+            # sends the next mining pass back to the start, so a read failure
+            # costs a full rescan rather than losing anything. Cheap in one
+            # direction, expensive in the other, and invisible either way.
+            if operation["c_symbols"] != ["db2_trace_mining_last_id"]:
+                fail("operation-c-symbols",
+                     "trace_mining_last_id C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "trace_mining_last_id results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "trace_mining_last_id.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"aggregate": "max", "empty_is_zero": True,
+                                          "failure_is_zero": True,
+                                          "zero_rescans_from_start": True}):
+                fail("trace-mining-last-id-request",
+                     "request must carry no payload and record what a zero costs")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "trace_mining_last_id.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "trace_mining_last_id.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "last_trace_id", "type": "u64", "minimum": 0,
+                              "maximum": 0x7fffffffffffffff}):
+                fail("trace-mining-last-id-reply",
+                     "reply must contain one bounded u64 watermark")
         elif key == ("custody", 1) and name == "vector_rebuild_lock_try_acquire" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # This is a check followed by a separate write. Two callers can
@@ -2767,7 +2799,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 77 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 78 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2787,14 +2819,14 @@ def validate_catalog(value: object) -> dict[str, object]:
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
             "drift_candidates", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
-            "proposals_archive_expired", "rel_types_ensure_seed",
+            "proposals_archive_expired", "trace_mining_last_id", "rel_types_ensure_seed",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
             "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the seventy-seven supported operations exactly once")
+             "the partial generator requires the seventy-eight supported operations exactly once")
     return catalog
 
 
@@ -2983,18 +3015,19 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     curiosity_rescore_all = catalog["operations"][62]
     mining_seed_job_defaults = catalog["operations"][63]
     proposals_archive_expired = catalog["operations"][64]
-    rel_types_ensure_seed = catalog["operations"][65]
-    vector_rebuild_lock_try_acquire = catalog["operations"][66]
-    vector_rebuild_lock_release = catalog["operations"][67]
-    release_get_active = catalog["operations"][68]
-    prospective_sweep_expired = catalog["operations"][69]
-    directive_sweep_expired = catalog["operations"][70]
-    mark_revisit_due = catalog["operations"][71]
-    ingest_queue_reset_running = catalog["operations"][72]
-    evidence_reembed_all = catalog["operations"][73]
-    curator_reembed_all = catalog["operations"][74]
-    synth_reenqueue_all = catalog["operations"][75]
-    curator_reenqueue_extract_all = catalog["operations"][76]
+    trace_mining_last_id = catalog["operations"][65]
+    rel_types_ensure_seed = catalog["operations"][66]
+    vector_rebuild_lock_try_acquire = catalog["operations"][67]
+    vector_rebuild_lock_release = catalog["operations"][68]
+    release_get_active = catalog["operations"][69]
+    prospective_sweep_expired = catalog["operations"][70]
+    directive_sweep_expired = catalog["operations"][71]
+    mark_revisit_due = catalog["operations"][72]
+    ingest_queue_reset_running = catalog["operations"][73]
+    evidence_reembed_all = catalog["operations"][74]
+    curator_reembed_all = catalog["operations"][75]
+    synth_reenqueue_all = catalog["operations"][76]
+    curator_reenqueue_extract_all = catalog["operations"][77]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3466,6 +3499,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     proposals_archive_expired_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(proposals_archive_expired["id"]), 0, b"",
+    )
+    trace_mining_last_id_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(trace_mining_last_id["id"]), 0, b"",
+    )
+    trace_mining_last_id_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(trace_mining_last_id["id"]), 0, _put_u64(22),
+    )
+    trace_mining_last_id_start = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(trace_mining_last_id["id"]), 0, _put_u64(0),
     )
     prospective_sweep_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(prospective_sweep_expired["id"]), 0, b"",
@@ -6558,6 +6600,48 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": trace_mining_last_id["family"],
+            "id": trace_mining_last_id["id"],
+            "name": trace_mining_last_id["name"],
+            "request": {
+                "positive": trace_mining_last_id_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(trace_mining_last_id_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(trace_mining_last_id_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     trace_mining_last_id_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (trace_mining_last_id_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "last_trace_id": 22,
+                     "hex": trace_mining_last_id_ok.hex()},
+                    {"result": 0, "last_trace_id": 0,
+                     "hex": trace_mining_last_id_start.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(trace_mining_last_id_ok, 8,
+                                int(trace_mining_last_id["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(trace_mining_last_id_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(trace_mining_last_id["id"]), 0, b"").hex()},
+                    {"mutation": "watermark_too_large", "hex":
+                     (trace_mining_last_id_ok[:-8] +
+                      _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex":
+                     trace_mining_last_id_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (trace_mining_last_id_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": rel_types_ensure_seed["family"],
             "id": rel_types_ensure_seed["id"],
             "name": rel_types_ensure_seed["name"],
@@ -7116,18 +7200,19 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     curiosity_rescore_all = catalog["operations"][62]
     mining_seed_job_defaults = catalog["operations"][63]
     proposals_archive_expired = catalog["operations"][64]
-    rel_types_ensure_seed = catalog["operations"][65]
-    vector_rebuild_lock_try_acquire = catalog["operations"][66]
-    vector_rebuild_lock_release = catalog["operations"][67]
-    release_get_active = catalog["operations"][68]
-    prospective_sweep_expired = catalog["operations"][69]
-    directive_sweep_expired = catalog["operations"][70]
-    mark_revisit_due = catalog["operations"][71]
-    ingest_queue_reset_running = catalog["operations"][72]
-    evidence_reembed_all = catalog["operations"][73]
-    curator_reembed_all = catalog["operations"][74]
-    synth_reenqueue_all = catalog["operations"][75]
-    curator_reenqueue_extract_all = catalog["operations"][76]
+    trace_mining_last_id = catalog["operations"][65]
+    rel_types_ensure_seed = catalog["operations"][66]
+    vector_rebuild_lock_try_acquire = catalog["operations"][67]
+    vector_rebuild_lock_release = catalog["operations"][68]
+    release_get_active = catalog["operations"][69]
+    prospective_sweep_expired = catalog["operations"][70]
+    directive_sweep_expired = catalog["operations"][71]
+    mark_revisit_due = catalog["operations"][72]
+    ingest_queue_reset_running = catalog["operations"][73]
+    evidence_reembed_all = catalog["operations"][74]
+    curator_reembed_all = catalog["operations"][75]
+    synth_reenqueue_all = catalog["operations"][76]
+    curator_reenqueue_extract_all = catalog["operations"][77]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -8021,6 +8106,18 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{proposals_archive_expired['reply']['encoded_size_ok']}u"),
         ("AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_ERROR_LEN",
          f"{proposals_archive_expired['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EVENT_TRACE_MINING_LAST_ID", "AIMEE_DB2_EVENT_LEARNING"),
+        ("AIMEE_DB2_STAGE_TRACE_MINING_LAST_ID", "AIMEE_DB2_FAMILY_LEARNING"),
+        ("AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID",
+         f"{trace_mining_last_id['id']}u"),
+        ("AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN",
+         f"{trace_mining_last_id['request']['encoded_size']}u"),
+        ("AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN",
+         f"{trace_mining_last_id['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_TRACE_MINING_LAST_ID_ERROR_LEN",
+         f"{trace_mining_last_id['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_TRACE_MINING_LAST_ID_MAX",
+         f"{trace_mining_last_id['reply']['field']['maximum']}ull"),
         ("AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED", "AIMEE_DB2_EVENT_ORGANIZATION"),
         ("AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED", "AIMEE_DB2_FAMILY_ORGANIZATION"),
         ("AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED",
@@ -10540,6 +10637,61 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
  * code and nothing else. For operations whose only honest answer is whether
  * they completed -- any count they could return would describe something other
  * than the work they did. */
+static inline int aimee_db2_trace_mining_last_id_request_encode(uint8_t *output,
+                                                                size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID, 0u, 0u,
+                                          output, capacity);
+}}
+
+static inline int aimee_db2_trace_mining_last_id_request_decode(const uint8_t *input,
+                                                                size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_trace_mining_last_id_reply_encode(uint64_t last_trace_id,
+                                                              uint8_t *output, size_t capacity,
+                                                              uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || last_trace_id > AIMEE_DB2_TRACE_MINING_LAST_ID_MAX ||
+       capacity < AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID,
+                                     AIMEE_DB2_RESULT_OK, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, last_trace_id);
+   *output_len = AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_trace_mining_last_id_reply_decode(const uint8_t *input,
+                                                              size_t input_len,
+                                                              uint64_t *last_trace_id)
+{{
+   if (last_trace_id)
+      *last_trace_id = 0u;
+   if (!last_trace_id)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_TRACE_MINING_LAST_ID_MAX)
+      return -1;
+   *last_trace_id = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_proposals_archive_expired_request_encode(uint8_t *output,
                                                                      size_t capacity)
 {{
@@ -14081,6 +14233,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_trace_mining_last_id_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t *last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -15779,6 +15935,31 @@ aimee_db2_proposals_archive_expired_call(aimee_db2_call_fn call, void *call_cont
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_trace_mining_last_id_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                    uint64_t deadline_ns, uint64_t *last_trace_id,
+                                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !last_trace_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *last_trace_id = 0u;
+   uint8_t request[AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_trace_mining_last_id_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_TRACE_MINING_LAST_ID,
+            AIMEE_DB2_STAGE_TRACE_MINING_LAST_ID, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_trace_mining_last_id_reply_decode(response, response_len, last_trace_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -16281,18 +16462,19 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     curiosity_rescore_all = catalog["operations"][62]
     mining_seed_job_defaults = catalog["operations"][63]
     proposals_archive_expired = catalog["operations"][64]
-    rel_types_ensure_seed = catalog["operations"][65]
-    vector_rebuild_lock_try_acquire = catalog["operations"][66]
-    vector_rebuild_lock_release = catalog["operations"][67]
-    release_get_active = catalog["operations"][68]
-    prospective_sweep_expired = catalog["operations"][69]
-    directive_sweep_expired = catalog["operations"][70]
-    mark_revisit_due = catalog["operations"][71]
-    ingest_queue_reset_running = catalog["operations"][72]
-    evidence_reembed_all = catalog["operations"][73]
-    curator_reembed_all = catalog["operations"][74]
-    synth_reenqueue_all = catalog["operations"][75]
-    curator_reenqueue_extract_all = catalog["operations"][76]
+    trace_mining_last_id = catalog["operations"][65]
+    rel_types_ensure_seed = catalog["operations"][66]
+    vector_rebuild_lock_try_acquire = catalog["operations"][67]
+    vector_rebuild_lock_release = catalog["operations"][68]
+    release_get_active = catalog["operations"][69]
+    prospective_sweep_expired = catalog["operations"][70]
+    directive_sweep_expired = catalog["operations"][71]
+    mark_revisit_due = catalog["operations"][72]
+    ingest_queue_reset_running = catalog["operations"][73]
+    evidence_reembed_all = catalog["operations"][74]
+    curator_reembed_all = catalog["operations"][75]
+    synth_reenqueue_all = catalog["operations"][76]
+    curator_reenqueue_extract_all = catalog["operations"][77]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -16679,6 +16861,10 @@ const ReleaseGetActiveMax uint64 = {release_get_active['reply']['field']['maximu
 const EventProposalsArchiveExpired = EventLearning
 const StageProposalsArchiveExpired = FamilyLearning
 const OperationProposalsArchiveExpired uint32 = {proposals_archive_expired['id']}
+const EventTraceMiningLastID = EventLearning
+const StageTraceMiningLastID = FamilyLearning
+const OperationTraceMiningLastID uint32 = {trace_mining_last_id['id']}
+const TraceMiningLastIDMax uint64 = {trace_mining_last_id['reply']['field']['maximum']}
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = {prospective_sweep_expired['id']}
@@ -19081,6 +19267,55 @@ func DecodeProposalsArchiveExpiredReply(reply []byte) error {{
 		return ErrMalformedEnvelope
 	}}
 	return nil
+}}
+
+// EncodeTraceMiningLastIDRequest emits the empty request envelope.
+func EncodeTraceMiningLastIDRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationTraceMiningLastID, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeTraceMiningLastIDRequest validates the exact learning-family envelope.
+func DecodeTraceMiningLastIDRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTraceMiningLastID ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeTraceMiningLastIDReply emits one bounded u64 watermark. Zero is a
+// never-mined corpus and also a failed read; the next pass restarts from the
+// beginning either way.
+func EncodeTraceMiningLastIDReply(lastTraceID uint64) ([]byte, error) {{
+	if lastTraceID > TraceMiningLastIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationTraceMiningLastID, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:], lastTraceID)
+	return reply, nil
+}}
+
+// DecodeTraceMiningLastIDReply validates the operation and bounded watermark.
+func DecodeTraceMiningLastIDReply(reply []byte) (uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTraceMiningLastID ||
+		header.Result != ResultOK || header.PayloadLen != 8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	lastTraceID := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
+	if lastTraceID > TraceMiningLastIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return lastTraceID, nil
 }}
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

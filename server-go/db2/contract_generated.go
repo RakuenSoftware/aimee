@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "6711129dbd83cc2e5d69eda9126e46ecde1e25cff06fc6029c003e0f1ffd56c4"
+const ContractSHA256 = "21bd0985bb8770597d6bcb505e63d226263fe62940f2c7a3281901d9990aacee"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -385,6 +385,10 @@ const ReleaseGetActiveMax uint64 = 9223372036854775807
 const EventProposalsArchiveExpired = EventLearning
 const StageProposalsArchiveExpired = FamilyLearning
 const OperationProposalsArchiveExpired uint32 = 4
+const EventTraceMiningLastID = EventLearning
+const StageTraceMiningLastID = FamilyLearning
+const OperationTraceMiningLastID uint32 = 5
+const TraceMiningLastIDMax uint64 = 9223372036854775807
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2789,6 +2793,55 @@ func DecodeProposalsArchiveExpiredReply(reply []byte) error {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+// EncodeTraceMiningLastIDRequest emits the empty request envelope.
+func EncodeTraceMiningLastIDRequest() []byte {
+	header, err := EncodeRequestHeader(OperationTraceMiningLastID, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeTraceMiningLastIDRequest validates the exact learning-family envelope.
+func DecodeTraceMiningLastIDRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTraceMiningLastID ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeTraceMiningLastIDReply emits one bounded u64 watermark. Zero is a
+// never-mined corpus and also a failed read; the next pass restarts from the
+// beginning either way.
+func EncodeTraceMiningLastIDReply(lastTraceID uint64) ([]byte, error) {
+	if lastTraceID > TraceMiningLastIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationTraceMiningLastID, ResultOK, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:], lastTraceID)
+	return reply, nil
+}
+
+// DecodeTraceMiningLastIDReply validates the operation and bounded watermark.
+func DecodeTraceMiningLastIDReply(reply []byte) (uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTraceMiningLastID ||
+		header.Result != ResultOK || header.PayloadLen != 8 {
+		return 0, ErrMalformedEnvelope
+	}
+	lastTraceID := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
+	if lastTraceID > TraceMiningLastIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return lastTraceID, nil
 }
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

@@ -33,6 +33,7 @@
 #include "c/prospective_memories.h"
 #include "c/rel_types_store.h"
 #include "c/rules.h"
+#include "c/trace_mining.h"
 
 static int production_health_counters(int promote_use_count, double promote_confidence,
                                       aimee_db2_health_counters_t *counters)
@@ -334,6 +335,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .curiosity_rescore_all = db2_curiosity_rescore_all,
        .mining_seed_job_defaults = db2_mining_seed_job_defaults,
        .proposals_archive_expired = db2_learning_proposals_archive_expired,
+       .trace_mining_last_id = db2_trace_mining_last_id,
        .rel_types_ensure_seed = db2_rel_types_ensure_seed,
        .vector_rebuild_lock_try_acquire = db2_kb_runtime_state_vector_rebuild_lock_try_acquire,
        .vector_rebuild_lock_release = db2_kb_runtime_state_vector_rebuild_lock_release,
@@ -389,6 +391,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL &&
         invocation->stage_id != AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED &&
+        invocation->stage_id != AIMEE_DB2_STAGE_TRACE_MINING_LAST_ID &&
         invocation->stage_id != AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED &&
         invocation->stage_id != AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE &&
         invocation->stage_id != AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE &&
@@ -1690,6 +1693,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_proposals_archive_expired_reply_encode(response_body, response_capacity,
                                                               response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_trace_mining_last_id_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->trace_mining_last_id)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* A never-mined corpus and a failed read are both zero, and here the
+          * two cost very different things: a zero sends the next mining pass
+          * back to the start, so a failed read buys a full rescan rather than
+          * losing anything. Cheap one way, expensive the other, invisible
+          * either way, and recorded in the catalog for that reason. */
+         int64_t last_trace_id = backend->trace_mining_last_id();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (last_trace_id < 0 || (uint64_t)last_trace_id > AIMEE_DB2_TRACE_MINING_LAST_ID_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_trace_mining_last_id_reply_encode((uint64_t)last_trace_id, response_body,
+                                                         response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
