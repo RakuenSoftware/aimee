@@ -95,6 +95,7 @@ typedef struct
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);
+   int (*ingest_queue_reset_running)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -172,6 +173,7 @@ static int requeue_drifted_calls;
 static int prospective_sweep_calls;
 static int directive_sweep_calls;
 static int mark_revisit_calls;
+static int queue_reset_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -1092,6 +1094,17 @@ static int mark_revisit_due(void)
    return 9;
 }
 
+int db2_kb_ingest_queue_reset_running(void)
+{
+   return 0;
+}
+
+static int ingest_queue_reset_running(void)
+{
+   queue_reset_calls++;
+   return 10;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1350,7 +1363,8 @@ int main(void)
                               AIMEE_DB2_EVENT_REQUEUE_DRIFTED,
                               AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED,
-                              AIMEE_DB2_EVENT_MARK_REVISIT_DUE};
+                              AIMEE_DB2_EVENT_MARK_REVISIT_DUE,
+                              AIMEE_DB2_EVENT_INGEST_QUEUE_RESET_RUNNING};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -1394,6 +1408,7 @@ int main(void)
        {AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_MARK_REVISIT_DUE, AIMEE_DB2_STAGE_MARK_REVISIT_DUE},
+       {AIMEE_DB2_EVENT_INGEST_QUEUE_RESET_RUNNING, AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING},
    };
    static const aimee_db2_module_backend_t backend = {
        .is_initialized = is_initialized,
@@ -1462,6 +1477,7 @@ int main(void)
        .prospective_sweep_expired = prospective_sweep_expired,
        .directive_sweep_expired = directive_sweep_expired,
        .mark_revisit_due = mark_revisit_due,
+       .ingest_queue_reset_running = ingest_queue_reset_running,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1833,6 +1849,11 @@ int main(void)
    assert(aimee_db2_mark_revisit_due_call(call_client, &client, 7084, 0, &marked, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(marked == 9 && mark_revisit_calls == 1);
+
+   uint32_t requeued_rows = 99u;
+   assert(aimee_db2_ingest_queue_reset_running_call(call_client, &client, 7085, 0, &requeued_rows,
+                                                    NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(requeued_rows == 10 && queue_reset_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

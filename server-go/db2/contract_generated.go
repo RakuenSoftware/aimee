@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "bfcb78be2c1d1f512607907112fb14d25ab255582b6bba2a1bc0c4082f4d1986"
+const ContractSHA256 = "78578b1f33a90fb7f641879be4f4a8b4040398b8fbed0aa7f5cdb112722669b4"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -353,6 +353,10 @@ const EventMarkRevisitDue = EventMaintenance
 const StageMarkRevisitDue = FamilyMaintenance
 const OperationMarkRevisitDue uint32 = 3
 const MarkRevisitDueMax uint32 = 2147483647
+const EventIngestQueueResetRunning = EventMaintenance
+const StageIngestQueueResetRunning = FamilyMaintenance
+const OperationIngestQueueResetRunning uint32 = 4
+const IngestQueueResetRunningMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2298,6 +2302,55 @@ func DecodeMarkRevisitDueReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return markedCount, nil
+}
+
+// EncodeIngestQueueResetRunningRequest emits the empty request envelope. The
+// states and the claim clear are policy and never travel.
+func EncodeIngestQueueResetRunningRequest() []byte {
+	header, err := EncodeRequestHeader(OperationIngestQueueResetRunning, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeIngestQueueResetRunningRequest validates the exact maintenance-family
+// envelope.
+func DecodeIngestQueueResetRunningRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationIngestQueueResetRunning ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeIngestQueueResetRunningReply emits one bounded u32 reset count.
+func EncodeIngestQueueResetRunningReply(resetCount uint32) ([]byte, error) {
+	if resetCount > IngestQueueResetRunningMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationIngestQueueResetRunning, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], resetCount)
+	return reply, nil
+}
+
+// DecodeIngestQueueResetRunningReply validates the operation and bounded count.
+func DecodeIngestQueueResetRunningReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationIngestQueueResetRunning ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	resetCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if resetCount > IngestQueueResetRunningMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return resetCount, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

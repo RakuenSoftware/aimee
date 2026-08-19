@@ -9803,9 +9803,15 @@
           "line": 326
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.ingest_queue_reset_running operation replaces the startup recovery that returns queue rows abandoned by a dead worker to the pending pool. The two states and the clearing of started_at are fixed policy. Clearing the claim instant is the part that matters: a row left marked as claimed by a process that no longer exists is work that never runs again, and a caller able to skip the clear would hand back a row that still looks taken."
+      },
       "signature": "int db2_kb_ingest_queue_reset_running ( void )",
       "signature_sha256": "d988bf89196e1349726f02ce68d7e40a89630074fc8beb2431206110eaa11213",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_ingest_queue_reset_running"
     },
     {
@@ -26094,15 +26100,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3b20d20e98aced35d4d72eb34e2a491a8554fd4e4ceb396cf30b6fe4f76c9fb5",
+  "fingerprint": "fe9e36f439972ab9865259fea73609c63ef3fe4869db15493bb732a116247499",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 613,
+    "audit_pending": 612,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 345
+    "reviewed": 346
   }
 }

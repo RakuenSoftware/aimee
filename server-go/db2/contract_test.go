@@ -100,6 +100,7 @@ type wireBaseline struct {
 				ExpiredCount          uint32            `json:"expired_count"`
 				DirectivesExpired     uint32            `json:"directives_expired"`
 				MarkedCount           uint32            `json:"marked_count"`
+				ResetCount            uint32            `json:"reset_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -245,7 +246,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 60 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 61 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -304,7 +305,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[56].Name != "requeue_drifted" ||
 		baseline.Operations[57].Name != "prospective_sweep_expired" ||
 		baseline.Operations[58].Name != "directive_sweep_expired" ||
-		baseline.Operations[59].Name != "mark_revisit_due" {
+		baseline.Operations[59].Name != "mark_revisit_due" ||
+		baseline.Operations[60].Name != "ingest_queue_reset_running" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -500,6 +502,50 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestIngestQueueResetRunningMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[60]
+	if operation.Family != "maintenance" {
+		t.Fatalf("family = %q, want maintenance", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeIngestQueueResetRunningRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeIngestQueueResetRunningRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	if err := DecodeProspectiveSweepExpiredRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("prospective decoder accepted a queue-reset request: %v", err)
+	}
+	if err := DecodeDirectiveSweepExpiredRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("directive decoder accepted a queue-reset request: %v", err)
+	}
+	if err := DecodeMarkRevisitDueRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("revisit decoder accepted a queue-reset request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeIngestQueueResetRunningRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeIngestQueueResetRunningReply(vector.ResetCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		reset, err := DecodeIngestQueueResetRunningReply(got)
+		if err != nil || reset != vector.ResetCount {
+			t.Fatalf("decode = (%d, %v)", reset, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		reset, err := DecodeIngestQueueResetRunningReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || reset != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, reset, err)
 		}
 	}
 }

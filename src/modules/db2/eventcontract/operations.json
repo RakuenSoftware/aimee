@@ -1630,6 +1630,31 @@
         "field": {"name": "marked_count", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 4,
+      "name": "ingest_queue_reset_running",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ingest queue status and the instant a row was claimed are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_kb_ingest_queue_reset_running"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"from_state": "running", "to_state": "pending",
+                   "clears_started_at": true}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "reset_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }

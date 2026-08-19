@@ -260,6 +260,14 @@
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
     },
     {
+      "symbol": "db2_kb_ingest_queue_reset_running",
+      "signature_sha256": "d988bf89196e1349726f02ce68d7e40a89630074fc8beb2431206110eaa11213",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.ingest_queue_reset_running operation replaces the startup recovery that returns queue rows abandoned by a dead worker to the pending pool. The two states and the clearing of started_at are fixed policy. Clearing the claim instant is the part that matters: a row left marked as claimed by a process that no longer exists is work that never runs again, and a caller able to skip the clear would hand back a row that still looks taken."
+    },
+    {
       "symbol": "db2_kb_service_agent_hint_consume_json",
       "signature_sha256": "495f0aaa0e5a6f7d73f3c27767bdf4e030862cad32e4c208e186064343ab9674",
       "disposition": "private-db2",

@@ -8,6 +8,7 @@
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
 #include "c/decision_log.h"
+#include "c/kb_service_backend.h"
 #include "c/epistemic_directives.h"
 #include "c/prospective_memories.h"
 #include "c/entity_edges.h"
@@ -314,6 +315,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        .directive_sweep_expired = db2_directive_sweep_expired,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
+       .ingest_queue_reset_running = db2_kb_ingest_queue_reset_running,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -348,7 +350,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
-        invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE))
+        invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
+        invocation->stage_id != AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1373,7 +1376,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED ||
        invocation->stage_id == AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED ||
-       invocation->stage_id == AIMEE_DB2_STAGE_MARK_REVISIT_DUE)
+       invocation->stage_id == AIMEE_DB2_STAGE_MARK_REVISIT_DUE ||
+       invocation->stage_id == AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING)
    {
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {
@@ -1435,6 +1439,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_mark_revisit_due_reply_encode((uint32_t)marked, response_body,
                                                      response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_ingest_queue_reset_running_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->ingest_queue_reset_running)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* No connection and no statement are -1 here, and the boundary keeps
+          * that as a failure. Reporting it as zero would claim a clean queue
+          * while rows abandoned by a dead worker are still stranded, which is
+          * exactly the state this recovery exists to leave behind. */
+         int reset_rows = backend->ingest_queue_reset_running();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (reset_rows < 0 || (uint32_t)reset_rows > AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_ingest_queue_reset_running_reply_encode(
+                 (uint32_t)reset_rows, response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

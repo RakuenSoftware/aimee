@@ -614,6 +614,17 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(marked == 0);
 
+   /* Nothing has ever claimed an ingest queue row on a fresh schema, so the
+    * recovery has nothing to hand back. Replaying it finds the same nothing. */
+   uint32_t reset_rows = 99;
+   assert(aimee_db2_ingest_queue_reset_running_call(call_client, &client, 9100, 0, &reset_rows,
+                                                    NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reset_rows == 0);
+   reset_rows = 99;
+   assert(aimee_db2_ingest_queue_reset_running_call(call_client, &client, 9101, 0, &reset_rows,
+                                                    NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reset_rows == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

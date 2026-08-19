@@ -82,6 +82,7 @@ typedef struct
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);
+   int (*ingest_queue_reset_running)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
