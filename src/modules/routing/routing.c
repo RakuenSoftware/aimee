@@ -354,6 +354,21 @@ int agent_route_last_was_module_fault(void)
    return atomic_load_explicit(&g_route_module_faults, memory_order_relaxed) != 0;
 }
 
+void agent_route_failure_message(const char *role, char *buf, size_t len)
+{
+   if (!buf || len == 0)
+      return;
+   if (!role)
+      role = "";
+   if (agent_route_last_was_module_fault())
+      snprintf(buf, len,
+               "routing module unavailable: refused to select an agent for role '%s' (the roster "
+               "was not consulted)",
+               role);
+   else
+      snprintf(buf, len, "no agent available for role '%s'", role);
+}
+
 static agent_route_selection_fn g_route_selection_provider;
 /* Latched once a caller declares a selection authority. It is deliberately NOT
  * cleared when the provider is: a daemon that has handed selection to the

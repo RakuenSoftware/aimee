@@ -623,6 +623,14 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    (void)role;
    return cfg && cfg->agent_count > 0 ? &cfg->agents[0] : NULL;
 }
+/* The real one lives beside the routing fault latch, which this suite does not
+ * link. The stub keeps the empty-roster wording, which is what a stubbed router
+ * with no agents means here. */
+void agent_route_failure_message(const char *role, char *buf, size_t len)
+{
+   if (buf && len)
+      snprintf(buf, len, "no agent available for role '%s'", role ? role : "");
+}
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role,
                                const agent_route_policy_t *sys_cfg, unsigned required_caps,
                                int min_context)

@@ -558,7 +558,17 @@ static void test_route_authority_refuses_without_provider(void)
    assert(!agent_route_last_was_module_fault());
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
    assert(agent_route_last_was_module_fault());
+   /* The words an operator actually reads. Every caller renders a failed route
+    * through this one helper, so this is where the two cases are pinned: each
+    * site that spelled the message itself got the distinction wrong. */
+   char why[256];
+   agent_route_failure_message("review", why, sizeof(why));
+   assert(strstr(why, "routing module unavailable") != NULL);
+   assert(strstr(why, "no agent available") == NULL);
    agent_reset_route_selection_authority();
+   agent_route_failure_message("review", why, sizeof(why));
+   assert(strstr(why, "no agent available for role") != NULL);
+   assert(strstr(why, "routing module unavailable") == NULL);
 }
 
 static void test_agent_route_selection_provider(void)

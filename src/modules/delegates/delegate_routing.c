@@ -475,7 +475,8 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
    agent_t *target = agent_route(cfg, role);
    if (!target)
    {
-      route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
+      if (errbuf && errbuf_sz > 0)
+         agent_route_failure_message(role, errbuf, errbuf_sz);
       return -1;
    }
    if (target && model_override && model_override[0])
@@ -494,7 +495,8 @@ int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf
    }
    if (!agent_route(cfg, role))
    {
-      route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
+      if (errbuf && errbuf_sz > 0)
+         agent_route_failure_message(role, errbuf, errbuf_sz);
       return -1;
    }
    return 0;

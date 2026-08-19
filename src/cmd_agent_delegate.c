@@ -1343,14 +1343,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       agent_t *ag = agent_route(&cfg, role);
       if (!ag)
       {
-         /* Same distinction the server draws: a routing-module fault is not an
-          * empty roster, and reporting it as one sends the operator to the
-          * wrong place. */
-         if (agent_route_last_was_module_fault())
-            fatal("routing module unavailable: refused to select an agent for role '%s' (the "
-                  "roster was not consulted)",
-                  role);
-         fatal("no agent available for role '%s'", role);
+         /* Same distinction the server draws, from the same helper: a
+          * routing-module fault is not an empty roster, and reporting it as one
+          * sends the operator to the wrong place. */
+         char why[256];
+         agent_route_failure_message(role, why, sizeof(why));
+         fatal("%s", why);
       }
 
       /* Pass the role: the real run selects instructions from it, so a dry run
@@ -1508,11 +1506,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          agent_t *ag = agent_route(&cfg, role);
          if (!ag)
          {
-            if (agent_route_last_was_module_fault())
-               fatal("routing module unavailable: refused to select an agent for role '%s' (the "
-                     "roster was not consulted)",
-                     role);
-            fatal("no agent available for role '%s'", role);
+            char why[256];
+            agent_route_failure_message(role, why, sizeof(why));
+            fatal("%s", why);
          }
          rc = agent_execute_with_plan(ag, &cfg.network, sys_prompt, prompt_to_use, max_tokens, 0.3,
                                       &result);

@@ -117,6 +117,13 @@ void agent_reset_route_selection_authority(void);
  * consulted, rather than because no agent was eligible? Callers use it to report
  * the real fault instead of blaming the roster. */
 int agent_route_last_was_module_fault(void);
+/* The one place a failed route is turned into words. Every caller that renders
+ * a NULL from agent_route (or a -1 from delegate_pick_for_role) has to draw the
+ * same distinction, and each one that spelled the message itself got it wrong
+ * the same way: an operator sent to audit an agent roster that is fine. Writes
+ * the routing-fault wording when the selection authority could not be consulted
+ * and the empty-roster wording otherwise. */
+void agent_route_failure_message(const char *role, char *buf, size_t len);
 
 /* Why an agent is not a routable delegate. Mirrors the decision order of
  * agent_is_available_for_routing so callers can surface the ACTUAL reason

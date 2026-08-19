@@ -461,17 +461,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    }
 
    if (!out->error[0])
-   {
-      /* A routing-module fault is not an empty roster, and saying so sends the
-       * operator to the wrong place entirely. */
-      if (agent_route_last_was_module_fault())
-         snprintf(out->error, sizeof(out->error),
-                  "routing module unavailable: refused to select an agent for role '%s' (the "
-                  "roster was not consulted)",
-                  role);
-      else
-         snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
-   }
+      agent_route_failure_message(role, out->error, sizeof(out->error));
    return -1;
 }
 
@@ -650,7 +640,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    agent_t *ag = agent_route(cfg, role);
    if (!ag)
    {
-      snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
+      agent_route_failure_message(role, out->error, sizeof(out->error));
       return -1;
    }
    agent_apply_runtime_config(ag);
