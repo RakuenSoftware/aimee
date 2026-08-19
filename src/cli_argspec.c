@@ -21,6 +21,11 @@
 #define SRC_FLAG            "flag"
 #define SRC_POSITIONAL      "positional"
 #define SRC_POSITIONAL_FLAG "positional_or_flag"
+/* The SAME two sources, opposite precedence: the flag wins and a positional is
+ * the fallback. kb.build reads `--path` first and positional[0] only if the
+ * flag is absent. Both orders are in use and they differ whenever both are
+ * supplied, so a spec has to say which one it means. */
+#define SRC_FLAG_POSITIONAL "flag_or_positional"
 #define SRC_ARGV_JOINED     "argv_joined"
 /* Every argv word as a JSON array of strings. The model and agent command
  * families pass their arguments through verbatim this way -- one shape,
@@ -84,8 +89,8 @@ static const char *field_str(const cJSON *field, const char *key)
 static int known_source(const char *from)
 {
    return from && (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
-                   !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_ARGV_JOINED) ||
-                   !strcmp(from, SRC_ARGV_ARRAY));
+                   !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
+                   !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY));
 }
 
 static int known_empty(const char *e)
@@ -139,9 +144,12 @@ int cli_argspec_supported(const cJSON *spec)
             return 0;
       }
       /* A source must carry what it reads from, or the row means nothing. */
-      if ((!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL_FLAG)) && !field_str(f, "flag"))
+      if ((!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL_FLAG) ||
+           !strcmp(from, SRC_FLAG_POSITIONAL)) &&
+          !field_str(f, "flag"))
          return 0;
-      if (!strcmp(from, SRC_POSITIONAL) || !strcmp(from, SRC_POSITIONAL_FLAG))
+      if (!strcmp(from, SRC_POSITIONAL) || !strcmp(from, SRC_POSITIONAL_FLAG) ||
+          !strcmp(from, SRC_FLAG_POSITIONAL))
       {
          const cJSON *idx = cJSON_GetObjectItemCaseSensitive(f, "index");
          if (!cJSON_IsNumber(idx) || idx->valuedouble < 0 || idx->valuedouble >= V1_MAX_POS)
@@ -205,6 +213,18 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
 
    if (!strcmp(from, SRC_FLAG))
       return cli_args_get(opts, flag);
+
+   if (!strcmp(from, SRC_FLAG_POSITIONAL))
+   {
+      const char *v = cli_args_get(opts, flag);
+      if (v && v[0])
+         return v;
+      const cJSON *fi = cJSON_GetObjectItemCaseSensitive(field, "index");
+      int fidx = cJSON_IsNumber(fi) ? (int)fi->valuedouble : 0;
+      return (opts->pos_count > fidx && opts->positional[fidx] && opts->positional[fidx][0])
+                 ? opts->positional[fidx]
+                 : NULL;
+   }
 
    const cJSON *idx = cJSON_GetObjectItemCaseSensitive(field, "index");
    int i = (int)idx->valuedouble;

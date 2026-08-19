@@ -173,7 +173,7 @@
 {"index.scan",
  "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"name\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"root\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"}]}"},
 {"kb.build",
- "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"path\",\"from\":\"flag\",\"flag\":\"path\"},{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\"},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\"}]}"},
+ "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"path\",\"from\":\"flag_or_positional\",\"flag\":\"path\",\"index\":0},{\"json\":\"project\",\"from\":\"flag_or_positional\",\"flag\":\"project\",\"index\":1},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\",\"empty\":\"emit\"}]}"},
 {"kb.ingest",
  "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"workspace\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\"}]}"},
 {"kb.status",
