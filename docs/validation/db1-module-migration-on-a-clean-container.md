@@ -65,6 +65,30 @@ checks passed, covering every family's shapes across the real bus -- nested
 rows, allocated lists, nine-parameter updates, refusals that are answers rather
 than errors. This is the real cross-family evidence; the sweep above is not.
 
+### `scripts/validation/db1-module-upgrade.sh` -- 11 checks, all passing
+
+Everything above starts from an empty home, where the module creates the schema
+itself. No deployment that matters is empty. This one builds the **pre-migration
+daemon** from `origin/testing` (`ab13bd87ab`, twelve families declared, eight
+served, `db1_init` still linked into the daemon), runs it against a fresh home,
+writes sessions through it, stops it, and brings the migrated build up on the
+same file.
+
+- the old daemon held **3 open descriptors** on `aimee.db`; the new one holds
+  **0** on the same store -- the migration's central claim, measured across the
+  upgrade rather than asserted about a fresh file
+- the new build **starts** on a store it did not create
+- **no table lost**: 102 before, 102 after
+- every session the old build wrote is still on disk **and** reads back through
+  the new build's API
+- the upgraded store still takes writes, and the new row lists beside the old
+
+One thing this turned up about the *old* build, recorded rather than fixed
+because it is not this branch's: the pre-migration daemon reliably fails its
+first store call after health has already gone green, then serves every call
+after it. The migrated build's equivalent is asserted in the e2e script, whose
+first store call comes directly after readiness and succeeds.
+
 ## What it turned up
 
 **One finding in the product**, written up as
@@ -104,5 +128,10 @@ Install the three binaries as above, then inside the container:
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-e2e.sh
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-explore.sh
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-readiness-probe.sh
+
+The upgrade script additionally needs a pre-migration build:
+
+    OLD_SERVER=/opt/old/aimee-server OLD_MODULE=/opt/old/aimee-module-db1 \
+      scripts/validation/db1-module-upgrade.sh
 
 `AIMEE_DB1_MODULE` overrides the module path for running against a build tree.
