@@ -269,3 +269,43 @@
 {"notes.search",
  "{\"fields\":[{\"json\":\"query\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"query\",\"empty\":\"emit\"},{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20}]}"},
 
+/* Four of the six methods marshal_cron_id serves. It branches on `method` in
+   exactly one place -- `--all` is honoured only for cron.enable/cron.disable --
+   which makes those two indescribable, not all six. No marshaller change. */
+
+{"cron.show",
+ "{\"usage\":\"usage: aimee cron show <id>\",\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"id\",\"required\":true}]}"},
+
+{"cron.run",
+ "{\"usage\":\"usage: aimee cron run <id>\",\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"id\",\"required\":true}]}"},
+
+{"cron.remove",
+ "{\"usage\":\"usage: aimee cron show <id>\",\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"id\",\"required\":true}]}"},
+
+{"cron.history",
+ "{\"usage\":\"usage: aimee cron history <id>\",\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"id\",\"required\":true},{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20}]}"},
+
+/* marshal_pipeline_request, per method. It branches three times and every other
+   method falls through to a shared tail, so each has a fixed shape of its own. */
+
+{"pipeline.advance",
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
+
+{"pipeline.cancel",
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
+
+{"pipeline.gate",
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"verdict\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":\"reason\",\"from\":\"flag\",\"flag\":\"reason\"},{\"json\":\"operator_principal\",\"from\":\"flag\",\"flag\":\"operator-principal\"}]}"},
+
+{"pipeline.list",
+ "{\"fields\":[{\"json\":\"state\",\"from\":\"flag\",\"flag\":\"state\"}]}"},
+
+{"pipeline.resume",
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
+
+{"pipeline.show",
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
+
+{"pipeline.status",
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
+
