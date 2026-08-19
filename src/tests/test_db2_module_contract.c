@@ -73,6 +73,8 @@ static int corpus_stat_count;
 static int corpus_stat_calls;
 static int edge_prune_value;
 static int edge_prune_calls;
+static int edge_normalize_value;
+static int edge_normalize_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -602,6 +604,17 @@ static int entity_edge_prune_orphans(void)
 {
    edge_prune_calls++;
    return edge_prune_value;
+}
+
+int db2_entity_edge_normalize_weights(void)
+{
+   return 0;
+}
+
+static int entity_edge_normalize_weights(void)
+{
+   edge_normalize_calls++;
+   return edge_normalize_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1298,6 +1311,8 @@ static void reset(void)
    corpus_stat_calls = 0;
    edge_prune_value = 2;
    edge_prune_calls = 0;
+   edge_normalize_value = 3;
+   edge_normalize_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2592,6 +2607,51 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_entity_edge_normalize_weights_wire(void)
+{
+   assert(AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_SCALE == 100u);
+   /* Second index-family operation: a distinct operation number within the
+    * family, and the same index event kind and stage as the first. */
+   assert(AIMEE_DB2_OPERATION_ENTITY_EDGE_NORMALIZE_WEIGHTS !=
+          AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS);
+   assert(AIMEE_DB2_EVENT_ENTITY_EDGE_NORMALIZE_WEIGHTS == AIMEE_DB2_EVENT_INDEX);
+
+   uint8_t request[AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_REQUEST_LEN] = {0};
+   assert(aimee_db2_entity_edge_normalize_weights_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == 0);
+   /* The prune request is a different operation number, so this decoder must
+    * reject it even though both arrive on the index stage. */
+   uint8_t prune_request[AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN] = {0};
+   assert(aimee_db2_entity_edge_prune_orphans_request_encode(prune_request,
+                                                             sizeof(prune_request)) == 0);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(prune_request,
+                                                                 sizeof(prune_request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, normalized = 99;
+   assert(aimee_db2_entity_edge_normalize_weights_reply_encode(3, reply, sizeof(reply),
+                                                               &reply_len) == 0);
+   assert(aimee_db2_entity_edge_normalize_weights_reply_decode(reply, reply_len, &normalized) ==
+              0 &&
+          normalized == 3);
+   /* A converged graph reports zero rewrites, which is a success. */
+   assert(aimee_db2_entity_edge_normalize_weights_reply_encode(0, reply, sizeof(reply),
+                                                               &reply_len) == 0);
+   assert(aimee_db2_entity_edge_normalize_weights_reply_decode(reply, reply_len, &normalized) ==
+              0 &&
+          normalized == 0);
+   assert(aimee_db2_entity_edge_normalize_weights_reply_encode(
+              AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_COUNT_MAX + 1u, reply, sizeof(reply),
+              &reply_len) == -1);
+   assert(aimee_db2_entity_edge_normalize_weights_reply_encode(3, reply, sizeof(reply),
+                                                               &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_entity_edge_normalize_weights_reply_decode(reply, reply_len, &normalized) ==
+          -1);
 }
 
 static void test_entity_edge_prune_orphans_wire(void)
@@ -4649,6 +4709,43 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_entity_edge_normalize_weights_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.entity_edge_normalize_weights =
+                                                   entity_edge_normalize_weights};
+   uint8_t request[AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN];
+   uint32_t response_len = 99, normalized = 99;
+   aimee_module_invocation_t invocation = {.stage_id =
+                                               AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS};
+   assert(aimee_db2_entity_edge_normalize_weights_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(edge_normalize_calls == 1);
+   assert(aimee_db2_entity_edge_normalize_weights_reply_decode(response, response_len,
+                                                               &normalized) == 0 &&
+          normalized == 3);
+
+   /* Converged graph: zero rewrites is a success, not a failure. */
+   edge_normalize_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_entity_edge_normalize_weights_reply_decode(response, response_len,
+                                                               &normalized) == 0 &&
+          normalized == 0);
+   edge_normalize_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   edge_normalize_value = 3;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_entity_edge_prune_orphans_handler(void)
 {
    reset();
@@ -6345,6 +6442,7 @@ int main(void)
    test_pick_first_temporal_ref_wire();
    test_count_and_max_updated_wire();
    test_entity_edge_prune_orphans_wire();
+   test_entity_edge_normalize_weights_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6398,6 +6496,7 @@ int main(void)
    test_pick_first_temporal_ref_handler();
    test_count_and_max_updated_handler();
    test_entity_edge_prune_orphans_handler();
+   test_entity_edge_normalize_weights_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

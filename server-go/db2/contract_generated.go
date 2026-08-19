@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "3bbdebfeea4d8d25b3d2236e151024960cb8ecef2815b644ded549b40d2e9744"
+const ContractSHA256 = "861acd367615dc56a97de6caeeaae19490d71392895fcb141fe2692a453aeff7"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -324,6 +324,11 @@ const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = 1
 const EntityEdgePruneOrphansCountMax uint32 = 2147483647
+const EventEntityEdgeNormalizeWeights = EventIndex
+const StageEntityEdgeNormalizeWeights = FamilyIndex
+const OperationEntityEdgeNormalizeWeights uint32 = 2
+const EntityEdgeNormalizeWeightsScale uint32 = 100
+const EntityEdgeNormalizeWeightsCountMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1930,6 +1935,55 @@ func DecodeEntityEdgePruneOrphansReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return prunedCount, nil
+}
+
+// EncodeEntityEdgeNormalizeWeightsRequest emits the empty request envelope.
+func EncodeEntityEdgeNormalizeWeightsRequest() []byte {
+	header, err := EncodeRequestHeader(OperationEntityEdgeNormalizeWeights, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeEntityEdgeNormalizeWeightsRequest validates the exact envelope.
+func DecodeEntityEdgeNormalizeWeightsRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityEdgeNormalizeWeights ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeEntityEdgeNormalizeWeightsReply emits one bounded u32 rescale count.
+// A converged graph reports zero: the statement skips rows already holding
+// their normalised value rather than rewriting them.
+func EncodeEntityEdgeNormalizeWeightsReply(normalizedCount uint32) ([]byte, error) {
+	if normalizedCount > EntityEdgeNormalizeWeightsCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEntityEdgeNormalizeWeights, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], normalizedCount)
+	return reply, nil
+}
+
+// DecodeEntityEdgeNormalizeWeightsReply validates operation and bounded count.
+func DecodeEntityEdgeNormalizeWeightsReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEntityEdgeNormalizeWeights ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	normalizedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if normalizedCount > EntityEdgeNormalizeWeightsCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return normalizedCount, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

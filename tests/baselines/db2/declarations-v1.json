@@ -7574,9 +7574,15 @@
           "line": 136
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_edge_normalize_weights operation replaces the per-relation weight rescale. The statement already skips rows that would be rewritten to the value they hold, so a converged graph reports zero rather than rewriting every edge, and the scale stays fixed policy behind the handler."
+      },
       "signature": "int db2_entity_edge_normalize_weights ( void )",
       "signature_sha256": "085de3b769fda5eb2c35fb0b9ba2177f2fd502d72c39aa5253bf9ed88f6d5331",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_normalize_weights"
     },
     {
@@ -26052,15 +26058,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e6547917bba5ccf80e87ccef200fabef841e328f506ab43c35710d161f514d62",
+  "fingerprint": "a92a82048718e5af0ede1890129cf97cbd85d1fce1b65e866cc1f5f1c680d882",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 620,
+    "audit_pending": 619,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 338
+    "reviewed": 339
   }
 }

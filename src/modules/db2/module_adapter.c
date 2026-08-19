@@ -302,6 +302,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .pick_first_temporal_ref = db2_memory_pick_first_temporal_ref,
        .count_and_max_updated = db2_memory_count_and_max_updated,
        .entity_edge_prune_orphans = db2_entity_edge_prune_orphans,
+       .entity_edge_normalize_weights = db2_entity_edge_normalize_weights,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -329,7 +330,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    if (!invocation || !response_len || !response_body ||
        (invocation->stage_id != AIMEE_DB2_STAGE_HEALTH &&
         invocation->stage_id != AIMEE_DB2_STAGE_LEVEL3_COUNT &&
-        invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS))
+        invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS &&
+        invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1247,7 +1249,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }
 
-   if (invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS)
+   if (invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS ||
+       invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS)
    {
       if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
       {
@@ -1264,6 +1267,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_entity_edge_prune_orphans_reply_encode((uint32_t)pruned, response_body,
                                                               response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->entity_edge_normalize_weights)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Zero here means a converged graph, not a failed pass: the statement
+          * excludes rows that already hold their normalised weight. */
+         int normalized = backend->entity_edge_normalize_weights();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (normalized < 0 ||
+             (uint32_t)normalized > AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_entity_edge_normalize_weights_reply_encode(
+                 (uint32_t)normalized, response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

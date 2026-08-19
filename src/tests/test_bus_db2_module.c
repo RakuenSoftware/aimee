@@ -88,6 +88,7 @@ typedef struct
    int (*pick_first_temporal_ref)(int64_t memory_id, char *out, int out_len);
    int (*count_and_max_updated)(int *out_count, char *out_ts, int out_ts_len);
    int (*entity_edge_prune_orphans)(void);
+   int (*entity_edge_normalize_weights)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -158,6 +159,7 @@ static int get_source_session_calls;
 static int temporal_ref_calls;
 static int corpus_stat_calls;
 static int edge_prune_calls;
+static int edge_normalize_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -1001,6 +1003,17 @@ static int entity_edge_prune_orphans(void)
    return 2;
 }
 
+int db2_entity_edge_normalize_weights(void)
+{
+   return 0;
+}
+
+static int entity_edge_normalize_weights(void)
+{
+   edge_normalize_calls++;
+   return 3;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1251,7 +1264,8 @@ int main(void)
     * event kind, and the module must serve a kind before any operation in
     * that family can be routed to it. */
    const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT,
-                              AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS};
+                              AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
+                              AIMEE_DB2_EVENT_ENTITY_EDGE_NORMALIZE_WEIGHTS};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -1287,6 +1301,8 @@ int main(void)
        {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_STAGE_HEALTH},
        {AIMEE_DB2_EVENT_LEVEL3_COUNT, AIMEE_DB2_STAGE_LEVEL3_COUNT},
        {AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS, AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS},
+       {AIMEE_DB2_EVENT_ENTITY_EDGE_NORMALIZE_WEIGHTS,
+        AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS},
    };
    static const aimee_db2_module_backend_t backend = {
        .is_initialized = is_initialized,
@@ -1348,6 +1364,7 @@ int main(void)
        .pick_first_temporal_ref = pick_first_temporal_ref,
        .count_and_max_updated = count_and_max_updated,
        .entity_edge_prune_orphans = entity_edge_prune_orphans,
+       .entity_edge_normalize_weights = entity_edge_normalize_weights,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1681,6 +1698,12 @@ int main(void)
    assert(aimee_db2_entity_edge_prune_orphans_call(call_client, &client, 7077, 0, &edges_pruned,
                                                    NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(edges_pruned == 2 && edge_prune_calls == 1);
+
+   uint32_t edges_normalized = 99u;
+   assert(aimee_db2_entity_edge_normalize_weights_call(call_client, &client, 7078, 0,
+                                                       &edges_normalized, NULL,
+                                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(edges_normalized == 3 && edge_normalize_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

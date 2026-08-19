@@ -1457,6 +1457,30 @@
         "field": {"name": "pruned_count", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "index",
+      "id": 2,
+      "name": "entity_edge_normalize_weights",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edge weights are canonical relational DB2 columns and their per-relation normalisation is a DB2 statement.",
+      "c_symbols": ["db2_entity_edge_normalize_weights"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"scale": 100, "converged_rows_skipped": true}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "normalized_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }

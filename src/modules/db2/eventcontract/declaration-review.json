@@ -172,6 +172,14 @@
       "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
     },
     {
+      "symbol": "db2_entity_edge_normalize_weights",
+      "signature_sha256": "085de3b769fda5eb2c35fb0b9ba2177f2fd502d72c39aa5253bf9ed88f6d5331",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_edge_normalize_weights operation replaces the per-relation weight rescale. The statement already skips rows that would be rewritten to the value they hold, so a converged graph reports zero rather than rewriting every edge, and the scale stays fixed policy behind the handler."
+    },
+    {
       "symbol": "db2_entity_edge_prune_orphans",
       "signature_sha256": "6e92ee40b63006fa5a26953c963aaf0a78c1acb76dded6d8dc1f60c1b5faeea1",
       "disposition": "wire-operation",

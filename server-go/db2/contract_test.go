@@ -93,6 +93,7 @@ type wireBaseline struct {
 				Count                 uint64            `json:"count"`
 				DeletedCount          uint32            `json:"deleted_count"`
 				PrunedCount           uint32            `json:"pruned_count"`
+				NormalizedCount       uint32            `json:"normalized_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -238,7 +239,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 53 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 54 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -290,7 +291,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[49].Name != "get_source_session" ||
 		baseline.Operations[50].Name != "pick_first_temporal_ref" ||
 		baseline.Operations[51].Name != "count_and_max_updated" ||
-		baseline.Operations[52].Name != "entity_edge_prune_orphans" {
+		baseline.Operations[52].Name != "entity_edge_prune_orphans" ||
+		baseline.Operations[53].Name != "entity_edge_normalize_weights" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -487,6 +489,49 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestEntityEdgeNormalizeWeightsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[53]
+	if operation.Family != "index" {
+		t.Fatalf("family = %q, want index", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeEntityEdgeNormalizeWeightsRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeEntityEdgeNormalizeWeightsRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	// Same family and stage as the prune, different operation number, so this
+	// decoder must reject the prune request.
+	if err := DecodeEntityEdgeNormalizeWeightsRequest(EncodeEntityEdgePruneOrphansRequest()); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("normalize decoder accepted the prune request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeEntityEdgeNormalizeWeightsRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeEntityEdgeNormalizeWeightsReply(vector.NormalizedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		normalized, err := DecodeEntityEdgeNormalizeWeightsReply(got)
+		if err != nil || normalized != vector.NormalizedCount {
+			t.Fatalf("decode = (%d, %v)", normalized, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		normalized, err := DecodeEntityEdgeNormalizeWeightsReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || normalized != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, normalized, err)
+		}
+	}
+	if EntityEdgeNormalizeWeightsScale != 100 {
+		t.Fatalf("scale = %d, want 100", EntityEdgeNormalizeWeightsScale)
 	}
 }
 
