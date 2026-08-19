@@ -234,6 +234,12 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
 
    const char *empty = field_str(field, "empty");
    int emit_empty = empty && !strcmp(empty, EMPTY_EMIT);
+   /* Omit a number whose value is not positive. Exactly parallel to
+    * `empty: "drop"` for strings -- a rule about ONE field's own value, with no
+    * reference to any other field, which is the line between data and a
+    * program. Seven marshallers do `int n = ...; if (n > 0) Add(n);`. */
+   int omit_nonpositive =
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "omit_if_nonpositive"));
    const char *value = field_value(field, opts, joined);
    /* `default` reproduces cli_args_get_int(opts, name, def): the field is
     * emitted even when the flag is absent, carrying the default. Absent means
@@ -241,7 +247,8 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
    const cJSON *dflt = cJSON_GetObjectItemCaseSensitive(field, "default");
    if ((!value || !value[0]) && cJSON_IsNumber(dflt) && !emit_empty)
    {
-      cJSON_AddNumberToObject(req, json_name, dflt->valuedouble);
+      if (!(omit_nonpositive && dflt->valuedouble <= 0))
+         cJSON_AddNumberToObject(req, json_name, dflt->valuedouble);
       return 0;
    }
    if (!value || (!value[0] && !emit_empty))
@@ -250,9 +257,14 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
    if (!type || !strcmp(type, TYPE_STRING))
       cJSON_AddStringToObject(req, json_name, value);
    else if (!strcmp(type, TYPE_NUMBER_LAX))
-      /* atoi(): leading digits, 0 for anything else, no refusal. Exactly what
-       * the 53 sites do -- described, not endorsed. */
-      cJSON_AddNumberToObject(req, json_name, (double)atoi(value));
+   /* atoi(): leading digits, 0 for anything else, no refusal. Exactly what
+    * the 53 sites do -- described, not endorsed. */
+   {
+      int n = atoi(value);
+      if (omit_nonpositive && n <= 0)
+         return 0;
+      cJSON_AddNumberToObject(req, json_name, (double)n);
+   }
    else if (!strcmp(type, TYPE_NUMBER))
    {
       /* Strict: a field the spec called a number is refused rather than

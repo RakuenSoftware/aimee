@@ -227,3 +227,33 @@
 {"model.roles",
  "{\"fields\":[{\"json\":\"args\",\"from\":\"argv_array\"}]}"},
 
+{"cert.issue",
+ "{\"fields\":[{\"json\":\"cn\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"days\",\"from\":\"flag\",\"flag\":\"days\",\"type\":\"number_lenient\"}]}"},
+
+{"job.cancel",
+ "{\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"job-id\",\"type\":\"number_lenient\"},{\"json\":\"reason\",\"from\":\"flag\",\"flag\":\"reason\"}]}"},
+
+{"job.status",
+ "{\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"job-id\",\"type\":\"number_lenient\"},{\"json\":\"reason\",\"from\":\"flag\",\"flag\":\"reason\"}]}"},
+
+{"jobs.cancel",
+ "{\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"job-id\",\"type\":\"number_lenient\"},{\"json\":\"reason\",\"from\":\"flag\",\"flag\":\"reason\"}]}"},
+
+{"jobs.logs",
+ "{\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"job-id\",\"type\":\"number_lenient\"},{\"json\":\"reason\",\"from\":\"flag\",\"flag\":\"reason\"}]}"},
+
+{"jobs.status",
+ "{\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"job-id\",\"type\":\"number_lenient\"},{\"json\":\"reason\",\"from\":\"flag\",\"flag\":\"reason\"}]}"},
+
+{"kb.reembed",
+ "{\"bool_flags\":[\"confirm\",\"force\",\"dry-run\",\"clear-maintenance\"],\"fields\":[{\"json\":\"confirm\",\"from\":\"flag\",\"flag\":\"confirm\",\"type\":\"true_if_set\"},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"},{\"json\":\"dry_run\",\"from\":\"flag\",\"flag\":\"dry-run\",\"type\":\"true_if_set\"},{\"json\":\"clear_maintenance\",\"from\":\"flag\",\"flag\":\"clear-maintenance\",\"type\":\"true_if_set\"},{\"json\":\"target_dim\",\"from\":\"flag\",\"flag\":\"target-dim\",\"type\":\"number_lenient\"}]}"},
+
+{"rules.delete",
+ "{\"fields\":[{\"json\":\"id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"id\",\"type\":\"number_lenient\"}]}"},
+
+{"job.start",
+ "{\"fields\":[{\"json\":\"plan_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"plan-id\",\"type\":\"number_lenient\"},{\"json\":\"parallel\",\"from\":\"flag\",\"flag\":\"parallel\",\"type\":\"number_lenient\",\"default\":0,\"omit_if_nonpositive\":true}]}"},
+
+{"session.list",
+ "{\"fields\":[{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":0,\"omit_if_nonpositive\":true}]}"},
+
