@@ -463,6 +463,14 @@ static const sample_t SAMPLES[] = {
     {"trajectory.batch", {"--tasks", "c.jsonl", "--out", "d", NULL}},
     {"trajectory.batch", {"--tasks", "c.jsonl", "--max-result-bytes", "0", NULL}},
     {"trajectory.batch", {"--tasks", "c.jsonl", "--toolset-dist", "research", NULL}},
+    {"session.close", {NULL}},
+    {"session.close", {"v0", NULL}},
+    {"session.close", {"", NULL}},
+    {"session.close", {"--session", "viaflag", NULL}},
+    {"session.get", {NULL}},
+    {"session.get", {"v0", NULL}},
+    {"session.get", {"", NULL}},
+    {"session.get", {"--session", "viaflag", NULL}},
 };
 
 static const char *spec_for(const char *method)
