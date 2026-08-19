@@ -7,6 +7,7 @@
 #include "c/db2_pool.h"
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
+#include "c/prospective_memories.h"
 #include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
@@ -308,6 +309,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .project_count = db2_code_index_project_count,
        .purge_hidden_pollution = db2_code_index_purge_hidden_pollution,
        .requeue_drifted = db2_code_index_requeue_drifted,
+       .prospective_sweep_expired = db2_prospective_sweep_expired,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -339,7 +341,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROJECT_COUNT &&
         invocation->stage_id != AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION &&
-        invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED))
+        invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED &&
+        invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1356,6 +1359,32 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_requeue_drifted_reply_encode((uint32_t)requeued, response_body,
                                                     response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   }
+
+   if (invocation->stage_id == AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED)
+   {
+      if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->prospective_sweep_expired)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Nothing armed has expired yet and a failed statement are both zero
+          * from this backend, so the count cannot separate them. What the
+          * boundary does keep is the clock: the comparison happens in the
+          * database, so a caller with a wrong clock cannot retire a memory
+          * that is still inside its window. */
+         int expired = backend->prospective_sweep_expired();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (expired < 0 || (uint32_t)expired > AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_prospective_sweep_expired_reply_encode((uint32_t)expired, response_body,
+                                                              response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

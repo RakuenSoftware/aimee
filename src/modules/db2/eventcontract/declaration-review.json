@@ -2148,6 +2148,14 @@
       "reason": "The injected embedder callback is a process-local compatibility seam and cannot cross the bus; callers resolve the running endpoint's dimension before submitting the typed reset operation, which always carries an explicit target."
     },
     {
+      "symbol": "db2_prospective_sweep_expired",
+      "signature_sha256": "8aff5c8b3bc10a515458c73f31e9c57aa4e1be83d12e572e8be28c58b4419373",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.prospective_sweep_expired operation replaces the sweep that retires armed prospective memories whose validity window has closed. The two states it moves between, and the requirement that a row carry a validity window at all, are fixed policy: a caller able to choose them could expire memories that were never given an expiry. The comparison is made against the database clock rather than a caller-supplied instant, so a wrong clock on one caller cannot retire memories early."
+    },
+    {
       "symbol": "db2_reembed_clear_maintenance",
       "signature_sha256": "fb2c499ea00edb05993508e40379e520976b5810f94265c9e0ad49e0773e4bda",
       "disposition": "wire-operation",

@@ -97,6 +97,7 @@ type wireBaseline struct {
 				ProjectCount          uint32            `json:"project_count"`
 				PurgedCount           uint32            `json:"purged_count"`
 				RequeuedCount         uint32            `json:"requeued_count"`
+				ExpiredCount          uint32            `json:"expired_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -242,7 +243,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 57 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 58 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -298,7 +299,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[53].Name != "entity_edge_normalize_weights" ||
 		baseline.Operations[54].Name != "project_count" ||
 		baseline.Operations[55].Name != "purge_hidden_pollution" ||
-		baseline.Operations[56].Name != "requeue_drifted" {
+		baseline.Operations[56].Name != "requeue_drifted" ||
+		baseline.Operations[57].Name != "prospective_sweep_expired" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -494,6 +496,52 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestProspectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[57]
+	if operation.Family != "maintenance" {
+		t.Fatalf("family = %q, want maintenance", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeProspectiveSweepExpiredRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeProspectiveSweepExpiredRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	// Operation numbers are unique per family, not globally, so the first
+	// operation of the index family produces the same bytes and decodes here.
+	// The stage an invocation arrives on is the only discriminator; the C
+	// handler test pins that, and this asserts the wire consequence rather
+	// than claiming a separation the envelope does not carry.
+	if err := DecodeEntityEdgePruneOrphansRequest(wantRequest); err != nil {
+		t.Fatalf("expected the index family's first operation to share these bytes: %v", err)
+	}
+	if err := DecodeRequeueDriftedRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("requeue decoder accepted a sweep request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeProspectiveSweepExpiredRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeProspectiveSweepExpiredReply(vector.ExpiredCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		expired, err := DecodeProspectiveSweepExpiredReply(got)
+		if err != nil || expired != vector.ExpiredCount {
+			t.Fatalf("decode = (%d, %v)", expired, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		expired, err := DecodeProspectiveSweepExpiredReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || expired != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, expired, err)
 		}
 	}
 }

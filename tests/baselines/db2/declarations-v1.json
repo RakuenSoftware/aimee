@@ -20316,9 +20316,15 @@
           "line": 44
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.prospective_sweep_expired operation replaces the sweep that retires armed prospective memories whose validity window has closed. The two states it moves between, and the requirement that a row carry a validity window at all, are fixed policy: a caller able to choose them could expire memories that were never given an expiry. The comparison is made against the database clock rather than a caller-supplied instant, so a wrong clock on one caller cannot retire memories early."
+      },
       "signature": "int db2_prospective_sweep_expired ( void )",
       "signature_sha256": "8aff5c8b3bc10a515458c73f31e9c57aa4e1be83d12e572e8be28c58b4419373",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_sweep_expired"
     },
     {
@@ -26076,15 +26082,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4fe1330559cf0b9aae859ab93eeefde21671533f71fc87e4fad221c2b72a2930",
+  "fingerprint": "63f7f449185da8021fc5248399441bc4f3721fcd607f9fd27ae182069df81fbb",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 616,
+    "audit_pending": 615,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 342
+    "reviewed": 343
   }
 }

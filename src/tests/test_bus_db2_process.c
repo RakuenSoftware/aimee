@@ -110,7 +110,8 @@ int main(int argc, char **argv)
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
 
    const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT,
-                              AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS};
+                              AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
+                              AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -585,6 +586,19 @@ int main(int argc, char **argv)
    assert(aimee_db2_requeue_drifted_call(call_client, &client, 9095, 0, &requeued, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(requeued == 0);
+
+   /* The maintenance family reaching the real process for the first time. No
+    * prospective memory is armed on a fresh schema, so nothing expires, and
+    * the second call returning the same zero is what the catalog's safe
+    * idempotency claims. */
+   uint32_t expired = 99;
+   assert(aimee_db2_prospective_sweep_expired_call(call_client, &client, 9096, 0, &expired, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(expired == 0);
+   expired = 99;
+   assert(aimee_db2_prospective_sweep_expired_call(call_client, &client, 9097, 0, &expired, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(expired == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

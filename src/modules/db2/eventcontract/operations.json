@@ -1555,6 +1555,31 @@
         "field": {"name": "requeued_count", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 1,
+      "name": "prospective_sweep_expired",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memory state and its validity window are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_prospective_sweep_expired"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"from_state": "armed", "to_state": "expired",
+                   "clock": "database", "requires_valid_until": true}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "expired_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }
