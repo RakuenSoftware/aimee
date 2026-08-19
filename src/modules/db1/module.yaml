@@ -134,6 +134,7 @@
     "src/modules/db1/local_operator.h",
     "src/modules/db1/maintenance.h",
     "src/modules/db1/mcp_osv_cache.h",
+    "src/modules/db1/mgmt_jwks_cache.h",
     "src/modules/db1/model_catalog.h",
     "src/modules/db1/model_pricing.h",
     "src/modules/db1/payload_rewrite_state.h",
