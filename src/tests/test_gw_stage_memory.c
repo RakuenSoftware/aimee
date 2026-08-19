@@ -398,6 +398,39 @@ static void test_ir_stage_guidance_not_repeated_midsession(void)
    printf("ir_stage_guidance_not_repeated_midsession OK\n");
 }
 
+/* PERSONA PLACEMENT on the IR seam -- the DEFAULT path, and the half that was
+ * untested: the flat legacy entry point had coverage, this did not.
+ *
+ * Two independent guards stop a second delivery. The marker catches a caller
+ * that echoes our mutated first turn back; the assistant-turn scan catches the
+ * caller that does NOT, which is the case a marker check alone would miss and
+ * would re-personify mid-conversation. */
+static void test_persona_prepends_first_user_message_once(void)
+{
+   static const char persona[] =
+       "<aimee-persona schema=\"1\" name=\"user-edited\">\ncustom\n</aimee-persona>\n";
+   aimee_request_t ir;
+   mk_user_ir(&ir, "fix the cache");
+   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 1);
+   assert(ir.messages[0].n_blocks == 2);
+   assert(strcmp(ir.messages[0].blocks[0].text, persona) == 0);
+   assert(strcmp(ir.messages[0].blocks[1].text, "fix the cache") == 0);
+   /* Marker present -> terminal. */
+   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 0);
+   assert(ir.messages[0].n_blocks == 2);
+   aimee_request_free(&ir);
+
+   /* A later request can carry the original user text WITHOUT the marker. Prior
+    * assistant history is on its own sufficient to prevent a second prefix. */
+   mk_user_ir(&ir, "fix the cache");
+   mk_assistant_turn(&ir);
+   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 0);
+   assert(ir.messages[0].n_blocks == 1);
+   assert(strcmp(ir.messages[0].blocks[0].text, "fix the cache") == 0);
+   aimee_request_free(&ir);
+   printf("persona_prepends_first_user_message_once OK\n");
+}
+
 int main(void)
 {
    printf("test_gw_stage_memory:\n");
@@ -410,6 +443,7 @@ int main(void)
    test_ir_stage_guidance_not_repeated_midsession();
    test_first_turn_withholds_shell();
    test_shell_returns_after_first_turn();
+   test_persona_prepends_first_user_message_once();
    printf("all gw_stage_memory tests passed\n");
    return 0;
 }
