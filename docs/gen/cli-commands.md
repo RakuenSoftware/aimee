@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 74
+Total commands: 75
 
 ## Core commands
 
@@ -268,6 +268,19 @@ Subcommands:
   resolve <name>   Print the resolved tool list
 ```
 
+### `aimee use`
+
+Select the active model provider.
+
+Subcommands:
+
+```
+  <name>           Make <name> the active provider
+  Same command as `aimee provider set`; both spellings route to
+  provider.set, so `aimee use ollama` and `aimee provider set ollama`
+  do the same thing.
+```
+
 ### `aimee vault`
 
 Per-user encrypted agent credentials.
@@ -511,11 +524,6 @@ Subcommands:
 
 ```
   list             List recent delegation episodes
-Unknown
-       commanduseSelect the active model provider  <name>           Make <name> the active provider
-  Same command as `aimee provider set`; both spellings route to
-  provider.set, so `aimee use ollama` and `aimee provider set ollama`
-  do the same thing.
 ```
 
 ### `aimee graph`
