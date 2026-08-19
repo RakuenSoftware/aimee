@@ -15251,9 +15251,15 @@
           "line": 951
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of memory_refresh_aliases: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_aliases_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "227c42b68e1cc57ee503bd21761cc6c7f434c2827e20214557c4a6bf33cbbdd4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_aliases_delete_for_memory"
     },
     {
@@ -15374,9 +15380,15 @@
           "line": 948
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of memory_refresh_chunks: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_chunks_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "70dd6b5d6e641c277a0c3b92dd66af40e721f1eb26b1edc922688f8008edd237",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_chunks_delete_for_memory"
     },
     {
@@ -15835,9 +15847,15 @@
           "line": 824
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of the entity refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_entities_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "21ecdf62abf3d569fea8420acb462e6f4590713e79ade9f205647706e3c02a86",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_entities_delete_for_memory"
     },
     {
@@ -15960,9 +15978,15 @@
           "line": 903
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of memory_refresh_episode_relations: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_episodes_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "e5620b3d16735ff839acf46d161f2db4482c827d2fd280242344af13948867a2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_episodes_delete_for_memory"
     },
     {
@@ -16006,9 +16030,15 @@
           "line": 945
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of the event-frame refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_event_frames_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "3aca3d4e16f13ff37e52998bd58e48deebe9aca53813edfdfcbd9f64a5962b69",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_event_frames_delete_for_memory"
     },
     {
@@ -17938,9 +17968,15 @@
           "line": 900
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of memory_refresh_episode_relations: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_relations_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "1e29122e659a695f72798bf2151c00eab049f54a56389fcc1e8b42f34c4698be",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_relations_delete_for_memory"
     },
     {
@@ -18491,9 +18527,15 @@
           "line": 922
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of the summary refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_summaries_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "02f64792cb0f42ca11ca1b76326a20dda3ab7c60b3d8a34e63dda6a9287d02c5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_summaries_delete_for_memory"
     },
     {
@@ -18583,9 +18625,15 @@
           "line": 827
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of the temporal-reference refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_temporal_refs_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "b10603b3b6e7ce0d2139627d5d7ae50a317f3650ac0fa5863479f19ef3d7c329",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_temporal_refs_delete_for_memory"
     },
     {
@@ -18696,9 +18744,15 @@
           "line": 976
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of memory_refresh_units_graph: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_unit_edges_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "a46e03404fb58c3f868a5a281039bd6e7e60d4723110aacdb579051604e269ba",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_unit_edges_delete_for_memory"
     },
     {
@@ -18772,9 +18826,15 @@
           "line": 979
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Private first half of memory_refresh_units_graph: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+      },
       "signature": "void db2_memory_units_delete_for_memory ( int64_t memory_id )",
       "signature_sha256": "f51c3a633f3051b88ddd62f7a0c9e40ebcaeecc99155236e191510711ef8d91b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_units_delete_for_memory"
     },
     {
@@ -25854,15 +25914,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fb357b0fbcb0eff1f7c445e22eb071c70f4f053e75270be17e70afdb6f9517fd",
+  "fingerprint": "6eac7af4ed74d973293c5995920093376e063bfc5b4f0f01f3a089daa1a9e2a9",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 653,
+    "audit_pending": 643,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 305
+    "reviewed": 315
   }
 }
