@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <sqlite3.h>
 
 #include "cJSON.h"
 #include "db1.h"
@@ -168,6 +170,51 @@ static void test_persona_delivery_tracks_durable_session_lifetime(void)
    printf("  PASS: test_persona_delivery_tracks_durable_session_lifetime\n");
 }
 
+/* An existing install upgrades in place: server_sessions predates
+ * persona_delivery_state, so the column arrives through the catch-up ALTER and
+ * every row already in the table must still claim exactly once. Only a fresh
+ * :memory: database exercises the CREATE path, which would hide a broken
+ * migration until it reached a real deployment. */
+static void test_persona_delivery_survives_schema_upgrade(void)
+{
+   const char *tmp = getenv("TMPDIR");
+   char path[512];
+   snprintf(path, sizeof path, "%s/aimee-legacy-db1.sqlite", tmp && tmp[0] ? tmp : "/tmp");
+   remove(path);
+
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "CREATE TABLE server_sessions (id TEXT PRIMARY KEY,"
+                       " client_type TEXT NOT NULL DEFAULT '',"
+                       " principal TEXT NOT NULL DEFAULT '', title TEXT DEFAULT '',"
+                       " last_activity_at TEXT NOT NULL DEFAULT (datetime('now')),"
+                       " claude_session_id TEXT DEFAULT '', metadata TEXT DEFAULT '{}',"
+                       " outcome TEXT DEFAULT NULL, rule_violations INTEGER NOT NULL DEFAULT 0,"
+                       " source TEXT NOT NULL DEFAULT '', chat_key TEXT NOT NULL DEFAULT '',"
+                       " created_at TEXT NOT NULL DEFAULT (datetime('now')))",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(sqlite3_exec(raw, "INSERT INTO server_sessions (id) VALUES ('pre-existing')", NULL, NULL,
+                       NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   assert(db1_server_session_persona_delivery_claim("pre-existing") == 1);
+   assert(db1_server_session_persona_delivery_claim("pre-existing") == 0);
+   assert(db1_server_session_persona_delivery_finish("pre-existing", 1) == 0);
+   assert(db1_server_session_persona_delivery_claim("pre-existing") == 0);
+
+   assert(db1_server_session_create("post-upgrade", "gateway", "p") == 0);
+   assert(db1_server_session_persona_delivery_claim("post-upgrade") == 1);
+   assert(db1_server_session_persona_delivery_finish("post-upgrade", 1) == 0);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_persona_delivery_survives_schema_upgrade\n");
+}
+
 int main(void)
 {
    assert(db1_init(":memory:") == 0);
@@ -179,6 +226,7 @@ int main(void)
    test_principal_scope_excludes_other_operator();
    test_no_message_match_reports_no_match();
    test_persona_delivery_tracks_durable_session_lifetime();
+   test_persona_delivery_survives_schema_upgrade();
    printf("session_search_tool: all tests passed\n");
    return 0;
 }
