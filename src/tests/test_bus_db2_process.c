@@ -587,6 +587,14 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(requeued == 0);
 
+   /* A rebuild inside one transaction. On an empty index the table is emptied
+    * and refilled with nothing, and the size it reports is a genuine zero
+    * rather than the -1 a rolled-back rebuild would have produced. */
+   uint32_t route_count = 99;
+   assert(aimee_db2_cross_repo_rebuild_routes_call(call_client, &client, 9107, 0, &route_count,
+                                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(route_count == 0);
+
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and
     * the second call returning the same zero is what the catalog's safe

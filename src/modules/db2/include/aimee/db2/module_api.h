@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "a66005f2702b5dac3fafbba11106621238abcc1b50af5d552fdddcb2a7665b0b"
+#define AIMEE_DB2_CONTRACT_SHA256 "f0f991fd5532c72949e267856b16e3644a8df955c87f96418070795663dc4ebb"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -527,6 +527,13 @@
 #define AIMEE_DB2_REQUEUE_DRIFTED_RESPONSE_LEN               28u
 #define AIMEE_DB2_REQUEUE_DRIFTED_ERROR_LEN                  24u
 #define AIMEE_DB2_REQUEUE_DRIFTED_MAX                        2147483647u
+#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_ROUTES            AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES            AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES        6u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN      24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN     28u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_ERROR_LEN        24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX              2147483647u
 #define AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_EVENT_MAINTENANCE
 #define AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED            AIMEE_DB2_FAMILY_MAINTENANCE
 #define AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED        1u
@@ -2934,6 +2941,62 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
    if (decoded > AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX)
       return -1;
    *expired_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_request_encode(uint8_t *output,
+                                                                     size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES, 0u, 0u,
+                                          output, capacity);
+}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_request_decode(const uint8_t *input,
+                                                                     size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_reply_encode(uint32_t route_count,
+                                                                   uint8_t *output,
+                                                                   size_t capacity,
+                                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || route_count > AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX ||
+       capacity < AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, route_count);
+   *output_len = AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_reply_decode(const uint8_t *input,
+                                                                   size_t input_len,
+                                                                   uint32_t *route_count)
+{
+   if (route_count)
+      *route_count = 0u;
+   if (!route_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX)
+      return -1;
+   *route_count = decoded;
    return 0;
 }
 

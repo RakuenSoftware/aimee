@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a66005f2702b5dac3fafbba11106621238abcc1b50af5d552fdddcb2a7665b0b"
+const ContractSHA256 = "f0f991fd5532c72949e267856b16e3644a8df955c87f96418070795663dc4ebb"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -341,6 +341,10 @@ const EventRequeueDrifted = EventIndex
 const StageRequeueDrifted = FamilyIndex
 const OperationRequeueDrifted uint32 = 5
 const RequeueDriftedMax uint32 = 2147483647
+const EventCrossRepoRebuildRoutes = EventIndex
+const StageCrossRepoRebuildRoutes = FamilyIndex
+const OperationCrossRepoRebuildRoutes uint32 = 6
+const CrossRepoRebuildRoutesMax uint32 = 2147483647
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2172,6 +2176,56 @@ func DecodeRequeueDriftedReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return requeuedCount, nil
+}
+
+// EncodeCrossRepoRebuildRoutesRequest emits the empty request envelope. Every
+// routing heuristic is policy and never travels.
+func EncodeCrossRepoRebuildRoutesRequest() []byte {
+	header, err := EncodeRequestHeader(OperationCrossRepoRebuildRoutes, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeCrossRepoRebuildRoutesRequest validates the exact index-family
+// envelope.
+func DecodeCrossRepoRebuildRoutesRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCrossRepoRebuildRoutes ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeCrossRepoRebuildRoutesReply emits one bounded u32 route-table size. It
+// is the size of the rebuilt table, not the number of routes changed.
+func EncodeCrossRepoRebuildRoutesReply(routeCount uint32) ([]byte, error) {
+	if routeCount > CrossRepoRebuildRoutesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationCrossRepoRebuildRoutes, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], routeCount)
+	return reply, nil
+}
+
+// DecodeCrossRepoRebuildRoutesReply validates the operation and bounded count.
+func DecodeCrossRepoRebuildRoutesReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCrossRepoRebuildRoutes ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	routeCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if routeCount > CrossRepoRebuildRoutesMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return routeCount, nil
 }
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

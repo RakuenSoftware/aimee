@@ -156,6 +156,14 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_cross_repo_rebuild_routes",
+      "signature_sha256": "387c0ce5b6c1234f226812d1f6953057697ae34f018a2840663738722dfa732d",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.cross_repo_rebuild_routes operation replaces the pass that empties and rebuilds the cross-repo include route table inside one transaction. The routing heuristics are fixed policy and travel nowhere: quoted includes only, the fan-out threshold that suppresses ubiquitous headers, and the generated-build-header rejects. Each was tuned against live findings, and a caller able to send them could reroute a repository's symbol resolution."
+    },
+    {
       "symbol": "db2_curator_reembed_all",
       "signature_sha256": "c76883d0c1d8edb11e85298b827e8802ae045ec73150b7ca99598ca130123adb",
       "disposition": "wire-operation",

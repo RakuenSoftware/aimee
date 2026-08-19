@@ -5553,9 +5553,15 @@
           "line": 18
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.cross_repo_rebuild_routes operation replaces the pass that empties and rebuilds the cross-repo include route table inside one transaction. The routing heuristics are fixed policy and travel nowhere: quoted includes only, the fan-out threshold that suppresses ubiquitous headers, and the generated-build-header rejects. Each was tuned against live findings, and a caller able to send them could reroute a repository's symbol resolution."
+      },
       "signature": "int db2_cross_repo_rebuild_routes ( void )",
       "signature_sha256": "387c0ce5b6c1234f226812d1f6953057697ae34f018a2840663738722dfa732d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_cross_repo_rebuild_routes"
     },
     {
@@ -26124,15 +26130,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "74a60675298f1ddf1c61eea46fa9df7f0545f986f709029f1aecdd2f095593e3",
+  "fingerprint": "b2364ce84505033f9083133b3dd83a075ba0ddebce9af280a42a6b803fe13a4c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 608,
+    "audit_pending": 607,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 350
+    "reviewed": 351
   }
 }

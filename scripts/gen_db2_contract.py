@@ -249,7 +249,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "curator_reembed_all",
                                                                 "synth_reenqueue_all") else
                                 "single" if name in ("reembed_clear_maintenance",
-                                                     "dimension_reset") else
+                                                     "dimension_reset",
+                                                     "cross_repo_rebuild_routes") else
                                 # Several statements, each autocommitting. Not
                                 # `single`: there is no surrounding transaction,
                                 # so a concurrent reader can see between them.
@@ -2067,6 +2068,39 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("requeue-drifted-reply",
                      "reply must contain one bounded u32 requeue count")
+        elif key == ("index", 6) and name == "cross_repo_rebuild_routes" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # Every one of these heuristics was tuned against a live finding,
+            # and together they decide which repository an include resolves to.
+            # A caller able to send them could reroute symbol resolution.
+            if operation["c_symbols"] != ["db2_cross_repo_rebuild_routes"]:
+                fail("operation-c-symbols",
+                     "cross_repo_rebuild_routes C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results",
+                     "cross_repo_rebuild_routes results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "cross_repo_rebuild_routes.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"replaces_table": True,
+                                          "quoted_includes_only": True,
+                                          "header_fanout_threshold": 4,
+                                          "rejects_generated_build_headers": True}):
+                fail("cross-repo-rebuild-routes-request",
+                     "request must carry no payload and fix every routing heuristic")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field", "count_source"},
+                          "cross_repo_rebuild_routes.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "cross_repo_rebuild_routes.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["count_source"] != "separate-query" or
+                    field != {"name": "route_count", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("cross-repo-rebuild-routes-reply",
+                     "reply must contain one bounded u32 table size from its own query")
         elif key == ("maintenance", 1) and name == "prospective_sweep_expired" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # The clock is the database's, not the caller's. A caller-supplied
@@ -2322,7 +2356,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 65 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 66 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2339,12 +2373,13 @@ def validate_catalog(value: object) -> dict[str, object]:
             "negation_tokens_update", "get_content", "get_source_session",
             "pick_first_temporal_ref", "count_and_max_updated",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
-            "purge_hidden_pollution", "requeue_drifted", "prospective_sweep_expired",
+            "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
+            "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the sixty-five supported operations exactly once")
+             "the partial generator requires the sixty-six supported operations exactly once")
     return catalog
 
 
@@ -2525,14 +2560,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     project_count = catalog["operations"][54]
     purge_hidden_pollution = catalog["operations"][55]
     requeue_drifted = catalog["operations"][56]
-    prospective_sweep_expired = catalog["operations"][57]
-    directive_sweep_expired = catalog["operations"][58]
-    mark_revisit_due = catalog["operations"][59]
-    ingest_queue_reset_running = catalog["operations"][60]
-    evidence_reembed_all = catalog["operations"][61]
-    curator_reembed_all = catalog["operations"][62]
-    synth_reenqueue_all = catalog["operations"][63]
-    curator_reenqueue_extract_all = catalog["operations"][64]
+    cross_repo_rebuild_routes = catalog["operations"][57]
+    prospective_sweep_expired = catalog["operations"][58]
+    directive_sweep_expired = catalog["operations"][59]
+    mark_revisit_due = catalog["operations"][60]
+    ingest_queue_reset_running = catalog["operations"][61]
+    evidence_reembed_all = catalog["operations"][62]
+    curator_reembed_all = catalog["operations"][63]
+    synth_reenqueue_all = catalog["operations"][64]
+    curator_reenqueue_extract_all = catalog["operations"][65]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2902,6 +2938,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     requeue_drifted_none = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(requeue_drifted["id"]), 0, _put_u32(0),
+    )
+    cross_repo_rebuild_routes_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(cross_repo_rebuild_routes["id"]), 0, b"",
+    )
+    cross_repo_rebuild_routes_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(cross_repo_rebuild_routes["id"]), 0, _put_u32(15),
+    )
+    cross_repo_rebuild_routes_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(cross_repo_rebuild_routes["id"]), 0, _put_u32(0),
     )
     prospective_sweep_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(prospective_sweep_expired["id"]), 0, b"",
@@ -5694,6 +5739,46 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": cross_repo_rebuild_routes["family"],
+            "id": cross_repo_rebuild_routes["id"],
+            "name": cross_repo_rebuild_routes["name"],
+            "request": {
+                "positive": cross_repo_rebuild_routes_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(cross_repo_rebuild_routes_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(cross_repo_rebuild_routes_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     cross_repo_rebuild_routes_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (cross_repo_rebuild_routes_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "route_count": 15,
+                     "hex": cross_repo_rebuild_routes_ok.hex()},
+                    {"result": 0, "route_count": 0,
+                     "hex": cross_repo_rebuild_routes_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(cross_repo_rebuild_routes_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(cross_repo_rebuild_routes_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(cross_repo_rebuild_routes["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (cross_repo_rebuild_routes_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex":
+                     cross_repo_rebuild_routes_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (cross_repo_rebuild_routes_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": prospective_sweep_expired["family"],
             "id": prospective_sweep_expired["id"],
             "name": prospective_sweep_expired["name"],
@@ -6066,14 +6151,15 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     project_count = catalog["operations"][54]
     purge_hidden_pollution = catalog["operations"][55]
     requeue_drifted = catalog["operations"][56]
-    prospective_sweep_expired = catalog["operations"][57]
-    directive_sweep_expired = catalog["operations"][58]
-    mark_revisit_due = catalog["operations"][59]
-    ingest_queue_reset_running = catalog["operations"][60]
-    evidence_reembed_all = catalog["operations"][61]
-    curator_reembed_all = catalog["operations"][62]
-    synth_reenqueue_all = catalog["operations"][63]
-    curator_reenqueue_extract_all = catalog["operations"][64]
+    cross_repo_rebuild_routes = catalog["operations"][57]
+    prospective_sweep_expired = catalog["operations"][58]
+    directive_sweep_expired = catalog["operations"][59]
+    mark_revisit_due = catalog["operations"][60]
+    ingest_queue_reset_running = catalog["operations"][61]
+    evidence_reembed_all = catalog["operations"][62]
+    curator_reembed_all = catalog["operations"][63]
+    synth_reenqueue_all = catalog["operations"][64]
+    curator_reenqueue_extract_all = catalog["operations"][65]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -6877,6 +6963,18 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{requeue_drifted['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_REQUEUE_DRIFTED_MAX",
          f"{requeue_drifted['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_ROUTES", "AIMEE_DB2_EVENT_INDEX"),
+        ("AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES", "AIMEE_DB2_FAMILY_INDEX"),
+        ("AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES",
+         f"{cross_repo_rebuild_routes['id']}u"),
+        ("AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN",
+         f"{cross_repo_rebuild_routes['request']['encoded_size']}u"),
+        ("AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN",
+         f"{cross_repo_rebuild_routes['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_ERROR_LEN",
+         f"{cross_repo_rebuild_routes['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX",
+         f"{cross_repo_rebuild_routes['reply']['field']['maximum']}u"),
         ("AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_EVENT_MAINTENANCE"),
         ("AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_FAMILY_MAINTENANCE"),
         ("AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED",
@@ -9346,6 +9444,62 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
    if (decoded > AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX)
       return -1;
    *expired_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_request_encode(uint8_t *output,
+                                                                     size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES, 0u, 0u,
+                                          output, capacity);
+}}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_request_decode(const uint8_t *input,
+                                                                     size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_reply_encode(uint32_t route_count,
+                                                                   uint8_t *output,
+                                                                   size_t capacity,
+                                                                   uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || route_count > AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX ||
+       capacity < AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, route_count);
+   *output_len = AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_cross_repo_rebuild_routes_reply_decode(const uint8_t *input,
+                                                                   size_t input_len,
+                                                                   uint32_t *route_count)
+{{
+   if (route_count)
+      *route_count = 0u;
+   if (!route_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX)
+      return -1;
+   *route_count = decoded;
    return 0;
 }}
 
@@ -12229,6 +12383,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *requeued_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_cross_repo_rebuild_routes_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *route_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -13632,6 +13790,30 @@ aimee_db2_requeue_drifted_call(aimee_db2_call_fn call, void *call_context, uint6
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_cross_repo_rebuild_routes_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t *route_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !route_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *route_count = 0u;
+   uint8_t request[AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_cross_repo_rebuild_routes_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_ROUTES,
+            AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_cross_repo_rebuild_routes_reply_decode(response, response_len, route_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -14126,14 +14308,15 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     project_count = catalog["operations"][54]
     purge_hidden_pollution = catalog["operations"][55]
     requeue_drifted = catalog["operations"][56]
-    prospective_sweep_expired = catalog["operations"][57]
-    directive_sweep_expired = catalog["operations"][58]
-    mark_revisit_due = catalog["operations"][59]
-    ingest_queue_reset_running = catalog["operations"][60]
-    evidence_reembed_all = catalog["operations"][61]
-    curator_reembed_all = catalog["operations"][62]
-    synth_reenqueue_all = catalog["operations"][63]
-    curator_reenqueue_extract_all = catalog["operations"][64]
+    cross_repo_rebuild_routes = catalog["operations"][57]
+    prospective_sweep_expired = catalog["operations"][58]
+    directive_sweep_expired = catalog["operations"][59]
+    mark_revisit_due = catalog["operations"][60]
+    ingest_queue_reset_running = catalog["operations"][61]
+    evidence_reembed_all = catalog["operations"][62]
+    curator_reembed_all = catalog["operations"][63]
+    synth_reenqueue_all = catalog["operations"][64]
+    curator_reenqueue_extract_all = catalog["operations"][65]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -14476,6 +14659,10 @@ const EventRequeueDrifted = EventIndex
 const StageRequeueDrifted = FamilyIndex
 const OperationRequeueDrifted uint32 = {requeue_drifted['id']}
 const RequeueDriftedMax uint32 = {requeue_drifted['reply']['field']['maximum']}
+const EventCrossRepoRebuildRoutes = EventIndex
+const StageCrossRepoRebuildRoutes = FamilyIndex
+const OperationCrossRepoRebuildRoutes uint32 = {cross_repo_rebuild_routes['id']}
+const CrossRepoRebuildRoutesMax uint32 = {cross_repo_rebuild_routes['reply']['field']['maximum']}
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = {prospective_sweep_expired['id']}
@@ -16305,6 +16492,56 @@ func DecodeRequeueDriftedReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return requeuedCount, nil
+}}
+
+// EncodeCrossRepoRebuildRoutesRequest emits the empty request envelope. Every
+// routing heuristic is policy and never travels.
+func EncodeCrossRepoRebuildRoutesRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationCrossRepoRebuildRoutes, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeCrossRepoRebuildRoutesRequest validates the exact index-family
+// envelope.
+func DecodeCrossRepoRebuildRoutesRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCrossRepoRebuildRoutes ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeCrossRepoRebuildRoutesReply emits one bounded u32 route-table size. It
+// is the size of the rebuilt table, not the number of routes changed.
+func EncodeCrossRepoRebuildRoutesReply(routeCount uint32) ([]byte, error) {{
+	if routeCount > CrossRepoRebuildRoutesMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationCrossRepoRebuildRoutes, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], routeCount)
+	return reply, nil
+}}
+
+// DecodeCrossRepoRebuildRoutesReply validates the operation and bounded count.
+func DecodeCrossRepoRebuildRoutesReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCrossRepoRebuildRoutes ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	routeCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if routeCount > CrossRepoRebuildRoutesMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return routeCount, nil
 }}
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

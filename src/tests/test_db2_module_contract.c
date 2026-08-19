@@ -81,6 +81,8 @@ static int purge_pollution_value;
 static int purge_pollution_calls;
 static int requeue_drifted_value;
 static int requeue_drifted_calls;
+static int rebuild_routes_value;
+static int rebuild_routes_calls;
 static int prospective_sweep_value;
 static int prospective_sweep_calls;
 static int directive_sweep_value;
@@ -670,6 +672,17 @@ static int requeue_drifted(void)
 {
    requeue_drifted_calls++;
    return requeue_drifted_value;
+}
+
+int db2_cross_repo_rebuild_routes(void)
+{
+   return 0;
+}
+
+static int cross_repo_rebuild_routes(void)
+{
+   rebuild_routes_calls++;
+   return rebuild_routes_value;
 }
 
 int db2_prospective_sweep_expired(void)
@@ -1462,6 +1475,8 @@ static void reset(void)
    purge_pollution_calls = 0;
    requeue_drifted_value = 6;
    requeue_drifted_calls = 0;
+   rebuild_routes_value = 15;
+   rebuild_routes_calls = 0;
    prospective_sweep_value = 7;
    prospective_sweep_calls = 0;
    directive_sweep_value = 8;
@@ -3028,6 +3043,45 @@ static void test_prospective_sweep_expired_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prospective_sweep_expired_reply_decode(reply, reply_len, &expired) == -1 &&
           expired == 0);
+}
+
+static void test_cross_repo_rebuild_routes_wire(void)
+{
+   uint8_t request[AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN] = {0};
+   assert(aimee_db2_cross_repo_rebuild_routes_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_cross_repo_rebuild_routes_request_decode(request, sizeof(request)) == 0);
+   /* Sixth index operation, so the five before it must refuse it. */
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_project_count_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_purge_hidden_pollution_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_requeue_drifted_request_decode(request, sizeof(request)) == -1);
+   /* Operation 6 of the maintenance family produces the same bytes; the stage
+    * separates them, not the envelope. */
+   assert(aimee_db2_curator_reembed_all_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_cross_repo_rebuild_routes_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, routes = 99;
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_encode(15, reply, sizeof(reply), &reply_len) ==
+          0);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_decode(reply, reply_len, &routes) == 0 &&
+          routes == 15);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_encode(0, reply, sizeof(reply), &reply_len) ==
+          0);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_decode(reply, reply_len, &routes) == 0 &&
+          routes == 0);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_encode(
+              AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX + 1u, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_encode(15, reply, sizeof(reply) - 1,
+                                                           &reply_len) == -1);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_encode(15, reply, sizeof(reply), &reply_len) ==
+          0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_decode(reply, reply_len, &routes) == -1 &&
+          routes == 0);
 }
 
 static void test_requeue_drifted_wire(void)
@@ -5535,6 +5589,45 @@ static void test_prospective_sweep_expired_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_cross_repo_rebuild_routes_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.cross_repo_rebuild_routes =
+                                                   cross_repo_rebuild_routes};
+   uint8_t request[AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN];
+   uint32_t response_len = 99, routes = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES};
+   assert(aimee_db2_cross_repo_rebuild_routes_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(rebuild_routes_calls == 1);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_decode(response, response_len, &routes) == 0 &&
+          routes == 15);
+
+   /* An index with no cross-repo include is a genuinely empty route table, and
+    * the rebuild says so. Zero is a size here, not a failure. */
+   rebuild_routes_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_cross_repo_rebuild_routes_reply_decode(response, response_len, &routes) == 0 &&
+          routes == 0);
+
+   /* A rolled-back rebuild is -1 and stays a failure. Reporting it as zero
+    * would claim every cross-repo include had stopped resolving, which is the
+    * one wrong answer this operation must never give. */
+   rebuild_routes_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   rebuild_routes_value = 15;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_requeue_drifted_handler(void)
 {
    reset();
@@ -7381,6 +7474,7 @@ int main(void)
    test_project_count_wire();
    test_purge_hidden_pollution_wire();
    test_requeue_drifted_wire();
+   test_cross_repo_rebuild_routes_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
    test_mark_revisit_due_wire();
@@ -7446,6 +7540,7 @@ int main(void)
    test_project_count_handler();
    test_purge_hidden_pollution_handler();
    test_requeue_drifted_handler();
+   test_cross_repo_rebuild_routes_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
    test_mark_revisit_due_handler();

@@ -1557,6 +1557,33 @@
       }
     },
     {
+      "family": "index",
+      "id": 6,
+      "name": "cross_repo_rebuild_routes",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Cross-repo include routes are derived relational DB2 records rebuilt from the index, not portable ANN state.",
+      "c_symbols": ["db2_cross_repo_rebuild_routes"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"replaces_table": true, "quoted_includes_only": true,
+                   "header_fanout_threshold": 4,
+                   "rejects_generated_build_headers": true}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "route_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647},
+        "count_source": "separate-query"
+      }
+    },
+    {
       "family": "maintenance",
       "id": 1,
       "name": "prospective_sweep_expired",
