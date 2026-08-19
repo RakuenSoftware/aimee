@@ -60,6 +60,78 @@ typedef struct
 } sample_t;
 
 static const sample_t SAMPLES[] = {
+    /* memory.delete / memory.get / memory.embed — the numeric width samples.
+       memory.delete SHIPPED with a spec saying atoi() where the marshaller uses
+       atoll(); every id in the suite was small, so nothing disagreed. These
+       straddle 2^31 and 2^63 deliberately, and a fractional value separates
+       atof() from both. Without them the three lenient parses are
+       indistinguishable and the spec can name the wrong one freely. */
+    {"memory.delete", {"2147483647", NULL}},
+    {"memory.delete", {"2147483648", NULL}},
+    {"memory.delete", {"4294967296", NULL}},
+    {"memory.delete", {"9007199254740993", NULL}},
+    {"memory.delete", {"-2147483649", NULL}},
+    {"memory.delete", {"12.9", NULL}},
+
+    {"memory.get", {NULL}},
+    {"memory.get", {"42", NULL}},
+    {"memory.get", {"2147483648", NULL}},
+    {"memory.get", {"9007199254740993", NULL}},
+    {"memory.get", {"12x", NULL}},
+    {"memory.get", {"abc", NULL}},
+    {"memory.get", {"", NULL}},
+    {"memory.get", {"7", "--as-of", "2026-01-01", NULL}},
+    {"memory.get", {"7", "--as_of", "2026-01-01", NULL}},
+    {"memory.get", {"7", "--as-of", "", NULL}},
+    {"memory.get", {"7", "--as-of", "a", "--as_of", "b", NULL}},
+
+    {"memory.embed", {NULL}},
+    {"memory.embed", {"--all", NULL}},
+    {"memory.embed", {"5", NULL}},
+    {"memory.embed", {"12.9", NULL}},
+    {"memory.embed", {"2147483648", NULL}},
+    {"memory.embed", {"abc", NULL}},
+    {"memory.embed", {"", NULL}},
+    {"memory.embed", {"5", "--version", "v2", NULL}},
+    {"memory.embed", {"5", "--version", "", NULL}},
+    {"memory.embed", {"--all", "5", "--version", "v2", NULL}},
+
+    /* session.presence — one optional flag, empty dropped. */
+    {"session.presence", {NULL}},
+    {"session.presence", {"--owner", "ada", NULL}},
+    {"session.presence", {"--owner", "", NULL}},
+    {"session.presence", {"stray", NULL}},
+
+    /* insights.overview — the clamp, probed on BOTH sides and at each edge.
+       These are the samples that would catch a spec that named the field and
+       forgot its range: 0 and 9999 render differently under a clamp than
+       without one, while 30 and 200 render identically either way. */
+    {"insights.overview", {NULL}},
+    {"insights.overview", {"--days", "200", NULL}},
+    {"insights.overview", {"--days", "0", NULL}},
+    {"insights.overview", {"--days", "-5", NULL}},
+    {"insights.overview", {"--days", "1", NULL}},
+    {"insights.overview", {"--days", "365", NULL}},
+    {"insights.overview", {"--days", "366", NULL}},
+    {"insights.overview", {"--days", "99999", NULL}},
+    {"insights.overview", {"--days", "abc", NULL}},
+    {"insights.overview", {"--days", "12x", NULL}},
+    {"insights.overview", {"--days", "", NULL}},
+
+    /* delegate.backend_exec — the command is the LAST positional, so the
+       samples have to vary how many precede it and put flags after it. */
+    {"delegate.backend_exec", {NULL}},
+    {"delegate.backend_exec", {"ls -la", NULL}},
+    {"delegate.backend_exec", {"first", "second", "ls -la", NULL}},
+    {"delegate.backend_exec", {"--backend", "docker", "ls -la", NULL}},
+    {"delegate.backend_exec", {"ls -la", "--backend", "docker", NULL}},
+    {"delegate.backend_exec", {"--no-hibernate", "ls -la", NULL}},
+    {"delegate.backend_exec", {"--backend", "", "cmd", NULL}},
+    {"delegate.backend_exec", {"--task-id", "t1", "--image", "img", "--host", "h", "cmd", NULL}},
+    {"delegate.backend_exec", {"", NULL}},
+    {"delegate.backend_exec", {"a", "", NULL}},
+    {"delegate.backend_exec", {"--no-hibernate", NULL}},
+
     /* provider.list — every bool flag absent, then each present, then all.
      * An unknown flag must not change the body: the server rejects what it
      * does not know, and the client inventing a field for it would be worse. */

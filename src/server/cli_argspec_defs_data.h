@@ -14,40 +14,51 @@
  * NOT here, and never: anything reading the client's own disk or environment.
  * That is the thin client's own job, not knowledge of what the server can do.
  *
- * WHY THE REST ARE NOT HERE YET. 115 of the 166 CLI-reachable methods are
- * served (33 no-argument, 82 specs). Every one of the remaining 51 has a
- * reason, and the reasons are of exactly three kinds:
+ * WHY THE REST ARE NOT HERE YET. 125 of the 181 CLI-reachable methods are
+ * served (36 no-argument, 89 specs) -- 91% of the set that CAN be served. Every
+ * one of the remaining 56 has a reason, and the reasons are of three kinds:
  *
- *   38  NEVER serveable -- the client's own state
- *    7  a field-SET branch: which fields exist depends on the input
- *    6  a transformation of a value, not a choice of where it comes from
+ *   43  NEVER serveable -- the client's own state
+ *    8  a field-SET branch: which fields exist depends on the input
+ *    5  a transformation of a value, or an argv grammar of its own
  *
- * THE 38 ARE THE POINT, not a shortfall. They read getcwd(),
+ * THE 43 ARE THE POINT, not a shortfall. They read getcwd(),
  * $AIMEE_SESSION_ID, the filesystem, or vault key material. A thin client
  * reading its own disk to build a request is doing its own job, not obeying the
- * server; serving them would be the defect this exercise exists to prevent. Six
- * were found only after the generator learned to follow helper calls, and one
- * (init.run) only after it stopped filing custom bodies under "no marshaller".
+ * server; serving them would be the defect this exercise exists to prevent.
+ *
+ * COUNT THE DENOMINATOR CAREFULLY. That total said 166 for most of this work,
+ * because the extractor matched a verb of [a-z0-9_]+ and so skipped every
+ * HYPHENATED verb (`graph sync-code`, `index blast-radius`, `vault set-server`)
+ * and every group that is itself a command (`aimee use`, `aimee presence`,
+ * `aimee git`). Fifteen methods were invisible, and nine of those had never been
+ * classified at all -- a method the extractor never yields is a method no
+ * downstream question ever asks about. An undercounted denominator makes
+ * coverage look BETTER, which is why nothing complained. scripts/
+ * report_cli_argspec_coverage.py now carries the corrected pattern and a note
+ * saying which way this error flatters.
  *
  * THE LINE, stated once so the next addition can be judged against it: a
  * field's rule may depend on ITS OWN value and its own flags, and nothing else.
  * No field's presence may depend on another field, and no branch may decide
- * which fields exist. Everything admitted so far meets it -- empty:"drop",
+ * which fields exist. Everything admitted meets it -- empty:"drop",
  * omit_if_nonpositive, bool_inverted, tristate_flag, skip_if_dash,
- * repeated_flag -- and the seven field-set branches do not:
+ * repeated_flag, argv_index, from_end, min/max, alt_flag -- and these do not:
  *
  *   - cron.enable/disable send job_id OR all:true, never both.
  *   - delegate.status sends job_ids (array) or job_id (scalar) by count.
  *   - trigger.fire needs --source AND (--task OR --proposal).
  *   - pipeline.start splits --questions on "||".
  *   - delegate.log refuses ANY positional -- a rule about the invocation.
+ *   - catalog.show splits "provider:model" on a colon, truncating at 64 bytes.
+ *   - the memory.user_capture family joins the positionals from index 1,
+ *     prefixes the key, and refuses one over 512 characters.
+ *   - memory.supersede parses raw argv with a grammar of its own: only the
+ *     inline --flag=value form, skipping any word that starts with a dash. That
+ *     is a second PARSER, not a field rule, and the spec describes fields.
  *
- * THE 6 are transformations: catalog.show splits "provider:model" on a colon
- * with a 64-byte truncation; memory.user_capture joins the positionals from
- * index 1, prefixes the key, and refuses one over 512 characters. The spec says
- * where a value comes from and how it is typed. Encoding string surgery would
- * make it a program transmitted over the wire, which is the property that makes
- * the served form safe to trust.
+ * Encoding string surgery would make a spec a program transmitted over the
+ * wire, which is the property that makes the served form safe to trust.
  *
  * ADDING A METHOD: write the spec, add samples INCLUDING the awkward input for
  * whatever convention it uses, and let test_cli_argspec decide -- it compares
@@ -55,16 +66,59 @@
  * When it does, the fix usually belongs in the GENERATOR: every mismatch in
  * this work traced back to reading the wrong part of the source -- the value
  * instead of the guard, a field-name list instead of the branch, a direct body
- * instead of its helpers.
+ * instead of its helpers, a verb pattern that could not spell "sync-code".
  *
  * AND NOTE WHAT THE TEST CANNOT SEE. Its samples are generated FROM the spec,
- * so a marshaller rule the spec omits is invisible to it: user_capture's
- * 512-character limit would have passed unnoticed. That is why the suite also
- * carries adversarial samples (oversized values, flag-shaped words, a bare
- * "--") and samples supplying BOTH sources of a two-source field at once. The
- * first set caught kb.build reading --path before positional[0]; the second
- * exists because the two orders differ only when both are given.
+ * so a marshaller rule the spec omits is invisible to it. Two real defects hid
+ * exactly there:
+ *
+ *   - memory.delete SHIPPED saying number_lenient (atoi) where the marshaller
+ *     calls atoll(). Any memory id above 2^31 would have been truncated by the
+ *     thin client and addressed a different row. Every generated id was small,
+ *     so nothing ever disagreed.
+ *   - insights.overview showed that the interpreter conflated "flag absent"
+ *     with "flag present but empty", silently dropping a default.
+ *
+ * Hence: adversarial samples (oversized values, flag-shaped words, a bare "--"),
+ * both-sources samples (the two precedences differ ONLY when both are given),
+ * numeric samples that straddle 2^31 and carry a fraction -- and, because
+ * samples can only ever probe what someone thought to sample,
+ * scripts/check_argspec_numeric_parity.py compares each spec's numeric type
+ * against the parse its marshaller actually calls, rather than hoping an input
+ * lands on the boundary. Each of these was plant-tested: a deliberate violation
+ * was introduced and the check confirmed to FAIL on it, because a check that
+ * has never failed is decoration.
  */
+
+{"session.presence",
+ "{\"fields\":[{\"json\":\"owner\",\"from\":\"flag\",\"flag\":\"owner\"}]}"},
+
+{"insights.overview",
+ "{\"fields\":[{\"json\":\"days\",\"from\":\"flag\",\"flag\":\"days\","
+ "\"type\":\"number_lenient\",\"default\":30,\"min\":1,\"max\":365,\"empty\":\"emit\"}]}"},
+
+{"delegate.backend_exec",
+ "{\"bool_flags\":[\"no-hibernate\"],\"fields\":["
+ "{\"json\":\"backend\",\"from\":\"flag\",\"flag\":\"backend\",\"empty\":\"emit\"},"
+ "{\"json\":\"task_id\",\"from\":\"flag\",\"flag\":\"task-id\",\"empty\":\"emit\"},"
+ "{\"json\":\"image\",\"from\":\"flag\",\"flag\":\"image\",\"empty\":\"emit\"},"
+ "{\"json\":\"host\",\"from\":\"flag\",\"flag\":\"host\",\"empty\":\"emit\"},"
+ "{\"json\":\"no_hibernate\",\"from\":\"flag\",\"flag\":\"no-hibernate\","
+ "\"type\":\"true_if_set\"},"
+ "{\"json\":\"command\",\"from\":\"positional\",\"index\":0,\"from_end\":true,"
+ "\"empty\":\"emit\"}]}"},
+
+{"memory.get",
+ "{\"fields\":[{\"json\":\"id\",\"from\":\"positional\",\"index\":0,"
+ "\"type\":\"number_lenient_int64\",\"empty\":\"emit\"},"
+ "{\"json\":\"as_of\",\"from\":\"flag\",\"flag\":\"as-of\",\"alt_flag\":\"as_of\"}]}"},
+
+{"memory.embed",
+ "{\"bool_flags\":[\"all\"],\"fields\":["
+ "{\"json\":\"all\",\"from\":\"flag\",\"flag\":\"all\",\"type\":\"true_if_set\"},"
+ "{\"json\":\"memory_id\",\"from\":\"positional\",\"index\":0,"
+ "\"type\":\"number_lenient_real\",\"empty\":\"emit\"},"
+ "{\"json\":\"version\",\"from\":\"flag\",\"flag\":\"version\",\"empty\":\"emit\"}]}"},
 
 {"provider.list",
  "{\"bool_flags\":[\"available\",\"all\",\"json\"],"
@@ -349,7 +403,7 @@
    headers/cli_argspec.h on argv_index. */
 
 {"memory.delete",
- "{\"fields\":[{\"json\":\"id\",\"from\":\"argv_index\",\"index\":0,\"type\":\"number_lenient\",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"id\",\"from\":\"argv_index\",\"index\":0,\"type\":\"number_lenient_int64\",\"empty\":\"emit\"}]}"},
 
 {"provider.set",
  "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0}]}"},

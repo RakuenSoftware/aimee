@@ -80,7 +80,20 @@
  * that a field's rule may depend on ITS OWN value and nothing else -- the same
  * standard that admitted empty:"drop" and omit_if_nonpositive. Inversion meets
  * it: no other field is consulted, and no branch decides which fields exist. */
-#define TYPE_BOOL_INVERTED "bool_inverted"
+/* Two more lenient parses, because "lenient" was never one convention. The
+ * marshallers use atoi(), atoll() and atof(), and they disagree on inputs that
+ * actually occur: atoi() cannot carry a memory id above 2^31, and atof() keeps
+ * a fractional confidence that atoi() would floor to 0.
+ *
+ * memory.delete was SHIPPING with this wrong -- its spec said number_lenient
+ * while the marshaller used atoll(), so a large id would have been truncated by
+ * the thin client and would have addressed a different row. The differential
+ * test did not catch it because every generated id was small. That is the same
+ * blind spot as user_capture's length limit, and the same fix: samples chosen
+ * to straddle the boundary, not samples derived from the spec. */
+#define TYPE_NUMBER_LAX_I64  "number_lenient_int64"
+#define TYPE_NUMBER_LAX_REAL "number_lenient_real"
+#define TYPE_BOOL_INVERTED   "bool_inverted"
 /* A constant STRING emitted when a flag is present: --review sends
  * "status": "ambiguous". Exactly true_if_set with a literal other than true,
  * so the same reasoning admits it -- one field, its own flag, no branch. The
@@ -108,6 +121,23 @@
  * kb.grant's comment is the argument that they should -- but that is a change
  * to the CLI, not to a file whose job is to describe it. */
 
+/* `min`/`max` clamp a number into a range the server will accept:
+ * insights.overview pins --days into [1, 365], so `--days 0` means 1 and
+ * `--days 9999` means 365. Like omit_if_nonpositive, this is a rule about ONE
+ * field's own value with no reference to any other field, which is the line
+ * this vocabulary holds. It applies to the default too, because the marshaller
+ * clamps after cli_args_get_int() has supplied it. */
+static double clamped(const cJSON *field, double v)
+{
+   const cJSON *lo = cJSON_GetObjectItemCaseSensitive(field, "min");
+   const cJSON *hi = cJSON_GetObjectItemCaseSensitive(field, "max");
+   if (cJSON_IsNumber(lo) && v < lo->valuedouble)
+      v = lo->valuedouble;
+   if (cJSON_IsNumber(hi) && v > hi->valuedouble)
+      v = hi->valuedouble;
+   return v;
+}
+
 static const char *field_str(const cJSON *field, const char *key)
 {
    const cJSON *v = cJSON_GetObjectItemCaseSensitive(field, key);
@@ -132,7 +162,8 @@ static int known_type(const char *type)
    /* Absent is legal and means string: the commonest field should not have to
     * say so in every row. */
    return !type || !strcmp(type, TYPE_STRING) || !strcmp(type, TYPE_NUMBER) ||
-          !strcmp(type, TYPE_NUMBER_LAX) || !strcmp(type, TYPE_BOOL) ||
+          !strcmp(type, TYPE_NUMBER_LAX) || !strcmp(type, TYPE_NUMBER_LAX_I64) ||
+          !strcmp(type, TYPE_NUMBER_LAX_REAL) || !strcmp(type, TYPE_BOOL) ||
           !strcmp(type, TYPE_BOOL_INVERTED) || !strcmp(type, TYPE_CONST_IF_SET) ||
           !strcmp(type, TYPE_TRISTATE_FLAG) || !strcmp(type, TYPE_TRUE_IF_SET);
 }
@@ -267,8 +298,23 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
       return (argv_emit_empty || argv[aidx][0]) ? argv[aidx] : NULL;
    }
 
+   /* `alt_flag` is a SECOND SPELLING of the same field: memory.get accepts
+    * --as-of and --as_of, and the marshaller tries them in that order. One
+    * field consulting nothing but its own flags -- the same shape tristate_flag
+    * already has, and it crosses nothing the line forbids. */
+   const char *alt = field_str(field, "alt_flag");
+
    if (!strcmp(from, SRC_FLAG))
-      return cli_args_get(opts, flag);
+   {
+      const char *v = cli_args_get(opts, flag);
+      if ((!v || !v[0]) && alt)
+      {
+         const char *av = cli_args_get(opts, alt);
+         if (av)
+            return av;
+      }
+      return v;
+   }
 
    if (!strcmp(from, SRC_FLAG_POSITIONAL))
    {
@@ -284,6 +330,17 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
 
    const cJSON *idx = cJSON_GetObjectItemCaseSensitive(field, "index");
    int i = (int)idx->valuedouble;
+   /* `"from_end": true` counts back from the last positional, so index 0 is the
+    * last one. delegate.backend_exec takes its command from positional
+    * [pos_count - 1] because the command is typically quoted into a single
+    * slot and any number of flags may precede it. Still only WHERE the value
+    * comes from -- no other field is consulted. */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "from_end")))
+   {
+      if (opts->pos_count <= i)
+         return NULL;
+      i = opts->pos_count - 1 - i;
+   }
    const char *empty = field_str(field, "empty");
    int emit_empty = empty && !strcmp(empty, EMPTY_EMIT);
    /* With "emit", presence is the COUNT alone -- an empty argument is a value
@@ -401,10 +458,16 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
     * emitted even when the flag is absent, carrying the default. Absent means
     * "omit when absent", which is what every other field does. */
    const cJSON *dflt = cJSON_GetObjectItemCaseSensitive(field, "default");
-   if ((!value || !value[0]) && cJSON_IsNumber(dflt) && !emit_empty)
+   /* ABSENT takes the default; present-but-empty is a value the operator typed
+    * and is converted like any other. The two were conflated here until
+    * insights.overview showed the difference: `--days ""` reaches
+    * cli_args_get_int(), which atoi()s "" to 0 and then clamps it to 1, while
+    * omitting --days entirely yields 30. A single `!value[0]` test cannot tell
+    * those apart, and with empty:"emit" it silently dropped the default. */
+   if (cJSON_IsNumber(dflt) && (!value || (!value[0] && !emit_empty)))
    {
       if (!(omit_nonpositive && dflt->valuedouble <= 0))
-         cJSON_AddNumberToObject(req, json_name, dflt->valuedouble);
+         cJSON_AddNumberToObject(req, json_name, clamped(field, dflt->valuedouble));
       return 0;
    }
    if (!value || (!value[0] && !emit_empty))
@@ -419,7 +482,23 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       int n = atoi(value);
       if (omit_nonpositive && n <= 0)
          return 0;
-      cJSON_AddNumberToObject(req, json_name, (double)n);
+      cJSON_AddNumberToObject(req, json_name, clamped(field, (double)n));
+   }
+   else if (!strcmp(type, TYPE_NUMBER_LAX_I64))
+   {
+      /* atoll(): the same leniency, 64 bits wide. */
+      long long n = atoll(value);
+      if (omit_nonpositive && n <= 0)
+         return 0;
+      cJSON_AddNumberToObject(req, json_name, clamped(field, (double)n));
+   }
+   else if (!strcmp(type, TYPE_NUMBER_LAX_REAL))
+   {
+      /* atof(): leading real, 0.0 for anything else, no refusal. */
+      double n = atof(value);
+      if (omit_nonpositive && n <= 0)
+         return 0;
+      cJSON_AddNumberToObject(req, json_name, clamped(field, n));
    }
    else if (!strcmp(type, TYPE_NUMBER))
    {
@@ -430,7 +509,7 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       double d = strtod(value, &tail);
       if (!tail || *tail || tail == value)
          return -1;
-      cJSON_AddNumberToObject(req, json_name, d);
+      cJSON_AddNumberToObject(req, json_name, clamped(field, d));
    }
    else /* TYPE_BOOL: the flag's presence, emitted as an explicit true. */
       cJSON_AddBoolToObject(req, json_name, cli_args_has_flag(opts, field_str(field, "flag")));

@@ -29,10 +29,28 @@
  * the shape the model and agent command families use to pass their arguments
  * through verbatim.
  *
- * `type` distinguishes the two numeric conventions the same way: "number"
- * refuses trailing garbage (3 sites), "number_lenient" is atoi (53 sites).
- * `default` carries the value a field takes when its flag is absent, which is
- * what cli_args_get_int(opts, name, def) does.
+ * `type` distinguishes the numeric conventions the same way, and there are
+ * FOUR, not two: "number" refuses trailing garbage (3 sites), "number_lenient"
+ * is atoi (53 sites), "number_lenient_int64" is atoll, "number_lenient_real" is
+ * atof. Naming the wrong one is not cosmetic -- memory.delete shipped saying
+ * atoi where its marshaller calls atoll, so an id above 2^31 would have been
+ * truncated and addressed a different row. The differential test could not see
+ * it, because its samples come from the spec and every id it generated was
+ * small; scripts/check_argspec_numeric_parity.py compares the two directly.
+ *
+ * `default` carries the value a field takes when its flag is ABSENT, which is
+ * what cli_args_get_int(opts, name, def) does. Absent is not the same as
+ * present-but-empty: `--days ""` reaches atoi("") and yields 0, while omitting
+ * --days yields the default.
+ *
+ * `min`/`max` clamp a number into a range (insights.overview pins --days into
+ * [1, 365]). `from_end` counts a positional back from the last one, which is
+ * how delegate.backend_exec takes its command. `alt_flag` is a second spelling
+ * of the same flag: memory.get accepts --as-of and --as_of.
+ *
+ * All three are rules about ONE field's own value and its own flags, which is
+ * the line this vocabulary holds -- no field's presence may depend on another
+ * field, and no branch may decide which fields exist.
  *
  * What it deliberately CANNOT express: reading the client's filesystem or
  * environment, composing prompts, or cross-field rules like "either --task or
