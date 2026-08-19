@@ -317,14 +317,26 @@ if err:
 PY
 }
 
+# mcp-serve runs from MCP_CWD, never from the source tree it was built in.
+#
+# A `git` tool call makes the client ship its CWD's working-tree diff to the
+# server. Run from src/, that diff is whatever the developer happens to have
+# uncommitted -- so this suite's result depended on the state of the checkout it
+# was invoked from, and six mirror checks failed for anyone carrying more than a
+# few megabytes of unpushed work. The tool calls below all pass absolute paths,
+# so the cwd is not otherwise load-bearing.
+MCP_CWD="$AIMEE_HOME/mcp-cwd"
+mkdir -p "$MCP_CWD"
+
 mcp_initialized_req() {
-    python3 - "$AIMEE" "$1" <<'PY'
+    python3 - "$AIMEE" "$1" "$MCP_CWD" <<'PY'
 import subprocess
 import sys
 
 cmd = [sys.argv[1], "mcp-serve"]
 request = sys.argv[2]
-p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                     cwd=sys.argv[3])
 
 def send(payload):
     body = payload.encode()
@@ -747,7 +759,10 @@ check_output "client session list via server" "$SID" echo "$RESP"
 RESP=$($AIMEE session show "$SID" 2>&1) || true
 check_output "client session show via server" "client:      test" echo "$RESP"
 
-RESP=$($AIMEE --json session list --limit 1 2>&1) || true
+# Not --limit 1: that asserts this session is the NEWEST, and an mcp session
+# created in the same second wins the tie. The claim being tested is that the
+# session is listed and the output is JSON, neither of which is about recency.
+RESP=$($AIMEE --json session list --limit 20 2>&1) || true
 check_output "client session list json" "$SID" echo "$RESP"
 
 RESP=$(srv_auth_req '{"method":"session.create","client_type":"test-close"}') || true

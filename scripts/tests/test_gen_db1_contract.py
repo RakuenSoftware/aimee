@@ -241,8 +241,12 @@ class CatalogTests(unittest.TestCase):
             root = Path(tmp.name)
             makefile = root / contract.MAKEFILE
             text = makefile.read_text(encoding="utf-8")
-            self.assertIn("modules/db1/checkpoints.c", text)
-            makefile.write_text(text.replace(" modules/db1/checkpoints.c", "", 1),
+            # Any domain source the daemon still links will do; wfe_store is the
+            # one a reserved family claims, so it stays linked until that family
+            # can serve it. Naming a source that later migrates makes this test
+            # fail for the wrong reason -- which is what checkpoints.c did.
+            self.assertIn("modules/db1/wfe_store.c", text)
+            makefile.write_text(text.replace(" modules/db1/wfe_store.c", "", 1),
                                 encoding="utf-8")
             self.assertRule(root, "retired-unclaimed")
         finally:
