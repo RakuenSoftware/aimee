@@ -372,13 +372,16 @@
      "  --show           Print the current primary (also the default with no\n"
      "                   argument)\n"
      "  --clear          Clear the session's primary agent\n"},
-    {"verify", "Verify the working tree against its remote", AIMEE_CMD_TIER_ADMIN, 0,
+    /* hidden_default: an alias spelling is answered by `aimee help verify` but
+       not listed in `help --all`, which is how cmd_table.c already treats an
+       alias -- and build_integrity bans the bare word from the listing. */
+    {"verify", "Verify the working tree against its remote", AIMEE_CMD_TIER_ADMIN, 1,
      "  Same command as `aimee git verify`; both spellings route to git.verify.\n"},
     {"get-help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 0,
      "  <topic>          Explain a topic -- work queue, delegation, memory,\n"
      "                   git, build, conventions. The words are joined, so\n"
      "                   `aimee get-help work queue` is one topic.\n"},
-    {"get_help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 0,
+    {"get_help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 1,
      "  Underscore spelling of `aimee get-help`; both route to help.get.\n"},
 
     {NULL, NULL, 0, 0, NULL},
