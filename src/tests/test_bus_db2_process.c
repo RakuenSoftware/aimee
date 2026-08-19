@@ -438,6 +438,22 @@ int main(int argc, char **argv)
                                           NULL) == AIMEE_MODULE_CALL_OK);
    assert(eval_corpus_count == 0 && eval_corpus_label[0] == '\0');
 
+   /* An empty corpus has no such rows, so both probes answer false against a
+    * real database rather than against a stub that decided to. */
+   uint32_t probe_exists = 99;
+   assert(aimee_db2_record_exists_call(call_client, &client, 9110, 0, 4096u, &probe_exists, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_exists == 0);
+   probe_exists = 99;
+   assert(aimee_db2_document_exists_call(call_client, &client, 9111, 0, 4096u, &probe_exists, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_exists == 0);
+
+   /* The watermark write is an insert, so it proves the table and the clock
+    * function both exist. */
+   assert(aimee_db2_trace_mining_record_call(call_client, &client, 9112, 0, 90210u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
@@ -833,13 +849,15 @@ int main(int argc, char **argv)
    assert(aimee_db2_proposals_archive_expired_call(call_client, &client, 9116, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
-   /* Nothing has been mined on a fresh schema, so the watermark is zero and
-    * the next pass would start from the beginning. That is the correct answer
-    * here and the expensive one when it comes from a failed read instead. */
+   /* trace_mining_record wrote this watermark earlier in the run, so reading it
+    * back is a round trip rather than a fresh-schema zero: one operation wrote
+    * the row and another read it, both across the bus and against a real
+    * database. A failed read would answer zero, which is why the value matters
+    * more than the call succeeding. */
    uint64_t watermark = 99;
    assert(aimee_db2_trace_mining_last_id_call(call_client, &client, 9124, 0, &watermark, NULL,
                                               NULL) == AIMEE_MODULE_CALL_OK);
-   assert(watermark == 0);
+   assert(watermark == 90210);
 
    /* The custody family against real Postgres. Sequentially the lock behaves:
     * the first acquire claims it, the second is refused because the row the

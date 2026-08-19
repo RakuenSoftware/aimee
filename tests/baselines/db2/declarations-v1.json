@@ -11499,9 +11499,15 @@
           "line": 102
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.document_exists operation replaces the document probe. It consults one table and answers one Boolean; the policy names the table so that the narrower scope is visible beside memory.record_exists, which consults two."
+      },
       "signature": "int db2_kb_service_kb_document_exists ( int64_t document_id )",
       "signature_sha256": "e79d41c382595a021af69c9aa35d281ef7776357b4e8dafef97112f370d0dad6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_kb_document_exists"
     },
     {
@@ -12806,9 +12812,15 @@
           "line": 101
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.record_exists operation replaces the record probe. It consults two tables -- memories and memory_units -- and the reply says only that one of them matched, not which, so a caller cannot use it to tell a memory identifier from a unit identifier. That is deliberate and is written into the policy, because the wire cannot show it."
+      },
       "signature": "int db2_kb_service_memory_record_exists ( int64_t record_id )",
       "signature_sha256": "9c153bf7da65a51b7889180c23f6dbd63bf5c01d54ef974e2a714d8225353722",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_record_exists"
     },
     {
@@ -22742,9 +22754,15 @@
           "line": 21
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.trace_mining_record operation replaces the watermark write. Each call appends a row stamped with DB2's own clock rather than updating one, so it is declared unsafe to replay: a second call does not restore the state the first found, it adds to it. The stamp is DB2's and never crosses."
+      },
       "signature": "int db2_trace_mining_record ( int64_t last_trace_id )",
       "signature_sha256": "08ee60779fcdd9f60a9a9d54ec3b64d6d1ae1796f7973ff1be64b4a76f7b19d5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_trace_mining_record"
     },
     {
@@ -26466,15 +26484,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3894e57be50015dc287e288c22c2f1a26d889aeee9e5e0b3c3a969a9a5c65ed9",
+  "fingerprint": "2f98b2005b735b6f4f2032e7a4927142f9fb122fe1eef045f23b4e2787c67494",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 551,
+    "audit_pending": 548,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 407
+    "reviewed": 410
   }
 }

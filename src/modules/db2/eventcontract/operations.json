@@ -2167,6 +2167,30 @@
       }
     },
     {
+      "family": "memory",
+      "id": 63,
+      "name": "record_exists",
+      "wire_format": "db2-envelope-u64-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Both tables the probe consults are relational DB2 state, so whether an identifier names anything is DB2 authority.",
+      "c_symbols": ["db2_kb_service_memory_record_exists"],
+      "request": {
+        "encoded_size": 32,
+        "policy": {"tables": "the memories table and the memory_units table; the reply does not say which one matched"},
+        "field": {"name": "record_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -2609,6 +2633,30 @@
       }
     },
     {
+      "family": "learning",
+      "id": 8,
+      "name": "trace_mining_record",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The mining watermark is relational DB2 bookkeeping over DB2's own trace rows, so recording how far mining reached stays DB2 authority.",
+      "c_symbols": ["db2_trace_mining_record"],
+      "request": {
+        "encoded_size": 32,
+        "policy": {"appends": "each call appends a row stamped with DB2's clock, so replaying it is not observationally neutral"},
+        "field": {"name": "last_trace_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -2736,6 +2784,30 @@
         "encoded_size_error": 24,
         "field": {"name": "deleted_documents", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
+      }
+    },
+    {
+      "family": "organization",
+      "id": 6,
+      "name": "document_exists",
+      "wire_format": "db2-envelope-u64-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The knowledge-base document table is relational DB2 state, so whether an identifier names a document is DB2 authority.",
+      "c_symbols": ["db2_kb_service_kb_document_exists"],
+      "request": {
+        "encoded_size": 32,
+        "policy": {"tables": "the kb_documents table alone"},
+        "field": {"name": "document_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
       }
     },
     {

@@ -772,6 +772,14 @@
       "reason": "The cJSON feedback facade is caller-specific presentation; a typed learning mutation validates bounded polarity, title, description, and weight."
     },
     {
+      "symbol": "db2_kb_service_kb_document_exists",
+      "signature_sha256": "e79d41c382595a021af69c9aa35d281ef7776357b4e8dafef97112f370d0dad6",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.document_exists operation replaces the document probe. It consults one table and answers one Boolean; the policy names the table so that the narrower scope is visible beside memory.record_exists, which consults two."
+    },
+    {
       "symbol": "db2_kb_service_learning_get_json",
       "signature_sha256": "9dd27e1e2c8bababa5057a656f302898147c6479f34aeb98d7bda861877292c2",
       "disposition": "private-db2",
@@ -1218,6 +1226,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The recall cJSON envelope remains local serialization; a typed request bounds query and scope fields and returns structured recall records."
+    },
+    {
+      "symbol": "db2_kb_service_memory_record_exists",
+      "signature_sha256": "9c153bf7da65a51b7889180c23f6dbd63bf5c01d54ef974e2a714d8225353722",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.record_exists operation replaces the record probe. It consults two tables -- memories and memory_units -- and the reply says only that one of them matched, not which, so a caller cannot use it to tell a memory identifier from a unit identifier. That is deliberate and is written into the policy, because the wire cannot show it."
     },
     {
       "symbol": "db2_kb_service_memory_reject_json",
@@ -2722,6 +2738,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.trace_mining_last_id operation reads the high-water mark the next mining pass resumes from. A never-mined corpus and a failed read are both zero, and the consequence is worth naming: a zero sends the next pass back to the beginning, so a read failure costs a full rescan rather than losing anything. That is recorded because it makes the collapse cheap in one direction and expensive in the other."
+    },
+    {
+      "symbol": "db2_trace_mining_record",
+      "signature_sha256": "08ee60779fcdd9f60a9a9d54ec3b64d6d1ae1796f7973ff1be64b4a76f7b19d5",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.trace_mining_record operation replaces the watermark write. Each call appends a row stamped with DB2's own clock rather than updating one, so it is declared unsafe to replay: a second call does not restore the state the first found, it adds to it. The stamp is DB2's and never crosses."
     },
     {
       "symbol": "db2_vault_control_startup_end",

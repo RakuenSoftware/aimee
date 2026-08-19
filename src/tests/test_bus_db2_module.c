@@ -82,6 +82,9 @@ typedef struct
    int (*aggregate)(const char *entity_seed, const char *keyword, int limit, int *truncated_out,
                     int64_t *out, int max);
    int (*load_eval_corpus)(int limit, char *label_out, size_t label_len, int64_t *out, int max);
+   int (*record_exists)(int64_t record_id);
+   int (*document_exists)(int64_t document_id);
+   int (*trace_mining_record)(int64_t last_trace_id);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -298,6 +301,10 @@ static int aggregate_calls;
 static char aggregate_entity_seen[64];
 static char aggregate_keyword_seen[64];
 static int corpus_calls;
+static int probe_calls[2];
+static int64_t probe_identifier_seen;
+static int mining_calls;
+static int64_t mining_watermark_seen;
 static int corpus_limit_seen;
 static char list_tier_seen[8];
 static char list_kind_seen[24];
@@ -694,6 +701,36 @@ static int aggregate(const char *entity_seed, const char *keyword, int limit, in
    return listed;
 }
 
+/* Identifier 404 is the absent one, and 500 is the statement that could not
+ * run: the probes report false for both, which is what they can honestly say. */
+static int probe_impl(int which, int64_t identifier)
+{
+   probe_calls[which]++;
+   probe_identifier_seen = identifier;
+   if (identifier == 404)
+      return 0;
+   if (identifier == 500)
+      return -1;
+   return 1;
+}
+
+static int record_exists(int64_t record_id)
+{
+   return probe_impl(0, record_id);
+}
+
+static int document_exists(int64_t document_id)
+{
+   return probe_impl(1, document_id);
+}
+
+static int trace_mining_record(int64_t last_trace_id)
+{
+   mining_calls++;
+   mining_watermark_seen = last_trace_id;
+   return 0;
+}
+
 static int load_eval_corpus(int limit, char *label_out, size_t label_len, int64_t *out, int max)
 {
    corpus_calls++;
@@ -1018,6 +1055,24 @@ int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t labe
    (void)max;
    if (label_out && label_len)
       label_out[0] = '\0';
+   return 0;
+}
+
+int db2_kb_service_memory_record_exists(int64_t record_id)
+{
+   (void)record_id;
+   return 0;
+}
+
+int db2_kb_service_kb_document_exists(int64_t document_id)
+{
+   (void)document_id;
+   return 0;
+}
+
+int db2_trace_mining_record(int64_t last_trace_id)
+{
+   (void)last_trace_id;
    return 0;
 }
 
@@ -2299,6 +2354,9 @@ int main(void)
        .list_rows = list_rows,
        .aggregate = aggregate,
        .load_eval_corpus = load_eval_corpus,
+       .record_exists = record_exists,
+       .document_exists = document_exists,
+       .trace_mining_record = trace_mining_record,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -2748,6 +2806,39 @@ int main(void)
                                           NULL) == AIMEE_MODULE_CALL_OK);
    assert(eval_corpus_count == 2 && eval_corpus_ids[0] == 8000 && corpus_calls == 1 &&
           corpus_limit_seen == 9 && strcmp(eval_corpus_label, "L2 facts") == 0);
+
+   /* The two probes share an envelope shape and are told apart only by the
+    * operation number, so each is called and identified by which backend ran. */
+   uint32_t probe_exists = 99;
+   assert(aimee_db2_record_exists_call(call_client, &client, 7140, 0, 2048u, &probe_exists, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_exists == 1 && probe_calls[0] == 1 && probe_calls[1] == 0 &&
+          probe_identifier_seen == 2048);
+
+   probe_exists = 99;
+   assert(aimee_db2_document_exists_call(call_client, &client, 7141, 0, 2049u, &probe_exists, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_exists == 1 && probe_calls[1] == 1 && probe_identifier_seen == 2049);
+
+   /* An absent row and a statement that did not run are both reported false:
+    * neither invents a true, and the caller cannot tell them apart. */
+   probe_exists = 99;
+   assert(aimee_db2_record_exists_call(call_client, &client, 7142, 0, 404u, &probe_exists, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_exists == 0);
+   probe_exists = 99;
+   assert(aimee_db2_record_exists_call(call_client, &client, 7143, 0, 500u, &probe_exists, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_exists == 0 && probe_calls[0] == 3);
+
+   /* Zero is not an identifier on any of the three. */
+   assert(aimee_db2_record_exists_call(call_client, &client, 7144, 0, 0u, &probe_exists, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(probe_calls[0] == 3);
+
+   assert(aimee_db2_trace_mining_record_call(call_client, &client, 7145, 0, 90210u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(mining_calls == 1 && mining_watermark_seen == 90210);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

@@ -668,6 +668,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .list_rows = production_list_rows,
        .aggregate = production_aggregate,
        .load_eval_corpus = production_load_eval_corpus,
+       .record_exists = db2_kb_service_memory_record_exists,
+       .document_exists = db2_kb_service_kb_document_exists,
+       .trace_mining_record = db2_trace_mining_record,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -1451,6 +1454,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_db2_load_eval_corpus_reply_encode(label, memory_ids, (uint32_t)listed,
                                                         response_body, response_capacity,
                                                         response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         /* A probe that answers for two tables at once. A backend that cannot
+          * run its statement reports a negative, which is reported as false
+          * rather than invented as true. */
+         uint64_t record_id = 0u;
+         if (aimee_db2_record_exists_request_decode(request_body, request_len, &record_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->record_exists)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int found = backend->record_exists((int64_t)record_id);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_record_exists_reply_encode(found > 0 ? 1u : 0u, response_body,
+                                                     response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }
@@ -2451,6 +2474,23 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
+      {
+         uint64_t document_id = 0u;
+         if (aimee_db2_document_exists_request_decode(request_body, request_len, &document_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->document_exists)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int found = backend->document_exists((int64_t)document_id);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_document_exists_reply_encode(found > 0 ? 1u : 0u, response_body,
+                                                       response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       char project[AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX + 1] = {0};
       if (aimee_db2_clear_project_request_decode(request_body, request_len, project,
                                                  sizeof(project)) == 0)
@@ -2563,6 +2603,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                                                              response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
+      }
+      {
+         uint64_t last_trace_id = 0u;
+         if (aimee_db2_trace_mining_record_request_decode(request_body, request_len,
+                                                          &last_trace_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->trace_mining_record)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int recorded = backend->trace_mining_record((int64_t)last_trace_id);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (recorded != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            if (aimee_db2_trace_mining_record_reply_encode(response_body, response_capacity,
+                                                           response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
       }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {

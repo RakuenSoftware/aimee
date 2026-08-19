@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import struct
+import subprocess
 import sys
 from typing import NoReturn
 
@@ -24,6 +25,7 @@ GO_CONTRACT = Path("server-go/db2/contract_generated.go")
 BASELINE = Path("tests/baselines/modules/db2-wire-v1.json")
 DECLARATION_REVIEW = Path("src/modules/db2/eventcontract/declaration-review.json")
 DECLARATION_LEDGER = Path("tests/baselines/db2/declarations-v1.json")
+CLANG_FORMAT = "clang-format-19"
 MAX_BYTES = 1_048_576
 MAX_LEDGER_BYTES = 2_097_152
 MAX_DEPTH = 32
@@ -218,6 +220,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             fail("operation-order", "operations must be sorted by family id then operation id")
         order.append(position)
         expected_transaction = ("single-statement" if name in ("reembed_clear",
+                                                                "trace_mining_record",
                                                                 "effectiveness_update",
                                                                 "effectiveness_demote",
                                                                 "health_record",
@@ -287,7 +290,11 @@ def validate_catalog(value: object) -> dict[str, object]:
                                             "anti_pattern_bump",
                                             "anti_pattern_delete",
                                             "doc_delete",
-                                            "task_delete")
+                                            "task_delete",
+                                            # The watermark accumulates: each
+                                            # call appends a row rather than
+                                            # replacing the last one.
+                                            "trace_mining_record")
                                 else "safe")
         # `session` means the request carries the scope triple. It is not a label
         # for "this operation happens to be scoped": db2_memory_scope_bind_current
@@ -2451,6 +2458,72 @@ def validate_catalog(value: object) -> dict[str, object]:
                                    "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
                 fail("load-eval-corpus-reply",
                      "reply must carry the bounded plan label and a bounded identifier list")
+        elif (key, operation["wire_format"]) in (
+                (("memory", 63), "db2-envelope-u64-u32-v1"),
+                (("organization", 6), "db2-envelope-u64-u32-v1")):
+            # Existence probes. What each one consults differs and the reply
+            # cannot show it -- record_exists answers for two tables and says
+            # only that one matched -- so each names its tables in the policy.
+            expected = {"record_exists": ("db2_kb_service_memory_record_exists", "record_id"),
+                        "document_exists": ("db2_kb_service_kb_document_exists", "document_id")}
+            if name not in expected:
+                fail("unsupported-operation", f"unsupported probe {name!r}")
+            symbol, argument = expected[name]
+            rule = name.replace("_", "-")
+            if operation["c_symbols"] != [symbol]:
+                fail("operation-c-symbols", f"{name} C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", f"{name} results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "policy", "field"},
+                            f"{name}.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  f"{name}.request.field")
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"tables"}:
+                fail(f"{rule}-request", "request policy must name the tables consulted")
+            _string(policy["tables"], f"{name}.request.policy.tables", 160)
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request_field != {"name": argument, "type": "u64", "minimum": 1,
+                                      "maximum": 0x7fffffffffffffff}):
+                fail(f"{rule}-request", "request must name one positive identifier")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "field"},
+                          f"{name}.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                f"{name}.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}):
+                fail(f"{rule}-reply", "reply must contain one Boolean")
+        elif key == ("learning", 8) and name == "trace_mining_record" and \
+                operation["wire_format"] == "db2-envelope-u64-ack-v1":
+            # An append, not an update: the watermark row accumulates.
+            if operation["c_symbols"] != ["db2_trace_mining_record"]:
+                fail("operation-c-symbols",
+                     "trace_mining_record C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "trace_mining_record results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "policy", "field"},
+                            "trace_mining_record.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "trace_mining_record.request.field")
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"appends"}:
+                fail("trace-mining-record-request",
+                     "request policy must say that the call appends rather than updates")
+            _string(policy["appends"], "trace_mining_record.request.policy.appends", 160)
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request_field != {"name": "last_trace_id", "type": "u64", "minimum": 1,
+                                      "maximum": 0x7fffffffffffffff}):
+                fail("trace-mining-record-request",
+                     "request must carry one positive watermark and nothing else")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "trace_mining_record.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("trace-mining-record-reply",
+                     "reply must acknowledge the write without a payload")
         elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # First operation of the index family. The tiers that count as a
@@ -3561,7 +3634,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 107 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 110 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3583,14 +3656,15 @@ def validate_catalog(value: object) -> dict[str, object]:
             "list_session_scope_priority_like", "negation_fts_search",
             "session_neighbors_before", "session_neighbors_after", "row_get",
             "row_get_by_unit_id", "search_facts_patterns_by_keyword", "fact_history", "list_rows",
-            "aggregate", "load_eval_corpus",
+            "aggregate", "load_eval_corpus", "record_exists",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
             "drift_candidates", "file_index_delete_project", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
             "proposals_archive_expired", "trace_mining_last_id", "anti_pattern_bump",
-            "anti_pattern_delete", "rel_types_ensure_seed", "doc_delete", "task_delete",
-            "clear_project", "clear_current_project",
+            "anti_pattern_delete", "trace_mining_record", "rel_types_ensure_seed",
+            "doc_delete", "task_delete",
+            "clear_project", "clear_current_project", "document_exists",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
             "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
@@ -3598,7 +3672,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the one hundred and seven supported operations exactly once")
+             "the partial generator requires the one hundred and ten supported operations exactly once")
     return catalog
 
 
@@ -3795,6 +3869,9 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     list_rows = named["list_rows"]
     aggregate = named["aggregate"]
     load_eval_corpus = named["load_eval_corpus"]
+    record_exists = named["record_exists"]
+    trace_mining_record = named["trace_mining_record"]
+    document_exists = named["document_exists"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -4182,6 +4259,9 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     list_rows_vectors = _filter_list_vectors(catalog, list_rows)
     aggregate_vectors = _aggregate_vectors(catalog, aggregate)
     load_eval_corpus_vectors = _corpus_vectors(catalog, load_eval_corpus)
+    record_exists_vectors = _u64_probe_vectors(catalog, record_exists)
+    trace_mining_record_vectors = _u64_ack_vectors(catalog, trace_mining_record)
+    document_exists_vectors = _u64_probe_vectors(catalog, document_exists)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -7007,7 +7087,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (count_and_max_updated_ok + b"\0").hex()},
                 ],
             },
-        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, row_get_vectors, row_get_by_unit_id_vectors, search_facts_patterns_by_keyword_vectors, fact_history_vectors, list_rows_vectors, aggregate_vectors, load_eval_corpus_vectors, {
+        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, row_get_vectors, row_get_by_unit_id_vectors, search_facts_patterns_by_keyword_vectors, fact_history_vectors, list_rows_vectors, aggregate_vectors, load_eval_corpus_vectors, record_exists_vectors, {
             "family": entity_edge_prune_orphans["family"],
             "id": entity_edge_prune_orphans["id"],
             "name": entity_edge_prune_orphans["name"],
@@ -7635,7 +7715,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (anti_pattern_delete_ok + b"\0").hex()},
                 ],
             },
-        }, {
+        }, trace_mining_record_vectors, {
             "family": rel_types_ensure_seed["family"],
             "id": rel_types_ensure_seed["id"],
             "name": rel_types_ensure_seed["name"],
@@ -7810,7 +7890,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (clear_current_project_ok + b"\0").hex()},
                 ],
             },
-        }, {
+        }, document_exists_vectors, {
             "family": vector_rebuild_lock_try_acquire["family"],
             "id": vector_rebuild_lock_try_acquire["id"],
             "name": vector_rebuild_lock_try_acquire["name"],
@@ -11447,6 +11527,381 @@ func Decode{name}Reply(reply []byte) (string, []uint64, error) {{
 """
 
 
+
+def _u64_probe_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-u64-u32-v1."""
+    upper = str(operation["name"]).upper()
+    family = str(operation["family"]).upper()
+    request, reply = operation["request"], operation["reply"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", f"AIMEE_DB2_EVENT_{family}"),
+        (f"AIMEE_DB2_STAGE_{upper}", f"AIMEE_DB2_FAMILY_{family}"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_LEN", f"{request['encoded_size']}u"),
+        (f"AIMEE_DB2_{upper}_IDENTIFIER_MAX", f"{request['field']['maximum']}ull"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_LEN", f"{reply['encoded_size_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+        (f"AIMEE_DB2_{upper}_MAX", f"{reply['field']['maximum']}u"),
+    ]
+
+
+def _u64_ack_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-u64-ack-v1."""
+    upper = str(operation["name"]).upper()
+    family = str(operation["family"]).upper()
+    request, reply = operation["request"], operation["reply"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", f"AIMEE_DB2_EVENT_{family}"),
+        (f"AIMEE_DB2_STAGE_{upper}", f"AIMEE_DB2_FAMILY_{family}"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_LEN", f"{request['encoded_size']}u"),
+        (f"AIMEE_DB2_{upper}_IDENTIFIER_MAX", f"{request['field']['maximum']}ull"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_LEN", f"{reply['encoded_size_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+    ]
+
+
+def _u64_request_codecs(operation: dict[str, object]) -> str:
+    """The request half both u64-argument formats share."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    argument = str(operation["request"]["field"]["name"])
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(uint64_t {argument}, uint8_t *output,
+                                                   size_t capacity)
+{{
+   if (!output || {argument} == 0u || {argument} > AIMEE_DB2_{upper}_IDENTIFIER_MAX ||
+       capacity < AIMEE_DB2_{upper}_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, {argument});
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *{argument})
+{{
+   if ({argument})
+      *{argument} = 0u;
+   if (!{argument})
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       header.payload_len != 8u || input_len != AIMEE_DB2_{upper}_REQUEST_LEN)
+      return -1;
+   uint64_t value = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value == 0u || value > AIMEE_DB2_{upper}_IDENTIFIER_MAX)
+      return -1;
+   *{argument} = value;
+   return 0;
+}}
+"""
+
+
+def _u64_probe_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-u64-u32-v1."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    return _u64_request_codecs(operation) + f"""
+static inline int aimee_db2_{lower}_reply_encode(uint32_t exists, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || exists > AIMEE_DB2_{upper}_MAX ||
+       capacity < AIMEE_DB2_{upper}_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, exists);
+   *output_len = AIMEE_DB2_{upper}_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *exists)
+{{
+   if (exists)
+      *exists = 0u;
+   if (!exists)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_{upper}_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t value = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value > AIMEE_DB2_{upper}_MAX)
+      return -1;
+   *exists = value;
+   return 0;
+}}
+"""
+
+
+def _u64_ack_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-u64-ack-v1."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    return _u64_request_codecs(operation) + f"""
+static inline int aimee_db2_{lower}_reply_encode(uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_{upper}_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_{upper}_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_{upper}_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_{upper} &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+"""
+
+
+def _u64_request_vectors(catalog: dict[str, object], operation: dict[str, object],
+                         identifier_value: int) -> dict[str, object]:
+    """The request half of the fixtures both u64-argument formats share."""
+    identifier = int(operation["id"])
+    request = _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0,
+                        _put_u64(identifier_value))
+    return {
+        "positive": request.hex(),
+        str(operation["request"]["field"]["name"]): identifier_value,
+        "negative": [
+            {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+            {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+            {"mutation": "identifier_zero", "hex":
+             (request[:ENVELOPE_HEADER_LEN] + _put_u64(0)).hex()},
+            {"mutation": "identifier_above_maximum", "hex":
+             (request[:ENVELOPE_HEADER_LEN] + _put_u64(0x8000000000000000)).hex()},
+            {"mutation": "short", "hex": request[:-1].hex()},
+            {"mutation": "long", "hex": (request + b"\0").hex()},
+        ],
+    }
+
+
+def _u64_probe_vectors(catalog: dict[str, object],
+                       operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for one db2-envelope-u64-u32-v1 operation."""
+    identifier = int(operation["id"])
+    present = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(1))
+    absent = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0))
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": _u64_request_vectors(catalog, operation, 4096),
+        "reply": {
+            "positive": [
+                {"result": 0, "exists": 1, "hex": present.hex()},
+                {"result": 0, "exists": 0, "hex": absent.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(present, 8, 12).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(present, 12, 5).hex()},
+                {"mutation": "above_maximum", "hex":
+                 _mutate_u32(present, ENVELOPE_HEADER_LEN, 2).hex()},
+                {"mutation": "short", "hex": present[:-1].hex()},
+                {"mutation": "long", "hex": (present + b"\0").hex()},
+            ],
+        },
+    }
+
+
+def _u64_ack_vectors(catalog: dict[str, object],
+                     operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for one db2-envelope-u64-ack-v1 operation."""
+    identifier = int(operation["id"])
+    acknowledged = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"")
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": _u64_request_vectors(catalog, operation, 4096),
+        "reply": {
+            "positive": [{"result": 0, "hex": acknowledged.hex()}],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(acknowledged, 8, 12).hex()},
+                {"mutation": "unsupported_result", "hex":
+                 _mutate_u32(acknowledged, 12, 5).hex()},
+                {"mutation": "ok_with_payload", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0)).hex()},
+                {"mutation": "short", "hex": acknowledged[:-1].hex()},
+                {"mutation": "long", "hex": (acknowledged + b"\0").hex()},
+            ],
+        },
+    }
+
+
+def _u64_probe_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for db2-envelope-u64-u32-v1."""
+    name = _go_name(str(operation["name"]))
+    family = _go_name(str(operation["family"]))
+    argument = _go_name(str(operation["request"]["field"]["name"]))
+    argument = argument[0].lower() + argument[1:]
+    return f"""const Event{name} = Event{family}
+const Stage{name} = Family{family}
+const Operation{name} uint32 = {operation['id']}
+const {name}IdentifierMax uint64 = {operation['request']['field']['maximum']}
+const {name}Max uint32 = {operation['reply']['field']['maximum']}
+
+// Encode{name}Request carries one positive identifier.
+func Encode{name}Request({argument} uint64) ([]byte, error) {{
+	if {argument} == 0 || {argument} > {name}IdentifierMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(Operation{name}, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], {argument})
+	return request, nil
+}}
+
+// Decode{name}Request validates the identifier against its bound.
+func Decode{name}Request(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > {name}IdentifierMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return value, nil
+}}
+
+// Encode{name}Reply emits the Boolean.
+func Encode{name}Reply(exists uint32) ([]byte, error) {{
+	if exists > {name}Max {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}}
+
+// Decode{name}Reply rejects any value outside the Boolean's bound.
+func Decode{name}Reply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > {name}Max {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return value, nil
+}}
+
+"""
+
+
+def _u64_ack_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for db2-envelope-u64-ack-v1."""
+    name = _go_name(str(operation["name"]))
+    family = _go_name(str(operation["family"]))
+    argument = _go_name(str(operation["request"]["field"]["name"]))
+    argument = argument[0].lower() + argument[1:]
+    return f"""const Event{name} = Event{family}
+const Stage{name} = Family{family}
+const Operation{name} uint32 = {operation['id']}
+const {name}IdentifierMax uint64 = {operation['request']['field']['maximum']}
+
+// Encode{name}Request carries one positive identifier.
+func Encode{name}Request({argument} uint64) ([]byte, error) {{
+	if {argument} == 0 || {argument} > {name}IdentifierMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(Operation{name}, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], {argument})
+	return request, nil
+}}
+
+// Decode{name}Request validates the identifier against its bound.
+func Decode{name}Request(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > {name}IdentifierMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return value, nil
+}}
+
+// Encode{name}Reply acknowledges the write without a payload.
+func Encode{name}Reply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// Decode{name}Reply requires the exact empty acknowledgement.
+func Decode{name}Reply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+"""
+
+
+
+def _clang_formatted(path: Path, text: str) -> str:
+    """Format generated C the way the repository's .clang-format asks.
+
+    The formatter resolves its configuration by path, so this writes beside the
+    file it is formatting rather than into a temporary directory.
+    """
+    scratch = path.with_name(f".{path.name}.format-tmp.c")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    scratch.write_text(text, encoding="utf-8")
+    try:
+        result = subprocess.run([CLANG_FORMAT, "-i", str(scratch)], capture_output=True)
+        if result.returncode != 0:
+            fail("client-source-format",
+                 f"{CLANG_FORMAT} failed: {result.stderr.decode('utf-8', 'replace').strip()}")
+        return scratch.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail("client-source-format", f"{CLANG_FORMAT} is required to generate the client")
+        raise
+    finally:
+        scratch.unlink(missing_ok=True)
+
+
 def header_bytes(catalog: dict[str, object]) -> bytes:
     def macros(rows: list[tuple[str, str]]) -> str:
         width = max(len(name) for name, _ in rows)
@@ -11527,6 +11982,9 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     list_rows = named["list_rows"]
     aggregate = named["aggregate"]
     load_eval_corpus = named["load_eval_corpus"]
+    record_exists = named["record_exists"]
+    trace_mining_record = named["trace_mining_record"]
+    document_exists = named["document_exists"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -12326,6 +12784,9 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         *_filter_list_constants(list_rows),
         *_aggregate_constants(aggregate),
         *_corpus_constants(load_eval_corpus),
+        *_u64_probe_constants(record_exists),
+        *_u64_ack_constants(trace_mining_record),
+        *_u64_probe_constants(document_exists),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -16728,7 +17189,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
 }}
 
 {_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
-{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}{_aggregate_codecs(aggregate)}{_corpus_codecs(load_eval_corpus)}
+{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}{_aggregate_codecs(aggregate)}{_corpus_codecs(load_eval_corpus)}{_u64_probe_codecs(record_exists)}{_u64_ack_codecs(trace_mining_record)}{_u64_probe_codecs(document_exists)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -19333,6 +19794,20 @@ extern "C"
        uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_record_exists_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t record_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_trace_mining_record_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_document_exists_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -21330,6 +21805,81 @@ aimee_module_call_result_t aimee_db2_load_eval_corpus_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_record_exists_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t record_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !exists)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RECORD_EXISTS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_record_exists_request_encode(record_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RECORD_EXISTS, AIMEE_DB2_STAGE_RECORD_EXISTS, trace_id, deadline_ns,
+            request, sizeof(request), response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_record_exists_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_trace_mining_record_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_TRACE_MINING_RECORD_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_trace_mining_record_request_encode(last_trace_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_TRACE_MINING_RECORD, AIMEE_DB2_STAGE_TRACE_MINING_RECORD, trace_id, deadline_ns,
+            request, sizeof(request), response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_trace_mining_record_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_document_exists_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !exists)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DOCUMENT_EXISTS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_document_exists_request_encode(document_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DOCUMENT_EXISTS, AIMEE_DB2_STAGE_DOCUMENT_EXISTS, trace_id, deadline_ns,
+            request, sizeof(request), response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_document_exists_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -22515,6 +23065,9 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     list_rows = named["list_rows"]
     aggregate = named["aggregate"]
     load_eval_corpus = named["load_eval_corpus"]
+    record_exists = named["record_exists"]
+    trace_mining_record = named["trace_mining_record"]
+    document_exists = named["document_exists"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -24569,7 +25122,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}{_aggregate_go(aggregate)}{_corpus_go(load_eval_corpus)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}{_aggregate_go(aggregate)}{_corpus_go(load_eval_corpus)}{_u64_probe_go(record_exists)}{_u64_ack_go(trace_mining_record)}{_u64_probe_go(document_exists)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)
@@ -28291,8 +28844,16 @@ def _client_sources(catalog: dict[str, object], client_source: bytes) -> list[tu
 
     # A family with no operations yet is still emitted, so the build's wildcard
     # sees a fixed set; it carries the includes and nothing else.
+    #
+    # The result is formatted here rather than written and reconciled
+    # afterwards. Where a wrapper is derived from the catalog its wrapping
+    # depends on how long the operation's name is, so it cannot be typed
+    # correctly in advance, and every derived wrapper would otherwise cost a
+    # round trip: generate, discover the formatter disagreed, edit the template,
+    # generate again.
     return [(CLIENT_SOURCE_DIR / f"generated_{family}.c",
-             ("\n\n".join([prologue] + blocks) + "\n").encode("utf-8"))
+             _clang_formatted(CLIENT_SOURCE_DIR / f"generated_{family}.c",
+                              "\n\n".join([prologue] + blocks) + "\n").encode("utf-8"))
             for family, blocks in grouped.items()]
 
 

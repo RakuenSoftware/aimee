@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "1c1983ed4ce7f6f4ae16cd09bd16f4723c891a9bc8103c175caa3d9be4fa46d4"
+#define AIMEE_DB2_CONTRACT_SHA256 "7ebafb6c521537b0c16849d20fd71bfc7b3d9509a3484805041e96cac41af5e9"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -829,6 +829,29 @@
 #define AIMEE_DB2_LOAD_EVAL_CORPUS_MAX                              64u
 #define AIMEE_DB2_LOAD_EVAL_CORPUS_ID_MIN                           1u
 #define AIMEE_DB2_LOAD_EVAL_CORPUS_ID_MAX                           9223372036854775807ull
+#define AIMEE_DB2_EVENT_RECORD_EXISTS                               AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RECORD_EXISTS                               AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RECORD_EXISTS                           63u
+#define AIMEE_DB2_RECORD_EXISTS_REQUEST_LEN                         32u
+#define AIMEE_DB2_RECORD_EXISTS_IDENTIFIER_MAX                      9223372036854775807ull
+#define AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN                        28u
+#define AIMEE_DB2_RECORD_EXISTS_ERROR_LEN                           24u
+#define AIMEE_DB2_RECORD_EXISTS_MAX                                 1u
+#define AIMEE_DB2_EVENT_TRACE_MINING_RECORD                         AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_TRACE_MINING_RECORD                         AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_TRACE_MINING_RECORD                     8u
+#define AIMEE_DB2_TRACE_MINING_RECORD_REQUEST_LEN                   32u
+#define AIMEE_DB2_TRACE_MINING_RECORD_IDENTIFIER_MAX                9223372036854775807ull
+#define AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN                  24u
+#define AIMEE_DB2_TRACE_MINING_RECORD_ERROR_LEN                     24u
+#define AIMEE_DB2_EVENT_DOCUMENT_EXISTS                             AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_DOCUMENT_EXISTS                             AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_DOCUMENT_EXISTS                         6u
+#define AIMEE_DB2_DOCUMENT_EXISTS_REQUEST_LEN                       32u
+#define AIMEE_DB2_DOCUMENT_EXISTS_IDENTIFIER_MAX                    9223372036854775807ull
+#define AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN                      28u
+#define AIMEE_DB2_DOCUMENT_EXISTS_ERROR_LEN                         24u
+#define AIMEE_DB2_DOCUMENT_EXISTS_MAX                               1u
 #define AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS                   AIMEE_DB2_EVENT_INDEX
 #define AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS                   AIMEE_DB2_FAMILY_INDEX
 #define AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS               1u
@@ -8036,6 +8059,190 @@ static inline int aimee_db2_load_eval_corpus_reply_decode(const uint8_t *input, 
       memory_ids[index] = value;
    }
    *count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_record_exists_request_encode(uint64_t record_id, uint8_t *output,
+                                                   size_t capacity)
+{
+   if (!output || record_id == 0u || record_id > AIMEE_DB2_RECORD_EXISTS_IDENTIFIER_MAX ||
+       capacity < AIMEE_DB2_RECORD_EXISTS_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECORD_EXISTS, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, record_id);
+   return 0;
+}
+
+static inline int aimee_db2_record_exists_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *record_id)
+{
+   if (record_id)
+      *record_id = 0u;
+   if (!record_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RECORD_EXISTS || header.flags != 0u ||
+       header.payload_len != 8u || input_len != AIMEE_DB2_RECORD_EXISTS_REQUEST_LEN)
+      return -1;
+   uint64_t value = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value == 0u || value > AIMEE_DB2_RECORD_EXISTS_IDENTIFIER_MAX)
+      return -1;
+   *record_id = value;
+   return 0;
+}
+
+static inline int aimee_db2_record_exists_reply_encode(uint32_t exists, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || exists > AIMEE_DB2_RECORD_EXISTS_MAX ||
+       capacity < AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RECORD_EXISTS, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, exists);
+   *output_len = AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_record_exists_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *exists)
+{
+   if (exists)
+      *exists = 0u;
+   if (!exists)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_RECORD_EXISTS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t value = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value > AIMEE_DB2_RECORD_EXISTS_MAX)
+      return -1;
+   *exists = value;
+   return 0;
+}
+
+static inline int aimee_db2_trace_mining_record_request_encode(uint64_t last_trace_id, uint8_t *output,
+                                                   size_t capacity)
+{
+   if (!output || last_trace_id == 0u || last_trace_id > AIMEE_DB2_TRACE_MINING_RECORD_IDENTIFIER_MAX ||
+       capacity < AIMEE_DB2_TRACE_MINING_RECORD_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TRACE_MINING_RECORD, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, last_trace_id);
+   return 0;
+}
+
+static inline int aimee_db2_trace_mining_record_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *last_trace_id)
+{
+   if (last_trace_id)
+      *last_trace_id = 0u;
+   if (!last_trace_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TRACE_MINING_RECORD || header.flags != 0u ||
+       header.payload_len != 8u || input_len != AIMEE_DB2_TRACE_MINING_RECORD_REQUEST_LEN)
+      return -1;
+   uint64_t value = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value == 0u || value > AIMEE_DB2_TRACE_MINING_RECORD_IDENTIFIER_MAX)
+      return -1;
+   *last_trace_id = value;
+   return 0;
+}
+
+static inline int aimee_db2_trace_mining_record_reply_encode(uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TRACE_MINING_RECORD, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_trace_mining_record_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TRACE_MINING_RECORD &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_document_exists_request_encode(uint64_t document_id, uint8_t *output,
+                                                   size_t capacity)
+{
+   if (!output || document_id == 0u || document_id > AIMEE_DB2_DOCUMENT_EXISTS_IDENTIFIER_MAX ||
+       capacity < AIMEE_DB2_DOCUMENT_EXISTS_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DOCUMENT_EXISTS, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, document_id);
+   return 0;
+}
+
+static inline int aimee_db2_document_exists_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *document_id)
+{
+   if (document_id)
+      *document_id = 0u;
+   if (!document_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_DOCUMENT_EXISTS || header.flags != 0u ||
+       header.payload_len != 8u || input_len != AIMEE_DB2_DOCUMENT_EXISTS_REQUEST_LEN)
+      return -1;
+   uint64_t value = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value == 0u || value > AIMEE_DB2_DOCUMENT_EXISTS_IDENTIFIER_MAX)
+      return -1;
+   *document_id = value;
+   return 0;
+}
+
+static inline int aimee_db2_document_exists_reply_encode(uint32_t exists, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || exists > AIMEE_DB2_DOCUMENT_EXISTS_MAX ||
+       capacity < AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DOCUMENT_EXISTS, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, exists);
+   *output_len = AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_document_exists_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *exists)
+{
+   if (exists)
+      *exists = 0u;
+   if (!exists)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DOCUMENT_EXISTS ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t value = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value > AIMEE_DB2_DOCUMENT_EXISTS_MAX)
+      return -1;
+   *exists = value;
    return 0;
 }
 

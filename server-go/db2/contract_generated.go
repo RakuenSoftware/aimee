@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "1c1983ed4ce7f6f4ae16cd09bd16f4723c891a9bc8103c175caa3d9be4fa46d4"
+const ContractSHA256 = "7ebafb6c521537b0c16849d20fd71bfc7b3d9509a3484805041e96cac41af5e9"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4417,6 +4417,182 @@ func DecodeLoadEvalCorpusReply(reply []byte) (string, []uint64, error) {
 		memoryIDs[index] = id
 	}
 	return label, memoryIDs, nil
+}
+
+const EventRecordExists = EventMemory
+const StageRecordExists = FamilyMemory
+const OperationRecordExists uint32 = 63
+const RecordExistsIdentifierMax uint64 = 9223372036854775807
+const RecordExistsMax uint32 = 1
+
+// EncodeRecordExistsRequest carries one positive identifier.
+func EncodeRecordExistsRequest(recordID uint64) ([]byte, error) {
+	if recordID == 0 || recordID > RecordExistsIdentifierMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationRecordExists, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], recordID)
+	return request, nil
+}
+
+// DecodeRecordExistsRequest validates the identifier against its bound.
+func DecodeRecordExistsRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRecordExists || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > RecordExistsIdentifierMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeRecordExistsReply emits the Boolean.
+func EncodeRecordExistsReply(exists uint32) ([]byte, error) {
+	if exists > RecordExistsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationRecordExists, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeRecordExistsReply rejects any value outside the Boolean's bound.
+func DecodeRecordExistsReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRecordExists || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > RecordExistsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventTraceMiningRecord = EventLearning
+const StageTraceMiningRecord = FamilyLearning
+const OperationTraceMiningRecord uint32 = 8
+const TraceMiningRecordIdentifierMax uint64 = 9223372036854775807
+
+// EncodeTraceMiningRecordRequest carries one positive identifier.
+func EncodeTraceMiningRecordRequest(lastTraceID uint64) ([]byte, error) {
+	if lastTraceID == 0 || lastTraceID > TraceMiningRecordIdentifierMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationTraceMiningRecord, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], lastTraceID)
+	return request, nil
+}
+
+// DecodeTraceMiningRecordRequest validates the identifier against its bound.
+func DecodeTraceMiningRecordRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTraceMiningRecord || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > TraceMiningRecordIdentifierMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeTraceMiningRecordReply acknowledges the write without a payload.
+func EncodeTraceMiningRecordReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationTraceMiningRecord, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeTraceMiningRecordReply requires the exact empty acknowledgement.
+func DecodeTraceMiningRecordReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTraceMiningRecord || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventDocumentExists = EventOrganization
+const StageDocumentExists = FamilyOrganization
+const OperationDocumentExists uint32 = 6
+const DocumentExistsIdentifierMax uint64 = 9223372036854775807
+const DocumentExistsMax uint32 = 1
+
+// EncodeDocumentExistsRequest carries one positive identifier.
+func EncodeDocumentExistsRequest(documentID uint64) ([]byte, error) {
+	if documentID == 0 || documentID > DocumentExistsIdentifierMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDocumentExists, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], documentID)
+	return request, nil
+}
+
+// DecodeDocumentExistsRequest validates the identifier against its bound.
+func DecodeDocumentExistsRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocumentExists || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > DocumentExistsIdentifierMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeDocumentExistsReply emits the Boolean.
+func EncodeDocumentExistsReply(exists uint32) ([]byte, error) {
+	if exists > DocumentExistsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDocumentExists, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeDocumentExistsReply rejects any value outside the Boolean's bound.
+func DecodeDocumentExistsReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDocumentExists || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > DocumentExistsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
 }
 
 // EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The

@@ -1470,6 +1470,24 @@ int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t labe
    return 0;
 }
 
+int db2_kb_service_memory_record_exists(int64_t record_id)
+{
+   (void)record_id;
+   return 0;
+}
+
+int db2_kb_service_kb_document_exists(int64_t document_id)
+{
+   (void)document_id;
+   return 0;
+}
+
+int db2_trace_mining_record(int64_t last_trace_id)
+{
+   (void)last_trace_id;
+   return 0;
+}
+
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
 {
    (void)term;

@@ -72,6 +72,10 @@ typedef struct
                     int64_t *out, int max);
    /* The corpus reports which of its three plans answered. */
    int (*load_eval_corpus)(int limit, char *label_out, size_t label_len, int64_t *out, int max);
+   /* record_exists answers for two tables at once and never says which. */
+   int (*record_exists)(int64_t record_id);
+   int (*document_exists)(int64_t document_id);
+   int (*trace_mining_record)(int64_t last_trace_id);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
