@@ -124,6 +124,14 @@
       "reason": "Parsing DB2-owned profile JSON is private operation logic; the future learning.calibration_threshold reply returns only the validated bounded threshold selected from the same scoped profile read."
     },
     {
+      "symbol": "db2_code_index_drift_candidates",
+      "signature_sha256": "5459f04835822fe983c2e8004587627ad68e623a9022d9a2771d841c69625534",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.drift_candidates operation counts the projects index.requeue_drifted would enqueue. The two share one predicate in the backend, and the catalog records that so the pair cannot drift apart: a count that no longer matches what the requeue acts on would be worse than no count, because it would look like a preview."
+    },
+    {
       "symbol": "db2_code_index_project_count",
       "signature_sha256": "2882e616e963fc51e85fae88e49fe4f00b32ab1949de4fbfe50ec88b60ec93ca",
       "disposition": "wire-operation",

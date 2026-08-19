@@ -328,6 +328,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .cross_repo_rebuild_routes = db2_cross_repo_rebuild_routes,
        .cross_repo_rebuild_identities = db2_cross_repo_rebuild_identities,
        .cross_repo_rebuild_build_deps = db2_cross_repo_rebuild_build_deps,
+       .drift_candidates = db2_code_index_drift_candidates,
        .rules_decay = db2_rules_decay,
        .curiosity_rescore_all = db2_curiosity_rescore_all,
        .mining_seed_job_defaults = db2_mining_seed_job_defaults,
@@ -381,6 +382,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS &&
+        invocation->stage_id != AIMEE_DB2_STAGE_DRIFT_CANDIDATES &&
         invocation->stage_id != AIMEE_DB2_STAGE_RULES_DECAY &&
         invocation->stage_id != AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL &&
         invocation->stage_id != AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS &&
@@ -1320,7 +1322,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        invocation->stage_id == AIMEE_DB2_STAGE_REQUEUE_DRIFTED ||
        invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES ||
        invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES ||
-       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS)
+       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS ||
+       invocation->stage_id == AIMEE_DB2_STAGE_DRIFT_CANDIDATES)
    {
       if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
       {
@@ -1481,6 +1484,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_cross_repo_rebuild_build_deps_reply_encode(
                  (uint32_t)build_deps_written, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_drift_candidates_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->drift_candidates)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The read-only half of a pair: this counts exactly what
+          * index.requeue_drifted would enqueue, because both statements use
+          * the same predicate. An empty corpus and a failed statement are both
+          * zero, as they are for the requeue itself. */
+         int64_t drift = backend->drift_candidates();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (drift < 0 || (uint64_t)drift > AIMEE_DB2_DRIFT_CANDIDATES_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_drift_candidates_reply_encode((uint64_t)drift, response_body,
+                                                     response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

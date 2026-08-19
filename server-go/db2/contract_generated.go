@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "2f183787a191657bb2ce0796ff14d69829a845eb61b3410c8bd83a5fe38b1b96"
+const ContractSHA256 = "6e4e3edba3e3e15b24653437055b94d97810184a1d1c27d1bfac23693329ed8a"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -353,6 +353,10 @@ const EventCrossRepoRebuildBuildDeps = EventIndex
 const StageCrossRepoRebuildBuildDeps = FamilyIndex
 const OperationCrossRepoRebuildBuildDeps uint32 = 8
 const CrossRepoRebuildBuildDepsMax uint32 = 2147483647
+const EventDriftCandidates = EventIndex
+const StageDriftCandidates = FamilyIndex
+const OperationDriftCandidates uint32 = 9
+const DriftCandidatesMax uint64 = 9223372036854775807
 const EventRulesDecay = EventLearning
 const StageRulesDecay = FamilyLearning
 const OperationRulesDecay uint32 = 1
@@ -2362,6 +2366,54 @@ func DecodeCrossRepoRebuildBuildDepsReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return buildDepsWritten, nil
+}
+
+// EncodeDriftCandidatesRequest emits the empty request envelope. The predicate
+// is policy, shared with the requeue that acts on it, and never travels.
+func EncodeDriftCandidatesRequest() []byte {
+	header, err := EncodeRequestHeader(OperationDriftCandidates, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeDriftCandidatesRequest validates the exact index-family envelope.
+func DecodeDriftCandidatesRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDriftCandidates ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeDriftCandidatesReply emits one bounded u64 drift count.
+func EncodeDriftCandidatesReply(driftCandidates uint64) ([]byte, error) {
+	if driftCandidates > DriftCandidatesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDriftCandidates, ResultOK, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:], driftCandidates)
+	return reply, nil
+}
+
+// DecodeDriftCandidatesReply validates the operation and bounded count.
+func DecodeDriftCandidatesReply(reply []byte) (uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDriftCandidates || header.Result != ResultOK ||
+		header.PayloadLen != 8 {
+		return 0, ErrMalformedEnvelope
+	}
+	driftCandidates := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
+	if driftCandidates > DriftCandidatesMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return driftCandidates, nil
 }
 
 // EncodeRulesDecayRequest emits the empty request envelope. Every decay

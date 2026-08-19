@@ -95,6 +95,7 @@ typedef struct
    int (*cross_repo_rebuild_routes)(void);
    int (*cross_repo_rebuild_identities)(void);
    int (*cross_repo_rebuild_build_deps)(void);
+   int64_t (*drift_candidates)(void);
    int (*rules_decay)(void);
    int (*curiosity_rescore_all)(void);
    int (*mining_seed_job_defaults)(void);
@@ -187,6 +188,7 @@ static int requeue_drifted_calls;
 static int rebuild_routes_calls;
 static int rebuild_identities_calls;
 static int rebuild_build_deps_calls;
+static int drift_candidates_calls;
 static int rules_decay_calls;
 static int curiosity_rescore_calls;
 static int mining_seed_calls;
@@ -1122,6 +1124,17 @@ static int cross_repo_rebuild_build_deps(void)
    return 17;
 }
 
+int64_t db2_code_index_drift_candidates(void)
+{
+   return 0;
+}
+
+static int64_t drift_candidates(void)
+{
+   drift_candidates_calls++;
+   return 20;
+}
+
 int db2_rules_decay(void)
 {
    return 0;
@@ -1652,6 +1665,7 @@ int main(void)
        .cross_repo_rebuild_routes = cross_repo_rebuild_routes,
        .cross_repo_rebuild_identities = cross_repo_rebuild_identities,
        .cross_repo_rebuild_build_deps = cross_repo_rebuild_build_deps,
+       .drift_candidates = drift_candidates,
        .rules_decay = rules_decay,
        .curiosity_rescore_all = curiosity_rescore_all,
        .mining_seed_job_defaults = mining_seed_job_defaults,
@@ -2038,6 +2052,11 @@ int main(void)
                                                        &build_deps_written, NULL,
                                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(build_deps_written == 17 && rebuild_build_deps_calls == 1);
+
+   uint64_t drift = 99u;
+   assert(aimee_db2_drift_candidates_call(call_client, &client, 7100, 0, &drift, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(drift == 20 && drift_candidates_calls == 1);
 
    /* The learning family's first crossing of the bus: a new event kind
     * and a new stage, not another operation on one already carrying work. */

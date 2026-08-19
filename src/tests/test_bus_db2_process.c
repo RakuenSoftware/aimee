@@ -615,6 +615,14 @@ int main(int argc, char **argv)
                                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(build_deps_written == 0);
 
+   /* The drift count against real Postgres. Nothing is indexed, so nothing has
+    * drifted, and the requeue above found the same nothing through the same
+    * predicate. */
+   uint64_t drift = 99;
+   assert(aimee_db2_drift_candidates_call(call_client, &client, 9122, 0, &drift, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(drift == 0);
+
    /* The learning family reaching the real process for the first time. No rule
     * has ever been reinforced on a fresh schema, so nothing is due for decay
     * and nothing falls through the archive threshold. */

@@ -4114,9 +4114,15 @@
           "line": 41
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.drift_candidates operation counts the projects index.requeue_drifted would enqueue. The two share one predicate in the backend, and the catalog records that so the pair cannot drift apart: a count that no longer matches what the requeue acts on would be worse than no count, because it would look like a preview."
+      },
       "signature": "int64_t db2_code_index_drift_candidates ( void )",
       "signature_sha256": "5459f04835822fe983c2e8004587627ad68e623a9022d9a2771d841c69625534",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_drift_candidates"
     },
     {
@@ -26190,15 +26196,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "04cedfbb52439d9ac3563db11f7355de02b5d479e5209521b617854730caa55b",
+  "fingerprint": "354c0165cca08d6b49271beed57645d92359f6b59d1384462426d5c2a39ccc9c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 597,
+    "audit_pending": 596,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 361
+    "reviewed": 362
   }
 }

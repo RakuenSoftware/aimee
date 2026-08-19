@@ -87,6 +87,8 @@ static int rebuild_identities_value;
 static int rebuild_identities_calls;
 static int rebuild_build_deps_value;
 static int rebuild_build_deps_calls;
+static int64_t drift_candidates_value;
+static int drift_candidates_calls;
 static int rules_decay_value;
 static int rules_decay_calls;
 static int curiosity_rescore_value;
@@ -721,6 +723,17 @@ static int cross_repo_rebuild_build_deps(void)
 {
    rebuild_build_deps_calls++;
    return rebuild_build_deps_value;
+}
+
+int64_t db2_code_index_drift_candidates(void)
+{
+   return 0;
+}
+
+static int64_t drift_candidates(void)
+{
+   drift_candidates_calls++;
+   return drift_candidates_value;
 }
 
 int db2_rules_decay(void)
@@ -1597,6 +1610,8 @@ static void reset(void)
    rebuild_identities_calls = 0;
    rebuild_build_deps_value = 17;
    rebuild_build_deps_calls = 0;
+   drift_candidates_value = 20;
+   drift_candidates_calls = 0;
    rules_decay_value = 18;
    rules_decay_calls = 0;
    curiosity_rescore_value = 19;
@@ -3362,6 +3377,40 @@ static void test_rules_decay_wire(void)
    assert(aimee_db2_rules_decay_reply_encode(18, reply, sizeof(reply), &reply_len) == 0);
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_rules_decay_reply_decode(reply, reply_len, &touched) == -1 && touched == 0);
+}
+
+static void test_drift_candidates_wire(void)
+{
+   uint8_t request[AIMEE_DB2_DRIFT_CANDIDATES_REQUEST_LEN] = {0};
+   assert(aimee_db2_drift_candidates_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_drift_candidates_request_decode(request, sizeof(request)) == 0);
+   /* Ninth index operation, so the earlier ones must refuse it -- including
+    * requeue_drifted, whose predicate it shares. Sharing a predicate is not
+    * sharing an operation number. */
+   assert(aimee_db2_requeue_drifted_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_cross_repo_rebuild_build_deps_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_drift_candidates_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99;
+   uint64_t drift = 99;
+   assert(aimee_db2_drift_candidates_reply_encode(20, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_drift_candidates_reply_decode(reply, reply_len, &drift) == 0 && drift == 20);
+   assert(aimee_db2_drift_candidates_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_drift_candidates_reply_decode(reply, reply_len, &drift) == 0 && drift == 0);
+   /* Sixty-four bits wide, so the bound is the signed maximum rather than the
+    * u32 ceiling every other count on this stage carries. */
+   assert(aimee_db2_drift_candidates_reply_encode(AIMEE_DB2_DRIFT_CANDIDATES_MAX, reply,
+                                                  sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_drift_candidates_reply_decode(reply, reply_len, &drift) == 0 &&
+          drift == AIMEE_DB2_DRIFT_CANDIDATES_MAX);
+   assert(aimee_db2_drift_candidates_reply_encode(AIMEE_DB2_DRIFT_CANDIDATES_MAX + 1ull, reply,
+                                                  sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_drift_candidates_reply_encode(20, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_drift_candidates_reply_encode(20, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_drift_candidates_reply_decode(reply, reply_len, &drift) == -1 && drift == 0);
 }
 
 static void test_cross_repo_rebuild_build_deps_wire(void)
@@ -6268,6 +6317,42 @@ static void test_rules_decay_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_drift_candidates_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.drift_candidates = drift_candidates};
+   uint8_t request[AIMEE_DB2_DRIFT_CANDIDATES_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   uint64_t drift = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_DRIFT_CANDIDATES};
+   assert(aimee_db2_drift_candidates_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(drift_candidates_calls == 1);
+   assert(aimee_db2_drift_candidates_reply_decode(response, response_len, &drift) == 0 &&
+          drift == 20);
+
+   /* Nothing drifted and a failed statement are both zero, the same collapse
+    * the requeue it previews carries. Reading this as a preview is fair only
+    * because both share the predicate; the catalog pins that. */
+   drift_candidates_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_drift_candidates_reply_decode(response, response_len, &drift) == 0 &&
+          drift == 0);
+   drift_candidates_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   drift_candidates_value = 20;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_cross_repo_rebuild_build_deps_handler(void)
 {
    reset();
@@ -8239,6 +8324,7 @@ int main(void)
    test_cross_repo_rebuild_routes_wire();
    test_cross_repo_rebuild_identities_wire();
    test_cross_repo_rebuild_build_deps_wire();
+   test_drift_candidates_wire();
    test_rules_decay_wire();
    test_curiosity_rescore_all_wire();
    test_mining_seed_job_defaults_wire();
@@ -8313,6 +8399,7 @@ int main(void)
    test_cross_repo_rebuild_routes_handler();
    test_cross_repo_rebuild_identities_handler();
    test_cross_repo_rebuild_build_deps_handler();
+   test_drift_candidates_handler();
    test_rules_decay_handler();
    test_curiosity_rescore_all_handler();
    test_mining_seed_job_defaults_handler();

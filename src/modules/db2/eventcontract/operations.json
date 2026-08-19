@@ -1643,6 +1643,30 @@
       }
     },
     {
+      "family": "index",
+      "id": 9,
+      "name": "drift_candidates",
+      "wire_format": "db2-envelope-u64-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed file generations and their drift are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_code_index_drift_candidates"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"predicate": "shared-with-requeue-drifted", "read_only": true}
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "field": {"name": "drift_candidates", "type": "u64", "minimum": 0,
+                  "maximum": 9223372036854775807}
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",

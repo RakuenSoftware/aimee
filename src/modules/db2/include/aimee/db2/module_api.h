@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "2f183787a191657bb2ce0796ff14d69829a845eb61b3410c8bd83a5fe38b1b96"
+#define AIMEE_DB2_CONTRACT_SHA256 "6e4e3edba3e3e15b24653437055b94d97810184a1d1c27d1bfac23693329ed8a"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -548,6 +548,13 @@
 #define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN   28u
 #define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_ERROR_LEN      24u
 #define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX            2147483647u
+#define AIMEE_DB2_EVENT_DRIFT_CANDIDATES                       AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_DRIFT_CANDIDATES                       AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_DRIFT_CANDIDATES                   9u
+#define AIMEE_DB2_DRIFT_CANDIDATES_REQUEST_LEN                 24u
+#define AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN                32u
+#define AIMEE_DB2_DRIFT_CANDIDATES_ERROR_LEN                   24u
+#define AIMEE_DB2_DRIFT_CANDIDATES_MAX                         9223372036854775807ull
 #define AIMEE_DB2_EVENT_RULES_DECAY                            AIMEE_DB2_EVENT_LEARNING
 #define AIMEE_DB2_STAGE_RULES_DECAY                            AIMEE_DB2_FAMILY_LEARNING
 #define AIMEE_DB2_OPERATION_RULES_DECAY                        1u
@@ -3347,6 +3354,58 @@ static inline int aimee_db2_rules_decay_reply_decode(const uint8_t *input, size_
    if (decoded > AIMEE_DB2_RULES_DECAY_MAX)
       return -1;
    *rules_touched = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_drift_candidates_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DRIFT_CANDIDATES, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_drift_candidates_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DRIFT_CANDIDATES_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DRIFT_CANDIDATES &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_drift_candidates_reply_encode(uint64_t drift_candidates,
+                                                          uint8_t *output, size_t capacity,
+                                                          uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || drift_candidates > AIMEE_DB2_DRIFT_CANDIDATES_MAX ||
+       capacity < AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DRIFT_CANDIDATES, AIMEE_DB2_RESULT_OK,
+                                     8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, drift_candidates);
+   *output_len = AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_drift_candidates_reply_decode(const uint8_t *input, size_t input_len,
+                                                          uint64_t *drift_candidates)
+{
+   if (drift_candidates)
+      *drift_candidates = 0u;
+   if (!drift_candidates)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_DRIFT_CANDIDATES ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_DRIFT_CANDIDATES_MAX)
+      return -1;
+   *drift_candidates = decoded;
    return 0;
 }
 

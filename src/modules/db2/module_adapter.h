@@ -82,6 +82,7 @@ typedef struct
    int (*cross_repo_rebuild_routes)(void);
    int (*cross_repo_rebuild_identities)(void);
    int (*cross_repo_rebuild_build_deps)(void);
+   int64_t (*drift_candidates)(void);
    int (*rules_decay)(void);
    int (*curiosity_rescore_all)(void);
    int (*mining_seed_job_defaults)(void);
