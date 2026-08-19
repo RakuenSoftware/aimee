@@ -782,6 +782,21 @@ int agent_registry_default_primary(agent_t *out)
    return agent_registry_pick(out, agent_registry_pick_default, NULL);
 }
 
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   int rc;
+
+   if (!out)
+      return -1;
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      rc = agent_registry_find(model, out);
+   else
+      rc = agent_registry_default_primary(out);
+   if (rc != 0 || !out->enabled)
+      return -1;
+   return 0;
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -828,6 +843,11 @@ int agent_load_config(agent_config_t *cfg)
    cJSON *def = cJSON_GetObjectItem(root, "default_agent");
    if (def && cJSON_IsString(def))
       snprintf(cfg->default_agent, MAX_AGENT_NAME, "%s", def->valuestring);
+
+   /* Delegate preference is independent from the primary/chat default. */
+   cJSON *delegate_def = cJSON_GetObjectItem(root, "default_delegate");
+   if (delegate_def && cJSON_IsString(delegate_def))
+      snprintf(cfg->default_delegate, MAX_AGENT_NAME, "%s", delegate_def->valuestring);
 
    /* Fallback chain */
    cJSON *fb = cJSON_GetObjectItem(root, "fallback_chain");
@@ -1553,6 +1573,8 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
 
    if (cfg->default_agent[0])
       JSON_ADD_STR(root, "default_agent", cfg->default_agent);
+   if (cfg->default_delegate[0])
+      JSON_ADD_STR(root, "default_delegate", cfg->default_delegate);
 
    cJSON *fb = cJSON_CreateArray();
    for (int i = 0; i < cfg->fallback_count; i++)

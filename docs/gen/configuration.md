@@ -769,6 +769,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `cost_tier` | Cost-tier label for routing. |
 | `credentials` | Credential block / reference. |
 | `default_agent` | Top-level: name of the default agent. |
+| `default_delegate` | Delegate this agent hands work to when a task arrives with no explicit delegate. Lets a project pin its own worker without every caller passing --delegate. |
 | `desc` | Human description of the agent. |
 | `enabled` | Whether the agent is active. |
 | `endpoint` | Provider endpoint URL. |

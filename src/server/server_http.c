@@ -261,9 +261,8 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    /* TCP requires a configured bearer and a matching Authorization header. */
    if (!have_bearer)
       return 503;
-   authorized = server_ct_equal(aimee_core_bearer_token(auth_header), bearer_cfg);
-   if (api_key_header && api_key_header[0])
-      authorized |= server_ct_equal(api_key_header, bearer_cfg);
+   authorized = server_http_bearer_matches(aimee_core_bearer_token(auth_header), bearer_cfg);
+   authorized |= server_http_bearer_matches(api_key_header, bearer_cfg);
    if (!authorized)
       return 401;
    return 0;

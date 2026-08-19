@@ -55,7 +55,7 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
  * else OpenAI). Returns a new cJSON the caller owns, or NULL to fall back. */
 struct cJSON *aimee_ir_build_from_chat(const char *agent_model, const struct cJSON *messages,
                                        const struct cJSON *tools, const char *system,
-                                       const char *driver_name);
+                                       const char *driver_name, int max_tokens, double temperature);
 
 /* Slice 3 gate (AIMEE_IR_RESP_PATH env, DEFAULT-OFF): route the OPENAI-WIRE buffered
  * response parse through the IR. Per-wire; anthropic + responses stay on legacy. */

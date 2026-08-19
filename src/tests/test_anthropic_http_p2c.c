@@ -152,6 +152,13 @@ int agent_registry_default_primary(agent_t *out)
    return 0;
 }
 
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
+}
+
 void delegate_drivers_init(void)
 {
 }

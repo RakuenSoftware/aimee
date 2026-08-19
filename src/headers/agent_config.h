@@ -90,6 +90,12 @@ int agent_registry_find(const char *name, agent_t *out);
 
 /* As agent_default_primary, against the cached registry. */
 int agent_registry_default_primary(agent_t *out);
+
+/* Resolve the standard OpenAI/Anthropic request `model` field. `aimee` (or an
+ * omitted field) selects the configured primary; every other value is the exact
+ * registered agent name and never silently falls back. The selected agent must
+ * be enabled. This is the shared ingress contract for all client wire formats. */
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
  * agent, else NULL. Never returns a disabled agent. */

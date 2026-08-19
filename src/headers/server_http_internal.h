@@ -52,6 +52,7 @@ int route_roundtable_set_active(const char *body, char *resp, int cap);
 void send_rate_limited(int fd, int retry_after, const char *request_id);
 void send_response(int fd, int status, const char *body, const char *request_id);
 void handle_session_events(int fd, const char *id_in, const char *request_id);
+void server_http_sse_live_run(int fd, const char *body, server_http_responses_stream_fn handler);
 
 extern atomic_int g_conn_live;
 extern atomic_int g_management_conn_live;

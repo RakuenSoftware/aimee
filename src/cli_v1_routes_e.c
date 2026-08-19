@@ -24,6 +24,79 @@
 #include <unistd.h>
 #endif /* !_WIN32 (preamble guard) */
 
+int cli_agent_probe_response_is_failure(cJSON *resp)
+{
+   cJSON *execution_ok = cJSON_GetObjectItemCaseSensitive(resp, "execution_ok");
+   if (execution_ok)
+      return !cJSON_IsTrue(execution_ok);
+   cJSON *model_available = cJSON_GetObjectItemCaseSensitive(resp, "model_available");
+   return model_available && !cJSON_IsTrue(model_available);
+}
+
+int cli_index_investigate_response_is_failure(cJSON *resp)
+{
+   cJSON *results = resp ? cJSON_GetObjectItemCaseSensitive(resp, "results") : NULL;
+   if (!cJSON_IsArray(results) || cJSON_GetArraySize(results) == 0)
+      return 1;
+   cJSON *row;
+   cJSON_ArrayForEach(row, results)
+   {
+      cJSON *result = cJSON_GetObjectItemCaseSensitive(row, "result");
+      cJSON *raw = cJSON_GetObjectItemCaseSensitive(row, "result_raw");
+      if (result || (cJSON_IsString(raw) && raw->valuestring[0]))
+         return 0;
+   }
+   return 1;
+}
+
+void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
+                             char *out, size_t out_len)
+{
+   const char *base = strrchr(abs_root, '/');
+   base = (base && base[1]) ? base + 1 : abs_root;
+   snprintf(out, out_len, "%s", base);
+   const char *verb = NULL;
+   const char *path = cli_v1_route_for_method("index.list", &verb);
+   int status = 0;
+   cJSON *response =
+       path ? cli_http_request(remote, verb ? verb : "POST", path, "{}", bearer, 15000, &status)
+            : NULL;
+   cJSON *projects = response ? cJSON_GetObjectItemCaseSensitive(response, "projects") : NULL;
+   int collision = 0;
+   cJSON *project = NULL;
+   cJSON_ArrayForEach(project, projects)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
+      const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
+      if (root && strcmp(root, abs_root) == 0 && name && name[0])
+      {
+         snprintf(out, out_len, "%s", name);
+         cJSON_Delete(response);
+         return;
+      }
+      if (name && strcmp(name, base) == 0)
+         collision = 1;
+   }
+   cJSON_Delete(response);
+   if (!collision)
+      return;
+   unsigned long hash = 2166136261u;
+   for (const unsigned char *p = (const unsigned char *)abs_root; *p; p++)
+      hash = (hash ^ *p) * 16777619u;
+   snprintf(out, out_len, "%s-%08lx", base, hash & 0xfffffffful);
+}
+
+cJSON *marshal_workspace_prepare(int argc, char **argv)
+{
+   cJSON *req = marshal_workspace_add(argc, argv);
+   if (req)
+   {
+      cJSON_ReplaceItemInObjectCaseSensitive(req, "method", cJSON_CreateString("workspace.add"));
+      cJSON_AddTrueToObject(req, "prepare");
+   }
+   return req;
+}
+
 /* Every ordered memory command carries the thin client's identity to the
  * server.  Explicit project/workspace values are useful for detached clients;
  * cwd is the normal active-project source and is never resolved on the KB

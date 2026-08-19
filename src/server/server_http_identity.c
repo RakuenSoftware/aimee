@@ -11,6 +11,7 @@
 #include "server_conn_io.h" /* server_conn_io_has_ssl/get_ssl — native-TLS attestation */
 #include "server_tls.h"     /* server_tls_peer_identity — mTLS client cert CN */
 #include "kb_mgmt_status.h"
+#include "server.h" /* server_ct_equal */
 #include "platform_ipc.h"
 #include "vault_principal.h"
 #include <aimee/core/connection/auth.h>
@@ -42,6 +43,21 @@ int server_http_session_bearer_unbind(const char *presented, char *bearer, size_
    bearer[base_n] = '\0';
    memcpy(session_id, sid, 33);
    return 1;
+}
+
+/* Compare a presented credential against the configured bearer, ignoring any
+ * `.aimee-session.<32hex>` suffix the client appended to scope its connection to
+ * one session. The suffix is client-chosen routing metadata, not a secret, so it
+ * must not change whether the credential authenticates -- otherwise every
+ * session-scoped client would be rejected at the door. The base token is still
+ * compared in constant time. */
+int server_http_bearer_matches(const char *presented, const char *bearer_cfg)
+{
+   if (!presented || !presented[0] || !bearer_cfg || !bearer_cfg[0])
+      return 0;
+   char base[4097], sid[33];
+   (void)server_http_session_bearer_unbind(presented, base, sizeof(base), sid, sizeof(sid));
+   return server_ct_equal(base, bearer_cfg);
 }
 
 /* Per-thread captured identity for the request currently being routed. Thread-

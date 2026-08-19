@@ -3,6 +3,7 @@
 #include "server_http.h"
 #include "server_http_authz.h"
 #include "server_http_internal.h"
+#include "server_http_identity.h"
 #include "runtime_secret.h"
 #include "request_context.h"
 #include "http_content_encoding.h"
@@ -12,6 +13,7 @@
 #include <aimee/audit/obs_bus.h>
 #include "agent_config.h"
 #include "config.h"
+#include "command_registry.h"
 #include "role_templates.h"
 #include "delegate_permissions_stub.h"
 #include "cJSON.h"
@@ -35,6 +37,11 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+
+static char *kb_agent_surfaces_stub(void)
+{
+   return strdup("{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}");
+}
 
 extern int g_remote_writes;
 
@@ -535,6 +542,28 @@ int main(void)
       assert(strstr(resp, "\"personas\"") && strstr(resp, "\"sessions\""));
       assert(strstr(resp, "\"models\""));
       assert(strstr(resp, "\"version\":\""));
+      cJSON *caps = cJSON_Parse(resp);
+      cJSON *surfaces = cJSON_GetObjectItemCaseSensitive(caps, "agent_surfaces");
+      assert(cJSON_IsObject(surfaces));
+      assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "cli_only")));
+      assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only")));
+      cJSON_Delete(caps);
+
+      aimee_command_registry_reset();
+      assert(aimee_agent_surface_register("runtime_future", AIMEE_SURFACE_MCP, "runtime-future") ==
+             0);
+      server_http_set_kb_agent_surfaces_provider(kb_agent_surfaces_stub);
+      st = server_http_route("GET", "/v1/capabilities", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      caps = cJSON_Parse(resp);
+      surfaces = cJSON_GetObjectItemCaseSensitive(caps, "agent_surfaces");
+      cJSON *mcp_only = cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only");
+      assert(cJSON_GetArraySize(mcp_only) == 2);
+      assert(strcmp(cJSON_GetArrayItem(mcp_only, 0)->valuestring, "runtime_future") == 0);
+      assert(strcmp(cJSON_GetArrayItem(mcp_only, 1)->valuestring, "kb_future") == 0);
+      cJSON_Delete(caps);
+      server_http_set_kb_agent_surfaces_provider(NULL);
+      aimee_command_registry_reset();
    }
 
    /* --- GET /v1/models is an OpenAI-shaped model list with the aimee model --- */
@@ -697,6 +726,43 @@ int main(void)
    {
       int st = server_http_route("GET", "/v1/personas/does-not-exist", NULL, 0, resp, sizeof(resp));
       assert(st == 404);
+   }
+
+   /* --- users can add, edit, and remove a persona through the server API --- */
+   {
+      const char *created =
+          "{\"name\":\"ignored-body-name\",\"description\":\"First version\","
+          "\"delegates\":\"full\",\"roles\":[\"code\"],"
+          "\"persona\":\"You are a staff engineer in %s.\","
+          "\"principles\":\"# Principles\\n- Prefer evidence.\",\"brief\":\"Initial brief\"}";
+      int st = server_http_route("PUT", "/v1/personas/staff-engineer", created,
+                                 (int)strlen(created), resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"name\":\"staff-engineer\""));
+      assert(strstr(resp, "First version"));
+
+      st = server_http_route("GET", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "Prefer evidence"));
+
+      const char *edited =
+          "{\"description\":\"Edited version\",\"delegates\":\"readonly\","
+          "\"roles\":[\"review\"],\"persona\":\"Edited identity.\","
+          "\"principles\":\"# Principles\\n- Review carefully.\",\"brief\":\"Edited brief\"}";
+      st = server_http_route("PUT", "/v1/personas/staff-engineer", edited, (int)strlen(edited),
+                             resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "Edited version"));
+      assert(strstr(resp, "Edited identity"));
+
+      st = server_http_route("DELETE", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      st = server_http_route("GET", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 404);
+
+      st = server_http_route("PUT", "/v1/personas/bad%2Fname", created, (int)strlen(created), resp,
+                             sizeof(resp));
+      assert(st == 400 || st == 404);
    }
 
    /* --- session persona store: set/get + isolation --- */
@@ -1087,6 +1153,38 @@ int main(void)
 
    /* --- server_http_authorize: UDS vs TCP + bearer + session-key rule --- */
    {
+      char unbound[128], bound_sid[80];
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 1);
+      assert(strcmp(unbound, "secret") == 0);
+      assert(strcmp(bound_sid, "0123456789abcdef0123456789abcdef") == 0);
+      /* The binding is a strict terminal suffix. Invalid forms remain ordinary
+       * bearer text and never acquire a session identity. */
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcde", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(strcmp(unbound, "secret.aimee-session.0123456789abcdef0123456789abcde") == 0);
+      assert(bound_sid[0] == '\0');
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef0", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdeg", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(".aimee-session.0123456789abcdef0123456789abcdef",
+                                               unbound, sizeof(unbound), bound_sid,
+                                               sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef.trailing", unbound,
+                 sizeof(unbound), bound_sid, sizeof(bound_sid)) == 0);
+      assert(
+          server_http_session_bearer_unbind("secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                            unbound, 6, bound_sid, sizeof(bound_sid)) == 0);
+      assert(
+          server_http_session_bearer_unbind("secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                            unbound, sizeof(unbound), bound_sid, 32) == 0);
+
       /* UDS is always authorized regardless of token, when no session key. */
       assert(server_http_authorize(0, "", NULL, NULL, 0) == 0);
       assert(server_http_authorize(0, "secret", NULL, NULL, 0) == 0);
@@ -1099,6 +1197,12 @@ int main(void)
       /* TCP with a bearer configured: Authorization or x-api-key exact match passes. */
       assert(server_http_authorize(1, "secret", "Bearer secret", NULL, 0) == 0);
       assert(server_http_authorize(1, "secret", NULL, "secret", 0) == 0);
+      assert(server_http_authorize(1, "secret",
+                                   "Bearer secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                   NULL, 0) == 0);
+      assert(server_http_authorize(1, "secret", NULL,
+                                   "secret.aimee-session.fedcba9876543210fedcba9876543210",
+                                   0) == 0);
       assert(server_http_authorize(1, "secret", "Bearer nope", "secret", 0) == 0);
       /* The caller identity JWT may occupy Authorization while the independent
        * rotating connection bearer occupies x-api-key. A valid identity-shaped

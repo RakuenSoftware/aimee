@@ -457,6 +457,11 @@ typedef struct
    agent_t agents[MAX_AGENTS];
    int agent_count;
    char default_agent[MAX_AGENT_NAME];
+   /* Preferred seat for unpinned delegate turns. This is deliberately separate
+    * from default_agent: choosing a local worker must not replace the user's
+    * primary chat model. If unavailable or ineligible for the requested role,
+    * normal capability/cost routing remains the fallback. */
+   char default_delegate[MAX_AGENT_NAME];
    char fallback_chain[MAX_FALLBACK][MAX_AGENT_NAME];
    int fallback_count;
    /* Transient per-request routing contract: an explicit agent/provider pin

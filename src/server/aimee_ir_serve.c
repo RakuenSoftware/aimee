@@ -251,7 +251,8 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
 }
 
 cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, const cJSON *tools,
-                                const char *system, const char *driver_name)
+                                const char *system, const char *driver_name, int max_tokens,
+                                double temperature)
 {
    /* assemble a chat request {model, messages: [system?] + messages, tools} */
    cJSON *chat = cJSON_CreateObject();
@@ -272,6 +273,17 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    }
    if (cJSON_IsArray(tools))
       cJSON_AddItemToObject(chat, "tools", cJSON_Duplicate((cJSON *)tools, 1));
+
+   /* Keep generation controls on the IR path. AIMEE_IR_PATH silently discarded
+    * the output cap, leaving local llama.cpp delegates at n_predict=-1 -- an
+    * unbounded generation where the caller had asked for a bounded one.
+    * Responses-backed provider CLIs keep their established no-cap request
+    * shape, because that wire rejects the chat-completions field. */
+   int is_responses_wire = driver_name && strcmp(driver_name, "chatgpt") == 0;
+   if (!is_responses_wire && max_tokens > 0)
+      cJSON_AddNumberToObject(chat, "max_tokens", max_tokens);
+   if (!is_responses_wire && temperature >= 0.0)
+      cJSON_AddNumberToObject(chat, "temperature", temperature);
 
    aimee_request_t ir;
    char err[128];
