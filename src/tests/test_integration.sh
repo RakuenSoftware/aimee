@@ -75,23 +75,52 @@ MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB1_MODULE_PID=""
 
 install_db1_module() {
-    [ -x "$DB1_MODULE_BUILT" ] || return 0
+    # Missing module: stop, do not degrade. This used to return 0 and let the
+    # run continue, from a time when the daemon still had an in-process store to
+    # fall back to. It has none now, so a skipped install does not produce a
+    # weaker run -- it produces a run where every store-backed check fails as
+    # "failed to create session", which reads like a product bug and is not one.
+    # The make target builds the module, so this only fires on a hand-run, which
+    # is exactly the case that needs telling.
+    if [ ! -x "$DB1_MODULE_BUILT" ]; then
+        echo "ABORT: the DB1 module is not built at $DB1_MODULE_BUILT."
+        echo "       Every store-backed check needs it: nothing serves the store"
+        echo "       without it. Build it with:"
+        echo "           make -C src build/obj/aimee-module-db1"
+        echo "       or run this harness through 'make integration-tests', which"
+        echo "       builds it as a prerequisite."
+        exit 1
+    fi
     # Copied beside the socket rather than granted where it was built: a grant
     # pins a resolved path, and a build tree is not where a deployed module
     # lives.
-    cp "$DB1_MODULE_BUILT" "$DB1_MODULE" || return 0
+    cp "$DB1_MODULE_BUILT" "$DB1_MODULE"
     chmod 0755 "$DB1_MODULE"
     mkdir -p "$MODULE_POLICY_DIR"
-    # Read the serve list from the grant the exporter generates when it is
-    # there, so this cannot drift from what the module serves. It is a build
-    # artifact and not always present, and under `set -e` a failed command
-    # substitution ends the run, so the read is guarded rather than trusted.
+    # The serve list comes from the grant the exporter generates, so it cannot
+    # drift from what the module actually serves. It is a build artifact, so
+    # generate it when it is not there rather than guessing: the guess this
+    # replaced was a hardcoded list of eight kinds, written when the module
+    # served eight families. It serves nineteen. A short list does not fail
+    # loudly -- the daemon starts, eleven families are simply unserved, and
+    # their checks fail as if the code were broken.
     local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/db1.grant"
+    if [ ! -r "$generated" ]; then
+        python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+            --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+    fi
     local serve=""
     if [ -r "$generated" ]; then
         serve=$(sed -n 's/^serve=//p' "$generated" || true)
     fi
-    [ -n "$serve" ] || serve="11777,11778,11779,11780,11781,11782,11783,11784"
+    if [ -z "$serve" ]; then
+        echo "ABORT: no generated DB1 grant at $generated, and it could not be"
+        echo "       generated. Without it there is no honest serve list to"
+        echo "       install: run"
+        echo "           python3 scripts/export_c_repositories.py \\"
+        echo "               --runtime-bundle src/build/obj/module-bundle"
+        exit 1
+    fi
     cat >"$MODULE_POLICY_DIR/db1.grant" <<GRANT
 version=1
 principal_class=1
