@@ -96,3 +96,21 @@ The prize is not tidiness. A daemon holding an open handle to a database it
 never uses is a daemon that can still be told to write to it -- one `db1_conn()`
 away from a new direct caller, and the whole point of this migration was to make
 that impossible rather than merely absent.
+
+## Verified on a live server, not only in the harness
+
+The one scenario this change actually alters is a fresh install: the daemon used
+to create and migrate the database at startup and no longer does. Run outside
+the test harness, on an empty AIMEE_HOME:
+
+- the server started with no database present, and created none -- it cannot,
+  the symbol is not in the binary;
+- the module, started against the same path, created it: 102 tables;
+- `/v1/server/health` then reported `"state":"ok"`, from a process holding no
+  connection;
+- a session created through `/v1/sessions/create` came back from
+  `/v1/sessions/list` and was present in the module's file on disk.
+
+Worth doing by hand because the harness starts the module every run, so it
+cannot tell "the module created the database" from "something else did".
+
