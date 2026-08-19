@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> /* getcwd */
 
 /* Field value sources. */
 #define SRC_FLAG            "flag"
@@ -49,6 +50,47 @@
  * own flag: no other field is consulted, and no branch decides which fields
  * exist. */
 #define SRC_REPEATED_FLAG "repeated_flag"
+/* Two facts only the CLIENT can know, named by the SERVER.
+ *
+ * I refused these for most of this work, on the grounds that "a thin client
+ * reading its own disk to build a request is doing its own job, not obeying the
+ * server". That conflated two different things. The client DECIDING that a
+ * field needs the working directory is client-side knowledge, and it is exactly
+ * what forces a rebuild when a new command wants it. The client SUPPLYING the
+ * working directory because a served spec asked for it is the thin-client model
+ * working as intended: the server decides, the client provides the one value it
+ * alone holds.
+ *
+ * Under the old reading, a new cwd-taking command could not be added without
+ * shipping a new client -- which is the precise failure this whole exercise
+ * exists to remove. 26 methods sat behind that mistake.
+ *
+ * They are NAMED, FIXED facts, not a general escape. There is deliberately no
+ * `{"from": "env", "name": <anything>}`: that would let a server -- or anyone
+ * who could answer as one -- ask the client to read AWS_SECRET_ACCESS_KEY and
+ * post it back. A spec can ask for the working directory and the session id
+ * because those are the two the CLI already puts on the wire, and for nothing
+ * else. Adding a third is a deliberate act, not a configuration. */
+/* An ordered cascade for ONE field: the first source that yields a value wins,
+ * and `default` supplies a literal when none does. memory.recall's task_hint is
+ * --task, then positional[0], then --query, then the literal "session start".
+ *
+ * positional_or_flag and flag_or_positional are the two-source special cases of
+ * this; they stay because they are what most marshallers do and reading them is
+ * easier than reading a list. Still one field consulting its own flags and its
+ * own positional: no other field is involved, and no branch decides which
+ * fields exist. */
+/* Every PARSED positional as an array of strings. memory.search sends its
+ * keywords this way. argv_array is the raw-argv sibling; this one respects
+ * flag parsing, which is what the marshallers building it do. */
+/* A value fixed by the METHOD, not by the input. skill.pin sends
+ * pinned=true and skill.unpin sends pinned=false from one shared
+ * marshaller; per-method specs make that a constant rather than a branch. */
+#define SRC_CONST            "const"
+#define SRC_POSITIONAL_ARRAY "positional_array"
+#define SRC_FIRST_OF         "first_of"
+#define SRC_CWD              "cwd"
+#define SRC_SESSION          "session"
 
 /* Whether a field present-but-empty is sent or dropped. Absent means "drop".
  *
@@ -91,13 +133,17 @@
  * test did not catch it because every generated id was small. That is the same
  * blind spot as user_capture's length limit, and the same fix: samples chosen
  * to straddle the boundary, not samples derived from the spec. */
-#define TYPE_NUMBER_LAX_I64  "number_lenient_int64"
-#define TYPE_NUMBER_LAX_REAL "number_lenient_real"
-#define TYPE_BOOL_INVERTED   "bool_inverted"
+/* strtoul(): eval.run parses --seed this way, and it differs from atoll on a
+ * negative (which wraps rather than staying negative). */
+#define TYPE_NUMBER_LAX_ULONG "number_lenient_ulong"
+#define TYPE_NUMBER_LAX_I64   "number_lenient_int64"
+#define TYPE_NUMBER_LAX_REAL  "number_lenient_real"
+#define TYPE_BOOL_INVERTED    "bool_inverted"
 /* A constant STRING emitted when a flag is present: --review sends
  * "status": "ambiguous". Exactly true_if_set with a literal other than true,
  * so the same reasoning admits it -- one field, its own flag, no branch. The
  * literal travels in `value`. */
+#define TYPE_CONST_BOOL   "const_bool"
 #define TYPE_CONST_IF_SET "const_if_set"
 /* One field, two flags, three states: --surprise sends true, --no-surprise
  * sends false, neither sends nothing. `flag` carries the true spelling and
@@ -146,10 +192,13 @@ static const char *field_str(const cJSON *field, const char *key)
 
 static int known_source(const char *from)
 {
-   return from && (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
-                   !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
-                   !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY) ||
-                   !strcmp(from, SRC_ARGV_INDEX) || !strcmp(from, SRC_REPEATED_FLAG));
+   return from &&
+          (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
+           !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
+           !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY) ||
+           !strcmp(from, SRC_ARGV_INDEX) || !strcmp(from, SRC_REPEATED_FLAG) ||
+           !strcmp(from, SRC_CWD) || !strcmp(from, SRC_SESSION) || !strcmp(from, SRC_FIRST_OF) ||
+           !strcmp(from, SRC_POSITIONAL_ARRAY) || !strcmp(from, SRC_CONST));
 }
 
 static int known_empty(const char *e)
@@ -163,8 +212,9 @@ static int known_type(const char *type)
     * say so in every row. */
    return !type || !strcmp(type, TYPE_STRING) || !strcmp(type, TYPE_NUMBER) ||
           !strcmp(type, TYPE_NUMBER_LAX) || !strcmp(type, TYPE_NUMBER_LAX_I64) ||
-          !strcmp(type, TYPE_NUMBER_LAX_REAL) || !strcmp(type, TYPE_BOOL) ||
-          !strcmp(type, TYPE_BOOL_INVERTED) || !strcmp(type, TYPE_CONST_IF_SET) ||
+          !strcmp(type, TYPE_NUMBER_LAX_REAL) || !strcmp(type, TYPE_NUMBER_LAX_ULONG) ||
+          !strcmp(type, TYPE_BOOL) || !strcmp(type, TYPE_BOOL_INVERTED) ||
+          !strcmp(type, TYPE_CONST_IF_SET) || !strcmp(type, TYPE_CONST_BOOL) ||
           !strcmp(type, TYPE_TRISTATE_FLAG) || !strcmp(type, TYPE_TRUE_IF_SET);
 }
 
@@ -275,6 +325,61 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
    const char *from = field_str(field, "from");
    const char *flag = field_str(field, "flag");
 
+   if (!strcmp(from, SRC_FIRST_OF))
+   {
+      const cJSON *srcs = cJSON_GetObjectItemCaseSensitive(field, "sources");
+      /* Advance on ABSENT, not on empty. `--task ""` is a value the operator
+       * typed: it stops the cascade, and the empty string then loses to the
+       * default at the emit step. Skipping it here would let --query win, which
+       * is a different request from the one the compiled marshaller sends. */
+      for (const cJSON *s = cJSON_IsArray(srcs) ? srcs->child : NULL; s; s = s->next)
+      {
+         const char *v = field_value(s, opts, joined, argc, argv);
+         if (v)
+         {
+            if (v[0])
+               return v;
+            /* Present but empty: a default replaces it if the marshaller has
+             * one (memory.recall falls back to "session start"), and otherwise
+             * the empty string IS the value -- session.attach sends "" for an
+             * empty positional rather than dropping the field. */
+            /* Two conventions, both real. memory.recall tests `task && task[0]`
+             * so an empty value takes the default; memory.benchmark tests
+             * `pos_count >= 1` so an empty positional IS the value. The spec has
+             * to say which, and standing is the commoner one. */
+            if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "default_on_empty")))
+               return v;
+            const char *d = field_str(field, "default");
+            return d ? d : v;
+         }
+      }
+      return field_str(field, "default");
+   }
+
+   if (!strcmp(from, SRC_CWD))
+   {
+      /* One buffer, because a request carries this field at most once and the
+       * marshalling path is single-threaded. getcwd() failing means the field
+       * is omitted, which is what every compiled marshaller does. */
+      static char cwd[4096];
+      return getcwd(cwd, sizeof(cwd)) ? cwd : NULL;
+   }
+
+   if (!strcmp(from, SRC_SESSION))
+   {
+      /* resolve_session_env(): --session, then $AIMEE_SESSION_ID, then the
+       * literal "default". A fixed precedence over one flag and one named
+       * variable -- no branch decides which fields exist, and no other field is
+       * consulted. */
+      const char *s = cli_args_get(opts, flag && flag[0] ? flag : "session");
+      if (s)
+         return s;
+      s = getenv("AIMEE_SESSION_ID");
+      if (s && s[0])
+         return s;
+      return "default";
+   }
+
    if (!strcmp(from, SRC_ARGV_JOINED))
       return joined && joined[0] ? joined : NULL;
 
@@ -366,6 +471,22 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
    int required = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "required"));
 
    const char *from = field_str(field, "from");
+   if (type && !strcmp(type, TYPE_CONST_BOOL))
+   {
+      cJSON_AddBoolToObject(req, json_name,
+                            cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "value")));
+      return 0;
+   }
+   if (from && !strcmp(from, SRC_POSITIONAL_ARRAY))
+   {
+      cJSON *arr = cJSON_CreateArray();
+      if (!arr)
+         return -1;
+      for (int i = 0; i < opts->pos_count; i++)
+         cJSON_AddItemToArray(arr, cJSON_CreateString(opts->positional[i]));
+      cJSON_AddItemToObject(req, json_name, arr);
+      return 0;
+   }
    if (from && !strcmp(from, SRC_REPEATED_FLAG))
    {
       const char *want = field_str(field, "flag");
@@ -453,6 +574,10 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
     * program. Seven marshallers do `int n = ...; if (n > 0) Add(n);`. */
    int omit_nonpositive =
        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "omit_if_nonpositive"));
+   /* `omit_below` is the same idea with the threshold named: session.attach
+    * takes --subscribe defaulting to -1 and sends it only when >= 0, so ZERO is
+    * a real value there and omit_if_nonpositive would have swallowed it. */
+   const cJSON *omit_below = cJSON_GetObjectItemCaseSensitive(field, "omit_below");
    const char *value = field_value(field, opts, joined, argc, argv);
    /* `default` reproduces cli_args_get_int(opts, name, def): the field is
     * emitted even when the flag is absent, carrying the default. Absent means
@@ -466,7 +591,8 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
     * those apart, and with empty:"emit" it silently dropped the default. */
    if (cJSON_IsNumber(dflt) && (!value || (!value[0] && !emit_empty)))
    {
-      if (!(omit_nonpositive && dflt->valuedouble <= 0))
+      if (!(omit_nonpositive && dflt->valuedouble <= 0) &&
+          !(cJSON_IsNumber(omit_below) && dflt->valuedouble < omit_below->valuedouble))
          cJSON_AddNumberToObject(req, json_name, clamped(field, dflt->valuedouble));
       return 0;
    }
@@ -482,6 +608,8 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       int n = atoi(value);
       if (omit_nonpositive && n <= 0)
          return 0;
+      if (cJSON_IsNumber(omit_below) && n < (int)omit_below->valuedouble)
+         return 0;
       cJSON_AddNumberToObject(req, json_name, clamped(field, (double)n));
    }
    else if (!strcmp(type, TYPE_NUMBER_LAX_I64))
@@ -489,6 +617,13 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       /* atoll(): the same leniency, 64 bits wide. */
       long long n = atoll(value);
       if (omit_nonpositive && n <= 0)
+         return 0;
+      cJSON_AddNumberToObject(req, json_name, clamped(field, (double)n));
+   }
+   else if (!strcmp(type, TYPE_NUMBER_LAX_ULONG))
+   {
+      unsigned long n = strtoul(value, NULL, 10);
+      if (omit_nonpositive && n == 0)
          return 0;
       cJSON_AddNumberToObject(req, json_name, clamped(field, (double)n));
    }

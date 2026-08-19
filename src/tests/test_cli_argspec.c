@@ -96,6 +96,221 @@ static const sample_t SAMPLES[] = {
     {"memory.embed", {"5", "--version", "", NULL}},
     {"memory.embed", {"--all", "5", "--version", "v2", NULL}},
 
+    /* The cwd family. cwd is the same value on both sides here -- the test runs
+       the compiled marshaller and the interpreter in one process -- so these
+       samples prove the OTHER fields and prove the field is emitted at all. A
+       spec that forgot cwd entirely fails, which is the assertion that matters:
+       a served spec silently dropping cwd would send a project-scoped query
+       with no project. */
+    {"index.find", {NULL}},
+    {"index.find", {"foo", NULL}},
+    {"index.find", {"foo", "--scope", "all", NULL}},
+    {"index.find", {"--scope", "all", NULL}},
+    {"index.find", {"", NULL}},
+    {"index.find", {"foo", "--scope", "", NULL}},
+    {"index.find", {"--json", "foo", NULL}},
+
+    {"memory.list", {NULL}},
+    {"memory.list", {"--tier", "L2", NULL}},
+    {"memory.list", {"--kind", "fact", "--limit", "5", NULL}},
+    {"memory.list", {"--limit", "abc", NULL}},
+    {"memory.list", {"--limit", "", NULL}},
+    {"memory.list", {"--project", "p", "--workspace", "w", "--scope", "s", NULL}},
+    {"memory.list", {"--tier", "", NULL}},
+    {"memory.list", {"stray", NULL}},
+
+    /* Generated candidates: every flag alone, all together, an empty value,
+       the positionals, and one argument too many. Spec-derived, so blind to any
+       rule the spec omits -- which is why the adversarial and both-sources
+       samples exist. These catch gross errors; they do not certify a spec. */
+
+    {"identity.snapshot", {NULL}},
+    {"identity.snapshot", {"--out", "v", NULL}},
+    {"identity.snapshot", {"--out", "v", NULL}},
+    {"identity.snapshot", {"--out", "", NULL}},
+    {"identity.snapshot", {"--unknown-flag", "x", NULL}},
+    {"index.blast_radius", {NULL}},
+    {"index.blast_radius", {"p0", "p1", NULL}},
+    {"index.blast_radius", {"", "", NULL}},
+    {"index.blast_radius", {"p0", "p1", "p2", NULL}},
+    {"index.blast_radius", {"--unknown-flag", "x", NULL}},
+    {"index.find_callers", {NULL}},
+    {"index.find_callers", {"--scope", "v", NULL}},
+    {"index.find_callers", {"--scope", "v", NULL}},
+    {"index.find_callers", {"--scope", "", NULL}},
+    {"index.find_callers", {"p0", "p1", NULL}},
+    {"index.find_callers", {"", "", NULL}},
+    {"index.find_callers", {"p0", "p1", "p2", NULL}},
+    {"index.find_callers", {"--unknown-flag", "x", NULL}},
+    {"index.structure", {NULL}},
+    {"index.structure", {"p0", "p1", NULL}},
+    {"index.structure", {"", "", NULL}},
+    {"index.structure", {"p0", "p1", "p2", NULL}},
+    {"index.structure", {"--unknown-flag", "x", NULL}},
+    {"kb.search", {NULL}},
+    {"kb.search", {"--project", "v", NULL}},
+    {"kb.search", {"--scope", "v", NULL}},
+    {"kb.search", {"--max", "v", NULL}},
+    {"kb.search", {"--fusion-mode", "v", NULL}},
+    {"kb.search", {"--embed", "v", NULL}},
+    {"kb.search", {"--project", "v", "--scope", "v", "--max", "v", NULL}},
+    {"kb.search", {"--project", "", NULL}},
+    {"kb.search", {"p0", NULL}},
+    {"kb.search", {"", NULL}},
+    {"kb.search", {"p0", "p1", NULL}},
+    {"kb.search", {"--unknown-flag", "x", NULL}},
+    {"wm.get", {NULL}},
+    {"wm.get", {"p0", NULL}},
+    {"wm.get", {"", NULL}},
+    {"wm.get", {"p0", "p1", NULL}},
+    {"wm.get", {"--unknown-flag", "x", NULL}},
+    {"wm.list", {NULL}},
+    {"wm.list", {"--category", "v", NULL}},
+    {"wm.list", {"--category", "v", NULL}},
+    {"wm.list", {"--category", "", NULL}},
+    {"wm.list", {"--unknown-flag", "x", NULL}},
+    {"wm.set", {NULL}},
+    {"wm.set", {"--category", "v", NULL}},
+    {"wm.set", {"--ttl", "v", NULL}},
+    {"wm.set", {"--category", "v", "--ttl", "v", NULL}},
+    {"wm.set", {"--category", "", NULL}},
+    {"wm.set", {"p0", "p1", NULL}},
+    {"wm.set", {"", "", NULL}},
+    {"wm.set", {"p0", "p1", "p2", NULL}},
+    {"wm.set", {"--unknown-flag", "x", NULL}},
+
+    /* memory.recall -- the cascade, probed at every step and in the order that
+       distinguishes them. --task AND a positional together is the sample that
+       separates "flag first" from "positional first"; an empty --task must fall
+       through rather than win; nothing at all must yield the literal. */
+    {"memory.recall", {NULL}},
+    {"memory.recall", {"--task", "t", NULL}},
+    {"memory.recall", {"p0", NULL}},
+    {"memory.recall", {"--task", "t", "p0", NULL}},
+    {"memory.recall", {"--query", "q", NULL}},
+    {"memory.recall", {"--task", "t", "--query", "q", NULL}},
+    {"memory.recall", {"p0", "--query", "q", NULL}},
+    {"memory.recall", {"--task", "", "--query", "q", NULL}},
+    {"memory.recall", {"--task", "", NULL}},
+    {"memory.recall", {"", NULL}},
+    {"memory.recall", {"--session-start", NULL}},
+    {"memory.recall", {"--limit-tokens", "500", NULL}},
+    {"memory.recall", {"--limit-tokens", "0", NULL}},
+    {"memory.recall", {"--limit-tokens", "-5", NULL}},
+    {"memory.recall", {"--project", "p", "--scope", "s", NULL}},
+
+    /* The session cascade. --session must beat $AIMEE_SESSION_ID, which must
+       beat the literal; with the variable set by main() these three samples are
+       what tells the orders apart. */
+    {"wm.list", {"--session", "flag-session", NULL}},
+    {"wm.list", {"--session", "", NULL}},
+    {"wm.get", {"k", "--session", "flag-session", NULL}},
+    {"wm.set", {"k", "v", "--session", "flag-session", NULL}},
+
+    /* session.attach / detach -- the cascade plus a literal default, and the
+       --subscribe threshold where ZERO is a real value. */
+    {"session.attach", {NULL}},
+    {"session.attach", {"sid", NULL}},
+    {"session.attach", {"", NULL}},
+    {"session.attach", {"--session", "flag-session", NULL}},
+    {"session.attach", {"sid", "--surface", "web", NULL}},
+    {"session.attach", {"sid", "--surface", "", NULL}},
+    {"session.attach", {"sid", "--subscribe", "0", NULL}},
+    {"session.attach", {"sid", "--subscribe", "-1", NULL}},
+    {"session.attach", {"sid", "--subscribe", "7", NULL}},
+    {"session.attach", {"sid", "--persistent", NULL}},
+    {"session.attach", {"sid", "--target", "t", "--owner", "o", NULL}},
+    {"session.attach", {"sid", "--target", "", NULL}},
+
+    {"session.detach", {NULL}},
+    {"session.detach", {"sid", NULL}},
+    {"session.detach", {"", NULL}},
+    {"session.detach", {"sid", "--attach-id", "a1", NULL}},
+    {"session.detach", {"sid", "--attach-id", "", NULL}},
+    {"session.detach", {"--session", "flag-session", NULL}},
+
+    /* Generated candidates: every flag alone, three together, an empty value,
+       a trailing-garbage number, the positionals, and one argument too many.
+       Spec-derived, so blind to any rule the spec omits. */
+
+    {"eval.run", {NULL}},
+    {"eval.run", {"--ablation", "v", NULL}},
+    {"eval.run", {"--runs", "v", NULL}},
+    {"eval.run", {"--seed", "v", NULL}},
+    {"eval.run", {"--ablation", "v", "--runs", "v", "--seed", "v", NULL}},
+    {"eval.run", {"--ablation", "", NULL}},
+    {"eval.run", {"--ablation", "12x", NULL}},
+    {"eval.run", {"p0", NULL}},
+    {"eval.run", {"", NULL}},
+    {"eval.run", {"p0", "p1", NULL}},
+    {"eval.run", {"--unknown-flag", "x", NULL}},
+    {"identity.diff", {NULL}},
+    {"identity.diff", {"--flip-threshold", "v", NULL}},
+    {"identity.diff", {"--flip-threshold", "v", NULL}},
+    {"identity.diff", {"--flip-threshold", "", NULL}},
+    {"identity.diff", {"--flip-threshold", "12x", NULL}},
+    {"identity.diff", {"p0", "p1", NULL}},
+    {"identity.diff", {"", "", NULL}},
+    {"identity.diff", {"p0", "p1", "p2", NULL}},
+    {"identity.diff", {"--unknown-flag", "x", NULL}},
+
+    {"memory.benchmark", {NULL}},
+    {"memory.benchmark", {"suite-x", NULL}},
+    {"memory.benchmark", {"", NULL}},
+    {"memory.benchmark", {"a", "b", NULL}},
+
+    /* Generated candidates: every flag alone, three together, an empty value,
+       a trailing-garbage number, the positionals, and one argument too many.
+       Spec-derived, so blind to any rule the spec omits. */
+
+    {"memory.search", {NULL}},
+    {"memory.search", {"--limit", "v", NULL}},
+    {"memory.search", {"--limit", "v", NULL}},
+    {"memory.search", {"--limit", "", NULL}},
+    {"memory.search", {"--limit", "12x", NULL}},
+    {"memory.search", {"--unknown-flag", "x", NULL}},
+    {"worktree.gc", {NULL}},
+    {"worktree.gc", {"--days", "v", NULL}},
+    {"worktree.gc", {"--force", "v", NULL}},
+    {"worktree.gc", {"--dry-run", "v", NULL}},
+    {"worktree.gc", {"--days", "v", "--force", "v", "--dry-run", "v", NULL}},
+    {"worktree.gc", {"--days", "", NULL}},
+    {"worktree.gc", {"--days", "12x", NULL}},
+    {"worktree.gc", {"--unknown-flag", "x", NULL}},
+
+    /* Generated candidates: every flag alone, three together, an empty value,
+       a trailing-garbage number, the positionals, and one argument too many.
+       Spec-derived, so blind to any rule the spec omits. */
+
+    {"pipeline.start", {NULL}},
+    {"pipeline.start", {"--done-bar", "v", NULL}},
+    {"pipeline.start", {"--base-branch", "v", NULL}},
+    {"pipeline.start", {"--repo-root", "v", NULL}},
+    {"pipeline.start", {"--brief", "v", NULL}},
+    {"pipeline.start", {"--head-branch", "v", NULL}},
+    {"pipeline.start", {"--remote", "v", NULL}},
+    {"pipeline.start", {"--worktree-path", "v", NULL}},
+    {"pipeline.start", {"--done-bar", "v", "--base-branch", "v", "--repo-root", "v", NULL}},
+    {"pipeline.start", {"--done-bar", "", NULL}},
+    {"pipeline.start", {"--done-bar", "12x", NULL}},
+    {"pipeline.start", {"p0", NULL}},
+    {"pipeline.start", {"", NULL}},
+    {"pipeline.start", {"p0", "p1", NULL}},
+    {"pipeline.start", {"--unknown-flag", "x", NULL}},
+    {"skill.list", {NULL}},
+    {"skill.list", {"--unknown-flag", "x", NULL}},
+
+    /* Generated candidates: every flag alone, three together, an empty value,
+       a trailing-garbage number, the positionals, and one argument too many.
+       Spec-derived, so blind to any rule the spec omits. */
+
+    {"skill.archive", {NULL}},
+    {"skill.archive", {"--unknown-flag", "x", NULL}},
+    {"skill.eval", {NULL}},
+    {"skill.eval", {"--unknown-flag", "x", NULL}},
+    {"skill.show", {NULL}},
+    {"skill.show", {"--unknown-flag", "x", NULL}},
+
     /* delegate.log -- an ARITY rule, so the samples that matter are the ones
        that must be REFUSED. The test treats both sides refusing as agreement
        and flags a one-sided refusal, which is exactly the assertion wanted
@@ -1769,6 +1984,13 @@ static void test_number_is_refused_not_coerced(void)
 
 int main(void)
 {
+   /* The session source resolves --session, then $AIMEE_SESSION_ID, then the
+    * literal "default". With the variable UNSET the first two are
+    * indistinguishable, so inverting the precedence in the interpreter passed
+    * unnoticed when it was planted. Set it to something no sample passes as a
+    * flag, and the samples below separate the three steps. */
+   setenv("AIMEE_SESSION_ID", "env-session-id", 1);
+
    test_every_shipped_spec_is_sampled();
    for (size_t i = 0; i < sizeof(SAMPLES) / sizeof(SAMPLES[0]); i++)
       check_same(&SAMPLES[i]);

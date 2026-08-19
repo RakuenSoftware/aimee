@@ -38,13 +38,25 @@ FUNCS.update({m.group(1): (m.group(2), m.group(3)) for m in re.finditer(
     r"^(?:static )?void (marshal_\w+)\(([^)]*)\)\s*\n\{(.*?)^\}", SRC, re.S | re.M)})
 TABLE = dict(re.findall(r'\{"([a-z0-9_.]+)",\s*(marshal_\w+)\}', SRC))
 
+# getcwd() and resolve_session_env() used to be here. They are not refusals any
+# more: the spec can NAME them, and the client supplies the value. What the
+# client must not do is DECIDE which commands need them -- that is the knowledge
+# that forces a rebuild, and it is the part that moved server-side.
+#
+# getenv( stays, but only for variables other than the session id: an arbitrary
+# environment read is not describable safely, because a vocabulary general
+# enough to say "read $X" is general enough to say "read $AWS_SECRET_ACCESS_KEY".
 NEVER = (
-    ("getcwd(", "local state"), ("fopen(", "local state"), ("getenv(", "local state"),
-    ("vault_client_", "local state"), ("cli_read_file", "local state"),
-    ("read_stdin", "local state"), ("build_preload", "local state"),
-    ("resolve_session_env", "local state"), ("positionals_joined(", "derived field"),
-    ("cJSON_AddItemToObject(req", "nested shape"),
+    ("fopen(", "local state"), ("vault_client_", "local state"),
+    ("cli_read_file", "local state"), ("read_stdin", "local state"),
+    ("build_preload", "local state"), ("positionals_joined(", "derived field"),
+
 )
+
+# An env read that is NOT the session id. The session resolver is expressible;
+# a general getenv is not.
+import re as _re
+OTHER_ENV = _re.compile(r'getenv\(\s*"(?!AIMEE_SESSION_ID|CLAUDE_SESSION_ID)')
 
 
 def usage_text(body):
@@ -69,7 +81,42 @@ def required_vars(body):
     return req
 
 
-def local_source(body, var):
+def local_source(body, var, before=None):
+    """Where `var` last got its value BEFORE offset `before`.
+
+    Marshallers reuse one scratch variable: kb.search writes
+    `if ((v = cli_args_get(&opts, "project")))` and then does the same for
+    scope, fusion-mode and embed. Resolving `v` to the first assignment in the
+    body gave all four fields the --project flag, so a served kb.search sent
+    scope, fusion_mode and embedding_command all carrying whatever --project
+    was. Take the assignment nearest above the use, which is what the C means.
+    """
+    if before is not None:
+        head = body[:before]
+        # A CASCADE, not a reassignment: `task = cli_args_get(...); if (!task &&
+        # pos_count) task = positional[0]; if (!task) task = cli_args_get(...)`.
+        # Taking the nearest assignment picks the LAST step and silently drops
+        # the earlier ones, which for memory.recall meant a spec that read
+        # --query and ignored --task and the positional entirely. Reading part
+        # of a rule is worse than refusing it, because it looks like an answer.
+        if re.search(rf"if \(!\s*{re.escape(var)}\b", head):
+            return None
+        # Trim to just after the last assignment to this variable, so the
+        # patterns below match that one rather than the earliest.
+        # Nearest assignment FIRST, then further back. A clamp is itself an
+        # assignment -- worktree.gc writes `days = cli_args_get_int(...)` and
+        # then `days = 1;` / `days = 365;` -- so "nearest" alone lands on the
+        # clamp and finds no source at all. Walk outwards until one resolves.
+        starts = [m.start() for m in re.finditer(rf"\b{re.escape(var)}\s*=", head)]
+        for s in reversed(starts):
+            got = _local_source_at(body[s:], var)
+            if got:
+                return got
+        return None
+    return _local_source_at(body, var)
+
+
+def _local_source_at(body, var):
     m = re.search(rf'{re.escape(var)}\s*=\s*opts\.pos_count > (\d+) \? opts\.positional\[(\d+)\]\s*'
                   rf':\s*cli_args_get\(&opts, "([a-z0-9_-]+)"\)', body)
     if m:
@@ -80,14 +127,92 @@ def local_source(body, var):
     m = re.search(rf'{re.escape(var)}\s*=\s*opts\.positional\[(\d+)\]', body)
     if m:
         return {"from": "positional", "index": int(m.group(1)), "empty": "emit"}
-    m = re.search(rf'{re.escape(var)}\s*=\s*cli_args_get_int\(&opts, "([a-z0-9_-]+)", (\d+)\)', body)
+    m = re.search(rf'{re.escape(var)}\s*=\s*cli_args_get_int\(&opts, "([a-z0-9_-]+)", (-?\d+)\)', body)
     if m:
-        return {"from": "flag", "flag": m.group(1), "type": "number_lenient",
-                "default": int(m.group(2))}
+        f = {"from": "flag", "flag": m.group(1), "type": "number_lenient",
+             "default": int(m.group(2)), "empty": "emit"}
+        # A clamp right after the read: `if (d < 1) d = 1; if (d > 365) d = 365;`
+        # worktree.gc and insights.overview both do this, and reading only the
+        # default produced a spec that sent --days 9999 through unclamped.
+        lo = re.search(rf"if \({re.escape(var)} < (-?\d+)\)\s*\n\s*"
+                       rf"{re.escape(var)} = (-?\d+);", body)
+        hi = re.search(rf"if \({re.escape(var)} > (-?\d+)\)\s*\n\s*"
+                       rf"{re.escape(var)} = (-?\d+);", body)
+        if lo:
+            f["min"] = int(lo.group(2))
+        if hi:
+            f["max"] = int(hi.group(2))
+        return f
     m = re.search(rf'{re.escape(var)}\s*=\s*atoi\(cli_args_get\(&opts, "([a-z0-9_-]+)"\)', body)
     if m:
         return {"from": "flag", "flag": m.group(1), "type": "number_lenient"}
     return None
+
+
+def numeric_wrapper(body, name):
+    """`AddNumber(req, "x", atof(v))` -- the parse wraps the variable.
+
+    The field loop reads the VALUE, so a field whose value is a parse call over
+    a flag variable resolved to nothing at all. Which parse it is matters: atof
+    keeps a fraction, strtoul wraps a negative, atoll does neither.
+    """
+    m = re.search(rf'cJSON_AddNumberToObject\(req, "{re.escape(name)}",\s*'
+                  rf'(atof|atoll|strtoul|atoi)\(\s*(\w+)', body)
+    if not m:
+        return None, None
+    kind = {"atof": "number_lenient_real", "atoll": "number_lenient_int64",
+            "strtoul": "number_lenient_ulong", "atoi": "number_lenient"}[m.group(1)]
+    return kind, m.group(2)
+
+
+
+def method_branch(body, method):
+    """The statements that actually run for `method` in a shared marshaller.
+
+    marshal_skill_request handles thirteen methods in one function, each in its
+    own `if (strcmp(method, "x") == 0) { ... return req; }` block. Judging the
+    WHOLE body refused all thirteen because two of them (skill.create,
+    skill.edit) read a file -- so eleven methods that never touch a file were
+    excluded by their neighbours.
+
+    Every branch returns, so the statements before a branch run for that method
+    and for every method whose branch comes later. Drop the other branches and
+    keep the rest, in order.
+    """
+    out, i, n = [], 0, len(body)
+    # A branch may name SEVERAL methods: `if (strcmp(method, "skill.create") ==
+    # 0 || strcmp(method, "skill.edit") == 0)`. Matching only the single-method
+    # form left those two blocks in every other method's slice, so the file read
+    # inside them kept refusing eleven methods that never reach it.
+    pat = re.compile(r'if \((strcmp\(method, "[a-z0-9_.]+"\) == 0'
+                     r'(?:\s*\|\|\s*strcmp\(method, "[a-z0-9_.]+"\) == 0)*)\)\s*')
+    while i < n:
+        m = pat.search(body, i)
+        if not m:
+            out.append(body[i:])
+            break
+        names = re.findall(r'strcmp\(method, "([a-z0-9_.]+)"\)', m.group(1))
+        out.append(body[i:m.start()])
+        j = m.end()
+        if j < n and body[j] == "{":
+            depth, k = 0, j
+            while k < n:
+                if body[k] == "{":
+                    depth += 1
+                elif body[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            block, i = body[j + 1:k], k + 1
+        else:
+            k = body.find(";", j)
+            block, i = body[j:k + 1], k + 1
+        if method in names:
+            out.append(block)
+            # This branch returns; nothing after it runs for this method.
+            break
+    return "".join(out)
 
 
 def spec_for(method):
@@ -111,6 +236,13 @@ def spec_for(method):
         return None, "custom body in marshal_request"
     params, body = FUNCS[fn]
 
+    # A shared marshaller is judged on the branch that actually runs, not on
+    # the union of every method it serves.
+    if "const char *method" in params and re.search(r'strcmp\(method, "', body):
+        sliced = method_branch(body, method)
+        if sliced.strip():
+            body = sliced
+
     # Follow helper calls before judging. The generator used to read only the
     # DIRECT body, so a marshaller calling a helper that adds getcwd() looked
     # clean -- memory.list generated a spec that silently DROPPED the cwd field
@@ -131,14 +263,44 @@ def spec_for(method):
     for needle, why in NEVER:
         if needle in expanded:
             return None, why
+    # A nested object under req is still out of reach, EXCEPT the
+    # array-of-positionals shape handled in the field loop below.
+    if "cJSON_AddItemToObject(req" in expanded and not re.search(
+            r"for \(int \w+ = 0; \w+ < opts\.pos_count", expanded):
+        return None, "nested shape"
+    if OTHER_ENV.search(expanded):
+        return None, "reads an arbitrary environment variable"
     if re.search(r">= sizeof\(\w+\)\)[^}]*return NULL;", expanded, re.S):
         return None, "length-limit refusal"
-    if "const char *method" in params and re.search(r"(strcmp|strncmp)\s*\(\s*method", body):
+    # A strcmp on the method that only supplies a CONSTANT is not a branch on
+    # the method once specs are per-method: skill.pin's `AddBool(req, "pinned",
+    # strcmp(method, "skill.pin") == 0)` is the literal true for pin and false
+    # for unpin. Judge what is left after those are accounted for.
+    # A constant that sits AFTER an early return is not unconditional. skill.pin
+    # reaches `AddBool(req, "pinned", ...)` only when `if (argc < 1) return req;`
+    # did not fire, so with no arguments the field is absent -- its presence
+    # depends on another argument, which is the half of the line that forbids.
+    if re.search(r"if \(argc < \d+\)\s*\n\s*return req;", body) and re.search(
+            r'cJSON_AddBoolToObject\(req, "\w+",\s*strcmp\(method', body):
+        return None, "constant guarded by an early return"
+
+    judged = re.sub(r'cJSON_AddBoolToObject\(req, "\w+",\s*'
+                    r'strcmp\(method, "[a-z0-9_.]+"\) == 0\);', "", body)
+    if re.search(r"(strcmp|strncmp)\s*\(\s*method", judged):
         return None, "multi-method: branches on the method"
+    # A branch on the COUNT that changes which field is sent. index.hybrid sends
+    # "query" for one positional and "queries" (an array) for several, and
+    # delegate.status does the same with job_id/job_ids. The generator happily
+    # produced a spec for the scalar half and dropped the array half entirely,
+    # so `aimee index hybrid a b` would have searched for "a" alone. Which
+    # fields EXIST must not depend on the input; that is the half of the line
+    # this crosses.
+    if re.search(r"pos_count == \d+", body) and "AddArrayToObject" in body:
+        return None, "field-set branch: the field name depends on the count"
     if re.search(r"else if \(cli_args_get", body):
         return None, "conditional: exclusive flags"
-    if "argv[0]" in body:
-        return None, "raw argv"
+    if re.search(r"for \(int \w+ = 0; \w+ < argc", body) or "argv[i]" in body:
+        return None, "raw argv scan"
     # An inverted flag: `compress` defaults true and --no-compress
     # clears it. The vocabulary has no negation, deliberately.
     if re.search(r'cli_args_(has_flag|get)\(&opts, "no-', body):
@@ -169,7 +331,50 @@ def spec_for(method):
         if m:
             bools = re.findall(r'"([a-z0-9_-]+)"', m.group(1))
 
+    # INLINE helper calls at the call SITE, so their fields land in the order
+    # the request is actually built. Expanding them at the end (which is what
+    # the refusal sweep above does) is enough to JUDGE a body but not to
+    # describe one: memory.search calls marshal_add_memory_scope() in the
+    # middle, and reading only the direct body dropped project, workspace,
+    # scope and cwd from the spec entirely.
+    def _inline(src, depth=0):
+        if depth > 3:
+            return src
+        def sub(m):
+            callee = m.group(1)
+            if callee not in FUNCS:
+                return m.group(0)
+            inner = _inline(FUNCS[callee][-1], depth + 1)
+            # A helper takes `const cli_args_t *opts`, so it writes
+            # cli_args_get(opts, ...) and opts->pos_count. Normalise to the
+            # caller's spelling or every pattern below misses by one character.
+            inner = inner.replace("cli_args_get(opts,", "cli_args_get(&opts,")
+            inner = inner.replace("cli_args_get_int(opts,", "cli_args_get_int(&opts,")
+            inner = inner.replace("cli_args_has_flag(opts,", "cli_args_has_flag(&opts,")
+            inner = inner.replace("opts->", "opts.")
+            return "\n" + inner + "\n"
+        return re.sub(r"^\s*(marshal_\w+)\(req, &opts\);\s*$", sub, src, flags=re.M)
+
+    body = _inline(body)
+
     fields, seen = [], set()
+    # An array field is added with AddItemToObject, which the value-shaped
+    # pattern below does not match at all -- so memory.search's keywords were
+    # not merely mis-sourced, they were invisible.
+    for stmt in re.finditer(
+            r'cJSON_AddItemToObject\(req, "(\w+)", (\w+)\);', body):
+        name, arrvar = stmt.groups()
+        if name in seen:
+            continue
+        built = re.search(
+            rf'for \(int \w+ = 0; \w+ < opts\.pos_count; \w+\+\+\)\s*\n\s*'
+            rf'cJSON_AddItemToArray\({re.escape(arrvar)}, cJSON_CreateString\(opts\.positional',
+            body)
+        if not built:
+            return None, f"nested shape for {name}"
+        fields.append({"json": name, "from": "positional_array"})
+        seen.add(name)
+
     for stmt in re.finditer(
             r'cJSON_Add(String|Number|True|Bool)ToObject\(req, "(\w+)"(?:, ([^;]*))?\);', body):
         kind, name, val = stmt.groups()
@@ -178,6 +383,37 @@ def spec_for(method):
         val = (val or "").strip()
         f = {"json": name}
         var = re.split(r"[,)\s]", val)[0].strip() if val else ""
+
+        # The two client facts a spec may NAME. Both are recognised by the value
+        # the marshaller passes, not by the field's json name, so a field called
+        # something else that happens to carry the cwd is still described right
+        # -- and a field called "cwd" carrying something else is not silently
+        # mislabelled.
+        cwd_var = re.search(r"getcwd\((\w+), sizeof", body)
+        if cwd_var and var == cwd_var.group(1):
+            f["from"] = "cwd"
+            fields.append(f)
+            seen.add(name)
+            continue
+        if "resolve_session_env" in val:
+            # resolve_session_env never returns NULL -- worst case the literal
+            # "default" -- so the field is ALWAYS sent, including as "" when
+            # --session was given empty. Dropping it there is a different
+            # request from the one the marshaller makes.
+            f["from"] = "session"
+            f["empty"] = "emit"
+            fields.append(f)
+            seen.add(name)
+            continue
+
+        if re.fullmatch(r"argv\[(\d+)\]", val or ""):
+            f.update({"from": "argv_index",
+                      "index": int(re.fullmatch(r"argv\[(\d+)\]", val).group(1)),
+                      "empty": "emit"})
+            fields.append(f)
+            seen.add(name)
+            continue
+
         if "opts.positional[" in val:
             pm = re.search(r"positional\[(\d+)\]", val)
             if not pm:
@@ -197,8 +433,21 @@ def spec_for(method):
         elif "cli_args_has_flag" in val:
             g = re.search(r'has_flag\(&opts, "([a-z0-9_-]+)"\)', val)
             f.update({"from": "flag", "flag": g.group(1) if g else name, "type": "bool"})
+        elif kind == "Bool" and re.search(r'strcmp\(method, "[a-z0-9_.]+"\) == 0', val):
+            want = re.search(r'strcmp\(method, "([a-z0-9_.]+)"\) == 0', val).group(1)
+            f.update({"from": "const", "type": "const_bool",
+                      "value": (want == method)})
         elif kind == "True":
-            f.update({"from": "flag", "flag": name.replace("_", "-"), "type": "true_if_set"})
+            # The GUARD names the flag, not the field. provider.list writes
+            # `if (cli_args_get(&opts, "available")) AddTrue(req,
+            # "available_only")`, and deriving "available-only" from the field
+            # name produced a spec that never set it. Derive only as a
+            # fallback, and only when no guard is there to read.
+            gt = re.search(
+                rf'if \(cli_args_(?:has_flag|get)\(&opts, "([a-z0-9_-]+)"\)\)\s*\n\s*'
+                rf'cJSON_AddTrueToObject\(req, "{re.escape(name)}"', body)
+            f.update({"from": "flag", "type": "true_if_set",
+                      "flag": gt.group(1) if gt else name.replace("_", "-")})
         elif "cli_args_get_int(&opts," in val:
             # Inline `cli_args_get_int(&opts, "limit", 20)`. The branch below
             # tested for `cli_args_get(&opts,` which does not match the _int
@@ -206,11 +455,27 @@ def spec_for(method):
             g = re.search(r'cli_args_get_int\(&opts, "([a-z0-9_-]+)", (-?\d+)\)', val)
             if not g:
                 return None, f"unreadable cli_args_get_int for {name}"
+            # cli_args_get_int parses whatever is PRESENT, so an empty --limit
+            # is atoi("") == 0 and not the default. Without empty:emit the spec
+            # substitutes the default and sends a different number.
             f.update({"from": "flag", "flag": g.group(1), "type": "number_lenient",
-                      "default": int(g.group(2))})
+                      "default": int(g.group(2)), "empty": "emit"})
         elif "cli_args_get(&opts," in val:
             g = re.search(r'cli_args_get\(&opts, "([a-z0-9_-]+)"\)', val)
             f.update({"from": "flag", "flag": g.group(1)})
+            # Same empty-vs-drop question the positional branch already asks,
+            # and it was only asked there. A flag guarded by `if (v)` SENDS an
+            # empty value; one guarded by `if (v && v[0])` drops it. Defaulting
+            # to drop made identity.snapshot and index.find_callers omit a field
+            # their marshallers send as "" -- caught by the differential test,
+            # which is the third time a guard read as a value has produced this
+            # exact class of near-miss.
+            var_for_flag = var or name
+            drops_empty = re.search(
+                rf"\b{re.escape(var_for_flag)}\s*&&\s*{re.escape(var_for_flag)}\[0\]|"
+                rf"&&\s*{re.escape(var_for_flag)}\[0\]", body) is not None
+            if not drops_empty:
+                f["empty"] = "emit"
         elif kind == "String" and re.search(
                 rf'if \(cli_args_get\(&opts, "[a-z0-9_-]+"\)\)\s*\n\s*'
                 rf'cJSON_AddStringToObject\(req, "{re.escape(name)}", "', body):
@@ -241,14 +506,41 @@ def spec_for(method):
             if inner:
                 var = inner.group(1)
                 lenient = True
-            srcf = local_source(body, var) if var else None
+            srcf = local_source(body, var, stmt.start()) if var else None
             if not srcf:
+                wkind, wvar = numeric_wrapper(body, name)
+                if wvar:
+                    srcf = local_source(body, wvar, stmt.start())
+                    if srcf:
+                        f["type"] = wkind
+                        lenient = True
+            if not srcf:
+                if re.search(rf"if \(!\s*{re.escape(var)}\b", body):
+                    return None, f"multi-step cascade for {name}"
                 return None, f"cannot resolve source of {name}"
             f.update(srcf)
+            # The empty-vs-drop guard again, for a field whose value arrives via
+            # a VARIABLE rather than an inline call. `const char *out =
+            # cli_args_get(...); if (out) Add(...)` sends an empty --out; the
+            # variable form is how most marshallers are written, so reading the
+            # guard only at the inline call site missed nearly all of them.
+            if srcf.get("from") == "flag" and "empty" not in f:
+                drops = re.search(
+                    rf"\b{re.escape(var)}\s*&&\s*{re.escape(var)}\[0\]|"
+                    rf"&&\s*{re.escape(var)}\[0\]", body)
+                if not drops:
+                    f["empty"] = "emit"
             if lenient:
-                f["type"] = "number_lenient"
-                f.pop("empty", None)
-        if kind == "Number" and f.get("type") != "number_lenient":
+                # A numeric_wrapper already set the exact parse; only the plain
+                # `atoi(...)` path needs the generic one.
+                f.setdefault("type", "number_lenient")
+                # The empty rule STAYS. identity.diff guards --flip-threshold
+                # with `if (ft)`, so an empty value is parsed (atof("") == 0)
+                # and sent; dropping the rule because the field is numeric made
+                # the spec omit a field the marshaller emits as 0.
+        if kind == "Number" and f.get("type") not in (
+                "number_lenient", "number_lenient_int64", "number_lenient_real",
+                "number_lenient_ulong"):
             if "atoi(" in val or "cli_args_get_int" in val:
                 f["type"] = "number_lenient"
                 d = re.search(r'cli_args_get_int\(&opts, "[a-z0-9_-]+", (\d+)\)', val)
