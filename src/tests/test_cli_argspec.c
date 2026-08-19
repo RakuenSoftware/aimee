@@ -1407,6 +1407,30 @@ static const sample_t SAMPLES[] = {
     {"workspace.remove", {"--", "v", NULL}},
     {"workspace.remove", {"-notaflag", NULL}},
     {"workspace.remove", {"a", "b", "c", "d", "e", NULL}},
+
+    /* BOTH sources supplied at once.
+     *
+     * positional_or_flag and flag_or_positional agree on every sample that
+     * gives only one of them; they differ ONLY here. kb.build had the order
+     * backwards and survived hundreds of samples because none supplied both.
+     * These make the next such error fail directly rather than by luck. */
+    {"kb.build", {"FROMPOS", "--path", "FROMFLAG", NULL}},
+    {"job.cancel", {"FROMPOS", "--job-id", "FROMFLAG", NULL}},
+    {"job.status", {"FROMPOS", "--job-id", "FROMFLAG", NULL}},
+    {"jobs.cancel", {"FROMPOS", "--job-id", "FROMFLAG", NULL}},
+    {"jobs.logs", {"FROMPOS", "--job-id", "FROMFLAG", NULL}},
+    {"jobs.status", {"FROMPOS", "--job-id", "FROMFLAG", NULL}},
+    {"rules.delete", {"FROMPOS", "--id", "FROMFLAG", NULL}},
+    {"job.start", {"FROMPOS", "--plan-id", "FROMFLAG", NULL}},
+    {"notes.search", {"FROMPOS", "--query", "FROMFLAG", NULL}},
+    {"cron.show", {"FROMPOS", "--id", "FROMFLAG", NULL}},
+    {"cron.run", {"FROMPOS", "--id", "FROMFLAG", NULL}},
+    {"cron.remove", {"FROMPOS", "--id", "FROMFLAG", NULL}},
+    {"cron.history", {"FROMPOS", "--id", "FROMFLAG", NULL}},
+    {"session.brief", {"FROMPOS", "--session", "FROMFLAG", NULL}},
+    {"trajectory.export", {"FROMPOS", "--session", "FROMFLAG", NULL}},
+    {"session.close", {"FROMPOS", "--session", "FROMFLAG", NULL}},
+    {"session.get", {"FROMPOS", "--session", "FROMFLAG", NULL}},
 };
 
 static const char *spec_for(const char *method)
