@@ -456,6 +456,34 @@ int server_tls_local_cert(SSL *ssl, server_tls_peer_cert_t *out)
    return 0;
 }
 
+static int slow_stream_handler(const char *body, server_http_sse_event_emit emit, void *ctx)
+{
+   (void)body;
+   struct timespec ts;
+   ts.tv_sec = 17;
+   ts.tv_nsec = 0;
+   nanosleep(&ts, NULL);
+   emit(ctx, "done", "{}");
+   return 0;
+}
+
+static void test_sse_keepalive_slow_generation(void)
+{
+   int fds[2];
+   if (pipe(fds) != 0)
+      return;
+   server_http_sse_live_run(fds[1], "{}", slow_stream_handler);
+   close(fds[1]);
+   char buf[8192];
+   ssize_t n = read(fds[0], buf, 8191);
+   if (n < 1)
+      n = 0;
+   buf[n] = 0;
+   close(fds[0]);
+   assert(n != 0);
+   assert(strstr(buf, "keep-alive") != NULL);
+}
+
 int main(void)
 {
    test_role_template_show_reports_what_the_role_came_to();
@@ -2641,6 +2669,7 @@ int main(void)
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
    g_test_server_ctx.orchestration_pool_initialized = 0;
    platform_test_rmrf(home);
+   test_sse_keepalive_slow_generation();
    printf("OK\n");
    return 0;
 }
