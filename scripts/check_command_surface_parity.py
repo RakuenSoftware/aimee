@@ -61,10 +61,15 @@ def cli_routes():
         # collapsed to one entry and this report could not see aliasing at all
         # -- it was blind to it by construction, not by omission. `agent` and
         # `model` resolve to the same ten methods; `server` and `status` to the
-        # same one. The registry this report feeds rejects a duplicate
-        # (group, verb) by design, so those pairs are decisions someone has to
-        # make before it can be populated, and a report that hides them is
-        # worse than no report.
+        # same one.
+        #
+        # These do NOT block command_registry, which I claimed three times
+        # before reading its contract properly: it keys on (group, verb), so
+        # (agent, list) and (model, list) are distinct entries and both register
+        # against one handler. What they are is two spellings of one capability,
+        # which is a thing worth SEEING -- an operator reading `aimee help`
+        # cannot tell that `agent list` and `model list` are the same command,
+        # and a report that hides it is worse than no report.
         out.setdefault(method, []).append((group, verb))
     return out
 
@@ -223,10 +228,12 @@ def main():
     for g in sorted(missing_groups)[:10]:
         print(f"  {g:16s} {len(missing_groups[g]):3d}  e.g. {missing_groups[g][0]}")
 
-    # Methods reachable under more than one group name. The registry's whole
-    # invariant is that a name resolves one way, and these are the places where
-    # two already do -- each one a decision (keep both as aliases, or retire
-    # one) that has to be made before the table can be populated.
+    # Methods reachable under more than one group name.
+    #
+    # Not a blocker for command_registry -- it keys on (group, verb), so both
+    # spellings register against one handler. This is a UI question: two names
+    # for one capability, which an operator reading the help cannot distinguish
+    # from two capabilities. Reported so the choice is deliberate.
     aliased = {m: gs for m, gs in cli.items() if len({g for g, _ in gs}) > 1}
     print(f"\nmethods reachable under more than one group: {len(aliased)}")
     for method in sorted(aliased):

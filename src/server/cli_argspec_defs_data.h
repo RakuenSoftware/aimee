@@ -154,3 +154,27 @@
  "{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\","
  "\"type\":\"number_lenient\"}]}"},
 
+/* Generated from each marshaller and proven against it; see the test. */
+
+{"config.get",
+ "{\"fields\":[{\"json\":\"key\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+{"config.set",
+ "{\"fields\":[{\"json\":\"key\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"value\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"}]}"},
+{"delegate.aggregate",
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"prompt\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+{"evidence.fidelity_retrieval_event",
+ "{\"fields\":[{\"json\":\"turn_id\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+{"evidence.provenance_retrieval_event",
+ "{\"fields\":[{\"json\":\"turn_id\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+{"evidence.trace_retrieval_event",
+ "{\"fields\":[{\"json\":\"turn_id\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+{"index.scan",
+ "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"name\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"root\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"}]}"},
+{"kb.build",
+ "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"path\",\"from\":\"flag\",\"flag\":\"path\"},{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\"},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\"}]}"},
+{"kb.ingest",
+ "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"workspace\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\"}]}"},
+{"kb.status",
+ "{\"fields\":[{\"json\":\"project\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+{"kb.update",
+ "{\"fields\":[{\"json\":\"path\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\"}]}"},
