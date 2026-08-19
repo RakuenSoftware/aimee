@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "f42cf9af21278faac859d9db1fa57e2045be60fd972beda5960cb3582c15b2e9"
+#define AIMEE_DB2_CONTRACT_SHA256 "a9e26f8e535f62ca4a4fb3875b7cfa53cecb6414710c990e463fbf7f31fb9ef1"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -411,6 +411,14 @@
 #define AIMEE_DB2_UPDATE_CONTENT_MEMORY_ID_MAX            9223372036854775807ull
 #define AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX              2047u
 #define AIMEE_DB2_UPDATE_CONTENT_MAX                      1u
+#define AIMEE_DB2_EVENT_DECAY_CONFIDENCE                  AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_DECAY_CONFIDENCE                  AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_DECAY_CONFIDENCE              34u
+#define AIMEE_DB2_DECAY_CONFIDENCE_REQUEST_LEN            32u
+#define AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN           24u
+#define AIMEE_DB2_DECAY_CONFIDENCE_ERROR_LEN              24u
+#define AIMEE_DB2_DECAY_CONFIDENCE_MEMORY_ID_MAX          9223372036854775807ull
+#define AIMEE_DB2_DECAY_CONFIDENCE_MULTIPLIER_BITS        4604480259023595110ull
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2325,6 +2333,57 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}
+
+static inline int aimee_db2_decay_confidence_request_encode(uint64_t memory_id,
+                                                           uint8_t *output, size_t capacity)
+{
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_DECAY_CONFIDENCE_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_DECAY_CONFIDENCE_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DECAY_CONFIDENCE, 0u, 8u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}
+
+static inline int aimee_db2_decay_confidence_request_decode(const uint8_t *input,
+                                                            size_t input_len, uint64_t *memory_id)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DECAY_CONFIDENCE_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DECAY_CONFIDENCE || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_DECAY_CONFIDENCE_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_decay_confidence_reply_encode(uint8_t *output, size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DECAY_CONFIDENCE,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}
+
+static inline int aimee_db2_decay_confidence_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DECAY_CONFIDENCE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }
 
 static inline int aimee_db2_update_content_request_encode(uint64_t memory_id,

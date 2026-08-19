@@ -52,6 +52,8 @@ static int reject_calls;
 static int64_t reject_last;
 static int update_content_value;
 static int update_content_calls;
+static int decay_confidence_calls;
+static int64_t decay_confidence_last;
 static char update_content_last[2048];
 static char scope_type_last[64];
 static int64_t link_delete_last;
@@ -430,6 +432,17 @@ static int update_content(int64_t memory_id, const char *content)
    update_content_calls++;
    snprintf(update_content_last, sizeof(update_content_last), "%s", content);
    return update_content_value;
+}
+
+void db2_memory_decay_confidence(int64_t memory_id)
+{
+   (void)memory_id;
+}
+
+static void decay_confidence(int64_t memory_id)
+{
+   decay_confidence_calls++;
+   decay_confidence_last = memory_id;
 }
 
 int64_t db2_memory_count(void)
@@ -1105,6 +1118,8 @@ static void reset(void)
    reject_last = 0;
    update_content_value = 1;
    update_content_calls = 0;
+   decay_confidence_calls = 0;
+   decay_confidence_last = 0;
    update_content_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
@@ -2395,6 +2410,40 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_decay_confidence_wire(void)
+{
+   uint64_t multiplier_bits = AIMEE_DB2_DECAY_CONFIDENCE_MULTIPLIER_BITS;
+   double multiplier = 0.0;
+   memcpy(&multiplier, &multiplier_bits, sizeof(multiplier));
+   assert(multiplier == 0.7);
+   /* Distinct from the other two confidence movers on this bus, so a copied
+    * constant would show up here rather than silently decaying by the wrong
+    * factor. */
+   assert(multiplier_bits != AIMEE_DB2_DEMOTE_ID_MULTIPLIER_BITS);
+
+   uint8_t request[AIMEE_DB2_DECAY_CONFIDENCE_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_decay_confidence_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_decay_confidence_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   assert(aimee_db2_decay_confidence_request_encode(0u, request, sizeof(request)) == -1);
+   assert(aimee_db2_decay_confidence_request_encode(AIMEE_DB2_DECAY_CONFIDENCE_MEMORY_ID_MAX + 1ull,
+                                                    request, sizeof(request)) == -1);
+   assert(aimee_db2_decay_confidence_request_encode(42u, request, sizeof(request) - 1) == -1);
+   assert(aimee_db2_decay_confidence_request_encode(42u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_decay_confidence_request_decode(request, sizeof(request), &memory_id) == -1 &&
+          memory_id == 0);
+
+   uint8_t reply[AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN] = {0};
+   assert(aimee_db2_decay_confidence_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_decay_confidence_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_decay_confidence_reply_encode(reply, sizeof(reply) - 1) == -1);
+   assert(aimee_db2_decay_confidence_reply_encode(reply, sizeof(reply)) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_decay_confidence_reply_decode(reply, sizeof(reply)) == -1);
 }
 
 static void test_update_content_wire(void)
@@ -4050,6 +4099,35 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_decay_confidence_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.decay_confidence = decay_confidence};
+   uint8_t request[AIMEE_DB2_DECAY_CONFIDENCE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_DECAY_CONFIDENCE};
+   assert(aimee_db2_decay_confidence_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(decay_confidence_calls == 1 && decay_confidence_last == 42);
+   assert(aimee_db2_decay_confidence_reply_decode(response, response_len) == 0);
+
+   /* There is no failure path to exercise: the backend returns void, so a
+    * memory that does not exist and a statement that did not run both arrive
+    * here as an acknowledgement. That is the honest limit of this operation
+    * and it is pinned so it is not mistaken for a working fault path. */
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(decay_confidence_calls == 2);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_update_content_handler(void)
 {
    reset();
@@ -5362,6 +5440,7 @@ int main(void)
    test_has_scope_type_wire();
    test_reject_wire();
    test_update_content_wire();
+   test_decay_confidence_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5405,6 +5484,7 @@ int main(void)
    test_has_scope_type_handler();
    test_reject_handler();
    test_update_content_handler();
+   test_decay_confidence_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

@@ -291,6 +291,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .has_scope_type = db2_memory_has_scope_type,
        .reject = production_reject,
        .update_content = db2_memory_update_content,
+       .decay_confidence = db2_memory_decay_confidence,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1031,6 +1032,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_update_content_reply_encode((uint32_t)updated, response_body,
                                                    response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t decay_confidence_memory_id = 0u;
+      if (aimee_db2_decay_confidence_request_decode(request_body, request_len,
+                                                    &decay_confidence_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->decay_confidence)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The backend returns void: it cannot report whether the row existed
+          * or whether the statement ran, so there is nothing to check here and
+          * nothing honest to put in the reply beyond the acknowledgement. */
+         backend->decay_confidence((int64_t)decay_confidence_memory_id);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_decay_confidence_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

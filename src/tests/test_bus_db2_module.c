@@ -78,6 +78,7 @@ typedef struct
    int (*has_scope_type)(int64_t memory_id, const char *scope_type);
    int (*reject)(int64_t memory_id);
    int (*update_content)(int64_t memory_id, const char *content);
+   void (*decay_confidence)(int64_t memory_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -133,6 +134,8 @@ static int reject_calls;
 static int64_t reject_last;
 static int update_content_calls;
 static char update_content_last[2048];
+static int decay_confidence_calls;
+static int64_t decay_confidence_last;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -834,6 +837,17 @@ static int update_content(int64_t memory_id, const char *content)
    return memory_id == 42 ? 1 : 0;
 }
 
+void db2_memory_decay_confidence(int64_t memory_id)
+{
+   (void)memory_id;
+}
+
+static void decay_confidence(int64_t memory_id)
+{
+   decay_confidence_calls++;
+   decay_confidence_last = memory_id;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1166,6 +1180,7 @@ int main(void)
        .has_scope_type = has_scope_type,
        .reject = reject,
        .update_content = update_content,
+       .decay_confidence = decay_confidence,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1421,6 +1436,10 @@ int main(void)
    assert(aimee_db2_update_content_call(call_client, &client, 7062, 0, 43u, "revised text",
                                         &rewritten, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(rewritten == 0);
+
+   assert(aimee_db2_decay_confidence_call(call_client, &client, 7063, 0, 42u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(decay_confidence_calls == 1 && decay_confidence_last == 42);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

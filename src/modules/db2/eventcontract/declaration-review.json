@@ -1436,6 +1436,14 @@
       "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
     },
     {
+      "symbol": "db2_memory_decay_confidence",
+      "signature_sha256": "6a364956b28d4c657a3fc39f7a874fd3ae483903a31a89019efff33cf3e015af",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.decay_confidence operation replaces the unconditional confidence decay; the multiplier stays fixed policy behind the handler. The backend returns void and so cannot report whether the row existed, which the acknowledgement-only reply preserves rather than inventing a count."
+    },
+    {
       "symbol": "db2_memory_delete_row",
       "signature_sha256": "b9e88857118459c3be0d1328af8c32642bb24af70246b95a1fd09f2dba9336fb",
       "disposition": "wire-operation",

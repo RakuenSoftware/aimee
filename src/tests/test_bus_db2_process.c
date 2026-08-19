@@ -455,6 +455,15 @@ int main(int argc, char **argv)
    assert(aimee_db2_update_content_call(call_client, &client, 9071, 0, 42u, "", &rewritten, NULL,
                                         NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 does not exist. The backend returns void, so the packaged
+    * process acknowledges regardless -- there is no answer to assert beyond
+    * that the call completed. Called once: the operation is declared unsafe
+    * because a real row's confidence would fall on every call. */
+   assert(aimee_db2_decay_confidence_call(call_client, &client, 9072, 0, 42u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_decay_confidence_call(call_client, &client, 9073, 0, 0u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

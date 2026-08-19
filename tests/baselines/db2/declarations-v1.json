@@ -15781,9 +15781,15 @@
           "line": 367
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.decay_confidence operation replaces the unconditional confidence decay; the multiplier stays fixed policy behind the handler. The backend returns void and so cannot report whether the row existed, which the acknowledgement-only reply preserves rather than inventing a count."
+      },
       "signature": "void db2_memory_decay_confidence ( int64_t memory_id )",
       "signature_sha256": "6a364956b28d4c657a3fc39f7a874fd3ae483903a31a89019efff33cf3e015af",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_decay_confidence"
     },
     {
@@ -25914,15 +25920,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "6eac7af4ed74d973293c5995920093376e063bfc5b4f0f01f3a089daa1a9e2a9",
+  "fingerprint": "a2f2cc273627e50fd5f27bced3171f11f7e23c5be7a46ffc94f73ca63d2270e1",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 643,
+    "audit_pending": 642,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 315
+    "reviewed": 316
   }
 }

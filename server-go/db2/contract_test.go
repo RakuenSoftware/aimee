@@ -228,7 +228,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 43 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 44 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -270,7 +270,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[39].Name != "valid_at" ||
 		baseline.Operations[40].Name != "has_scope_type" ||
 		baseline.Operations[41].Name != "reject" ||
-		baseline.Operations[42].Name != "update_content" {
+		baseline.Operations[42].Name != "update_content" ||
+		baseline.Operations[43].Name != "decay_confidence" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -467,6 +468,47 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestDecayConfidenceMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[43]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeDecayConfidenceRequest(operation.Request.MemoryID)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, err := DecodeDecayConfidenceRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID {
+		t.Fatalf("positive request = (%d, %v)", memoryID, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeDecayConfidenceRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeDecayConfidenceReply()
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		if err := DecodeDecayConfidenceReply(got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeDecayConfidenceReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	// Three operations on this bus move confidence and each uses a different
+	// constant; comparing as bits catches one being copied onto another.
+	if math.Float64frombits(DecayConfidenceMultiplierBits) != 0.7 ||
+		DecayConfidenceMultiplierBits == DemoteIDMultiplierBits {
+		t.Fatalf("multiplier = %v", math.Float64frombits(DecayConfidenceMultiplierBits))
+	}
+	if _, err := EncodeDecayConfidenceRequest(0); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("zero memory encoded: %v", err)
 	}
 }
 

@@ -65,6 +65,7 @@ typedef struct
    int (*has_scope_type)(int64_t memory_id, const char *scope_type);
    int (*reject)(int64_t memory_id);
    int (*update_content)(int64_t memory_id, const char *content);
+   void (*decay_confidence)(int64_t memory_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

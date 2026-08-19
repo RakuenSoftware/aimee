@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "f42cf9af21278faac859d9db1fa57e2045be60fd972beda5960cb3582c15b2e9"
+const ContractSHA256 = "a9e26f8e535f62ca4a4fb3875b7cfa53cecb6414710c990e463fbf7f31fb9ef1"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -275,6 +275,11 @@ const OperationUpdateContent uint32 = 33
 const UpdateContentMemoryIDMax uint64 = 9223372036854775807
 const UpdateContentContentMax = 2047
 const UpdateContentMax uint32 = 1
+const EventDecayConfidence = EventMemory
+const StageDecayConfidence = FamilyMemory
+const OperationDecayConfidence uint32 = 34
+const DecayConfidenceMemoryIDMax uint64 = 9223372036854775807
+const DecayConfidenceMultiplierBits uint64 = 4604480259023595110
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1205,6 +1210,53 @@ func DecodeUpdateContentReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return updatedRows, nil
+}
+
+// EncodeDecayConfidenceRequest emits the memory whose confidence decays.
+func EncodeDecayConfidenceRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > DecayConfidenceMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDecayConfidence, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeDecayConfidenceRequest validates the envelope and the bounded memory.
+func DecodeDecayConfidenceRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecayConfidence || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > DecayConfidenceMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeDecayConfidenceReply acknowledges the decay without a payload.
+func EncodeDecayConfidenceReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationDecayConfidence, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeDecayConfidenceReply validates the acknowledgement and refuses payload.
+func DecodeDecayConfidenceReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDecayConfidence || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.
