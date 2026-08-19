@@ -14,39 +14,52 @@
  * NOT here, and never: anything reading the client's own disk or environment.
  * That is the thin client's own job, not knowledge of what the server can do.
  *
- * WHY THE REST ARE NOT HERE YET, from reading every remaining marshaller. The
- * blocker is not the spec language -- it is that the marshallers disagree with
- * each other, and a spec that reproduced each disagreement would stop being
- * data and start being a program:
+ * WHY THE REST ARE NOT HERE YET, from reading every remaining marshaller.
  *
- *   - LENIENT NUMBERS. aux.test, dogfood.tag, api.enable and others parse with
- *     atoi()/cli_args_get_int(), so "12x" becomes 12 and "abc" becomes 0 or a
- *     default. This file's "number" refuses rather than coerces, deliberately
- *     (see kb.grant's team_id, where rounding an id would administer the wrong
- *     team). Serving these means fixing the coercion, not describing it.
- *   - MISSING ENVELOPE. eval.results, dogfood.tag and others build their body
- *     by hand and omit protocol_version, which every other request carries. The
- *     differential test catches it immediately, which is how it was found.
- *   - DERIVED FIELDS. catalog.show splits "provider:model" into two fields;
- *     workspace.add inverts --no-scan into "scan": false and nests part of its
- *     body under `args`.
- *   - EMPTY POSITIONALS. 45 positional sites gate on pos_count alone, so
- *     `aimee eval results ""` sends "suite": "" and filters on the empty
- *     string; a handful of others require non-empty and drop it. The spec's
- *     `positional` source follows the second, so it cannot describe the first
- *     without a flag that would enshrine a convention that looks like a bug.
- *     Found by the differential test on the first attempt to serve
- *     eval.results, which is exactly what it is for.
- *   - CROSS-FIELD RULES. cron.enable's --all is valid only for two of the five
- *     cron methods; trigger.fire accepts --task OR --proposal; dogfood.tag's
- *     --surprise and --no-surprise are exclusive. These are judgements about
- *     what the operator meant.
- *   - LOCAL STATE. eval.run, identity.snapshot and six others read getcwd() or
- *     the filesystem. These must NEVER be served, whatever the spec can express.
+ * This list has been WRONG twice, in the same way, and the corrections are the
+ * useful part. Both times I called a convention un-describable and treated the
+ * marshallers as the thing to change; both times counting showed the spec was
+ * the odd one out and the honest fix was to describe what the code does:
  *
- * So the remaining work is normalising the marshallers, which now has a safety
- * net: convert one, add its samples, and the differential test proves the
- * request body did not change.
+ *   - EMPTY POSITIONALS. 81 sites gate on pos_count alone, so
+ *     `aimee eval results ""` sends "suite": ""; 2 also require non-empty. I
+ *     said a flag for the first "would enshrine a convention that looks like a
+ *     bug". A vocabulary expressing 2 of 83 sites is not principled, it is
+ *     incomplete -- so `"empty": "emit"`, and six methods followed.
+ *   - LENIENT NUMBERS. 53 sites parse with atoi()/cli_args_get_int(), so "12x"
+ *     is 12 and "abc" is 0; 3 refuse trailing garbage. Same shape, same
+ *     correction: "number_lenient" plus "default", and three more methods.
+ *
+ * Whether those 81 and 53 sites SHOULD behave that way is a live question and
+ * NOT settled here. kb.grant is the argument that the numbers should refuse:
+ * its team_id is strict because "770001x" becoming 770001 would administer a
+ * team the operator did not type. Changing them is a change to the CLI. This
+ * file describes the CLI.
+ *
+ * What is left is left for reasons that are not counting errors:
+ *
+ *   - CONDITIONALS. api.enable emits `port` only when > 0; dogfood.tag's
+ *     --surprise and --no-surprise are exclusive; trigger.fire takes --task OR
+ *     --proposal; cron's --all is valid for two of its five methods. A spec
+ *     language that grew these would stop being data and become a program
+ *     shipped over the wire, which is the one line this vocabulary will not
+ *     cross.
+ *   - DERIVED FIELDS. catalog.show splits "provider:model" in two; cron.add and
+ *     mcp.call compute fields; memory.user_capture joins the positionals from
+ *     index 1 and prefixes the key; workspace.add inverts --no-scan into
+ *     "scan": false and nests part of its body under `args`.
+ *   - LOCAL STATE. eval.run, identity.snapshot, identity.diff, vault.unlock and
+ *     delegate.launch read the client's own disk, environment or key material.
+ *     These must NEVER be served, whatever the vocabulary can express.
+ *   - RAW ARGV. provider.set reads argv[0] rather than a parsed positional, so
+ *     `provider set --json openai` sends name="--json". Describing that would
+ *     enshrine semantics that look like a bug, and the counting argument above
+ *     does not apply to a sample of one: it is 1 site, not 81.
+ *
+ * Adding a method: write the spec, add samples INCLUDING the awkward input for
+ * whatever convention it uses (empty string, non-numeric), and let the
+ * differential test decide. It compares rendered JSON against the real
+ * marshaller, so a spec that is merely plausible fails.
  */
 
 {"provider.list",
