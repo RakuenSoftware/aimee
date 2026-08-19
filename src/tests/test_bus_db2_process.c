@@ -362,6 +362,21 @@ int main(int argc, char **argv)
                                                  NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(walk_count == 0);
 
+   /* The corpus is empty, so both getters answer not_found -- which is also what
+    * they would answer if the statement had not run. Only a real database can
+    * say the statement did run. */
+   aimee_db2_memory_row_t fetched;
+   uint32_t row_result = 99;
+   row_result = 99;
+   assert(aimee_db2_row_get_call(call_client, &client, 9070, 0, 4096u, &row_result, &fetched, NULL,
+                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(row_result == AIMEE_DB2_RESULT_NOT_FOUND && fetched.id == 0);
+
+   row_result = 99;
+   assert(aimee_db2_row_get_by_unit_id_call(call_client, &client, 9071, 0, 4096u, &row_result,
+                                            &fetched, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(row_result == AIMEE_DB2_RESULT_NOT_FOUND && fetched.id == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

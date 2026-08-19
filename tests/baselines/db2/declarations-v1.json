@@ -16506,9 +16506,15 @@
           "line": 692
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.get operation replaces the row read. It is the first whose reply carries a whole memory row: a caller holding an identifier has nothing else to reattach it to, and one row is about four kilobytes at its widest against the sixteen l2_memory_ids already puts on a caller's stack. The backend answers -1 both for an absent row and for a statement that did not run, so the operation reports not_found for both; that conflation is the backend's. A null provenance category reads back as user_stated."
+      },
       "signature": "int db2_memory_get ( int64_t memory_id , memory_t * out )",
       "signature_sha256": "6ea23c707aaf35c3056464cb674aed4ed2aae1ea967913f9a0c86d33c6960d07",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get"
     },
     {
@@ -16522,9 +16528,15 @@
           "line": 892
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.get_by_unit_id operation resolves a unit to its memory and shares memory.get's row format. It does not fill the same row: its statement asks for eleven columns, so salience, provenance_category and use_cases come back empty rather than absent, and a caller cannot tell an unread column from a genuinely empty one. That is why each operation's policy lists the columns it actually reads. It conflates an absent row with a failed statement the same way memory.get does."
+      },
       "signature": "int db2_memory_get_by_unit_id ( int64_t unit_id , memory_t * out )",
       "signature_sha256": "5a6658a87dbafefdb168a44ffe454f4d940e2a0356d62d62580cd4664e417268",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_by_unit_id"
     },
     {
@@ -26424,15 +26436,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b10b2b7ebb86d17813b57bab9ee23363af53a8b42e5d134cfec0d59538d98fb4",
+  "fingerprint": "e3d4592d5ee3ff1293bdeae39c1fec86764f7bb228ca83d968b42471929df777",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 558,
+    "audit_pending": 556,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 400
+    "reviewed": 402
   }
 }

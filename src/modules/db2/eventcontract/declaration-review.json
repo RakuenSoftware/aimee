@@ -1900,6 +1900,22 @@
       "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
     },
     {
+      "symbol": "db2_memory_get",
+      "signature_sha256": "6ea23c707aaf35c3056464cb674aed4ed2aae1ea967913f9a0c86d33c6960d07",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.get operation replaces the row read. It is the first whose reply carries a whole memory row: a caller holding an identifier has nothing else to reattach it to, and one row is about four kilobytes at its widest against the sixteen l2_memory_ids already puts on a caller's stack. The backend answers -1 both for an absent row and for a statement that did not run, so the operation reports not_found for both; that conflation is the backend's. A null provenance category reads back as user_stated."
+    },
+    {
+      "symbol": "db2_memory_get_by_unit_id",
+      "signature_sha256": "5a6658a87dbafefdb168a44ffe454f4d940e2a0356d62d62580cd4664e417268",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.get_by_unit_id operation resolves a unit to its memory and shares memory.get's row format. It does not fill the same row: its statement asks for eleven columns, so salience, provenance_category and use_cases come back empty rather than absent, and a caller cannot tell an unread column from a genuinely empty one. That is why each operation's policy lists the columns it actually reads. It conflates an absent row with a failed statement the same way memory.get does."
+    },
+    {
       "symbol": "db2_memory_get_content",
       "signature_sha256": "45147cad822329064bfe4f49e6259586766da0199382cb8d31a2205c1536cc05",
       "disposition": "wire-operation",

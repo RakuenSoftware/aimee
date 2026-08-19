@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "9e625afe3697e1a4792caaf20a08c170ad12e85a65ee557b2b06d9cfc38fc519"
+const ContractSHA256 = "dbfeac9edf854aa88dea5969c741fccf0614b660bea64e6c1cfcdf8defa5e2ef"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -481,6 +481,39 @@ const SessionNeighborsAfterSessionMax = 127
 const SessionNeighborsAfterMax uint32 = 64
 const SessionNeighborsAfterIDMin uint64 = 1
 const SessionNeighborsAfterIDMax uint64 = 9223372036854775807
+const MemoryRowTierMax = 3
+const MemoryRowKindMax = 15
+const MemoryRowKeyMax = 511
+const MemoryRowContentMax = 2047
+const MemoryRowUseCasesMax = 1023
+const MemoryRowLastUsedAtMax = 31
+const MemoryRowCreatedAtMax = 31
+const MemoryRowUpdatedAtMax = 31
+const MemoryRowSourceSessionMax = 127
+const MemoryRowProvenanceCategoryMax = 31
+const MemoryRowUseCountMax uint32 = 2147483647
+const MemoryRowIDMax uint64 = 9223372036854775807
+const MemoryRowPayloadMin uint32 = 68
+const MemoryRowPayloadMax uint32 = 3918
+
+// MemoryRow is the whole bounded memory row as it crosses the wire.
+type MemoryRow struct {
+	ID                 uint64
+	Confidence         float64
+	Salience           float64
+	UseCount           uint32
+	Tier               string
+	Kind               string
+	Key                string
+	Content            string
+	UseCases           string
+	LastUsedAt         string
+	CreatedAt          string
+	UpdatedAt          string
+	SourceSession      string
+	ProvenanceCategory string
+}
+
 const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = 1
@@ -3546,6 +3579,286 @@ func DecodeSessionNeighborsAfterReply(reply []byte) ([]uint64, error) {
 		memoryIDs[index] = id
 	}
 	return memoryIDs, nil
+}
+
+// putRowText appends one bounded, length-prefixed row string.
+func putRowText(payload *[]byte, value string, maximum int) error {
+	if len(value) > maximum || hasNUL(value) {
+		return ErrMalformedEnvelope
+	}
+	var prefix [4]byte
+	binary.LittleEndian.PutUint32(prefix[:], uint32(len(value)))
+	*payload = append(append(*payload, prefix[:]...), value...)
+	return nil
+}
+
+// takeRowText reads one bounded, length-prefixed row string, checking the
+// prefix against what is left rather than trusting it.
+func takeRowText(payload []byte, cursor *int, maximum int) (string, error) {
+	if *cursor+4 > len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	length := int(binary.LittleEndian.Uint32(payload[*cursor:]))
+	if length > maximum || *cursor+4+length > len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	value := string(payload[*cursor+4 : *cursor+4+length])
+	if hasNUL(value) {
+		return "", ErrMalformedEnvelope
+	}
+	*cursor += 4 + length
+	return value, nil
+}
+
+func validMemoryRow(row MemoryRow) bool {
+	return row.ID != 0 && row.ID <= MemoryRowIDMax && row.UseCount <= MemoryRowUseCountMax &&
+		row.Confidence >= 0 && row.Confidence <= 1 && row.Salience >= 0 && row.Salience <= 1
+}
+
+// encodeMemoryRow lays out the fixed head and then every bounded string.
+func encodeMemoryRow(row MemoryRow) ([]byte, error) {
+	if !validMemoryRow(row) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := make([]byte, 28)
+	binary.LittleEndian.PutUint64(payload, row.ID)
+	binary.LittleEndian.PutUint64(payload[8:], math.Float64bits(row.Confidence))
+	binary.LittleEndian.PutUint64(payload[16:], math.Float64bits(row.Salience))
+	binary.LittleEndian.PutUint32(payload[24:], row.UseCount)
+	if err := putRowText(&payload, row.Tier, MemoryRowTierMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.Kind, MemoryRowKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.Key, MemoryRowKeyMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.Content, MemoryRowContentMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.UseCases, MemoryRowUseCasesMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.LastUsedAt, MemoryRowLastUsedAtMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.CreatedAt, MemoryRowCreatedAtMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.UpdatedAt, MemoryRowUpdatedAtMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.SourceSession, MemoryRowSourceSessionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, row.ProvenanceCategory, MemoryRowProvenanceCategoryMax); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func decodeMemoryRow(payload []byte) (MemoryRow, error) {
+	if uint32(len(payload)) < MemoryRowPayloadMin || uint32(len(payload)) > MemoryRowPayloadMax {
+		return MemoryRow{}, ErrMalformedEnvelope
+	}
+	var row MemoryRow
+	var err error
+	row.ID = binary.LittleEndian.Uint64(payload)
+	row.Confidence = math.Float64frombits(binary.LittleEndian.Uint64(payload[8:]))
+	row.Salience = math.Float64frombits(binary.LittleEndian.Uint64(payload[16:]))
+	row.UseCount = binary.LittleEndian.Uint32(payload[24:])
+	cursor := 28
+	if row.Tier, err = takeRowText(payload, &cursor, MemoryRowTierMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.Kind, err = takeRowText(payload, &cursor, MemoryRowKindMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.Key, err = takeRowText(payload, &cursor, MemoryRowKeyMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.Content, err = takeRowText(payload, &cursor, MemoryRowContentMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.UseCases, err = takeRowText(payload, &cursor, MemoryRowUseCasesMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.LastUsedAt, err = takeRowText(payload, &cursor, MemoryRowLastUsedAtMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.CreatedAt, err = takeRowText(payload, &cursor, MemoryRowCreatedAtMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.UpdatedAt, err = takeRowText(payload, &cursor, MemoryRowUpdatedAtMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.SourceSession, err = takeRowText(payload, &cursor, MemoryRowSourceSessionMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if row.ProvenanceCategory, err = takeRowText(payload, &cursor, MemoryRowProvenanceCategoryMax); err != nil {
+		return MemoryRow{}, err
+	}
+	if cursor != len(payload) || !validMemoryRow(row) {
+		return MemoryRow{}, ErrMalformedEnvelope
+	}
+	return row, nil
+}
+
+const EventRowGet = EventMemory
+const StageRowGet = FamilyMemory
+const OperationRowGet uint32 = 56
+
+// EncodeRowGetRequest carries the one bounded identifier.
+func EncodeRowGetRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > MemoryRowIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationRowGet, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeRowGetRequest validates the identifier against its bound.
+func DecodeRowGetRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRowGet || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > MemoryRowIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeRowGetReply emits the row, or the empty envelope for an absent one.
+func EncodeRowGetReply(result uint32, row *MemoryRow) ([]byte, error) {
+	if result == ResultNotFound {
+		if row != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		header, err := EncodeReplyHeader(OperationRowGet, result, 0)
+		if err != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		return header, nil
+	}
+	if result != ResultOK || row == nil {
+		return nil, ErrMalformedEnvelope
+	}
+	payload, err := encodeMemoryRow(*row)
+	if err != nil {
+		return nil, err
+	}
+	header, err := EncodeReplyHeader(OperationRowGet, ResultOK, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRowGetReply keeps an absent row distinct from a malformed one.
+func DecodeRowGetReply(reply []byte) (uint32, *MemoryRow, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRowGet ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, nil, ErrMalformedEnvelope
+	}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 {
+		return header.Result, nil, nil
+	}
+	if header.Result != ResultOK {
+		return 0, nil, ErrMalformedEnvelope
+	}
+	row, err := decodeMemoryRow(reply[EnvelopeHeaderLen:])
+	if err != nil {
+		return 0, nil, err
+	}
+	return header.Result, &row, nil
+}
+
+const EventRowGetByUnitID = EventMemory
+const StageRowGetByUnitID = FamilyMemory
+const OperationRowGetByUnitID uint32 = 57
+
+// EncodeRowGetByUnitIDRequest carries the one bounded identifier.
+func EncodeRowGetByUnitIDRequest(unitID uint64) ([]byte, error) {
+	if unitID == 0 || unitID > MemoryRowIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationRowGetByUnitID, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], unitID)
+	return request, nil
+}
+
+// DecodeRowGetByUnitIDRequest validates the identifier against its bound.
+func DecodeRowGetByUnitIDRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRowGetByUnitID || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > MemoryRowIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeRowGetByUnitIDReply emits the row, or the empty envelope for an absent one.
+func EncodeRowGetByUnitIDReply(result uint32, row *MemoryRow) ([]byte, error) {
+	if result == ResultNotFound {
+		if row != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		header, err := EncodeReplyHeader(OperationRowGetByUnitID, result, 0)
+		if err != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		return header, nil
+	}
+	if result != ResultOK || row == nil {
+		return nil, ErrMalformedEnvelope
+	}
+	payload, err := encodeMemoryRow(*row)
+	if err != nil {
+		return nil, err
+	}
+	header, err := EncodeReplyHeader(OperationRowGetByUnitID, ResultOK, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRowGetByUnitIDReply keeps an absent row distinct from a malformed one.
+func DecodeRowGetByUnitIDReply(reply []byte) (uint32, *MemoryRow, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRowGetByUnitID ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, nil, ErrMalformedEnvelope
+	}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 {
+		return header.Result, nil, nil
+	}
+	if header.Result != ResultOK {
+		return 0, nil, ErrMalformedEnvelope
+	}
+	row, err := decodeMemoryRow(reply[EnvelopeHeaderLen:])
+	if err != nil {
+		return 0, nil, err
+	}
+	return header.Result, &row, nil
 }
 
 // EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The

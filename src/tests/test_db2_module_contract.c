@@ -1405,6 +1405,20 @@ int db2_memory_session_neighbors_after(const char *session_id, int64_t anchor_id
    return 0;
 }
 
+int db2_memory_get(int64_t memory_id, void *out)
+{
+   (void)memory_id;
+   (void)out;
+   return -1;
+}
+
+int db2_memory_get_by_unit_id(int64_t unit_id, void *out)
+{
+   (void)unit_id;
+   (void)out;
+   return -1;
+}
+
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
 {
    (void)term;

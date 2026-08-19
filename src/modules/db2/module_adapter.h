@@ -63,6 +63,10 @@ typedef struct
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
                                   int64_t *out, int max);
+   /* The only two backends whose whole row crosses. Zero on found, non-zero
+    * for both an absent row and a statement that did not run. */
+   int (*row_get)(int64_t memory_id, aimee_db2_memory_row_t *row);
+   int (*row_get_by_unit_id)(int64_t unit_id, aimee_db2_memory_row_t *row);
    /* health_record composes these three: DB2 owns the corpus total and the
     * fixed conflict window, so only the cycle counters cross the bus. */
    int (*count_memories)(void);

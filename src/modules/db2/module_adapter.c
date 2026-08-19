@@ -224,6 +224,52 @@ static int production_session_neighbors_after(const char *session_id, int64_t an
                                  out, max);
 }
 
+/* Copy a memory_t into the bounded row the wire carries. The row's text fields
+ * are one byte narrower than the columns they come from, so a value that filled
+ * its column exactly would not fit; snprintf truncates rather than overruns,
+ * and the bound is checked before the row is encoded. */
+static void production_fill_row(const memory_t *from, aimee_db2_memory_row_t *row)
+{
+   memset(row, 0, sizeof(*row));
+   row->id = (uint64_t)from->id;
+   row->confidence = from->confidence;
+   row->salience = from->salience;
+   row->use_count = from->use_count < 0 ? 0u : (uint32_t)from->use_count;
+   snprintf(row->tier, sizeof(row->tier), "%s", from->tier);
+   snprintf(row->kind, sizeof(row->kind), "%s", from->kind);
+   snprintf(row->key, sizeof(row->key), "%s", from->key);
+   snprintf(row->content, sizeof(row->content), "%s", from->content);
+   snprintf(row->use_cases, sizeof(row->use_cases), "%s", from->use_cases);
+   snprintf(row->last_used_at, sizeof(row->last_used_at), "%s", from->last_used_at);
+   snprintf(row->created_at, sizeof(row->created_at), "%s", from->created_at);
+   snprintf(row->updated_at, sizeof(row->updated_at), "%s", from->updated_at);
+   snprintf(row->source_session, sizeof(row->source_session), "%s", from->source_session);
+   snprintf(row->provenance_category, sizeof(row->provenance_category), "%s",
+            from->provenance_category);
+}
+
+static int production_row_read(int (*read)(int64_t, memory_t *), int64_t identifier,
+                               aimee_db2_memory_row_t *row)
+{
+   if (!read || !row)
+      return -1;
+   memory_t found;
+   if (read(identifier, &found) != 0)
+      return -1;
+   production_fill_row(&found, row);
+   return 0;
+}
+
+static int production_row_get(int64_t memory_id, aimee_db2_memory_row_t *row)
+{
+   return production_row_read(db2_memory_get, memory_id, row);
+}
+
+static int production_row_get_by_unit_id(int64_t unit_id, aimee_db2_memory_row_t *row)
+{
+   return production_row_read(db2_memory_get_by_unit_id, unit_id, row);
+}
+
 static int production_collect_alias_matches(const char *term, int limit, int scope_active,
                                             int include_all, const char *workspace,
                                             const char *project, int64_t *out, int max)
@@ -511,6 +557,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .negation_fts_search = production_negation_fts_search,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
+       .row_get = production_row_get,
+       .row_get_by_unit_id = production_row_get_by_unit_id,
        .count_memories = db2_memory_health_count_memories,
        .count_recent_conflicts = db2_memory_health_count_recent_conflicts,
        .health_record = db2_memory_health_record,
@@ -1110,6 +1158,44 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                memory_ids[index] = (uint64_t)rows[index];
             }
             if (encode(memory_ids, (uint32_t)listed, response_body, response_capacity,
+                       response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         /* Both row getters decode the same way and differ only in which
+          * reviewed backend they reach, so one branch serves both. */
+         uint64_t identifier = 0u;
+         int (*read)(int64_t, aimee_db2_memory_row_t *) = NULL;
+         int (*encode)(uint32_t, const aimee_db2_memory_row_t *, uint8_t *, size_t, uint32_t *) =
+             NULL;
+         if (!encode &&
+             aimee_db2_row_get_request_decode(request_body, request_len, &identifier) == 0)
+         {
+            read = backend ? backend->row_get : NULL;
+            encode = aimee_db2_row_get_reply_encode;
+         }
+         if (!encode && aimee_db2_row_get_by_unit_id_request_decode(request_body, request_len,
+                                                                    &identifier) == 0)
+         {
+            read = backend ? backend->row_get_by_unit_id : NULL;
+            encode = aimee_db2_row_get_by_unit_id_reply_encode;
+         }
+         if (encode)
+         {
+            if (response_capacity < AIMEE_DB2_ROW_GET_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_row_t row;
+            int found = read((int64_t)identifier, &row);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            /* The backend cannot separate an absent row from a statement that
+             * did not run, so not_found is the honest report for both. */
+            if (encode(found == 0 ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND,
+                       found == 0 ? &row : NULL, response_body, response_capacity,
                        response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;

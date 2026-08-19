@@ -2176,6 +2176,46 @@ def validate_catalog(value: object) -> dict[str, object]:
                                     "item_minimum": 1, "item_maximum": 0x7fffffffffffffff}):
                 fail(f"{rule}-reply",
                      "reply must be a counted identifier list bounded by the request policy")
+        elif key in (("memory", 56), ("memory", 57)) and \
+                name in ("row_get", "row_get_by_unit_id") and \
+                operation["wire_format"] == "db2-envelope-u64-memory-row-v1":
+            # The only format on this branch whose reply is a whole memory row.
+            # Both operations carry the same fourteen fields, and neither fills
+            # all of them -- get_by_unit_id reads eleven columns -- so each
+            # states which columns it actually reads. A caller cannot tell an
+            # unread column from a genuinely empty one, and the wire cannot
+            # show the difference, so the policy has to.
+            if operation["c_symbols"] != ["db2_memory_" + name[len("row_"):]]:
+                fail("operation-c-symbols", f"{name} C symbol differs from the reviewed backend")
+            # The backend answers -1 both for an absent row and for a statement
+            # that did not run, so not_found is the honest report for both.
+            if operation["results"] != ["ok", "not_found"]:
+                fail("operation-results", f"{name} must report an absent row")
+            rule = name.replace("_", "-")
+            request = _keys(operation["request"], {"encoded_size", "policy", "field"},
+                            f"{name}.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  f"{name}.request.field")
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"columns", "note"}:
+                fail(f"{rule}-request",
+                     "request policy must list the columns read and note what that leaves out")
+            _string(policy["columns"], f"{name}.request.policy.columns", 200)
+            _string(policy["note"], f"{name}.request.policy.note", 120)
+            argument = "memory_id" if name == "row_get" else "unit_id"
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request_field != {"name": argument, "type": "u64", "minimum": 1,
+                                      "maximum": 0x7fffffffffffffff}):
+                fail(f"{rule}-request", "request must carry one bounded identifier")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "fields"}, f"{name}.reply")
+            if reply["fields"] != _memory_row_catalog_fields():
+                fail(f"{rule}-reply", "reply must carry the whole bounded memory row")
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + MEMORY_ROW_PAYLOAD_MIN or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + MEMORY_ROW_PAYLOAD_MAX or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN):
+                fail(f"{rule}-reply", "reply bounds must follow from the row's own field bounds")
         elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # First operation of the index family. The tiers that count as a
@@ -3286,7 +3326,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 100 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 102 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3306,7 +3346,8 @@ def validate_catalog(value: object) -> dict[str, object]:
             "collect_event_frame_matches", "collect_relation_token_matches",
             "collect_summary_matches", "collect_temporal_matches", "find_facts_like",
             "list_session_scope_priority_like", "negation_fts_search",
-            "session_neighbors_before", "session_neighbors_after",
+            "session_neighbors_before", "session_neighbors_after", "row_get",
+            "row_get_by_unit_id",
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
@@ -3321,7 +3362,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the one hundred supported operations exactly once")
+             "the partial generator requires the one hundred and two supported operations exactly once")
     return catalog
 
 
@@ -3511,6 +3552,8 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     negation_fts_search = named["negation_fts_search"]
     session_neighbors_before = named["session_neighbors_before"]
     session_neighbors_after = named["session_neighbors_after"]
+    row_get = named["row_get"]
+    row_get_by_unit_id = named["row_get_by_unit_id"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -3890,6 +3933,8 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     negation_fts_search_vectors = _scoped_term_list_vectors(catalog, negation_fts_search)
     session_neighbors_before_vectors = _neighbor_list_vectors(catalog, session_neighbors_before)
     session_neighbors_after_vectors = _neighbor_list_vectors(catalog, session_neighbors_after)
+    row_get_vectors = _memory_row_vectors(catalog, row_get)
+    row_get_by_unit_id_vectors = _memory_row_vectors(catalog, row_get_by_unit_id)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -6715,7 +6760,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (count_and_max_updated_ok + b"\0").hex()},
                 ],
             },
-        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, {
+        }, top_l2_facts_vectors, list_session_scope_priority_vectors, collect_alias_matches_vectors, collect_entity_matches_vectors, collect_event_frame_matches_vectors, collect_relation_token_matches_vectors, collect_summary_matches_vectors, collect_temporal_matches_vectors, find_facts_like_vectors, list_session_scope_priority_like_vectors, negation_fts_search_vectors, session_neighbors_before_vectors, session_neighbors_after_vectors, row_get_vectors, row_get_by_unit_id_vectors, {
             "family": entity_edge_prune_orphans["family"],
             "id": entity_edge_prune_orphans["id"],
             "name": entity_edge_prune_orphans["name"],
@@ -9221,6 +9266,567 @@ func Decode{name}Reply(reply []byte) ([]uint64, error) {{
 """
 
 
+
+# The memory row, as it crosses the wire: name, wire type, and the maximum bytes
+# a text field may carry, one less than the column it is read into so the NUL
+# always fits. The catalog gate and the emitted codecs are both built from this,
+# so a field cannot be added to one and forgotten in the other.
+MEMORY_ROW_FIELDS = (
+    ("id", "u64", None),
+    ("confidence", "f64", None),
+    ("salience", "f64", None),
+    ("use_count", "u32", None),
+    ("tier", "utf8", 3),
+    ("kind", "utf8", 15),
+    ("key", "utf8", 511),
+    ("content", "utf8", 2047),
+    ("use_cases", "utf8", 1023),
+    ("last_used_at", "utf8", 31),
+    ("created_at", "utf8", 31),
+    ("updated_at", "utf8", 31),
+    ("source_session", "utf8", 127),
+    ("provenance_category", "utf8", 31),
+)
+MEMORY_ROW_TEXT = tuple((name, limit) for name, kind, limit in MEMORY_ROW_FIELDS
+                        if kind == "utf8")
+MEMORY_ROW_PAYLOAD_MIN = 8 + 8 + 8 + 4 + 4 * len(MEMORY_ROW_TEXT)
+MEMORY_ROW_PAYLOAD_MAX = MEMORY_ROW_PAYLOAD_MIN + sum(limit for _name, limit in MEMORY_ROW_TEXT)
+# 1.0 as binary64: a confidence and a salience are both fractions of one.
+MEMORY_ROW_UNIT_BITS = 0x3ff0000000000000
+
+
+def _memory_row_catalog_fields() -> list[dict[str, object]]:
+    """The reply field list every memory-row operation must declare."""
+    fields: list[dict[str, object]] = []
+    for name, kind, limit in MEMORY_ROW_FIELDS:
+        if kind == "utf8":
+            fields.append({"name": name, "type": "utf8", "minimum_bytes": 0,
+                           "maximum_bytes": limit})
+        elif kind == "u64":
+            fields.append({"name": name, "type": "u64", "minimum": 1,
+                           "maximum": 0x7fffffffffffffff})
+        elif kind == "u32":
+            fields.append({"name": name, "type": "u32", "minimum": 0, "maximum": 0x7fffffff})
+        else:
+            fields.append({"name": name, "type": "f64", "encoding": "ieee754-binary64-le",
+                           "minimum_binary64_bits": 0,
+                           "maximum_binary64_bits": MEMORY_ROW_UNIT_BITS})
+    return fields
+
+
+def _memory_row_struct() -> str:
+    """The shared row type the two getters hand back."""
+    members = "\n".join(
+        f"   char {name}[AIMEE_DB2_MEMORY_ROW_{name.upper()}_MAX + 1];"
+        for name, limit in MEMORY_ROW_TEXT)
+    return f"""
+typedef struct
+{{
+   uint64_t id;
+   double confidence;
+   double salience;
+   uint32_t use_count;
+{members}
+}} aimee_db2_memory_row_t;
+"""
+
+
+def _memory_row_constants() -> list[tuple[str, str]]:
+    """Bounds shared by every operation on the memory-row format."""
+    rows = [(f"AIMEE_DB2_MEMORY_ROW_{name.upper()}_MAX", f"{limit}u")
+            for name, limit in MEMORY_ROW_TEXT]
+    rows.append(("AIMEE_DB2_MEMORY_ROW_ID_MAX", "9223372036854775807ull"))
+    rows.append(("AIMEE_DB2_MEMORY_ROW_USE_COUNT_MAX", "2147483647u"))
+    rows.append(("AIMEE_DB2_MEMORY_ROW_UNIT_BITS", f"{MEMORY_ROW_UNIT_BITS}ull"))
+    rows.append(("AIMEE_DB2_MEMORY_ROW_PAYLOAD_MIN", f"{MEMORY_ROW_PAYLOAD_MIN}u"))
+    rows.append(("AIMEE_DB2_MEMORY_ROW_PAYLOAD_MAX", f"{MEMORY_ROW_PAYLOAD_MAX}u"))
+    return rows
+
+
+def _memory_row_operation_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Per-operation rows for db2-envelope-u64-memory-row-v1."""
+    upper = str(operation["name"]).upper()
+    request = operation["request"]
+    reply = operation["reply"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", "AIMEE_DB2_EVENT_MEMORY"),
+        (f"AIMEE_DB2_STAGE_{upper}", "AIMEE_DB2_FAMILY_MEMORY"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_LEN", f"{request['encoded_size']}u"),
+        (f"AIMEE_DB2_{upper}_IDENTIFIER_MAX", f"{request['field']['maximum']}ull"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MIN_LEN", f"{reply['encoded_size_min_ok']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_MAX_LEN", f"{reply['encoded_size_max_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+    ]
+
+
+def _memory_row_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for one memory-row operation."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    argument = "memory_id" if operation["name"] == "row_get" else "unit_id"
+
+    encode_text = "\n".join(f"""   if (aimee_db2_memory_row_put(row->{name}, AIMEE_DB2_MEMORY_ROW_{name.upper()}_MAX, payload,
+                                &cursor, sizeof(scratch)) != 0)
+      return -1;""" for name, _limit in MEMORY_ROW_TEXT)
+    decode_text = "\n".join(f"""   if (aimee_db2_memory_row_take(payload, header.payload_len, &cursor, row->{name},
+                                 AIMEE_DB2_MEMORY_ROW_{name.upper()}_MAX) != 0)
+      return -1;""" for name, _limit in MEMORY_ROW_TEXT)
+
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(uint64_t {argument}, uint8_t *output,
+                                                   size_t capacity)
+{{
+   if (!output || {argument} == 0u || {argument} > AIMEE_DB2_{upper}_IDENTIFIER_MAX ||
+       capacity < AIMEE_DB2_{upper}_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, {argument});
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *{argument})
+{{
+   if ({argument})
+      *{argument} = 0u;
+   if (!{argument})
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       header.payload_len != 8u || input_len != AIMEE_DB2_{upper}_REQUEST_LEN)
+      return -1;
+   uint64_t value = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value == 0u || value > AIMEE_DB2_{upper}_IDENTIFIER_MAX)
+      return -1;
+   *{argument} = value;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_encode(uint32_t result,
+                                                 const aimee_db2_memory_row_t *row,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_NOT_FOUND)
+   {{
+      /* An absent row carries nothing, and neither does the statement that
+       * could not run: the backend cannot tell them apart. */
+      if (row != NULL || capacity < AIMEE_DB2_{upper}_ERROR_LEN ||
+          aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, result, 0u, output,
+                                        capacity) != 0)
+         return -1;
+      *output_len = AIMEE_DB2_{upper}_ERROR_LEN;
+      return 0;
+   }}
+   if (result != AIMEE_DB2_RESULT_OK || !row || !aimee_db2_memory_row_valid(row))
+      return -1;
+
+   uint8_t scratch[AIMEE_DB2_MEMORY_ROW_PAYLOAD_MAX];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u64(payload, row->id);
+   aimee_db2_put_u64(payload + 8u, aimee_db2_binary64_bits(row->confidence));
+   aimee_db2_put_u64(payload + 16u, aimee_db2_binary64_bits(row->salience));
+   aimee_db2_put_u32(payload + 24u, row->use_count);
+   cursor = 28u;
+{encode_text}
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *result, aimee_db2_memory_row_t *row)
+{{
+   if (result)
+      *result = 0u;
+   if (row)
+      memset(row, 0, sizeof(*row));
+   if (!result || !row)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_NOT_FOUND && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK ||
+       header.payload_len < AIMEE_DB2_MEMORY_ROW_PAYLOAD_MIN ||
+       header.payload_len > AIMEE_DB2_MEMORY_ROW_PAYLOAD_MAX)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   row->id = aimee_db2_get_u64(payload);
+   row->confidence = aimee_db2_binary64_value(aimee_db2_get_u64(payload + 8u));
+   row->salience = aimee_db2_binary64_value(aimee_db2_get_u64(payload + 16u));
+   row->use_count = aimee_db2_get_u32(payload + 24u);
+   uint32_t cursor = 28u;
+{decode_text}
+   if (cursor != header.payload_len || !aimee_db2_memory_row_valid(row))
+      return -1;
+   *result = header.result;
+   return 0;
+}}
+"""
+
+
+def _memory_row_shared_codecs() -> str:
+    """The row helpers both memory-row operations share."""
+    checks = "\n".join(f"""   if (aimee_db2_memory_row_text_len(row->{name}, AIMEE_DB2_MEMORY_ROW_{name.upper()}_MAX) < 0)
+      return 0;""" for name, _limit in MEMORY_ROW_TEXT)
+    return f"""
+{_memory_row_struct()}
+/* A double as the bits of its binary64 encoding, and back. The row carries two
+ * of them, and memcpy is how this tree converts: no aliasing, no union. */
+static inline uint64_t aimee_db2_binary64_bits(double value)
+{{
+   uint64_t bits = 0u;
+   memcpy(&bits, &value, sizeof(bits));
+   return bits;
+}}
+
+static inline double aimee_db2_binary64_value(uint64_t bits)
+{{
+   double value = 0.0;
+   memcpy(&value, &bits, sizeof(value));
+   return value;
+}}
+
+/* Length of a bounded row string, or -1 if it is not NUL-terminated within its
+ * bound. Reading past the bound is the failure this exists to prevent. */
+static inline int aimee_db2_memory_row_text_len(const char *value, uint32_t maximum)
+{{
+   uint32_t length = 0u;
+   while (length <= maximum && value[length])
+      ++length;
+   return length > maximum ? -1 : (int)length;
+}}
+
+static inline int aimee_db2_memory_row_valid(const aimee_db2_memory_row_t *row)
+{{
+   if (!row || row->id == 0u || row->id > AIMEE_DB2_MEMORY_ROW_ID_MAX ||
+       row->use_count > AIMEE_DB2_MEMORY_ROW_USE_COUNT_MAX ||
+       !(row->confidence >= 0.0 && row->confidence <= 1.0) ||
+       !(row->salience >= 0.0 && row->salience <= 1.0))
+      return 0;
+{checks}
+   return 1;
+}}
+
+static inline int aimee_db2_memory_row_put(const char *value, uint32_t maximum, uint8_t *payload,
+                                           uint32_t *cursor, size_t capacity)
+{{
+   int length = aimee_db2_memory_row_text_len(value, maximum);
+   if (length < 0 || (size_t)*cursor + 4u + (size_t)length > capacity)
+      return -1;
+   aimee_db2_put_u32(payload + *cursor, (uint32_t)length);
+   memcpy(payload + *cursor + 4u, value, (size_t)length);
+   *cursor += 4u + (uint32_t)length;
+   return 0;
+}}
+
+static inline int aimee_db2_memory_row_take(const uint8_t *payload, uint32_t payload_len,
+                                            uint32_t *cursor, char *value, uint32_t maximum)
+{{
+   if (*cursor + 4u > payload_len)
+      return -1;
+   uint32_t length = aimee_db2_get_u32(payload + *cursor);
+   if (length > maximum || *cursor + 4u + length > payload_len ||
+       memchr(payload + *cursor + 4u, 0, length) != NULL)
+      return -1;
+   memcpy(value, payload + *cursor + 4u, length);
+   value[length] = '\\0';
+   *cursor += 4u + length;
+   return 0;
+}}
+"""
+
+
+def _memory_row_vectors(catalog: dict[str, object],
+                        operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for one db2-envelope-u64-memory-row-v1 operation."""
+    identifier = int(operation["id"])
+    argument = "memory_id" if operation["name"] == "row_get" else "unit_id"
+    request = _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0, _put_u64(4096))
+
+    # A half confidence and a quarter salience: exact in binary64, so the
+    # fixture says what it means without a rounding argument.
+    confidence_bits, salience_bits = 0x3fe0000000000000, 0x3fd0000000000000
+    values = {"tier": "L2", "kind": "fact", "key": "row-key", "content": "row content",
+              "use_cases": "recall", "last_used_at": "2026-01-02T03:04:05Z",
+              "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T03:04:05Z",
+              "source_session": "session-9f2a", "provenance_category": "user_stated"}
+    body = (_put_u64(7) + _put_u64(confidence_bits) + _put_u64(salience_bits) + _put_u32(3))
+    for name, _limit in MEMORY_ROW_TEXT:
+        encoded = values[name].encode("utf-8")
+        body += _put_u32(len(encoded)) + encoded
+    reply_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, body)
+
+    # Every text field empty: the shortest a row can be, and the shape
+    # get_by_unit_id produces for the columns it does not read.
+    empty_body = (_put_u64(7) + _put_u64(0) + _put_u64(0) + _put_u32(0) +
+                  _put_u32(0) * len(MEMORY_ROW_TEXT))
+    reply_empty = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, empty_body)
+    reply_absent = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 1, b"")
+
+    tier_length_at = ENVELOPE_HEADER_LEN + 28
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {
+            "positive": request.hex(),
+            argument: 4096,
+            "negative": [
+                {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+                {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+                {"mutation": "identifier_zero", "hex":
+                 (request[:ENVELOPE_HEADER_LEN] + _put_u64(0)).hex()},
+                {"mutation": "identifier_above_maximum", "hex":
+                 (request[:ENVELOPE_HEADER_LEN] + _put_u64(0x8000000000000000)).hex()},
+                {"mutation": "short", "hex": request[:-1].hex()},
+                {"mutation": "long", "hex": (request + b"\0").hex()},
+            ],
+        },
+        "reply": {
+            "positive": [
+                {"result": 0, "id": 7, "use_count": 3,
+                 "confidence_binary64_bits": confidence_bits,
+                 "salience_binary64_bits": salience_bits,
+                 **values, "hex": reply_ok.hex()},
+                {"result": 0, "id": 7, "use_count": 0,
+                 "confidence_binary64_bits": 0, "salience_binary64_bits": 0,
+                 **{name: "" for name, _limit in MEMORY_ROW_TEXT},
+                 "hex": reply_empty.hex()},
+                {"result": 1, "hex": reply_absent.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
+                {"mutation": "not_found_with_payload", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 1, body).hex()},
+                {"mutation": "ok_without_row", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
+                {"mutation": "identifier_zero", "hex":
+                 (reply_ok[:ENVELOPE_HEADER_LEN] + _put_u64(0) +
+                  reply_ok[ENVELOPE_HEADER_LEN + 8:]).hex()},
+                {"mutation": "confidence_above_one", "hex":
+                 (reply_ok[:ENVELOPE_HEADER_LEN + 8] + _put_u64(0x3ff0000000000001) +
+                  reply_ok[ENVELOPE_HEADER_LEN + 16:]).hex()},
+                {"mutation": "salience_above_one", "hex":
+                 (reply_ok[:ENVELOPE_HEADER_LEN + 16] + _put_u64(0x4000000000000000) +
+                  reply_ok[ENVELOPE_HEADER_LEN + 24:]).hex()},
+                {"mutation": "use_count_above_maximum", "hex":
+                 _mutate_u32(reply_ok, ENVELOPE_HEADER_LEN + 24, 0x80000000).hex()},
+                {"mutation": "tier_above_maximum", "hex":
+                 _mutate_u32(reply_ok, tier_length_at, 4).hex()},
+                {"mutation": "tier_length_exceeds_payload", "hex":
+                 _mutate_u32(reply_ok, tier_length_at, 3).hex()},
+                {"mutation": "short", "hex": reply_ok[:-1].hex()},
+                {"mutation": "long", "hex": (reply_ok + b"\0").hex()},
+            ],
+        },
+    }
+
+
+
+def _memory_row_go_constants() -> str:
+    """Go bounds shared by every operation on the memory-row format."""
+    rows = "\n".join(f"const MemoryRow{_go_name(name)}Max = {limit}"
+                      for name, limit in MEMORY_ROW_TEXT)
+    return f"""{rows}
+const MemoryRowUseCountMax uint32 = 2147483647
+const MemoryRowIDMax uint64 = 9223372036854775807
+const MemoryRowPayloadMin uint32 = {MEMORY_ROW_PAYLOAD_MIN}
+const MemoryRowPayloadMax uint32 = {MEMORY_ROW_PAYLOAD_MAX}
+
+// MemoryRow is the whole bounded memory row as it crosses the wire.
+type MemoryRow struct {{
+	ID                 uint64
+	Confidence         float64
+	Salience           float64
+	UseCount           uint32
+{chr(10).join(f"	{_go_name(name):<18} string" for name, _limit in MEMORY_ROW_TEXT)}
+}}
+
+"""
+
+
+def _memory_row_go_shared() -> str:
+    """The row encode and decode both Go operations share."""
+    put = "\n".join(f"""	if err := putRowText(&payload, row.{_go_name(name)}, MemoryRow{_go_name(name)}Max); err != nil {{
+		return nil, err
+	}}""" for name, _limit in MEMORY_ROW_TEXT)
+    take = "\n".join(f"""	if row.{_go_name(name)}, err = takeRowText(payload, &cursor, MemoryRow{_go_name(name)}Max); err != nil {{
+		return MemoryRow{{}}, err
+	}}""" for name, _limit in MEMORY_ROW_TEXT)
+    return f"""// putRowText appends one bounded, length-prefixed row string.
+func putRowText(payload *[]byte, value string, maximum int) error {{
+	if len(value) > maximum || hasNUL(value) {{
+		return ErrMalformedEnvelope
+	}}
+	var prefix [4]byte
+	binary.LittleEndian.PutUint32(prefix[:], uint32(len(value)))
+	*payload = append(append(*payload, prefix[:]...), value...)
+	return nil
+}}
+
+// takeRowText reads one bounded, length-prefixed row string, checking the
+// prefix against what is left rather than trusting it.
+func takeRowText(payload []byte, cursor *int, maximum int) (string, error) {{
+	if *cursor+4 > len(payload) {{
+		return "", ErrMalformedEnvelope
+	}}
+	length := int(binary.LittleEndian.Uint32(payload[*cursor:]))
+	if length > maximum || *cursor+4+length > len(payload) {{
+		return "", ErrMalformedEnvelope
+	}}
+	value := string(payload[*cursor+4 : *cursor+4+length])
+	if hasNUL(value) {{
+		return "", ErrMalformedEnvelope
+	}}
+	*cursor += 4 + length
+	return value, nil
+}}
+
+func validMemoryRow(row MemoryRow) bool {{
+	return row.ID != 0 && row.ID <= MemoryRowIDMax && row.UseCount <= MemoryRowUseCountMax &&
+		row.Confidence >= 0 && row.Confidence <= 1 && row.Salience >= 0 && row.Salience <= 1
+}}
+
+// encodeMemoryRow lays out the fixed head and then every bounded string.
+func encodeMemoryRow(row MemoryRow) ([]byte, error) {{
+	if !validMemoryRow(row) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload := make([]byte, 28)
+	binary.LittleEndian.PutUint64(payload, row.ID)
+	binary.LittleEndian.PutUint64(payload[8:], math.Float64bits(row.Confidence))
+	binary.LittleEndian.PutUint64(payload[16:], math.Float64bits(row.Salience))
+	binary.LittleEndian.PutUint32(payload[24:], row.UseCount)
+{put}
+	return payload, nil
+}}
+
+func decodeMemoryRow(payload []byte) (MemoryRow, error) {{
+	if uint32(len(payload)) < MemoryRowPayloadMin || uint32(len(payload)) > MemoryRowPayloadMax {{
+		return MemoryRow{{}}, ErrMalformedEnvelope
+	}}
+	var row MemoryRow
+	var err error
+	row.ID = binary.LittleEndian.Uint64(payload)
+	row.Confidence = math.Float64frombits(binary.LittleEndian.Uint64(payload[8:]))
+	row.Salience = math.Float64frombits(binary.LittleEndian.Uint64(payload[16:]))
+	row.UseCount = binary.LittleEndian.Uint32(payload[24:])
+	cursor := 28
+{take}
+	if cursor != len(payload) || !validMemoryRow(row) {{
+		return MemoryRow{{}}, ErrMalformedEnvelope
+	}}
+	return row, nil
+}}
+
+"""
+
+
+def _memory_row_go_operation(operation: dict[str, object]) -> str:
+    """Go constants and codecs for one memory-row operation."""
+    name = _go_name(str(operation["name"]))
+    argument = "memoryID" if operation["name"] == "row_get" else "unitID"
+    return f"""const Event{name} = EventMemory
+const Stage{name} = FamilyMemory
+const Operation{name} uint32 = {operation['id']}
+
+// Encode{name}Request carries the one bounded identifier.
+func Encode{name}Request({argument} uint64) ([]byte, error) {{
+	if {argument} == 0 || {argument} > MemoryRowIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(Operation{name}, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], {argument})
+	return request, nil
+}}
+
+// Decode{name}Request validates the identifier against its bound.
+func Decode{name}Request(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > MemoryRowIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return value, nil
+}}
+
+// Encode{name}Reply emits the row, or the empty envelope for an absent one.
+func Encode{name}Reply(result uint32, row *MemoryRow) ([]byte, error) {{
+	if result == ResultNotFound {{
+		if row != nil {{
+			return nil, ErrMalformedEnvelope
+		}}
+		header, err := EncodeReplyHeader(Operation{name}, result, 0)
+		if err != nil {{
+			return nil, ErrMalformedEnvelope
+		}}
+		return header, nil
+	}}
+	if result != ResultOK || row == nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload, err := encodeMemoryRow(*row)
+	if err != nil {{
+		return nil, err
+	}}
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Reply keeps an absent row distinct from a malformed one.
+func Decode{name}Reply(reply []byte) (uint32, *MemoryRow, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, nil, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 {{
+		return header.Result, nil, nil
+	}}
+	if header.Result != ResultOK {{
+		return 0, nil, ErrMalformedEnvelope
+	}}
+	row, err := decodeMemoryRow(reply[EnvelopeHeaderLen:])
+	if err != nil {{
+		return 0, nil, err
+	}}
+	return header.Result, &row, nil
+}}
+
+"""
+
+
 def header_bytes(catalog: dict[str, object]) -> bytes:
     def macros(rows: list[tuple[str, str]]) -> str:
         width = max(len(name) for name, _ in rows)
@@ -9294,6 +9900,8 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     negation_fts_search = named["negation_fts_search"]
     session_neighbors_before = named["session_neighbors_before"]
     session_neighbors_after = named["session_neighbors_after"]
+    row_get = named["row_get"]
+    row_get_by_unit_id = named["row_get_by_unit_id"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -10085,6 +10693,9 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         *_scoped_term_list_constants(negation_fts_search),
         *_neighbor_list_constants(session_neighbors_before),
         *_neighbor_list_constants(session_neighbors_after),
+        *_memory_row_constants(),
+        *_memory_row_operation_constants(row_get),
+        *_memory_row_operation_constants(row_get_by_unit_id),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -14487,7 +15098,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
 }}
 
 {_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
-{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}
+{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -17052,6 +17663,16 @@ extern "C"
        uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_row_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, uint32_t *domain_result, aimee_db2_memory_row_t *row,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_row_get_by_unit_id_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t unit_id, uint32_t *domain_result, aimee_db2_memory_row_t *row,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -18837,6 +19458,65 @@ aimee_module_call_result_t aimee_db2_session_neighbors_after_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_row_get_call(aimee_db2_call_fn call, void *call_context,
+                                                  uint64_t trace_id, uint64_t deadline_ns,
+                                                  uint64_t memory_id, uint32_t *domain_result,
+                                                  aimee_db2_memory_row_t *row,
+                                                  aimee_module_cancelled_fn cancelled,
+                                                  void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (row)
+      memset(row, 0, sizeof(*row));
+   if (!call || !domain_result || !row)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ROW_GET_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ROW_GET_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_row_get_request_encode(memory_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ROW_GET, AIMEE_DB2_STAGE_ROW_GET, trace_id, deadline_ns,
+            request, sizeof(request), response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_row_get_reply_decode(response, response_len, domain_result, row) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_row_get_by_unit_id_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t unit_id, uint32_t *domain_result,
+                                  aimee_db2_memory_row_t *row, aimee_module_cancelled_fn cancelled,
+                                  void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (row)
+      memset(row, 0, sizeof(*row));
+   if (!call || !domain_result || !row)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ROW_GET_BY_UNIT_ID_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ROW_GET_BY_UNIT_ID_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_row_get_by_unit_id_request_encode(unit_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ROW_GET_BY_UNIT_ID, AIMEE_DB2_STAGE_ROW_GET_BY_UNIT_ID,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_row_get_by_unit_id_reply_decode(response, response_len, domain_result, row) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -20015,6 +20695,8 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     negation_fts_search = named["negation_fts_search"]
     session_neighbors_before = named["session_neighbors_before"]
     session_neighbors_after = named["session_neighbors_after"]
+    row_get = named["row_get"]
+    row_get_by_unit_id = named["row_get_by_unit_id"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -20371,7 +21053,7 @@ const StageCountAndMaxUpdated = FamilyMemory
 const OperationCountAndMaxUpdated uint32 = {count_and_max_updated['id']}
 const CountAndMaxUpdatedCountMax uint32 = {count_and_max_updated['reply']['fields'][0]['maximum']}
 const CountAndMaxUpdatedStampMax = {count_and_max_updated['reply']['fields'][1]['maximum_bytes']}
-{_scoped_id_list_go_constants(top_l2_facts)}{_scoped_id_list_go_constants(list_session_scope_priority)}{_scoped_term_list_go_constants(collect_alias_matches)}{_scoped_term_list_go_constants(collect_entity_matches)}{_scoped_term_list_go_constants(collect_event_frame_matches)}{_scoped_term_list_go_constants(collect_relation_token_matches)}{_scoped_term_list_go_constants(collect_summary_matches)}{_scoped_term_list_go_constants(collect_temporal_matches)}{_scoped_term_list_go_constants(find_facts_like)}{_scoped_term_list_go_constants(list_session_scope_priority_like)}{_scoped_term_list_go_constants(negation_fts_search)}{_neighbor_list_go_constants(session_neighbors_before)}{_neighbor_list_go_constants(session_neighbors_after)}const EventEntityEdgePruneOrphans = EventIndex
+{_scoped_id_list_go_constants(top_l2_facts)}{_scoped_id_list_go_constants(list_session_scope_priority)}{_scoped_term_list_go_constants(collect_alias_matches)}{_scoped_term_list_go_constants(collect_entity_matches)}{_scoped_term_list_go_constants(collect_event_frame_matches)}{_scoped_term_list_go_constants(collect_relation_token_matches)}{_scoped_term_list_go_constants(collect_summary_matches)}{_scoped_term_list_go_constants(collect_temporal_matches)}{_scoped_term_list_go_constants(find_facts_like)}{_scoped_term_list_go_constants(list_session_scope_priority_like)}{_scoped_term_list_go_constants(negation_fts_search)}{_neighbor_list_go_constants(session_neighbors_before)}{_neighbor_list_go_constants(session_neighbors_after)}{_memory_row_go_constants()}const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = {entity_edge_prune_orphans['id']}
 const EntityEdgePruneOrphansCountMax uint32 = {entity_edge_prune_orphans['reply']['field']['maximum']}
@@ -22069,7 +22751,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)

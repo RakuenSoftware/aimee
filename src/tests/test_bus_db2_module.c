@@ -76,6 +76,8 @@ typedef struct
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
                                   int64_t *out, int max);
+   int (*row_get)(int64_t memory_id, aimee_db2_memory_row_t *row);
+   int (*row_get_by_unit_id)(int64_t unit_id, aimee_db2_memory_row_t *row);
    int (*count_memories)(void);
    int (*count_recent_conflicts)(int days);
    void (*health_record)(int total_memories, int contradictions_detected, int promotions,
@@ -281,6 +283,8 @@ static int top_l2_facts_calls;
 static int list_session_scope_priority_calls;
 static int term_probe_calls[9];
 static int walk_calls[2];
+static int row_calls[2];
+static int64_t row_identifier_seen;
 static char walk_session_seen[64];
 static int64_t walk_anchor_seen;
 static int walk_limit_seen;
@@ -592,6 +596,36 @@ static int negation_fts_search(const char *term, int limit, int scope_active, in
    return term_probe_impl(8, term, limit, scope_active, include_all, workspace, project, out, max);
 }
 
+static int row_impl(int which, int64_t identifier, aimee_db2_memory_row_t *row)
+{
+   row_calls[which]++;
+   row_identifier_seen = identifier;
+   /* Identifier 404 is the absent row: the getters cannot tell that apart from
+    * a statement that did not run, and the test pins that they do not try. */
+   if (identifier == 404)
+      return -1;
+   memset(row, 0, sizeof(*row));
+   row->id = (uint64_t)(which + 1) * 10;
+   row->confidence = 0.5;
+   row->salience = 0.25;
+   row->use_count = 3u;
+   snprintf(row->tier, sizeof(row->tier), "%s", "L2");
+   snprintf(row->kind, sizeof(row->kind), "%s", "fact");
+   snprintf(row->key, sizeof(row->key), "%s", "row-key");
+   snprintf(row->content, sizeof(row->content), "%s", "row content");
+   return 0;
+}
+
+static int row_get(int64_t memory_id, aimee_db2_memory_row_t *row)
+{
+   return row_impl(0, memory_id, row);
+}
+
+static int row_get_by_unit_id(int64_t unit_id, aimee_db2_memory_row_t *row)
+{
+   return row_impl(1, unit_id, row);
+}
+
 static int walk_impl(int which, const char *session_id, int64_t anchor_id, int limit, int64_t *out,
                      int max)
 {
@@ -838,6 +872,20 @@ int db2_memory_session_neighbors_after(const char *session_id, int64_t anchor_id
    (void)out;
    (void)max;
    return 0;
+}
+
+int db2_memory_get(int64_t memory_id, void *out)
+{
+   (void)memory_id;
+   (void)out;
+   return -1;
+}
+
+int db2_memory_get_by_unit_id(int64_t unit_id, void *out)
+{
+   (void)unit_id;
+   (void)out;
+   return -1;
 }
 
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
@@ -2115,6 +2163,8 @@ int main(void)
        .negation_fts_search = negation_fts_search,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
+       .row_get = row_get,
+       .row_get_by_unit_id = row_get_by_unit_id,
        .count_memories = count_memories,
        .count_recent_conflicts = count_recent_conflicts,
        .health_record = health_record,
@@ -2450,6 +2500,39 @@ int main(void)
                                                   &walk_count, NULL,
                                                   NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
    assert(walk_calls[0] == 1);
+
+   /* The row getters are the only operations whose reply carries a whole memory
+    * row, so the round trip is checked field by field rather than by count. */
+   aimee_db2_memory_row_t fetched;
+   uint32_t row_result = 99;
+   assert(aimee_db2_row_get_call(call_client, &client, 7100, 0, 2048u, &row_result, &fetched, NULL,
+                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(row_result == AIMEE_DB2_RESULT_OK && fetched.id == 10 && fetched.confidence == 0.5 &&
+          fetched.salience == 0.25 && fetched.use_count == 3u && strcmp(fetched.tier, "L2") == 0 &&
+          strcmp(fetched.kind, "fact") == 0 && strcmp(fetched.key, "row-key") == 0 &&
+          strcmp(fetched.content, "row content") == 0 && fetched.use_cases[0] == '\0' &&
+          row_calls[0] == 1 && row_identifier_seen == 2048);
+
+   assert(aimee_db2_row_get_by_unit_id_call(call_client, &client, 7101, 0, 2048u, &row_result,
+                                            &fetched, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(row_result == AIMEE_DB2_RESULT_OK && fetched.id == 20 && fetched.confidence == 0.5 &&
+          fetched.salience == 0.25 && fetched.use_count == 3u && strcmp(fetched.tier, "L2") == 0 &&
+          strcmp(fetched.kind, "fact") == 0 && strcmp(fetched.key, "row-key") == 0 &&
+          strcmp(fetched.content, "row content") == 0 && fetched.use_cases[0] == '\0' &&
+          row_calls[1] == 1 && row_identifier_seen == 2048);
+
+   /* An absent row is a result, not a transport failure, and it clears the row
+    * the caller passed rather than leaving the previous answer in it. */
+   row_result = 99;
+   assert(aimee_db2_row_get_call(call_client, &client, 7102, 0, 404u, &row_result, &fetched, NULL,
+                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(row_result == AIMEE_DB2_RESULT_NOT_FOUND && fetched.id == 0 && fetched.tier[0] == '\0' &&
+          row_calls[0] == 2);
+
+   /* Zero is not an identifier, so the encoder refuses it before the bus. */
+   assert(aimee_db2_row_get_call(call_client, &client, 7103, 0, 0u, &row_result, &fetched, NULL,
+                                 NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(row_calls[0] == 2);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */
