@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "b4e72a504c2cd431a9c1d8e318418ffb9bce02faa4f5fe540044abdc3d1f4c2b"
+const ContractSHA256 = "5dbf4b54f81d3badfbecc5ebb796da44d74fdd2c48260e323a088b74ebad7a83"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -337,6 +337,10 @@ const EventPurgeHiddenPollution = EventIndex
 const StagePurgeHiddenPollution = FamilyIndex
 const OperationPurgeHiddenPollution uint32 = 4
 const PurgeHiddenPollutionMax uint32 = 2147483647
+const EventRequeueDrifted = EventIndex
+const StageRequeueDrifted = FamilyIndex
+const OperationRequeueDrifted uint32 = 5
+const RequeueDriftedMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2088,6 +2092,54 @@ func DecodePurgeHiddenPollutionReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return purgedCount, nil
+}
+
+// EncodeRequeueDriftedRequest emits the empty request envelope. The forced
+// re-ingest and the dedup rule are policy and never travel.
+func EncodeRequeueDriftedRequest() []byte {
+	header, err := EncodeRequestHeader(OperationRequeueDrifted, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeRequeueDriftedRequest validates the exact index-family envelope.
+func DecodeRequeueDriftedRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRequeueDrifted ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeRequeueDriftedReply emits one bounded u32 requeue count.
+func EncodeRequeueDriftedReply(requeuedCount uint32) ([]byte, error) {
+	if requeuedCount > RequeueDriftedMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationRequeueDrifted, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], requeuedCount)
+	return reply, nil
+}
+
+// DecodeRequeueDriftedReply validates the operation and bounded count.
+func DecodeRequeueDriftedReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRequeueDrifted || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	requeuedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if requeuedCount > RequeueDriftedMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return requeuedCount, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

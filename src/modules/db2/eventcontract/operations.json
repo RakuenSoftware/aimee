@@ -1530,6 +1530,31 @@
         "field": {"name": "purged_count", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "index",
+      "id": 5,
+      "name": "requeue_drifted",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The ingest queue and the project generations it is driven from are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_code_index_requeue_drifted"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"force": true, "enqueued_status": "pending",
+                   "dedup_against": ["pending", "running"]}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "requeued_count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
     }
   ]
 }

@@ -574,6 +574,18 @@ int main(int argc, char **argv)
                                                 NULL) == AIMEE_MODULE_CALL_OK);
    assert(purged == 0);
 
+   /* No project has drifted on a fresh schema, so nothing is enqueued. Zero is
+    * also what the dedup produces once every drifted project already holds a
+    * pending row, which is why replaying the sweep is harmless. */
+   uint32_t requeued = 99;
+   assert(aimee_db2_requeue_drifted_call(call_client, &client, 9094, 0, &requeued, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(requeued == 0);
+   requeued = 99;
+   assert(aimee_db2_requeue_drifted_call(call_client, &client, 9095, 0, &requeued, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(requeued == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

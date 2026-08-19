@@ -96,6 +96,7 @@ type wireBaseline struct {
 				NormalizedCount       uint32            `json:"normalized_count"`
 				ProjectCount          uint32            `json:"project_count"`
 				PurgedCount           uint32            `json:"purged_count"`
+				RequeuedCount         uint32            `json:"requeued_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -241,7 +242,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 56 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 57 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -296,7 +297,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[52].Name != "entity_edge_prune_orphans" ||
 		baseline.Operations[53].Name != "entity_edge_normalize_weights" ||
 		baseline.Operations[54].Name != "project_count" ||
-		baseline.Operations[55].Name != "purge_hidden_pollution" {
+		baseline.Operations[55].Name != "purge_hidden_pollution" ||
+		baseline.Operations[56].Name != "requeue_drifted" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -492,6 +494,54 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestRequeueDriftedMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[56]
+	if operation.Family != "index" {
+		t.Fatalf("family = %q, want index", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeRequeueDriftedRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeRequeueDriftedRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	// Every earlier index operation shares this stage and must refuse it.
+	if err := DecodeEntityEdgePruneOrphansRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("prune decoder accepted a requeue request: %v", err)
+	}
+	if err := DecodeEntityEdgeNormalizeWeightsRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("normalize decoder accepted a requeue request: %v", err)
+	}
+	if err := DecodeProjectCountRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("project_count decoder accepted a requeue request: %v", err)
+	}
+	if err := DecodePurgeHiddenPollutionRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("purge decoder accepted a requeue request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeRequeueDriftedRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeRequeueDriftedReply(vector.RequeuedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		requeued, err := DecodeRequeueDriftedReply(got)
+		if err != nil || requeued != vector.RequeuedCount {
+			t.Fatalf("decode = (%d, %v)", requeued, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		requeued, err := DecodeRequeueDriftedReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || requeued != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, requeued, err)
 		}
 	}
 }

@@ -79,6 +79,8 @@ static int project_count_value;
 static int project_count_calls;
 static int purge_pollution_value;
 static int purge_pollution_calls;
+static int requeue_drifted_value;
+static int requeue_drifted_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -641,6 +643,17 @@ static int purge_hidden_pollution(void)
 {
    purge_pollution_calls++;
    return purge_pollution_value;
+}
+
+int db2_code_index_requeue_drifted(void)
+{
+   return 0;
+}
+
+static int requeue_drifted(void)
+{
+   requeue_drifted_calls++;
+   return requeue_drifted_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1343,6 +1356,8 @@ static void reset(void)
    project_count_calls = 0;
    purge_pollution_value = 5;
    purge_pollution_calls = 0;
+   requeue_drifted_value = 6;
+   requeue_drifted_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2637,6 +2652,37 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_requeue_drifted_wire(void)
+{
+   uint8_t request[AIMEE_DB2_REQUEUE_DRIFTED_REQUEST_LEN] = {0};
+   assert(aimee_db2_requeue_drifted_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_requeue_drifted_request_decode(request, sizeof(request)) == 0);
+   /* Fifth index operation: every earlier one in the family must refuse it,
+    * because the operation number is all that tells them apart. */
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_project_count_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_purge_hidden_pollution_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_requeue_drifted_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_REQUEUE_DRIFTED_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, requeued = 99;
+   assert(aimee_db2_requeue_drifted_reply_encode(6, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_requeue_drifted_reply_decode(reply, reply_len, &requeued) == 0 &&
+          requeued == 6);
+   assert(aimee_db2_requeue_drifted_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_requeue_drifted_reply_decode(reply, reply_len, &requeued) == 0 &&
+          requeued == 0);
+   assert(aimee_db2_requeue_drifted_reply_encode(AIMEE_DB2_REQUEUE_DRIFTED_MAX + 1u, reply,
+                                                 sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_requeue_drifted_reply_encode(6, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_requeue_drifted_reply_encode(6, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_requeue_drifted_reply_decode(reply, reply_len, &requeued) == -1 &&
+          requeued == 0);
 }
 
 static void test_purge_hidden_pollution_wire(void)
@@ -4796,6 +4842,42 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_requeue_drifted_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.requeue_drifted = requeue_drifted};
+   uint8_t request[AIMEE_DB2_REQUEUE_DRIFTED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_REQUEUE_DRIFTED_RESPONSE_LEN];
+   uint32_t response_len = 99, requeued = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_REQUEUE_DRIFTED};
+   assert(aimee_db2_requeue_drifted_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(requeue_drifted_calls == 1);
+   assert(aimee_db2_requeue_drifted_reply_decode(response, response_len, &requeued) == 0 &&
+          requeued == 6);
+
+   /* Nothing drifted, and every drifted project already queued, are both zero.
+    * So is a failed statement -- the backend collapses all three, and the wire
+    * cannot separate what it is not told apart. Pinned so the limitation stays
+    * visible rather than being rediscovered. */
+   requeue_drifted_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_requeue_drifted_reply_decode(response, response_len, &requeued) == 0 &&
+          requeued == 0);
+   requeue_drifted_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   requeue_drifted_value = 6;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_purge_hidden_pollution_handler(void)
 {
    reset();
@@ -6605,6 +6687,7 @@ int main(void)
    test_entity_edge_normalize_weights_wire();
    test_project_count_wire();
    test_purge_hidden_pollution_wire();
+   test_requeue_drifted_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6661,6 +6744,7 @@ int main(void)
    test_entity_edge_normalize_weights_handler();
    test_project_count_handler();
    test_purge_hidden_pollution_handler();
+   test_requeue_drifted_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

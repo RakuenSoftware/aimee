@@ -4403,9 +4403,15 @@
           "line": 48
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.requeue_drifted operation replaces the maintenance enqueue that re-ingests projects whose files have drifted. The forced re-ingest, the status the new rows carry and the pending-or-running dedup are fixed policy: without the dedup a repeated sweep would pile duplicate work onto the ingest drain, and the operation could not claim safe idempotency."
+      },
       "signature": "int db2_code_index_requeue_drifted ( void )",
       "signature_sha256": "731ae5264f742ebdd5dd2e82551bb7bf44071e282bc31615d0280ccfcb1c36ea",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_requeue_drifted"
     },
     {
@@ -26070,15 +26076,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e06808a20a9988677ac7456a07ac350f65f877ed36034a71910081dec12937a0",
+  "fingerprint": "4fe1330559cf0b9aae859ab93eeefde21671533f71fc87e4fad221c2b72a2930",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 617,
+    "audit_pending": 616,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 341
+    "reviewed": 342
   }
 }

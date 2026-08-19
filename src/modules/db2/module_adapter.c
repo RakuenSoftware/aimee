@@ -6,6 +6,7 @@
 #include "c/db2_internal.h"
 #include "c/db2_pool.h"
 #include "c/code_index.h"
+#include "c/code_index_ops.h"
 #include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
@@ -306,6 +307,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_edge_normalize_weights = db2_entity_edge_normalize_weights,
        .project_count = db2_code_index_project_count,
        .purge_hidden_pollution = db2_code_index_purge_hidden_pollution,
+       .requeue_drifted = db2_code_index_requeue_drifted,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -336,7 +338,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS &&
         invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROJECT_COUNT &&
-        invocation->stage_id != AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION))
+        invocation->stage_id != AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION &&
+        invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1257,7 +1260,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    if (invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS ||
        invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS ||
        invocation->stage_id == AIMEE_DB2_STAGE_PROJECT_COUNT ||
-       invocation->stage_id == AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION)
+       invocation->stage_id == AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION ||
+       invocation->stage_id == AIMEE_DB2_STAGE_REQUEUE_DRIFTED)
    {
       if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
       {
@@ -1332,6 +1336,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_purge_hidden_pollution_reply_encode((uint32_t)purged, response_body,
                                                            response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_requeue_drifted_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_REQUEUE_DRIFTED_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->requeue_drifted)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Nothing drifted and no connection both arrive as zero here, so the
+          * count cannot separate an idle graph from a failed enqueue. The
+          * statement returns the rows it inserted rather than counting them
+          * again, so the number that does arrive is at least exact. */
+         int requeued = backend->requeue_drifted();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (requeued < 0 || (uint32_t)requeued > AIMEE_DB2_REQUEUE_DRIFTED_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_requeue_drifted_reply_encode((uint32_t)requeued, response_body,
+                                                    response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

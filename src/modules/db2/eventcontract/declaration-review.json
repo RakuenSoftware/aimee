@@ -140,6 +140,14 @@
       "reason": "The typed index.purge_hidden_pollution operation replaces the startup hygiene sweep that removes inadmissible hidden-path files from the current generation. Which paths are inadmissible, and the .gitmodules exemption that keeps legitimately indexed submodule declarations, are fixed policy: a caller cannot widen the deletion to reach files the ingest path admits."
     },
     {
+      "symbol": "db2_code_index_requeue_drifted",
+      "signature_sha256": "731ae5264f742ebdd5dd2e82551bb7bf44071e282bc31615d0280ccfcb1c36ea",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.requeue_drifted operation replaces the maintenance enqueue that re-ingests projects whose files have drifted. The forced re-ingest, the status the new rows carry and the pending-or-running dedup are fixed policy: without the dedup a repeated sweep would pile duplicate work onto the ingest drain, and the operation could not claim safe idempotency."
+    },
+    {
       "symbol": "db2_conn",
       "signature_sha256": "4a33cfbffa38498794f2c49735e95cd914ce3cbf42a4772d2bf4f66f980d8899",
       "disposition": "private-db2",
