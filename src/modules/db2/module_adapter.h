@@ -83,6 +83,7 @@ typedef struct
    int (*cross_repo_rebuild_identities)(void);
    int (*cross_repo_rebuild_build_deps)(void);
    int (*rules_decay)(void);
+   int (*curiosity_rescore_all)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);

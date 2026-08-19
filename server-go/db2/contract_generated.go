@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "12d4ef47df47ec9d04f4f95f632ae7fbbda5d3f0a5d5460c098a4e0eb45ebbb0"
+const ContractSHA256 = "4529830ca9e069986cb481fc7da8128b6bd928aa184d5f9ae91c6014cf44738a"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -357,6 +357,10 @@ const EventRulesDecay = EventLearning
 const StageRulesDecay = FamilyLearning
 const OperationRulesDecay uint32 = 1
 const RulesDecayMax uint32 = 2147483647
+const EventCuriosityRescoreAll = EventLearning
+const StageCuriosityRescoreAll = FamilyLearning
+const OperationCuriosityRescoreAll uint32 = 2
+const CuriosityRescoreAllMax uint32 = 2147483647
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2393,6 +2397,55 @@ func DecodeRulesDecayReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return rulesTouched, nil
+}
+
+// EncodeCuriosityRescoreAllRequest emits the empty request envelope. Every
+// scoring weight is policy and never travels.
+func EncodeCuriosityRescoreAllRequest() []byte {
+	header, err := EncodeRequestHeader(OperationCuriosityRescoreAll, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeCuriosityRescoreAllRequest validates the exact learning-family
+// envelope.
+func DecodeCuriosityRescoreAllRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCuriosityRescoreAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeCuriosityRescoreAllReply emits one bounded u32 rescored item count.
+func EncodeCuriosityRescoreAllReply(itemsRescored uint32) ([]byte, error) {
+	if itemsRescored > CuriosityRescoreAllMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationCuriosityRescoreAll, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], itemsRescored)
+	return reply, nil
+}
+
+// DecodeCuriosityRescoreAllReply validates the operation and bounded count.
+func DecodeCuriosityRescoreAllReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCuriosityRescoreAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	itemsRescored := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if itemsRescored > CuriosityRescoreAllMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return itemsRescored, nil
 }
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

@@ -1419,6 +1419,31 @@ aimee_module_call_result_t aimee_db2_rules_decay_call(aimee_db2_call_fn call, vo
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_curiosity_rescore_all_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, uint32_t *items_rescored,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !items_rescored)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *items_rescored = 0u;
+   uint8_t request[AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_curiosity_rescore_all_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CURIOSITY_RESCORE_ALL,
+            AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_curiosity_rescore_all_reply_decode(response, response_len, items_rescored) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context)

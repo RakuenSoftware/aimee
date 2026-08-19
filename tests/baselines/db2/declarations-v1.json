@@ -6275,9 +6275,15 @@
           "line": 88
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.curiosity_rescore_all operation replaces the pass that rescores open curiosity items. The weights decide what the system becomes curious about next, so a caller able to send them could steer its attention; they are fixed policy and travel as integer percents, since a float literal is not the same number on every reader. The pass also writes updated_at back to itself so a rescore does not read as an edit."
+      },
       "signature": "int db2_curiosity_rescore_all ( void )",
       "signature_sha256": "2fa4af495a36240cf5defc84e76ee62be4412b3e21dd56906d5a49ee6f000a8c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_curiosity_rescore_all"
     },
     {
@@ -26148,15 +26154,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8ee9cccb9eb5abad3ef4b3b6e67a75eadfca070c6201347270d1d664ad1c81f7",
+  "fingerprint": "f2b8552ed10ea065c51eddc1d631ba426c987547d6af2e2abdfa9ea766d84e32",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 604,
+    "audit_pending": 603,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 354
+    "reviewed": 355
   }
 }

@@ -89,6 +89,8 @@ static int rebuild_build_deps_value;
 static int rebuild_build_deps_calls;
 static int rules_decay_value;
 static int rules_decay_calls;
+static int curiosity_rescore_value;
+static int curiosity_rescore_calls;
 static int prospective_sweep_value;
 static int prospective_sweep_calls;
 static int directive_sweep_value;
@@ -722,6 +724,17 @@ static int rules_decay(void)
 {
    rules_decay_calls++;
    return rules_decay_value;
+}
+
+int db2_curiosity_rescore_all(void)
+{
+   return 0;
+}
+
+static int curiosity_rescore_all(void)
+{
+   curiosity_rescore_calls++;
+   return curiosity_rescore_value;
 }
 
 int db2_prospective_sweep_expired(void)
@@ -1522,6 +1535,8 @@ static void reset(void)
    rebuild_build_deps_calls = 0;
    rules_decay_value = 18;
    rules_decay_calls = 0;
+   curiosity_rescore_value = 19;
+   curiosity_rescore_calls = 0;
    prospective_sweep_value = 7;
    prospective_sweep_calls = 0;
    directive_sweep_value = 8;
@@ -3088,6 +3103,38 @@ static void test_prospective_sweep_expired_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prospective_sweep_expired_reply_decode(reply, reply_len, &expired) == -1 &&
           expired == 0);
+}
+
+static void test_curiosity_rescore_all_wire(void)
+{
+   uint8_t request[AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN] = {0};
+   assert(aimee_db2_curiosity_rescore_all_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_curiosity_rescore_all_request_decode(request, sizeof(request)) == 0);
+   /* Second learning operation, so the first must refuse it. Operation 2 of
+    * the index and maintenance families produces the same bytes; the stage
+    * separates them, not the envelope. */
+   assert(aimee_db2_rules_decay_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == 0);
+   assert(aimee_db2_directive_sweep_expired_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_curiosity_rescore_all_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, rescored = 99;
+   assert(aimee_db2_curiosity_rescore_all_reply_encode(19, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_curiosity_rescore_all_reply_decode(reply, reply_len, &rescored) == 0 &&
+          rescored == 19);
+   assert(aimee_db2_curiosity_rescore_all_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_curiosity_rescore_all_reply_decode(reply, reply_len, &rescored) == 0 &&
+          rescored == 0);
+   assert(aimee_db2_curiosity_rescore_all_reply_encode(AIMEE_DB2_CURIOSITY_RESCORE_ALL_MAX + 1u,
+                                                       reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_curiosity_rescore_all_reply_encode(19, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_curiosity_rescore_all_reply_encode(19, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_curiosity_rescore_all_reply_decode(reply, reply_len, &rescored) == -1 &&
+          rescored == 0);
 }
 
 static void test_rules_decay_wire(void)
@@ -5744,6 +5791,42 @@ static void test_prospective_sweep_expired_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_curiosity_rescore_all_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.curiosity_rescore_all = curiosity_rescore_all};
+   uint8_t request[AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN];
+   uint32_t response_len = 99, rescored = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL};
+   assert(aimee_db2_curiosity_rescore_all_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(curiosity_rescore_calls == 1);
+   assert(aimee_db2_curiosity_rescore_all_reply_decode(response, response_len, &rescored) == 0 &&
+          rescored == 19);
+
+   /* No open curiosity item is zero, and so is a failed statement. Rescoring
+    * an unchanged corpus is also not a no-op in the count: every open item is
+    * rewritten with the same numbers, so the count stays at the item total
+    * rather than falling to zero on replay. */
+   curiosity_rescore_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_curiosity_rescore_all_reply_decode(response, response_len, &rescored) == 0 &&
+          rescored == 0);
+   curiosity_rescore_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   curiosity_rescore_value = 19;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_rules_decay_handler(void)
 {
    reset();
@@ -7764,6 +7847,7 @@ int main(void)
    test_cross_repo_rebuild_identities_wire();
    test_cross_repo_rebuild_build_deps_wire();
    test_rules_decay_wire();
+   test_curiosity_rescore_all_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
    test_mark_revisit_due_wire();
@@ -7833,6 +7917,7 @@ int main(void)
    test_cross_repo_rebuild_identities_handler();
    test_cross_repo_rebuild_build_deps_handler();
    test_rules_decay_handler();
+   test_curiosity_rescore_all_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
    test_mark_revisit_due_handler();

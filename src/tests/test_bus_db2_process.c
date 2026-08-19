@@ -620,6 +620,13 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(rules_touched == 0);
 
+   /* No curiosity item exists on a fresh schema, so the rescore has nothing to
+    * weigh. Zero here is an empty working set, not a failure. */
+   uint32_t items_rescored = 99;
+   assert(aimee_db2_curiosity_rescore_all_call(call_client, &client, 9111, 0, &items_rescored, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   assert(items_rescored == 0);
+
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and
     * the second call returning the same zero is what the catalog's safe

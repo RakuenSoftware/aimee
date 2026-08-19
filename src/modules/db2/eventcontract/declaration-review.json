@@ -196,6 +196,14 @@
       "reason": "The typed maintenance.curator_reenqueue_extract_all operation replaces the pass that enqueues an extraction job for every current-generation document and re-arms the existing ones. Two properties are recorded rather than smoothed over: it runs three autocommitting statements with no surrounding transaction, so a reader can observe the state between them, and its number comes from a separate count query rather than the rows the mutations touched, so it is the queue afterwards and not the work done."
     },
     {
+      "symbol": "db2_curiosity_rescore_all",
+      "signature_sha256": "2fa4af495a36240cf5defc84e76ee62be4412b3e21dd56906d5a49ee6f000a8c",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.curiosity_rescore_all operation replaces the pass that rescores open curiosity items. The weights decide what the system becomes curious about next, so a caller able to send them could steer its attention; they are fixed policy and travel as integer percents, since a float literal is not the same number on every reader. The pass also writes updated_at back to itself so a rescore does not read as an edit."
+    },
+    {
       "symbol": "db2_decision_log_mark_revisit_due",
       "signature_sha256": "68c8c667165a80c21272f9393f008b4d1d813ebe7422b09699cdd71df6e249ab",
       "disposition": "wire-operation",

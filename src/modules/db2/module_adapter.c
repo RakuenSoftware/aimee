@@ -6,6 +6,7 @@
 #include "c/db2_internal.h"
 #include "c/db2_pool.h"
 #include "c/code_index.h"
+#include "c/curiosity.h"
 #include "c/code_index_ops.h"
 #include "c/cross_repo_build.h"
 #include "c/cross_repo_identity.h"
@@ -324,6 +325,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .cross_repo_rebuild_identities = db2_cross_repo_rebuild_identities,
        .cross_repo_rebuild_build_deps = db2_cross_repo_rebuild_build_deps,
        .rules_decay = db2_rules_decay,
+       .curiosity_rescore_all = db2_curiosity_rescore_all,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        .directive_sweep_expired = db2_directive_sweep_expired,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
@@ -368,6 +370,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS &&
         invocation->stage_id != AIMEE_DB2_STAGE_RULES_DECAY &&
+        invocation->stage_id != AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1467,7 +1470,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }
 
-   if (invocation->stage_id == AIMEE_DB2_STAGE_RULES_DECAY)
+   if (invocation->stage_id == AIMEE_DB2_STAGE_RULES_DECAY ||
+       invocation->stage_id == AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL)
    {
       if (aimee_db2_rules_decay_request_decode(request_body, request_len) == 0)
       {
@@ -1488,6 +1492,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_rules_decay_reply_encode((uint32_t)rules_touched, response_body,
                                                 response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_curiosity_rescore_all_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->curiosity_rescore_all)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The scoring weights stay here for the same reason the decay
+          * constants next door do, though what they buy is different: these
+          * decide what the system becomes curious about next, so a caller able
+          * to send them could steer its attention. Nothing open to rescore and
+          * a failed statement are both zero. */
+         int items_rescored = backend->curiosity_rescore_all();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (items_rescored < 0 || (uint32_t)items_rescored > AIMEE_DB2_CURIOSITY_RESCORE_ALL_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_curiosity_rescore_all_reply_encode((uint32_t)items_rescored, response_body,
+                                                          response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

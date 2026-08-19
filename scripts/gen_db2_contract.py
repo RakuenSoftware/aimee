@@ -258,7 +258,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 # so a concurrent reader can see between them.
                                 "multi-statement"
                                 if name in ("curator_reenqueue_extract_all",
-                                            "rules_decay") else "none")
+                                            "rules_decay",
+                                            "curiosity_rescore_all") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
         # observationally neutral the way every other operation here is.
         expected_idempotency = ("unsafe"
@@ -2224,6 +2225,48 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("rules-decay-reply",
                      "reply must contain one bounded u32 summed row count")
+        elif key == ("learning", 2) and name == "curiosity_rescore_all" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # Weights travel as integer percents because the catalog forbids
+            # float literals: a JSON float is not the same number on every
+            # reader, and a scoring weight that drifts by a rounding step is
+            # exactly the kind of change nobody would notice.
+            # These weights decide what the system becomes curious about next.
+            # A caller able to send them could steer its attention, which is a
+            # more interesting capability than it first looks. The pass also
+            # writes updated_at back to itself on purpose, so a rescore does
+            # not read downstream as somebody having edited the item.
+            if operation["c_symbols"] != ["db2_curiosity_rescore_all"]:
+                fail("operation-c-symbols",
+                     "curiosity_rescore_all C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "curiosity_rescore_all results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "curiosity_rescore_all.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"states": ["open", "in_progress"],
+                                          "evidence_multiplier_percent": 115,
+                                          "progress_half_life_days": 30,
+                                          "stale_boost_percent": 20,
+                                          "contradiction_boost_percent": 10,
+                                          "maturity_weight_percent": 60,
+                                          "maturity_log_divisor": 4,
+                                          "preserves_updated_at": True}):
+                fail("curiosity-rescore-all-request",
+                     "request must carry no payload and fix every scoring weight")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field", "count_source"},
+                          "curiosity_rescore_all.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "curiosity_rescore_all.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["count_source"] != "successful-updates" or
+                    field != {"name": "items_rescored", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("curiosity-rescore-all-reply",
+                     "reply must contain one bounded u32 rescored item count")
         elif key == ("maintenance", 1) and name == "prospective_sweep_expired" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # The clock is the database's, not the caller's. A caller-supplied
@@ -2479,7 +2522,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 69 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 70 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2498,12 +2541,12 @@ def validate_catalog(value: object) -> dict[str, object]:
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
-            "rules_decay", "prospective_sweep_expired",
+            "rules_decay", "curiosity_rescore_all", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the sixty-nine supported operations exactly once")
+             "the partial generator requires the seventy supported operations exactly once")
     return catalog
 
 
@@ -2688,14 +2731,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
     rules_decay = catalog["operations"][60]
-    prospective_sweep_expired = catalog["operations"][61]
-    directive_sweep_expired = catalog["operations"][62]
-    mark_revisit_due = catalog["operations"][63]
-    ingest_queue_reset_running = catalog["operations"][64]
-    evidence_reembed_all = catalog["operations"][65]
-    curator_reembed_all = catalog["operations"][66]
-    synth_reenqueue_all = catalog["operations"][67]
-    curator_reenqueue_extract_all = catalog["operations"][68]
+    curiosity_rescore_all = catalog["operations"][61]
+    prospective_sweep_expired = catalog["operations"][62]
+    directive_sweep_expired = catalog["operations"][63]
+    mark_revisit_due = catalog["operations"][64]
+    ingest_queue_reset_running = catalog["operations"][65]
+    evidence_reembed_all = catalog["operations"][66]
+    curator_reembed_all = catalog["operations"][67]
+    synth_reenqueue_all = catalog["operations"][68]
+    curator_reenqueue_extract_all = catalog["operations"][69]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3105,6 +3149,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     rules_decay_none = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(rules_decay["id"]), 0, _put_u32(0),
+    )
+    curiosity_rescore_all_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(curiosity_rescore_all["id"]), 0, b"",
+    )
+    curiosity_rescore_all_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(curiosity_rescore_all["id"]), 0, _put_u32(19),
+    )
+    curiosity_rescore_all_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(curiosity_rescore_all["id"]), 0, _put_u32(0),
     )
     prospective_sweep_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(prospective_sweep_expired["id"]), 0, b"",
@@ -6051,6 +6104,46 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": curiosity_rescore_all["family"],
+            "id": curiosity_rescore_all["id"],
+            "name": curiosity_rescore_all["name"],
+            "request": {
+                "positive": curiosity_rescore_all_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(curiosity_rescore_all_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(curiosity_rescore_all_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     curiosity_rescore_all_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (curiosity_rescore_all_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "items_rescored": 19,
+                     "hex": curiosity_rescore_all_ok.hex()},
+                    {"result": 0, "items_rescored": 0,
+                     "hex": curiosity_rescore_all_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(curiosity_rescore_all_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(curiosity_rescore_all_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(curiosity_rescore_all["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (curiosity_rescore_all_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex":
+                     curiosity_rescore_all_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (curiosity_rescore_all_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": prospective_sweep_expired["family"],
             "id": prospective_sweep_expired["id"],
             "name": prospective_sweep_expired["name"],
@@ -6427,14 +6520,15 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
     rules_decay = catalog["operations"][60]
-    prospective_sweep_expired = catalog["operations"][61]
-    directive_sweep_expired = catalog["operations"][62]
-    mark_revisit_due = catalog["operations"][63]
-    ingest_queue_reset_running = catalog["operations"][64]
-    evidence_reembed_all = catalog["operations"][65]
-    curator_reembed_all = catalog["operations"][66]
-    synth_reenqueue_all = catalog["operations"][67]
-    curator_reenqueue_extract_all = catalog["operations"][68]
+    curiosity_rescore_all = catalog["operations"][61]
+    prospective_sweep_expired = catalog["operations"][62]
+    directive_sweep_expired = catalog["operations"][63]
+    mark_revisit_due = catalog["operations"][64]
+    ingest_queue_reset_running = catalog["operations"][65]
+    evidence_reembed_all = catalog["operations"][66]
+    curator_reembed_all = catalog["operations"][67]
+    synth_reenqueue_all = catalog["operations"][68]
+    curator_reenqueue_extract_all = catalog["operations"][69]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -7285,6 +7379,18 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{rules_decay['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_RULES_DECAY_MAX",
          f"{rules_decay['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_CURIOSITY_RESCORE_ALL", "AIMEE_DB2_EVENT_LEARNING"),
+        ("AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL", "AIMEE_DB2_FAMILY_LEARNING"),
+        ("AIMEE_DB2_OPERATION_CURIOSITY_RESCORE_ALL",
+         f"{curiosity_rescore_all['id']}u"),
+        ("AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN",
+         f"{curiosity_rescore_all['request']['encoded_size']}u"),
+        ("AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN",
+         f"{curiosity_rescore_all['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_CURIOSITY_RESCORE_ALL_ERROR_LEN",
+         f"{curiosity_rescore_all['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_CURIOSITY_RESCORE_ALL_MAX",
+         f"{curiosity_rescore_all['reply']['field']['maximum']}u"),
         ("AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_EVENT_MAINTENANCE"),
         ("AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_FAMILY_MAINTENANCE"),
         ("AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED",
@@ -9754,6 +9860,61 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
    if (decoded > AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX)
       return -1;
    *expired_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_curiosity_rescore_all_request_encode(uint8_t *output,
+                                                                 size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CURIOSITY_RESCORE_ALL, 0u, 0u,
+                                          output, capacity);
+}}
+
+static inline int aimee_db2_curiosity_rescore_all_request_decode(const uint8_t *input,
+                                                                 size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_CURIOSITY_RESCORE_ALL &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_curiosity_rescore_all_reply_encode(uint32_t items_rescored,
+                                                               uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || items_rescored > AIMEE_DB2_CURIOSITY_RESCORE_ALL_MAX ||
+       capacity < AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CURIOSITY_RESCORE_ALL,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, items_rescored);
+   *output_len = AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_curiosity_rescore_all_reply_decode(const uint8_t *input,
+                                                               size_t input_len,
+                                                               uint32_t *items_rescored)
+{{
+   if (items_rescored)
+      *items_rescored = 0u;
+   if (!items_rescored)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CURIOSITY_RESCORE_ALL ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CURIOSITY_RESCORE_ALL_MAX)
+      return -1;
+   *items_rescored = decoded;
    return 0;
 }}
 
@@ -12868,6 +13029,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *rules_touched, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_curiosity_rescore_all_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *items_rescored, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -14371,6 +14536,31 @@ aimee_module_call_result_t aimee_db2_rules_decay_call(aimee_db2_call_fn call, vo
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_curiosity_rescore_all_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, uint32_t *items_rescored,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !items_rescored)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *items_rescored = 0u;
+   uint8_t request[AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_curiosity_rescore_all_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CURIOSITY_RESCORE_ALL,
+            AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_curiosity_rescore_all_reply_decode(response, response_len, items_rescored) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -14869,14 +15059,15 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
     rules_decay = catalog["operations"][60]
-    prospective_sweep_expired = catalog["operations"][61]
-    directive_sweep_expired = catalog["operations"][62]
-    mark_revisit_due = catalog["operations"][63]
-    ingest_queue_reset_running = catalog["operations"][64]
-    evidence_reembed_all = catalog["operations"][65]
-    curator_reembed_all = catalog["operations"][66]
-    synth_reenqueue_all = catalog["operations"][67]
-    curator_reenqueue_extract_all = catalog["operations"][68]
+    curiosity_rescore_all = catalog["operations"][61]
+    prospective_sweep_expired = catalog["operations"][62]
+    directive_sweep_expired = catalog["operations"][63]
+    mark_revisit_due = catalog["operations"][64]
+    ingest_queue_reset_running = catalog["operations"][65]
+    evidence_reembed_all = catalog["operations"][66]
+    curator_reembed_all = catalog["operations"][67]
+    synth_reenqueue_all = catalog["operations"][68]
+    curator_reenqueue_extract_all = catalog["operations"][69]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -15235,6 +15426,10 @@ const EventRulesDecay = EventLearning
 const StageRulesDecay = FamilyLearning
 const OperationRulesDecay uint32 = {rules_decay['id']}
 const RulesDecayMax uint32 = {rules_decay['reply']['field']['maximum']}
+const EventCuriosityRescoreAll = EventLearning
+const StageCuriosityRescoreAll = FamilyLearning
+const OperationCuriosityRescoreAll uint32 = {curiosity_rescore_all['id']}
+const CuriosityRescoreAllMax uint32 = {curiosity_rescore_all['reply']['field']['maximum']}
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = {prospective_sweep_expired['id']}
@@ -17269,6 +17464,55 @@ func DecodeRulesDecayReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return rulesTouched, nil
+}}
+
+// EncodeCuriosityRescoreAllRequest emits the empty request envelope. Every
+// scoring weight is policy and never travels.
+func EncodeCuriosityRescoreAllRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationCuriosityRescoreAll, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeCuriosityRescoreAllRequest validates the exact learning-family
+// envelope.
+func DecodeCuriosityRescoreAllRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCuriosityRescoreAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeCuriosityRescoreAllReply emits one bounded u32 rescored item count.
+func EncodeCuriosityRescoreAllReply(itemsRescored uint32) ([]byte, error) {{
+	if itemsRescored > CuriosityRescoreAllMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationCuriosityRescoreAll, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], itemsRescored)
+	return reply, nil
+}}
+
+// DecodeCuriosityRescoreAllReply validates the operation and bounded count.
+func DecodeCuriosityRescoreAllReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCuriosityRescoreAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	itemsRescored := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if itemsRescored > CuriosityRescoreAllMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return itemsRescored, nil
 }}
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The
