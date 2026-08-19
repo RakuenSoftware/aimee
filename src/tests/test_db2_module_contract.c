@@ -1470,6 +1470,30 @@ int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t labe
    return 0;
 }
 
+int db2_entity_count_observations(const char *entity_id)
+{
+   (void)entity_id;
+   return 0;
+}
+
+int db2_fidelity_attribution_count_by_turn(const char *turn_id)
+{
+   (void)turn_id;
+   return 0;
+}
+
+int db2_kb_blob_ref_referenced(const char *blob_ref)
+{
+   (void)blob_ref;
+   return 0;
+}
+
+int db2_kb_async_count_kind_pending(const char *kind)
+{
+   (void)kind;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

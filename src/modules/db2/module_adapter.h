@@ -80,6 +80,10 @@ typedef struct
    int (*anti_pattern_exists_by_source_ref)(const char *source_ref);
    int (*artifact_citation_count)(const char *artifact_id);
    int (*commits_in_last_7_days)(const char *sink);
+   int (*entity_observation_count)(const char *entity_id);
+   int (*fidelity_attribution_count)(const char *turn_id);
+   int (*blob_referenced)(const char *blob_ref);
+   int (*async_pending_count)(const char *kind);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);

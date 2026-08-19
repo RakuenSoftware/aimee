@@ -2573,6 +2573,48 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply_field != {"name": reply_name, "type": "u32", "minimum": 0,
                                     "maximum": reply_max}):
                 fail(f"{rule}-reply", "reply must carry one bounded number")
+        elif (key in (("index", 12), ("learning", 13), ("organization", 7), ("maintenance", 11))) and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            # More reads of the same shape, spread across four families. What
+            # each number counts is again the part the wire cannot show.
+            expected = {
+                "entity_observation_count": ("db2_entity_count_observations", "entity_id", 255, "count", 0x7fffffff),
+                "fidelity_attribution_count": ("db2_fidelity_attribution_count_by_turn", "turn_id", 127, "count", 0x7fffffff),
+                "blob_referenced": ("db2_kb_blob_ref_referenced", "blob_ref", 255, "referenced", 0x1),
+                "async_pending_count": ("db2_kb_async_count_kind_pending", "kind", 63, "count", 0x7fffffff),
+            }
+            if name not in expected:
+                fail("unsupported-operation", f"unsupported single-string read {name!r}")
+            symbol, argument, argument_max, reply_name, reply_max = expected[name]
+            rule = name.replace("_", "-")
+            if operation["c_symbols"] != [symbol]:
+                fail("operation-c-symbols", f"{name} C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", f"{name} results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "policy", "field"},
+                            f"{name}.request")
+            request_field = _keys(request["field"],
+                                  {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                  f"{name}.request.field")
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"counts"}:
+                fail(f"{rule}-request", "request policy must say what the number counts")
+            _string(policy["counts"], f"{name}.request.policy.counts", 160)
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 5 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 4 + argument_max or
+                    request_field != {"name": argument, "type": "utf8", "minimum_bytes": 1,
+                                      "maximum_bytes": argument_max}):
+                fail(f"{rule}-request", "request must carry one non-empty bounded string")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "field"},
+                          f"{name}.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                f"{name}.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": reply_name, "type": "u32", "minimum": 0,
+                                    "maximum": reply_max}):
+                fail(f"{rule}-reply", "reply must carry one bounded number")
         elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # First operation of the index family. The tiers that count as a
@@ -3683,7 +3725,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 114 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 118 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3709,21 +3751,22 @@ def validate_catalog(value: object) -> dict[str, object]:
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
-            "drift_candidates", "file_index_delete_project", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
+            "drift_candidates", "file_index_delete_project", "entity_observation_count",
+            "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
             "proposals_archive_expired", "trace_mining_last_id", "anti_pattern_bump",
             "anti_pattern_delete", "trace_mining_record", "anti_pattern_exists_exact",
             "anti_pattern_exists_by_source_ref", "artifact_citation_count",
-            "commits_in_last_7_days", "rel_types_ensure_seed",
+            "commits_in_last_7_days", "fidelity_attribution_count", "rel_types_ensure_seed",
             "doc_delete", "task_delete",
-            "clear_project", "clear_current_project", "document_exists",
+            "clear_project", "clear_current_project", "document_exists", "blob_referenced",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
             "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all", "directive_suppress",
-            "directive_record_surface"]:
+            "directive_record_surface", "async_pending_count"]:
         fail("unsupported-operation",
-             "the partial generator requires the one hundred and fourteen supported operations exactly once")
+             "the partial generator requires the one hundred and eighteen supported operations exactly once")
     return catalog
 
 
@@ -3927,6 +3970,10 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     anti_pattern_exists_by_source_ref = named["anti_pattern_exists_by_source_ref"]
     artifact_citation_count = named["artifact_citation_count"]
     commits_in_last_7_days = named["commits_in_last_7_days"]
+    entity_observation_count = named["entity_observation_count"]
+    fidelity_attribution_count = named["fidelity_attribution_count"]
+    blob_referenced = named["blob_referenced"]
+    async_pending_count = named["async_pending_count"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -4321,6 +4368,10 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     anti_pattern_exists_by_source_ref_vectors = _string_count_vectors(catalog, anti_pattern_exists_by_source_ref)
     artifact_citation_count_vectors = _string_count_vectors(catalog, artifact_citation_count)
     commits_in_last_7_days_vectors = _string_count_vectors(catalog, commits_in_last_7_days)
+    entity_observation_count_vectors = _string_count_vectors(catalog, entity_observation_count)
+    fidelity_attribution_count_vectors = _string_count_vectors(catalog, fidelity_attribution_count)
+    blob_referenced_vectors = _string_count_vectors(catalog, blob_referenced)
+    async_pending_count_vectors = _string_count_vectors(catalog, async_pending_count)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -7522,7 +7573,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (file_index_delete_project_ok + b"\0").hex()},
                 ],
             },
-        }, {
+        }, entity_observation_count_vectors, {
             "family": rules_decay["family"],
             "id": rules_decay["id"],
             "name": rules_decay["name"],
@@ -7774,7 +7825,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (anti_pattern_delete_ok + b"\0").hex()},
                 ],
             },
-        }, trace_mining_record_vectors, anti_pattern_exists_exact_vectors, anti_pattern_exists_by_source_ref_vectors, artifact_citation_count_vectors, commits_in_last_7_days_vectors, {
+        }, trace_mining_record_vectors, anti_pattern_exists_exact_vectors, anti_pattern_exists_by_source_ref_vectors, artifact_citation_count_vectors, commits_in_last_7_days_vectors, fidelity_attribution_count_vectors, {
             "family": rel_types_ensure_seed["family"],
             "id": rel_types_ensure_seed["id"],
             "name": rel_types_ensure_seed["name"],
@@ -7949,7 +8000,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (clear_current_project_ok + b"\0").hex()},
                 ],
             },
-        }, document_exists_vectors, {
+        }, document_exists_vectors, blob_referenced_vectors, {
             "family": vector_rebuild_lock_try_acquire["family"],
             "id": vector_rebuild_lock_try_acquire["id"],
             "name": vector_rebuild_lock_try_acquire["name"],
@@ -8434,7 +8485,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (directive_record_surface_ok + b"\0").hex()},
                 ],
             },
-        }],
+        }, async_pending_count_vectors],
     }
     # The fixture blocks above are hand-sequenced, so their order is not the
     # catalog's by construction. It has drifted once already: a learning
@@ -12293,6 +12344,10 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     anti_pattern_exists_by_source_ref = named["anti_pattern_exists_by_source_ref"]
     artifact_citation_count = named["artifact_citation_count"]
     commits_in_last_7_days = named["commits_in_last_7_days"]
+    entity_observation_count = named["entity_observation_count"]
+    fidelity_attribution_count = named["fidelity_attribution_count"]
+    blob_referenced = named["blob_referenced"]
+    async_pending_count = named["async_pending_count"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -13099,6 +13154,10 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         *_string_count_constants(anti_pattern_exists_by_source_ref),
         *_string_count_constants(artifact_citation_count),
         *_string_count_constants(commits_in_last_7_days),
+        *_string_count_constants(entity_observation_count),
+        *_string_count_constants(fidelity_attribution_count),
+        *_string_count_constants(blob_referenced),
+        *_string_count_constants(async_pending_count),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -17501,7 +17560,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
 }}
 
 {_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
-{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}{_aggregate_codecs(aggregate)}{_corpus_codecs(load_eval_corpus)}{_u64_probe_codecs(record_exists)}{_u64_ack_codecs(trace_mining_record)}{_u64_probe_codecs(document_exists)}{_string_count_codecs(anti_pattern_exists_exact)}{_string_count_codecs(anti_pattern_exists_by_source_ref)}{_string_count_codecs(artifact_citation_count)}{_string_count_codecs(commits_in_last_7_days)}
+{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}{_aggregate_codecs(aggregate)}{_corpus_codecs(load_eval_corpus)}{_u64_probe_codecs(record_exists)}{_u64_ack_codecs(trace_mining_record)}{_u64_probe_codecs(document_exists)}{_string_count_codecs(anti_pattern_exists_exact)}{_string_count_codecs(anti_pattern_exists_by_source_ref)}{_string_count_codecs(artifact_citation_count)}{_string_count_codecs(commits_in_last_7_days)}{_string_count_codecs(entity_observation_count)}{_string_count_codecs(fidelity_attribution_count)}{_string_count_codecs(blob_referenced)}{_string_count_codecs(async_pending_count)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -20140,6 +20199,26 @@ extern "C"
        const char *sink, uint32_t *count, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_entity_observation_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *entity_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_fidelity_attribution_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *turn_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_blob_referenced_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *blob_ref, uint32_t *referenced, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_async_pending_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *kind, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -22324,6 +22403,114 @@ aimee_module_call_result_t aimee_db2_commits_in_last_7_days_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_entity_observation_count_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *entity_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !entity_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ENTITY_OBSERVATION_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ENTITY_OBSERVATION_COUNT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_entity_observation_count_request_encode(entity_id, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENTITY_OBSERVATION_COUNT, AIMEE_DB2_STAGE_ENTITY_OBSERVATION_COUNT, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_entity_observation_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_fidelity_attribution_count_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *turn_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !turn_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_fidelity_attribution_count_request_encode(turn_id, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FIDELITY_ATTRIBUTION_COUNT, AIMEE_DB2_STAGE_FIDELITY_ATTRIBUTION_COUNT, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_fidelity_attribution_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_blob_referenced_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *blob_ref, uint32_t *referenced, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (referenced)
+      *referenced = 0u;
+   if (!call || !referenced || !blob_ref)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_BLOB_REFERENCED_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_BLOB_REFERENCED_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_blob_referenced_request_encode(blob_ref, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_BLOB_REFERENCED, AIMEE_DB2_STAGE_BLOB_REFERENCED, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_blob_referenced_reply_decode(response, response_len, referenced) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_async_pending_count_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *kind, uint32_t *count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !kind)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ASYNC_PENDING_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ASYNC_PENDING_COUNT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_async_pending_count_request_encode(kind, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ASYNC_PENDING_COUNT, AIMEE_DB2_STAGE_ASYNC_PENDING_COUNT, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_async_pending_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -23516,6 +23703,10 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     anti_pattern_exists_by_source_ref = named["anti_pattern_exists_by_source_ref"]
     artifact_citation_count = named["artifact_citation_count"]
     commits_in_last_7_days = named["commits_in_last_7_days"]
+    entity_observation_count = named["entity_observation_count"]
+    fidelity_attribution_count = named["fidelity_attribution_count"]
+    blob_referenced = named["blob_referenced"]
+    async_pending_count = named["async_pending_count"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -25570,7 +25761,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}{_aggregate_go(aggregate)}{_corpus_go(load_eval_corpus)}{_u64_probe_go(record_exists)}{_u64_ack_go(trace_mining_record)}{_u64_probe_go(document_exists)}{_string_count_go(anti_pattern_exists_exact)}{_string_count_go(anti_pattern_exists_by_source_ref)}{_string_count_go(artifact_citation_count)}{_string_count_go(commits_in_last_7_days)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}{_aggregate_go(aggregate)}{_corpus_go(load_eval_corpus)}{_u64_probe_go(record_exists)}{_u64_ack_go(trace_mining_record)}{_u64_probe_go(document_exists)}{_string_count_go(anti_pattern_exists_exact)}{_string_count_go(anti_pattern_exists_by_source_ref)}{_string_count_go(artifact_citation_count)}{_string_count_go(commits_in_last_7_days)}{_string_count_go(entity_observation_count)}{_string_count_go(fidelity_attribution_count)}{_string_count_go(blob_referenced)}{_string_count_go(async_pending_count)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)

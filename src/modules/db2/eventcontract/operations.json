@@ -2449,6 +2449,31 @@
       }
     },
     {
+      "family": "index",
+      "id": 12,
+      "name": "entity_observation_count",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity observations are relational DB2 rows joined to canonical memories, so counting them stays DB2 authority.",
+      "c_symbols": ["db2_entity_count_observations"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 283,
+        "policy": {"counts": "distinct memories mentioning the entity, matched case-insensitively, so a memory naming it twice counts once"},
+        "field": {"name": "entity_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 255}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -2757,6 +2782,31 @@
       }
     },
     {
+      "family": "learning",
+      "id": 13,
+      "name": "fidelity_attribution_count",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Fidelity attributions are relational DB2 artifact rows, so counting the ones recorded for a turn stays DB2 authority.",
+      "c_symbols": ["db2_fidelity_attribution_count_by_turn"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "policy": {"counts": "artifact rows of the fidelity_attribution kind for this turn; the kind is fixed policy"},
+        "field": {"name": "turn_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -2908,6 +2958,31 @@
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
         "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+      }
+    },
+    {
+      "family": "organization",
+      "id": 7,
+      "name": "blob_referenced",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Document assets are relational DB2 rows, so whether a stored blob is still referenced is DB2 authority.",
+      "c_symbols": ["db2_kb_blob_ref_referenced"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 283,
+        "policy": {"counts": "whether any document asset still points at the blob; the count of references is not reported"},
+        "field": {"name": "blob_ref", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 255}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "referenced", "type": "u32", "minimum": 0, "maximum": 1}
       }
     },
     {
@@ -3237,6 +3312,31 @@
         "encoded_size_error": 24,
         "fields": [],
         "absent_collapsed_into_error": true
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 11,
+      "name": "async_pending_count",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The asynchronous job queue is relational DB2 state, so how much of a kind is waiting stays DB2 authority.",
+      "c_symbols": ["db2_kb_async_count_kind_pending"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 91,
+        "policy": {"counts": "jobs of this kind still in the pending state; a job being worked on is not counted"},
+        "field": {"name": "kind", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 63}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
       }
     }
   ]

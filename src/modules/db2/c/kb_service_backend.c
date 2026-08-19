@@ -1101,6 +1101,17 @@ int db2_kb_service_list_pending_reembed_memory_ids(const char *version, int resu
    return count;
 }
 
+/* This counts every successful memory_units embedding, not the ones belonging to
+ * `version`: vector_index_ops has no column naming the embedder version, so the
+ * filter this function's name promises cannot be written against this schema.
+ * The argument is validated and then unused.
+ *
+ * The consequence is in the caller. kb_handle_memory_reembed_rollback uses the
+ * count as a safety gate -- refuse to roll back to a version that has no
+ * embeddings -- and because the count ignores the version, the gate passes for
+ * any version string as long as some embeddings exist. Closing that gate needs a
+ * column that records which version produced a row, which is a schema decision
+ * rather than a fix to this function. */
 int db2_kb_service_count_embeddings_for_version(const char *version)
 {
    if (!version || !version[0])

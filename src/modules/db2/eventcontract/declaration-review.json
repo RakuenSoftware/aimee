@@ -356,6 +356,14 @@
       "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
     },
     {
+      "symbol": "db2_entity_count_observations",
+      "signature_sha256": "b1542fbbdf4772d744aaea46795c0360004baa6e503f3615fa946aa54e44d3e0",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_observation_count operation replaces the observation count. It counts distinct memories rather than observation rows and matches the entity case-insensitively, so a memory naming an entity twice counts once and a differently cased spelling still matches. Neither is visible in a bare number, so both are policy."
+    },
+    {
       "symbol": "db2_entity_edge_normalize_weights",
       "signature_sha256": "085de3b769fda5eb2c35fb0b9ba2177f2fd502d72c39aa5253bf9ed88f6d5331",
       "disposition": "wire-operation",
@@ -396,6 +404,14 @@
       "reason": "The typed maintenance.evidence_reembed_all operation replaces the reset that requeues every evidence index row after an embedder version change. Its reach is total and deliberately so: it takes no predicate, resets the attempt count and discards the last error on every row. Recording that as fixed policy is the point of the entry -- the reach cannot be narrowed or widened by a caller, and the discarded failure history is stated rather than left to be discovered by someone wondering where the errors went."
     },
     {
+      "symbol": "db2_fidelity_attribution_count_by_turn",
+      "signature_sha256": "00d594b46960adac6cc676ef7e879c2638327cb267f6e7e09ce8fcabb878a3dd",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.fidelity_attribution_count operation replaces the attribution count. Which artifact kind counts as a fidelity attribution is DB2 policy fixed in the statement, so a caller cannot ask for a different kind through this operation."
+    },
+    {
       "symbol": "db2_health_probe",
       "signature_sha256": "325f260c51f255dae61d7323836bc549a712cb5486abeb4f4967ffdc57ac05ee",
       "disposition": "wire-operation",
@@ -418,6 +434,22 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.health operation proves the DB2 owner is initialized before reporting PostgreSQL and canonical KB readiness."
+    },
+    {
+      "symbol": "db2_kb_async_count_kind_pending",
+      "signature_sha256": "12e003145090300c55f8e964465e0289d6f77cb86bf0609bb63946d1e1a19090",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.async_pending_count operation replaces the queue-depth read. It counts only jobs still pending, so a job already being worked on is not in the answer -- a caller using this as a backlog gauge is measuring what has not started rather than what is outstanding."
+    },
+    {
+      "symbol": "db2_kb_blob_ref_referenced",
+      "signature_sha256": "d8c70a38c5ba64b7cbec9bd3d6ecfbc3b16220ccdb3c739d72e9e6508ccd438d",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.blob_referenced operation replaces the reference probe. It answers whether any document asset still points at the blob, not how many do: the statement stops at the first row, which is what makes it cheap enough to run before a delete."
     },
     {
       "symbol": "db2_kb_doc_delete",

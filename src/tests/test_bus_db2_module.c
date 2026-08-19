@@ -89,6 +89,10 @@ typedef struct
    int (*anti_pattern_exists_by_source_ref)(const char *source_ref);
    int (*artifact_citation_count)(const char *artifact_id);
    int (*commits_in_last_7_days)(const char *sink);
+   int (*entity_observation_count)(const char *entity_id);
+   int (*fidelity_attribution_count)(const char *turn_id);
+   int (*blob_referenced)(const char *blob_ref);
+   int (*async_pending_count)(const char *kind);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -309,6 +313,7 @@ static int probe_calls[2];
 static int64_t probe_identifier_seen;
 static int mining_calls;
 static int string_read_calls[4];
+static int cross_family_calls[4];
 static char string_read_argument_seen[64];
 static int64_t mining_watermark_seen;
 static int corpus_limit_seen;
@@ -740,6 +745,36 @@ static int string_read_impl(int which, const char *argument)
    return which == 2 ? 77 : which;
 }
 
+/* Each answers a different number so the reply says which one ran; the third
+ * answers past its Boolean bound to show the handler clamps. */
+static int cross_family_impl(int which, const char *argument)
+{
+   cross_family_calls[which]++;
+   snprintf(string_read_argument_seen, sizeof(string_read_argument_seen), "%s",
+            argument ? argument : "");
+   return which == 2 ? 9 : which + 11;
+}
+
+static int entity_observation_count(const char *entity_id)
+{
+   return cross_family_impl(0, entity_id);
+}
+
+static int fidelity_attribution_count(const char *turn_id)
+{
+   return cross_family_impl(1, turn_id);
+}
+
+static int blob_referenced(const char *blob_ref)
+{
+   return cross_family_impl(2, blob_ref);
+}
+
+static int async_pending_count(const char *kind)
+{
+   return cross_family_impl(3, kind);
+}
+
 static int anti_pattern_exists_exact(const char *pattern)
 {
    return string_read_impl(0, pattern);
@@ -1091,6 +1126,30 @@ int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t labe
    (void)max;
    if (label_out && label_len)
       label_out[0] = '\0';
+   return 0;
+}
+
+int db2_entity_count_observations(const char *entity_id)
+{
+   (void)entity_id;
+   return 0;
+}
+
+int db2_fidelity_attribution_count_by_turn(const char *turn_id)
+{
+   (void)turn_id;
+   return 0;
+}
+
+int db2_kb_blob_ref_referenced(const char *blob_ref)
+{
+   (void)blob_ref;
+   return 0;
+}
+
+int db2_kb_async_count_kind_pending(const char *kind)
+{
+   (void)kind;
    return 0;
 }
 
@@ -2421,6 +2480,10 @@ int main(void)
        .anti_pattern_exists_by_source_ref = anti_pattern_exists_by_source_ref,
        .artifact_citation_count = artifact_citation_count,
        .commits_in_last_7_days = commits_in_last_7_days,
+       .entity_observation_count = entity_observation_count,
+       .fidelity_attribution_count = fidelity_attribution_count,
+       .blob_referenced = blob_referenced,
+       .async_pending_count = async_pending_count,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -2948,6 +3011,34 @@ int main(void)
    assert(aimee_db2_artifact_citation_count_call(call_client, &client, 7161, 0, "", &string_answer,
                                                  NULL, NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
    assert(string_read_calls[2] == 1);
+
+   /* Four more of the same shape, in four different families, so each also
+    * proves it reached the family branch that owns it. */
+   string_answer = 99;
+   assert(aimee_db2_entity_observation_count_call(call_client, &client, 7170, 0, "probe-argument",
+                                                  &string_answer, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 11 && cross_family_calls[0] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_fidelity_attribution_count_call(call_client, &client, 7171, 0, "probe-argument",
+                                                    &string_answer, NULL,
+                                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 12 && cross_family_calls[1] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_blob_referenced_call(call_client, &client, 7172, 0, "probe-argument",
+                                         &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && cross_family_calls[2] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_async_pending_count_call(call_client, &client, 7173, 0, "probe-argument",
+                                             &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 14 && cross_family_calls[3] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

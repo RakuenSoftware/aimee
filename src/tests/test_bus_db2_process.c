@@ -482,6 +482,28 @@ int main(int argc, char **argv)
                                                 NULL) == AIMEE_MODULE_CALL_OK);
    assert(string_answer == 0);
 
+   string_answer = 99;
+   assert(aimee_db2_entity_observation_count_call(call_client, &client, 9130, 0, "replay-argument",
+                                                  &string_answer, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_fidelity_attribution_count_call(call_client, &client, 9131, 0,
+                                                    "replay-argument", &string_answer, NULL,
+                                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_blob_referenced_call(call_client, &client, 9132, 0, "replay-argument",
+                                         &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_async_pending_count_call(call_client, &client, 9133, 0, "replay-argument",
+                                             &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

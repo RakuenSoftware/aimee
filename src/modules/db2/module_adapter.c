@@ -16,8 +16,10 @@
 #include "c/db2_learning.h"
 #include "c/decision_log.h"
 #include "c/entity_edges.h"
+#include "c/entity_profiles.h"
 #include "c/epistemic_directives.h"
 #include "c/evidence_vectors.h"
+#include "c/fidelity.h"
 #include "c/kb_docs.h"
 #include "c/kb_payload.h"
 #include "c/kb_releases.h"
@@ -675,6 +677,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .anti_pattern_exists_by_source_ref = db2_anti_pattern_exists_by_source_ref,
        .artifact_citation_count = db2_artifact_citation_count,
        .commits_in_last_7_days = db2_learning_commits_in_last_7_days,
+       .entity_observation_count = db2_entity_count_observations,
+       .fidelity_attribution_count = db2_fidelity_attribution_count_by_turn,
+       .blob_referenced = db2_kb_blob_ref_referenced,
+       .async_pending_count = db2_kb_async_count_kind_pending,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -2159,6 +2165,39 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
+      {
+         /* One string in, one number out. Each clamps its own answer: a probe
+          * must not put a two on a wire whose contract says zero or one. */
+         char argument[AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ARGUMENT_MAX + 1];
+         int (*read)(const char *) = NULL;
+         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         uint32_t bound = 0u;
+         if (!answer && aimee_db2_entity_observation_count_request_decode(
+                            request_body, request_len, argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->entity_observation_count : NULL;
+            answer = aimee_db2_entity_observation_count_reply_encode;
+            bound = AIMEE_DB2_ENTITY_OBSERVATION_COUNT_MAX;
+         }
+         if (answer)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_OBSERVATION_COUNT_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int counted = read(argument);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (counted < 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint32_t value = (uint32_t)counted;
+            if (value > bound)
+               value = bound;
+            if (answer(value, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -2495,6 +2534,39 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         /* One string in, one number out. Each clamps its own answer: a probe
+          * must not put a two on a wire whose contract says zero or one. */
+         char argument[AIMEE_DB2_BLOB_REFERENCED_ARGUMENT_MAX + 1];
+         int (*read)(const char *) = NULL;
+         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         uint32_t bound = 0u;
+         if (!answer && aimee_db2_blob_referenced_request_decode(request_body, request_len,
+                                                                 argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->blob_referenced : NULL;
+            answer = aimee_db2_blob_referenced_reply_encode;
+            bound = AIMEE_DB2_BLOB_REFERENCED_MAX;
+         }
+         if (answer)
+         {
+            if (response_capacity < AIMEE_DB2_BLOB_REFERENCED_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int counted = read(argument);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (counted < 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint32_t value = (uint32_t)counted;
+            if (value > bound)
+               value = bound;
+            if (answer(value, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       char project[AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX + 1] = {0};
       if (aimee_db2_clear_project_request_decode(request_body, request_len, project,
                                                  sizeof(project)) == 0)
@@ -2683,6 +2755,39 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         /* One string in, one number out. Each clamps its own answer: a probe
+          * must not put a two on a wire whose contract says zero or one. */
+         char argument[AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ARGUMENT_MAX + 1];
+         int (*read)(const char *) = NULL;
+         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         uint32_t bound = 0u;
+         if (!answer && aimee_db2_fidelity_attribution_count_request_decode(
+                            request_body, request_len, argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->fidelity_attribution_count : NULL;
+            answer = aimee_db2_fidelity_attribution_count_reply_encode;
+            bound = AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_MAX;
+         }
+         if (answer)
+         {
+            if (response_capacity < AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int counted = read(argument);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (counted < 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint32_t value = (uint32_t)counted;
+            if (value > bound)
+               value = bound;
+            if (answer(value, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
@@ -2776,6 +2881,39 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        invocation->stage_id == AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL ||
        invocation->stage_id == AIMEE_DB2_STAGE_CURATOR_REENQUEUE_EXTRACT_ALL)
    {
+      {
+         /* One string in, one number out. Each clamps its own answer: a probe
+          * must not put a two on a wire whose contract says zero or one. */
+         char argument[AIMEE_DB2_ASYNC_PENDING_COUNT_ARGUMENT_MAX + 1];
+         int (*read)(const char *) = NULL;
+         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         uint32_t bound = 0u;
+         if (!answer && aimee_db2_async_pending_count_request_decode(
+                            request_body, request_len, argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->async_pending_count : NULL;
+            answer = aimee_db2_async_pending_count_reply_encode;
+            bound = AIMEE_DB2_ASYNC_PENDING_COUNT_MAX;
+         }
+         if (answer)
+         {
+            if (response_capacity < AIMEE_DB2_ASYNC_PENDING_COUNT_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int counted = read(argument);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (counted < 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint32_t value = (uint32_t)counted;
+            if (value > bound)
+               value = bound;
+            if (answer(value, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_RESPONSE_LEN)

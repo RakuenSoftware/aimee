@@ -141,6 +141,33 @@ aimee_db2_commits_in_last_7_days_call(aimee_db2_call_fn call, void *call_context
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_fidelity_attribution_count_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *turn_id, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !turn_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_fidelity_attribution_count_request_encode(turn_id, request, sizeof(request),
+                                                           &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FIDELITY_ATTRIBUTION_COUNT,
+            AIMEE_DB2_STAGE_FIDELITY_ATTRIBUTION_COUNT, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_fidelity_attribution_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_rules_decay_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *rules_touched,

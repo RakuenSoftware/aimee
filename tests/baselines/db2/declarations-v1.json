@@ -7526,9 +7526,15 @@
           "line": 30
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_observation_count operation replaces the observation count. It counts distinct memories rather than observation rows and matches the entity case-insensitively, so a memory naming an entity twice counts once and a differently cased spelling still matches. Neither is visible in a bare number, so both are policy."
+      },
       "signature": "int db2_entity_count_observations ( const char * entity_id )",
       "signature_sha256": "b1542fbbdf4772d744aaea46795c0360004baa6e503f3615fa946aa54e44d3e0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_count_observations"
     },
     {
@@ -8745,9 +8751,15 @@
           "line": 51
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.fidelity_attribution_count operation replaces the attribution count. Which artifact kind counts as a fidelity attribution is DB2 policy fixed in the statement, so a caller cannot ask for a different kind through this operation."
+      },
       "signature": "int db2_fidelity_attribution_count_by_turn ( const char * turn_id )",
       "signature_sha256": "00d594b46960adac6cc676ef7e879c2638327cb267f6e7e09ce8fcabb878a3dd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_fidelity_attribution_count_by_turn"
     },
     {
@@ -9159,9 +9171,15 @@
           "line": 261
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.async_pending_count operation replaces the queue-depth read. It counts only jobs still pending, so a job already being worked on is not in the answer -- a caller using this as a backlog gauge is measuring what has not started rather than what is outstanding."
+      },
       "signature": "int db2_kb_async_count_kind_pending ( const char * kind )",
       "signature_sha256": "12e003145090300c55f8e964465e0289d6f77cb86bf0609bb63946d1e1a19090",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_async_count_kind_pending"
     },
     {
@@ -9285,9 +9303,15 @@
           "line": 347
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.blob_referenced operation replaces the reference probe. It answers whether any document asset still points at the blob, not how many do: the statement stops at the first row, which is what makes it cheap enough to run before a delete."
+      },
       "signature": "int db2_kb_blob_ref_referenced ( const char * blob_ref )",
       "signature_sha256": "d8c70a38c5ba64b7cbec9bd3d6ecfbc3b16220ccdb3c739d72e9e6508ccd438d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_blob_ref_referenced"
     },
     {
@@ -26508,15 +26532,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e220ab0d21c79d6cbe4929005b63deb0495dc1a47a4a4813c11dec2fed829347",
+  "fingerprint": "a9defc4f7d063f2601b44510e859b3ca8bfac89e1beebb3578acd399968c3144",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 544,
+    "audit_pending": 540,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 414
+    "reviewed": 418
   }
 }
