@@ -41,8 +41,15 @@ STAGES_HEADER = Path("src/modules/db1/db1_stages.h")
 # daemon from util.c. In DB1_SRCS it would be a duplicate symbol there; out of
 # the module it is an undefined one here. db1_module_init.c opens the store the
 # module serves from, which the daemon opens for itself.
+# Sources that live in the module and are linked into no daemon. db1_init.c and
+# db1_write.c joined them when the last family was served: with every read and
+# write going over the bus, the daemon opened a connection it never used, and
+# leaving the lifecycle linked would have kept it one call away from a direct
+# caller again. Tests still link both -- they open ":memory:" and exercise the
+# domain objects directly -- which is why this is about the DAEMON's link and
+# not about who compiles the file.
 MODULE_ONLY_SOURCES = frozenset({"module_adapter.c", "db1_time.c", "db1_module_init.c",
-                                 "db1_module_support.c"})
+                                 "db1_module_support.c", "db1_init.c", "db1_write.c"})
 
 # DB1's principal ref. Event kinds are carved 4096 + ref*256 + stage, and a
 # family's id IS its future stage id, so the arithmetic is fixed here too.

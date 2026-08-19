@@ -2468,10 +2468,12 @@ void server_shutdown(server_ctx_t *ctx)
    platform_evloop_destroy(&ctx->evloop);
    /* Drop our pid file so a future server can detect that we are gone. */
    server_pid_clear(ctx->socket_path);
-   /* Drain any audit rows still queued in the async writer before closing DB1, so
-    * rows enqueued near shutdown are not lost (the writer thread is detached). The
-    * request/compute pools are already drained above, so no new rows arrive. */
+   /* Drain any audit rows still queued in the async writer, so rows enqueued
+    * near shutdown are not lost (the writer thread is detached). The
+    * request/compute pools are already drained above, so no new rows arrive.
+    *
+    * Nothing to close afterwards: this process opens no DB1 connection, and
+    * the module closes its own when it stops. */
    agent_audit_async_flush();
-   db1_shutdown();
    LOG_INFO("server", "shut down");
 }

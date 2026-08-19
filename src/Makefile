@@ -322,7 +322,19 @@ CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 # of the tree call typed domain functions declared in modules/db1/*.h and never
 # see a handle. src/tests/support/{db1_init,wm}_mock.c are alternative implementations linked by
 # tests that want to exercise the API contract without a real backend.
-DB1_SRCS = modules/db1/db1_init.c modules/db1/db1_write.c modules/db1/secrets.c modules/db1/diagnostics.c modules/db1/maintenance.c
+# What the daemon still compiles from db1/, and why each is here rather than in
+# the module: secrets.c is a file-backed secret store that never touched DB1,
+# and maintenance.c supplies db1_default_path, which config resolves the DB1
+# location with -- and tests for as a WEAK symbol, so dropping it would not fail
+# to link, it would quietly resolve the path somewhere else. diagnostics.c comes
+# with maintenance: the recover path calls into it. Both work on the file by
+# path and never hold the shared connection, which is why they are here and not
+# a family.
+#
+# db1_init.c is deliberately absent. With every family served by the module,
+# nothing here opens a connection, and leaving the symbol linked would keep the
+# daemon one call away from a new direct caller. It cannot make that call now.
+DB1_SRCS = modules/db1/secrets.c modules/db1/maintenance.c modules/db1/diagnostics.c
 DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 
 # Branch ownership is served by the DB1 module now, so the daemon links the bus

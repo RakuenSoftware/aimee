@@ -239,7 +239,15 @@ class CatalogTests(unittest.TestCase):
             root = Path(tmp.name)
             catalog = self.catalog(root)
             active = next(f for f in catalog["families"] if f["active"])
-            active["retired_sources"] = sorted(set(active["retired_sources"]) | {"db1_init.c"})
+            # Read a still-linked source out of the Makefile rather than naming
+            # one. Every hardcoded choice here has eventually migrated -- first
+            # checkpoints.c, then wfe_store.c, then db1_init.c -- and each time
+            # this test failed for the wrong reason.
+            makefile = (root / contract.MAKEFILE).read_text(encoding="utf-8")
+            line = next(l for l in makefile.splitlines() if l.startswith("DB1_SRCS ="))
+            linked = sorted(t.split("/")[-1] for t in line.split() if t.endswith(".c"))
+            self.assertTrue(linked, "the daemon links no db1 source at all")
+            active["retired_sources"] = sorted(set(active["retired_sources"]) | {linked[0]})
             self.write(root, catalog)
             self.assertRule(root, "retired-still-linked")
         finally:

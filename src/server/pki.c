@@ -7,7 +7,6 @@
 #include "vault_service.h"   /* seal/inject the CA key */
 #include "vault_principal.h" /* vault_principal_name_sanitize */
 #include "config.h"          /* config_default_dir */
-#include "db1_internal.h"    /* db1_conn */
 #include "aimee.h"           /* MAX_PATH_LEN */
 #include "log.h"
 
