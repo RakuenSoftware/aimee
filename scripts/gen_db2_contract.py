@@ -1794,9 +1794,43 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum_bytes": 2047}):
                 fail("get-content-reply",
                      "reply must carry the bounded content at the width update_content accepts")
+        elif key == ("memory", 40) and name == "get_source_session" and \
+                operation["wire_format"] == "db2-envelope-u64-string-reply-v1":
+            if operation["c_symbols"] != ["db2_memory_get_source_session"]:
+                fail("operation-c-symbols",
+                     "get_source_session C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "not_found"]:
+                fail("operation-results",
+                     "get_source_session must be able to report that no session is set")
+            request = _keys(operation["request"], {"encoded_size", "field"},
+                            "get_source_session.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "get_source_session.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                      "maximum": 0x7fffffffffffffff}):
+                fail("get-source-session-request",
+                     "request must name one positive memory and carry nothing else")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "field"}, "get_source_session.reply")
+            field = _keys(reply["field"],
+                          {"name", "type", "minimum_bytes", "maximum_bytes"},
+                          "get_source_session.reply.field")
+            # Minimum one, unlike get_content on the same wire format. This
+            # backend succeeds only for a non-empty session and collapses an
+            # absent memory and a blank column into the same failure, so an
+            # empty ok would be a distinction the backend cannot actually make.
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 5 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + 127 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "session_id", "type": "utf8", "minimum_bytes": 1,
+                              "maximum_bytes": 127}):
+                fail("get-source-session-reply",
+                     "reply must carry a non-empty bounded session at the set width")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 49 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 50 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1810,9 +1844,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
             "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
             "workspace_tag_insert", "set_cognified_kind", "set_source_session",
-            "negation_tokens_update", "get_content"]:
+            "negation_tokens_update", "get_content", "get_source_session"]:
         fail("unsupported-operation",
-             "the partial generator requires the forty-nine supported operations exactly once")
+             "the partial generator requires the fifty supported operations exactly once")
     return catalog
 
 
@@ -1985,6 +2019,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     set_source_session = catalog["operations"][46]
     negation_tokens_update = catalog["operations"][47]
     get_content = catalog["operations"][48]
+    get_source_session = catalog["operations"][49]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2278,6 +2313,17 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     get_content_missing = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(get_content["id"]), 1, b"",
+    )
+    source_session_read = b"sess-2026-08-19"
+    get_source_session_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(get_source_session["id"]), 0, _put_u64(42),
+    )
+    get_source_session_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(get_source_session["id"]), 0,
+        _put_u32(len(source_session_read)) + source_session_read,
+    )
+    get_source_session_missing = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(get_source_session["id"]), 1, b"",
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -4654,6 +4700,57 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (get_content_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": get_source_session["family"],
+            "id": get_source_session["id"],
+            "name": get_source_session["name"],
+            "request": {
+                "positive": get_source_session_request.hex(),
+                "memory_id": 42,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(get_source_session_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(get_source_session_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(get_source_session["id"]), 0, _put_u64(0)).hex()},
+                    {"mutation": "short", "hex": get_source_session_request[:-1].hex()},
+                    {"mutation": "long", "hex": (get_source_session_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "session_id": source_session_read.decode("ascii"),
+                     "hex": get_source_session_ok.hex()},
+                    {"result": 1, "session_id": "",
+                     "hex": get_source_session_missing.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(get_source_session_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(get_source_session_ok, 12, 3).hex()},
+                    {"mutation": "missing_with_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(get_source_session["id"]), 1, _put_u32(0)).hex()},
+                    {"mutation": "empty_ok", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(get_source_session["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "session_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(get_source_session["id"]), 0,
+                               _put_u32(len(source_session_read) + 1) +
+                               source_session_read).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(get_source_session["id"]), 0,
+                               _put_u32(len(source_session_read)) +
+                               source_session_read[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": get_source_session_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (get_source_session_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -4715,6 +4812,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     set_source_session = catalog["operations"][46]
     negation_tokens_update = catalog["operations"][47]
     get_content = catalog["operations"][48]
+    get_source_session = catalog["operations"][49]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -5411,6 +5509,21 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{get_content['request']['field']['maximum']}ull"),
         ("AIMEE_DB2_GET_CONTENT_CONTENT_MAX",
          f"{get_content['reply']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_EVENT_GET_SOURCE_SESSION", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_GET_SOURCE_SESSION", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_GET_SOURCE_SESSION", f"{get_source_session['id']}u"),
+        ("AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN",
+         f"{get_source_session['request']['encoded_size']}u"),
+        ("AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MIN_LEN",
+         f"{get_source_session['reply']['encoded_size_min_ok']}u"),
+        ("AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MAX_LEN",
+         f"{get_source_session['reply']['encoded_size_max_ok']}u"),
+        ("AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN",
+         f"{get_source_session['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_GET_SOURCE_SESSION_MEMORY_ID_MAX",
+         f"{get_source_session['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX",
+         f"{get_source_session['reply']['field']['maximum_bytes']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -7350,6 +7463,116 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_get_source_session_request_encode(uint64_t memory_id,
+                                                             uint8_t *output, size_t capacity)
+{{
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_GET_SOURCE_SESSION_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_GET_SOURCE_SESSION, 0u, 8u, output,
+                                       capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}}
+
+static inline int aimee_db2_get_source_session_request_decode(const uint8_t *input,
+                                                              size_t input_len,
+                                                              uint64_t *memory_id)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_GET_SOURCE_SESSION || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_GET_SOURCE_SESSION_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_get_source_session_reply_encode(uint32_t result,
+                                                            const char *session_id,
+                                                            uint8_t *output, size_t capacity,
+                                                            uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_NOT_FOUND)
+   {{
+      if (session_id != NULL || capacity < AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN ||
+          aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_GET_SOURCE_SESSION, result, 0u,
+                                        output, capacity) != 0)
+         return -1;
+      *output_len = AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN;
+      return 0;
+   }}
+   if (result != AIMEE_DB2_RESULT_OK || !session_id)
+      return -1;
+   size_t session_len = 0u;
+   while (session_len <= AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX && session_id[session_len])
+      ++session_len;
+   uint32_t payload_len = (uint32_t)(4u + session_len);
+   /* An empty session is never an ok reply: the backend reports it as absent,
+    * so encoding one here would claim a distinction it cannot make. */
+   if (session_len == 0u || session_len > AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX ||
+       capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_GET_SOURCE_SESSION,
+                                     AIMEE_DB2_RESULT_OK, payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)session_len);
+   memcpy(payload + 4u, session_id, session_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_get_source_session_reply_decode(const uint8_t *input,
+                                                            size_t input_len, uint32_t *result,
+                                                            char *session_id,
+                                                            size_t session_capacity)
+{{
+   if (result)
+      *result = 0u;
+   if (session_id && session_capacity)
+      session_id[0] = '\\0';
+   if (!result || !session_id ||
+       session_capacity < (size_t)AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX + 1u)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_GET_SOURCE_SESSION)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_NOT_FOUND && header.payload_len == 0u &&
+       input_len == AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 5u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t session_len = aimee_db2_get_u32(payload);
+   if (session_len == 0u || session_len > AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX ||
+       (uint32_t)4u + session_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < session_len; ++index)
+      if (payload[4u + index] == 0u)
+         return -1;
+   memcpy(session_id, payload + 4u, session_len);
+   session_id[session_len] = '\\0';
+   *result = header.result;
    return 0;
 }}
 
@@ -9601,6 +9824,11 @@ extern "C"
        uint64_t memory_id, uint32_t *domain_result, char *content, size_t content_capacity,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_get_source_session_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, uint32_t *domain_result, char *session_id, size_t session_capacity,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -10759,6 +10987,35 @@ aimee_module_call_result_t aimee_db2_get_content_call(aimee_db2_call_fn call, vo
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_get_source_session_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t memory_id, uint32_t *domain_result,
+                                  char *session_id, size_t session_capacity,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !domain_result || !session_id ||
+       session_capacity < (size_t)AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX + 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *domain_result = 0u;
+   session_id[0] = '\\0';
+   uint8_t request[AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_get_source_session_request_encode(memory_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_GET_SOURCE_SESSION, AIMEE_DB2_STAGE_GET_SOURCE_SESSION,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_get_source_session_reply_decode(response, response_len, domain_result, session_id,
+                                                 session_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -11047,6 +11304,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     set_source_session = catalog["operations"][46]
     negation_tokens_update = catalog["operations"][47]
     get_content = catalog["operations"][48]
+    get_source_session = catalog["operations"][49]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -11353,6 +11611,11 @@ const StageGetContent = FamilyMemory
 const OperationGetContent uint32 = {get_content['id']}
 const GetContentMemoryIDMax uint64 = {get_content['request']['field']['maximum']}
 const GetContentContentMax = {get_content['reply']['field']['maximum_bytes']}
+const EventGetSourceSession = EventMemory
+const StageGetSourceSession = FamilyMemory
+const OperationGetSourceSession uint32 = {get_source_session['id']}
+const GetSourceSessionMemoryIDMax uint64 = {get_source_session['request']['field']['maximum']}
+const GetSourceSessionSessionMax = {get_source_session['reply']['field']['maximum_bytes']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -12661,6 +12924,91 @@ func DecodeGetContentReply(reply []byte) (uint32, string, error) {{
 		return 0, "", ErrMalformedEnvelope
 	}}
 	return header.Result, content, nil
+}}
+
+// EncodeGetSourceSessionRequest emits the memory whose session is read.
+func EncodeGetSourceSessionRequest(memoryID uint64) ([]byte, error) {{
+	if memoryID == 0 || memoryID > GetSourceSessionMemoryIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationGetSourceSession, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}}
+
+// DecodeGetSourceSessionRequest validates the envelope and the bounded memory.
+func DecodeGetSourceSessionRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationGetSourceSession || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > GetSourceSessionMemoryIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return memoryID, nil
+}}
+
+// EncodeGetSourceSessionReply carries a non-empty session, or reports that
+// none is set. Unlike get_content there is no empty-ok: this backend cannot
+// tell a blank column from an absent memory, so neither can the wire.
+func EncodeGetSourceSessionReply(result uint32, sessionID string) ([]byte, error) {{
+	if result == ResultNotFound {{
+		if sessionID != "" {{
+			return nil, ErrMalformedEnvelope
+		}}
+		header, err := EncodeReplyHeader(OperationGetSourceSession, result, 0)
+		if err != nil {{
+			return nil, ErrMalformedEnvelope
+		}}
+		return header, nil
+	}}
+	if result != ResultOK || len(sessionID) == 0 ||
+		len(sessionID) > GetSourceSessionSessionMax || hasNUL(sessionID) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 4 + len(sessionID)
+	header, err := EncodeReplyHeader(OperationGetSourceSession, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(sessionID)))
+	copy(payload[4:], sessionID)
+	return reply, nil
+}}
+
+// DecodeGetSourceSessionReply refuses an empty ok for the same reason.
+func DecodeGetSourceSessionReply(reply []byte) (uint32, string, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationGetSourceSession {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 &&
+		len(reply) == int(EnvelopeHeaderLen) {{
+		return header.Result, "", nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen < 5 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	sessionLen := binary.LittleEndian.Uint32(payload)
+	if sessionLen == 0 || sessionLen > uint32(GetSourceSessionSessionMax) ||
+		4+sessionLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	sessionID := string(payload[4 : 4+sessionLen])
+	if hasNUL(sessionID) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return header.Result, sessionID, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

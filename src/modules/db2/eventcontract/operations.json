@@ -1356,6 +1356,31 @@
         "field": {"name": "content", "type": "utf8", "minimum_bytes": 0,
                   "maximum_bytes": 2047}
       }
+    },
+    {
+      "family": "memory",
+      "id": 40,
+      "name": "get_source_session",
+      "wire_format": "db2-envelope-u64-string-reply-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "not_found"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Session attribution is a canonical relational column on the memory row and is not derivable from portable ANN state.",
+      "c_symbols": ["db2_memory_get_source_session"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "memory_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_min_ok": 29,
+        "encoded_size_max_ok": 155,
+        "encoded_size_error": 24,
+        "field": {"name": "session_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127}
+      }
     }
   ]
 }

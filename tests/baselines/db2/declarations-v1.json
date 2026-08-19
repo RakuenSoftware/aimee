@@ -16328,9 +16328,15 @@
           "line": 839
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.get_source_session operation replaces the session read and is the companion to memory.set_source_session. The backend succeeds only for a non-empty session and reports an absent memory and a blank column identically, so the wire reply is non-empty on ok and everything else is not_found rather than inventing a distinction the backend cannot make."
+      },
       "signature": "int db2_memory_get_source_session ( int64_t memory_id , char * out , int out_len )",
       "signature_sha256": "bd63250d7a681a703a521ae5351d2c10a1bed14d3fcc53d7600415631f01aedb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_source_session"
     },
     {
@@ -25950,15 +25956,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d752af23571e553ebdf3ee3908855aa1a814ab3eea40125b926b397928325fef",
+  "fingerprint": "b351099bf32c8bd168b97f42d41123769d21562342b8af65858c1fffb05caabf",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 637,
+    "audit_pending": 636,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 321
+    "reviewed": 322
   }
 }

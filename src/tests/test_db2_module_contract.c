@@ -64,6 +64,9 @@ static int negation_tokens_calls;
 static char negation_tokens_last[2048];
 static int get_content_hit;
 static int get_content_calls;
+static int get_source_session_rc;
+static int get_source_session_calls;
+static char get_source_session_value[160];
 static char get_content_value[2048];
 static char update_content_last[2048];
 static char scope_type_last[64];
@@ -524,6 +527,24 @@ static int get_content(int64_t memory_id, char *out, int out_len)
       return 0;
    snprintf(out, (size_t)out_len, "%s", get_content_value);
    return 1;
+}
+
+int db2_memory_get_source_session(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return -1;
+}
+
+static int get_source_session(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   get_source_session_calls++;
+   if (get_source_session_rc != 0)
+      return get_source_session_rc;
+   snprintf(out, (size_t)out_len, "%s", get_source_session_value);
+   return 0;
 }
 
 int64_t db2_memory_count(void)
@@ -1211,6 +1232,9 @@ static void reset(void)
    negation_tokens_last[0] = '\0';
    get_content_hit = 1;
    get_content_calls = 0;
+   get_source_session_rc = 0;
+   get_source_session_calls = 0;
+   snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
    snprintf(get_content_value, sizeof(get_content_value), "%s", "stored text");
    update_content_last[0] = '\0';
    total_count_value = 1234567890123LL;
@@ -2502,6 +2526,42 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_get_source_session_wire(void)
+{
+   uint8_t request[AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_get_source_session_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_get_source_session_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   assert(aimee_db2_get_source_session_request_encode(0u, request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MAX_LEN];
+   char session_id[AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX + 1];
+   uint32_t reply_len = 99, result = 99;
+   assert(aimee_db2_get_source_session_reply_encode(AIMEE_DB2_RESULT_OK, "sess-1", reply,
+                                                    sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_get_source_session_reply_decode(reply, reply_len, &result, session_id,
+                                                    sizeof(session_id)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && strcmp(session_id, "sess-1") == 0);
+
+   assert(aimee_db2_get_source_session_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, NULL, reply,
+                                                    sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN);
+   assert(aimee_db2_get_source_session_reply_decode(reply, reply_len, &result, session_id,
+                                                    sizeof(session_id)) == 0);
+   assert(result == AIMEE_DB2_RESULT_NOT_FOUND && session_id[0] == '\0');
+
+   /* THE CONTRAST WITH get_content, WHICH SHARES THIS WIRE FORMAT. There an
+    * empty ok is a real answer -- a row holding "". Here the backend succeeds
+    * only for a non-empty session and reports a blank column exactly as it
+    * reports an absent memory, so an empty ok would claim a distinction that
+    * cannot be made and must not encode or decode. */
+   assert(aimee_db2_get_source_session_reply_encode(AIMEE_DB2_RESULT_OK, "", reply, sizeof(reply),
+                                                    &reply_len) == -1);
+   assert(aimee_db2_get_source_session_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, "x", reply,
+                                                    sizeof(reply), &reply_len) == -1);
 }
 
 static void test_get_content_wire(void)
@@ -4406,6 +4466,48 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_get_source_session_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.get_source_session = get_source_session};
+   uint8_t request[AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MAX_LEN];
+   char session_id[AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX + 1];
+   uint32_t response_len = 99, result = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_GET_SOURCE_SESSION};
+   assert(aimee_db2_get_source_session_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(get_source_session_calls == 1);
+   assert(aimee_db2_get_source_session_reply_decode(response, response_len, &result, session_id,
+                                                    sizeof(session_id)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && strcmp(session_id, "sess-1") == 0);
+
+   get_source_session_rc = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(response_len == AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN);
+   assert(aimee_db2_get_source_session_reply_decode(response, response_len, &result, session_id,
+                                                    sizeof(session_id)) == 0);
+   assert(result == AIMEE_DB2_RESULT_NOT_FOUND);
+   get_source_session_rc = 0;
+
+   /* A backend that reports success while leaving the buffer empty has broken
+    * its own contract; the handler refuses rather than encoding an empty ok
+    * that a caller would read as a blank session. */
+   get_source_session_value[0] = '\0';
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response,
+                 AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_get_content_handler(void)
 {
    reset();
@@ -5916,6 +6018,7 @@ int main(void)
    test_set_source_session_wire();
    test_negation_tokens_update_wire();
    test_get_content_wire();
+   test_get_source_session_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5965,6 +6068,7 @@ int main(void)
    test_set_source_session_handler();
    test_negation_tokens_update_handler();
    test_get_content_handler();
+   test_get_source_session_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

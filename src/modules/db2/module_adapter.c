@@ -297,6 +297,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .set_source_session = db2_memory_set_source_session,
        .negation_tokens_update = db2_memory_negation_tokens_update,
        .get_content = db2_memory_get_content,
+       .get_source_session = db2_memory_get_source_session,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1156,6 +1157,31 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_get_content_reply_encode(
                  hit ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND, hit ? read_content : NULL,
                  response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t session_read_memory_id = 0u;
+      if (aimee_db2_get_source_session_request_decode(request_body, request_len,
+                                                      &session_read_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->get_source_session)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         char read_session[AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX + 1];
+         read_session[0] = '\0';
+         int found = backend->get_source_session((int64_t)session_read_memory_id, read_session,
+                                                 (int)sizeof(read_session)) == 0;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         /* The backend succeeds only for a non-empty session, so a success
+          * with an empty buffer would be a contract violation rather than a
+          * blank session -- refuse it instead of encoding an empty ok. */
+         if (found && read_session[0] == '\0')
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_get_source_session_reply_encode(
+                 found ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND,
+                 found ? read_session : NULL, response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

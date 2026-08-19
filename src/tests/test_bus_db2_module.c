@@ -84,6 +84,7 @@ typedef struct
    void (*set_source_session)(int64_t memory_id, const char *session_id);
    void (*negation_tokens_update)(int64_t memory_id, const char *tokens);
    int (*get_content)(int64_t memory_id, char *out, int out_len);
+   int (*get_source_session)(int64_t memory_id, char *out, int out_len);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -150,6 +151,7 @@ static char source_session_last[160];
 static int negation_tokens_calls;
 static char negation_tokens_last[2048];
 static int get_content_calls;
+static int get_source_session_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -931,6 +933,23 @@ static int get_content(int64_t memory_id, char *out, int out_len)
    return 1;
 }
 
+int db2_memory_get_source_session(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return -1;
+}
+
+static int get_source_session(int64_t memory_id, char *out, int out_len)
+{
+   get_source_session_calls++;
+   if (memory_id != 42)
+      return -1;
+   snprintf(out, (size_t)out_len, "%s", "sess-1");
+   return 0;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1269,6 +1288,7 @@ int main(void)
        .set_source_session = set_source_session,
        .negation_tokens_update = negation_tokens_update,
        .get_content = get_content,
+       .get_source_session = get_source_session,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1563,6 +1583,18 @@ int main(void)
    assert(aimee_db2_get_content_call(call_client, &client, 7071, 0, 43u, &content_result, read_back,
                                      sizeof(read_back), NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(content_result == AIMEE_DB2_RESULT_NOT_FOUND && read_back[0] == '\0');
+
+   uint32_t session_result = 99u;
+   char session_back[AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX + 1];
+   assert(aimee_db2_get_source_session_call(call_client, &client, 7072, 0, 42u, &session_result,
+                                            session_back, sizeof(session_back), NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(session_result == AIMEE_DB2_RESULT_OK && strcmp(session_back, "sess-1") == 0 &&
+          get_source_session_calls == 1);
+   assert(aimee_db2_get_source_session_call(call_client, &client, 7073, 0, 43u, &session_result,
+                                            session_back, sizeof(session_back), NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(session_result == AIMEE_DB2_RESULT_NOT_FOUND && session_back[0] == '\0');
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

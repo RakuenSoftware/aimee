@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "6152426ca447d4685e99c10a7962604ca3383c4f8e771b08f4041e1194f45ece"
+const ContractSHA256 = "341ba6c93934cea53c78365c6bc308f2220505f8fa4317611d8f1e3ef08bddf6"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -305,6 +305,11 @@ const StageGetContent = FamilyMemory
 const OperationGetContent uint32 = 39
 const GetContentMemoryIDMax uint64 = 9223372036854775807
 const GetContentContentMax = 2047
+const EventGetSourceSession = EventMemory
+const StageGetSourceSession = FamilyMemory
+const OperationGetSourceSession uint32 = 40
+const GetSourceSessionMemoryIDMax uint64 = 9223372036854775807
+const GetSourceSessionSessionMax = 127
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1615,6 +1620,91 @@ func DecodeGetContentReply(reply []byte) (uint32, string, error) {
 		return 0, "", ErrMalformedEnvelope
 	}
 	return header.Result, content, nil
+}
+
+// EncodeGetSourceSessionRequest emits the memory whose session is read.
+func EncodeGetSourceSessionRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > GetSourceSessionMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationGetSourceSession, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeGetSourceSessionRequest validates the envelope and the bounded memory.
+func DecodeGetSourceSessionRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationGetSourceSession || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > GetSourceSessionMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeGetSourceSessionReply carries a non-empty session, or reports that
+// none is set. Unlike get_content there is no empty-ok: this backend cannot
+// tell a blank column from an absent memory, so neither can the wire.
+func EncodeGetSourceSessionReply(result uint32, sessionID string) ([]byte, error) {
+	if result == ResultNotFound {
+		if sessionID != "" {
+			return nil, ErrMalformedEnvelope
+		}
+		header, err := EncodeReplyHeader(OperationGetSourceSession, result, 0)
+		if err != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		return header, nil
+	}
+	if result != ResultOK || len(sessionID) == 0 ||
+		len(sessionID) > GetSourceSessionSessionMax || hasNUL(sessionID) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 4 + len(sessionID)
+	header, err := EncodeReplyHeader(OperationGetSourceSession, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(sessionID)))
+	copy(payload[4:], sessionID)
+	return reply, nil
+}
+
+// DecodeGetSourceSessionReply refuses an empty ok for the same reason.
+func DecodeGetSourceSessionReply(reply []byte) (uint32, string, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationGetSourceSession {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 &&
+		len(reply) == int(EnvelopeHeaderLen) {
+		return header.Result, "", nil
+	}
+	if header.Result != ResultOK || header.PayloadLen < 5 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	sessionLen := binary.LittleEndian.Uint32(payload)
+	if sessionLen == 0 || sessionLen > uint32(GetSourceSessionSessionMax) ||
+		4+sessionLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	sessionID := string(payload[4 : 4+sessionLen])
+	if hasNUL(sessionID) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return header.Result, sessionID, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

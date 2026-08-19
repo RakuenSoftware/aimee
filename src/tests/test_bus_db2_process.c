@@ -516,6 +516,16 @@ int main(int argc, char **argv)
                                      read_content, sizeof(read_content), NULL,
                                      NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 has no row and therefore no session. This backend cannot tell
+    * that apart from a blank column, so both arrive as not_found -- the
+    * narrower answer than get_content gives above, and deliberately so. */
+   uint32_t session_result = 99;
+   char read_session[AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX + 1];
+   assert(aimee_db2_get_source_session_call(call_client, &client, 9086, 0, 42u, &session_result,
+                                            read_session, sizeof(read_session), NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(session_result == AIMEE_DB2_RESULT_NOT_FOUND && read_session[0] == '\0');
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
