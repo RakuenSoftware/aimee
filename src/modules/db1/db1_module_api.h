@@ -415,6 +415,13 @@
 #define AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET              11u
 #define AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS        12u
 #define AIMEE_DB1_OP_WFE_LEASE_RECLAIM_STALE           13u
+#define AIMEE_DB1_OP_PIPELINE_CREATE                   14u
+#define AIMEE_DB1_OP_PIPELINE_GET                      15u
+#define AIMEE_DB1_OP_PIPELINE_UPDATE                   16u
+#define AIMEE_DB1_OP_PIPELINE_LINK_PLAN                17u
+#define AIMEE_DB1_OP_PIPELINE_LINK_JOB                 18u
+#define AIMEE_DB1_OP_PIPELINE_CANCEL                   19u
+#define AIMEE_DB1_OP_PIPELINE_LIST_ACTIVE              20u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and

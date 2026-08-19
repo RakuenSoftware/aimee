@@ -261,6 +261,7 @@
    ],
    "retired_sources": [
     "execution_trace.c",
+    "pipelines.c",
     "wfe_binding.c"
    ]
   },
@@ -17036,6 +17037,410 @@
      }
     ],
     "max_bytes": 32
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 14,
+   "name": "pipeline_create",
+   "c_name": "db1_pipeline_create",
+   "c_params": [
+    "task",
+    "request_classification",
+    "plan_depth",
+    "out_id"
+   ],
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "task",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "request_classification",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "plan_depth",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 15,
+   "name": "pipeline_get",
+   "c_name": "db1_pipeline_get",
+   "c_params": [
+    "pipeline_id",
+    "out"
+   ],
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_pipeline_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "task",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "current_phase",
+      "type": "text"
+     },
+     {
+      "name": "request_classification",
+      "type": "text"
+     },
+     {
+      "name": "plan_depth",
+      "type": "text"
+     },
+     {
+      "name": "phase_attempts",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "clarify_session_id",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 16,
+   "name": "pipeline_update",
+   "c_name": "db1_pipeline_update",
+   "c_params": [
+    "pipeline_id",
+    "status",
+    "current_phase",
+    "phase_attempts",
+    "plan_id",
+    "job_id",
+    "request_classification",
+    "plan_depth",
+    "clarify_session_id"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "current_phase",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "phase_attempts",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "plan_id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "request_classification",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "plan_depth",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "clarify_session_id",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 17,
+   "name": "pipeline_link_plan",
+   "c_name": "db1_pipeline_link_plan",
+   "c_params": [
+    "pipeline_id",
+    "plan_id"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "plan_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 18,
+   "name": "pipeline_link_job",
+   "c_name": "db1_pipeline_link_job",
+   "c_params": [
+    "pipeline_id",
+    "job_id"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "job_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 19,
+   "name": "pipeline_cancel",
+   "c_name": "db1_pipeline_cancel",
+   "c_params": [
+    "pipeline_id"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pipeline_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "workflow",
+   "id": 20,
+   "name": "pipeline_list_active",
+   "c_name": "db1_pipeline_list_active",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_pipeline_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "task",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "current_phase",
+      "type": "text"
+     },
+     {
+      "name": "request_classification",
+      "type": "text"
+     },
+     {
+      "name": "plan_depth",
+      "type": "text"
+     },
+     {
+      "name": "phase_attempts",
+      "type": "int"
+     },
+     {
+      "name": "plan_id",
+      "type": "int"
+     },
+     {
+      "name": "job_id",
+      "type": "int"
+     },
+     {
+      "name": "clarify_session_id",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
    }
   }
  ]

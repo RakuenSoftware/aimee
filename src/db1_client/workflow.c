@@ -17,6 +17,7 @@
  * catalog permanently one reformat apart. */
 /* clang-format off */
 #include "execution_trace.h"
+#include "pipelines.h"
 #include "wfe_binding.h"
 
 #include "db1_module_api.h"
@@ -540,6 +541,165 @@ int db1_wfe_lease_reclaim_stale()
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_pipeline_create(const char *task, const char *request_classification, const char *plan_depth, int *out_id)
+{
+   if (!task || !task[0] || !out_id)
+      return -1;
+   const char *fields[] = {task, request_classification ? request_classification : "", plan_depth ? plan_depth : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_PIPELINE_CREATE, fields, 3, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   *out_id = (int)strtol(slot0, NULL, 10);
+   return 0;
+}
+
+int db1_pipeline_get(int pipeline_id, db1_pipeline_t *out)
+{
+   if (!out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", pipeline_id);
+   const char *fields[] = {arg0};
+   char slot0[32];
+   char slot6[32];
+   char slot7[32];
+   char slot8[32];
+   char slot9[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, out->task, out->status, out->current_phase, out->request_classification, out->plan_depth, slot6, slot7, slot8, slot9, out->created_at, out->updated_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->task, sizeof out->status, sizeof out->current_phase, sizeof out->request_classification, sizeof out->plan_depth, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9, sizeof out->created_at, sizeof out->updated_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_PIPELINE_GET, fields, 1, values, caps, 12, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->phase_attempts = (int)strtol(slot6, NULL, 10);
+   out->plan_id = (int)strtol(slot7, NULL, 10);
+   out->job_id = (int)strtol(slot8, NULL, 10);
+   out->clarify_session_id = (int)strtol(slot9, NULL, 10);
+   return 0;
+}
+
+int db1_pipeline_update(int pipeline_id, const char *status, const char *current_phase, int phase_attempts, int plan_id, int job_id, const char *request_classification, const char *plan_depth, int clarify_session_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", pipeline_id);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%d", phase_attempts);
+   char arg4[32];
+   snprintf(arg4, sizeof arg4, "%d", plan_id);
+   char arg5[32];
+   snprintf(arg5, sizeof arg5, "%d", job_id);
+   char arg8[32];
+   snprintf(arg8, sizeof arg8, "%d", clarify_session_id);
+   const char *fields[] = {arg0, status ? status : "", current_phase ? current_phase : "", arg3, arg4, arg5, request_classification ? request_classification : "", plan_depth ? plan_depth : "", arg8};
+   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_UPDATE, fields, 9, NULL, NULL, 0, NULL));
+}
+
+int db1_pipeline_link_plan(int pipeline_id, int plan_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", pipeline_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", plan_id);
+   const char *fields[] = {arg0, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_LINK_PLAN, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_pipeline_link_job(int pipeline_id, int job_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", pipeline_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", job_id);
+   const char *fields[] = {arg0, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_LINK_JOB, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_pipeline_cancel(int pipeline_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", pipeline_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_CANCEL, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_pipeline_list_active(db1_pipeline_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 128)
+      max = 128;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **wire_values = malloc((size_t)max * 12u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 12u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 5u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 12u + 0u] = wire_scratch[wire_row * 5u + 0u];
+      wire_caps[wire_row * 12u + 0u] = sizeof wire_scratch[wire_row * 5u + 0u];
+      wire_values[wire_row * 12u + 1u] = out[wire_row].task;
+      wire_caps[wire_row * 12u + 1u] = sizeof out[wire_row].task;
+      wire_values[wire_row * 12u + 2u] = out[wire_row].status;
+      wire_caps[wire_row * 12u + 2u] = sizeof out[wire_row].status;
+      wire_values[wire_row * 12u + 3u] = out[wire_row].current_phase;
+      wire_caps[wire_row * 12u + 3u] = sizeof out[wire_row].current_phase;
+      wire_values[wire_row * 12u + 4u] = out[wire_row].request_classification;
+      wire_caps[wire_row * 12u + 4u] = sizeof out[wire_row].request_classification;
+      wire_values[wire_row * 12u + 5u] = out[wire_row].plan_depth;
+      wire_caps[wire_row * 12u + 5u] = sizeof out[wire_row].plan_depth;
+      wire_values[wire_row * 12u + 6u] = wire_scratch[wire_row * 5u + 1u];
+      wire_caps[wire_row * 12u + 6u] = sizeof wire_scratch[wire_row * 5u + 1u];
+      wire_values[wire_row * 12u + 7u] = wire_scratch[wire_row * 5u + 2u];
+      wire_caps[wire_row * 12u + 7u] = sizeof wire_scratch[wire_row * 5u + 2u];
+      wire_values[wire_row * 12u + 8u] = wire_scratch[wire_row * 5u + 3u];
+      wire_caps[wire_row * 12u + 8u] = sizeof wire_scratch[wire_row * 5u + 3u];
+      wire_values[wire_row * 12u + 9u] = wire_scratch[wire_row * 5u + 4u];
+      wire_caps[wire_row * 12u + 9u] = sizeof wire_scratch[wire_row * 5u + 4u];
+      wire_values[wire_row * 12u + 10u] = out[wire_row].created_at;
+      wire_caps[wire_row * 12u + 10u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 12u + 11u] = out[wire_row].updated_at;
+      wire_caps[wire_row * 12u + 11u] = sizeof out[wire_row].updated_at;
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_PIPELINE_LIST_ACTIVE, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 12), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 12u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 12u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].id = (int)strtol(wire_scratch[wire_row * 5u + 0u], NULL, 10);
+      out[wire_row].phase_attempts = (int)strtol(wire_scratch[wire_row * 5u + 1u], NULL, 10);
+      out[wire_row].plan_id = (int)strtol(wire_scratch[wire_row * 5u + 2u], NULL, 10);
+      out[wire_row].job_id = (int)strtol(wire_scratch[wire_row * 5u + 3u], NULL, 10);
+      out[wire_row].clarify_session_id = (int)strtol(wire_scratch[wire_row * 5u + 4u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
 }
 
 /* clang-format on */

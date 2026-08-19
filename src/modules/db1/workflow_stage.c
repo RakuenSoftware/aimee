@@ -14,6 +14,7 @@
 
 #include "db1_module_api.h"
 #include "execution_trace.h"
+#include "pipelines.h"
 #include "wfe_binding.h"
 
 #include <errno.h>
@@ -161,8 +162,9 @@ aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint
       empty" and "the queue is broken" reach the caller as the same answer. */
    int found = 0;
    db1_execution_trace_detail_t row_db1_execution_trace_detail_t;
-   const char *row_slots[10];
-   char row_text[3][32];
+   db1_pipeline_t row_db1_pipeline_t;
+   const char *row_slots[12];
+   char row_text[5][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
       stack buffer is sized for identifiers and these carry documents. */
@@ -647,6 +649,276 @@ aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint
       row_slots[0] = row_text[0];
       rows = row_slots;
       row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_PIPELINE_CREATE:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int scalar0 = 0;
+      rc = db1_pipeline_create(field[0], field[1], field[2], &scalar0);
+      snprintf(row_text[0], sizeof row_text[0], "%d", scalar0);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_PIPELINE_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_db1_pipeline_t, 0, sizeof row_db1_pipeline_t);
+      rc = db1_pipeline_get(parsed0, &row_db1_pipeline_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_db1_pipeline_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_db1_pipeline_t.phase_attempts);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_db1_pipeline_t.plan_id);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_db1_pipeline_t.job_id);
+      snprintf(row_text[4], sizeof row_text[4], "%d", row_db1_pipeline_t.clarify_session_id);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_db1_pipeline_t.task;
+      row_slots[2] = row_db1_pipeline_t.status;
+      row_slots[3] = row_db1_pipeline_t.current_phase;
+      row_slots[4] = row_db1_pipeline_t.request_classification;
+      row_slots[5] = row_db1_pipeline_t.plan_depth;
+      row_slots[6] = row_text[1];
+      row_slots[7] = row_text[2];
+      row_slots[8] = row_text[3];
+      row_slots[9] = row_text[4];
+      row_slots[10] = row_db1_pipeline_t.created_at;
+      row_slots[11] = row_db1_pipeline_t.updated_at;
+      rows = row_slots;
+      row_count = 12u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_PIPELINE_UPDATE:
+   {
+      if (count != 9u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed3;
+      if (parse_int(field[3], &parsed3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed4;
+      if (parse_int(field[4], &parsed4) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed5;
+      if (parse_int(field[5], &parsed5) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed8;
+      if (parse_int(field[8], &parsed8) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_pipeline_update(parsed0, field[1], field[2], parsed3, parsed4, parsed5, field[6], field[7], parsed8);
+      break;
+   }
+   case AIMEE_DB1_OP_PIPELINE_LINK_PLAN:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_pipeline_link_plan(parsed0, parsed1);
+      break;
+   }
+   case AIMEE_DB1_OP_PIPELINE_LINK_JOB:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_pipeline_link_job(parsed0, parsed1);
+      break;
+   }
+   case AIMEE_DB1_OP_PIPELINE_CANCEL:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_pipeline_cancel(parsed0);
+      break;
+   }
+   case AIMEE_DB1_OP_PIPELINE_LIST_ACTIVE:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed0 <= 0 || parsed0 > 128)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_pipeline_t *found = calloc((size_t)parsed0, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_pipeline_list_active(found, parsed0);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed0)
+                                 ? (uint32_t)rc : (uint32_t)parsed0;
+         const char **cells = malloc((size_t)produced * 12u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 5u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 5u + 0u], 32,
+                     "%d", found[row].id);
+            snprintf(numbers[row * 5u + 1u], 32,
+                     "%d", found[row].phase_attempts);
+            snprintf(numbers[row * 5u + 2u], 32,
+                     "%d", found[row].plan_id);
+            snprintf(numbers[row * 5u + 3u], 32,
+                     "%d", found[row].job_id);
+            snprintf(numbers[row * 5u + 4u], 32,
+                     "%d", found[row].clarify_session_id);
+            cells[row * 12u + 0u] = numbers[row * 5u + 0u];
+            cells[row * 12u + 1u] = found[row].task;
+            cells[row * 12u + 2u] = found[row].status;
+            cells[row * 12u + 3u] = found[row].current_phase;
+            cells[row * 12u + 4u] = found[row].request_classification;
+            cells[row * 12u + 5u] = found[row].plan_depth;
+            cells[row * 12u + 6u] = numbers[row * 5u + 1u];
+            cells[row * 12u + 7u] = numbers[row * 5u + 2u];
+            cells[row * 12u + 8u] = numbers[row * 5u + 3u];
+            cells[row * 12u + 9u] = numbers[row * 5u + 4u];
+            cells[row * 12u + 10u] = found[row].created_at;
+            cells[row * 12u + 11u] = found[row].updated_at;
+         }
+         rows = cells;
+         row_count = produced * 12u;
+      }
+      listed = 1;
       break;
    }
    default:

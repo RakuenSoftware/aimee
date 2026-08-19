@@ -120,6 +120,7 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/caches.o \
                     $(OBJDIR)/modules/db1/execution_trace.o \
                     $(OBJDIR)/modules/db1/wfe_binding.o \
+                    $(OBJDIR)/modules/db1/pipelines.o \
                     $(OBJDIR)/modules/db1/web_page_cache.o \
                     $(OBJDIR)/modules/db1/fsnap.o \
                     $(OBJDIR)/modules/db1/decisions.o \
@@ -5268,6 +5269,7 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/workflow_stage.o \
                                        $(OBJDIR)/modules/db1/execution_trace.o \
                                        $(OBJDIR)/modules/db1/wfe_binding.o \
+                                       $(OBJDIR)/modules/db1/pipelines.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o \
                                        $(OBJDIR)/dstr.o \
                                        $(OBJDIR)/modules/db1/token_audit.o \

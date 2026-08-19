@@ -36,6 +36,7 @@
 #include "ensemble.h"
 #include "execution_trace.h"
 #include "wfe_binding.h"
+#include "pipelines.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -1033,6 +1034,79 @@ static void test_a_binding_refusal_is_not_a_broken_store(void)
    printf("  PASS: a binding refusal is not a broken store\n");
 }
 
+/* A pipeline row is twelve columns of mixed int and text, and the update takes
+   nine parameters in an order nothing but position enforces. Swap two ints on
+   either side of the wire and every call still compiles. */
+static void test_a_pipeline_row_survives_a_nine_parameter_update(void)
+{
+   int id = 0;
+   must(db1_pipeline_create("build the thing", "feature", "deep", &id) == 0, "created a pipeline");
+   must(id > 0, "and it came back with an id");
+
+   db1_pipeline_t got;
+   memset(&got, 0, sizeof got);
+   must(db1_pipeline_get(id, &got) == 0, "read it back");
+   must(strcmp(got.task, "build the thing") == 0, "the task crossed");
+   must(strcmp(got.request_classification, "feature") == 0, "so did the classification");
+   must(strcmp(got.plan_depth, "deep") == 0, "and the plan depth");
+   must(db1_pipeline_get(999999, &got) != 0, "an absent pipeline is not a read");
+
+   /* Distinct values per int, so a transposed pair cannot pass. */
+   must(db1_pipeline_update(id, "running", "planning", 3, 11, 22, "bugfix", "shallow", 33) == 0,
+        "updated every column at once");
+   memset(&got, 0, sizeof got);
+   must(db1_pipeline_get(id, &got) == 0, "read the update back");
+   must(strcmp(got.status, "running") == 0, "status");
+   must(strcmp(got.current_phase, "planning") == 0, "phase");
+   must(got.phase_attempts == 3, "attempts");
+   must(got.plan_id == 11, "plan id");
+   must(got.job_id == 22, "job id");
+   must(strcmp(got.request_classification, "bugfix") == 0, "reclassified");
+   must(strcmp(got.plan_depth, "shallow") == 0, "re-depthed");
+   must(got.clarify_session_id == 33, "and the clarify session, which is last on both sides");
+
+   must(db1_pipeline_link_plan(id, 44) == 0, "linked a plan");
+   must(db1_pipeline_link_job(id, 55) == 0, "linked a job");
+   memset(&got, 0, sizeof got);
+   must(db1_pipeline_get(id, &got) == 0, "read the links back");
+   must(got.plan_id == 44 && got.job_id == 55, "each link landed in its own column");
+
+   /* "Active" is the domain's word, not a synonym for "exists": the read takes
+      status IN ('active','paused'), so the 'running' set above is excluded. */
+   db1_pipeline_t active[8];
+   memset(active, 0, sizeof active);
+   int n = db1_pipeline_list_active(active, 8);
+   int listed = 0;
+   for (int at = 0; at < n; at++)
+   {
+      if (active[at].id == id)
+         listed = 1;
+   }
+   must(!listed, "a 'running' pipeline is not one of the active ones");
+
+   must(db1_pipeline_update(id, "paused", "planning", 3, 44, 55, "bugfix", "shallow", 33) == 0,
+        "paused it");
+   memset(active, 0, sizeof active);
+   n = db1_pipeline_list_active(active, 8);
+   listed = 0;
+   for (int at = 0; at < n; at++)
+   {
+      if (active[at].id != id)
+         continue;
+      listed = 1;
+      must(strcmp(active[at].task, "build the thing") == 0,
+           "and a listed row carries its columns, not just its id");
+   }
+   must(listed, "a paused pipeline is active");
+
+   must(db1_pipeline_cancel(id) == 0, "cancelled it");
+   memset(&got, 0, sizeof got);
+   must(db1_pipeline_get(id, &got) == 0, "a cancelled pipeline is still readable");
+   must(strcmp(got.status, "paused") != 0, "but no longer paused");
+
+   printf("  PASS: a pipeline row survives a nine-parameter update\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1081,6 +1155,7 @@ int main(int argc, char **argv)
    test_an_ensemble_verdict_crosses_as_a_sentence();
    test_execution_trace_rows_keep_their_shapes();
    test_a_binding_refusal_is_not_a_broken_store();
+   test_a_pipeline_row_survives_a_nine_parameter_update();
 
    stop_module();
    obs_bus_stop();
