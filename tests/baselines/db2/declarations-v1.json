@@ -18440,9 +18440,15 @@
           "line": 326
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.set_cognified_kind operation replaces the cognified-kind write, bounded to the memory record's own kind width. The backend refuses an empty kind and returns void, so the wire refuses it too and acknowledges rather than inventing a count."
+      },
       "signature": "void db2_memory_set_cognified_kind ( int64_t memory_id , const char * kind )",
       "signature_sha256": "55aeffe8c671bad6ba68e92b467bb548a4ab0b5a6a36e7b97db178091dfc94dc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_set_cognified_kind"
     },
     {
@@ -25926,15 +25932,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b113830236f77d7738e191ff3882643032f137674d970e05017ae92d83fe2644",
+  "fingerprint": "8b6fff79133738d0aeb86d611eb877ba5aab039e60ff682580a887155464c847",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 641,
+    "audit_pending": 640,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 317
+    "reviewed": 318
   }
 }

@@ -1828,6 +1828,14 @@
       "reason": "Purging a session's L0 memories and provenance is a private mutation inside the future memory.session_fold transaction; it cannot be an independent wire operation without risking loss between checkpoint creation and deletion."
     },
     {
+      "symbol": "db2_memory_set_cognified_kind",
+      "signature_sha256": "55aeffe8c671bad6ba68e92b467bb548a4ab0b5a6a36e7b97db178091dfc94dc",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.set_cognified_kind operation replaces the cognified-kind write, bounded to the memory record's own kind width. The backend refuses an empty kind and returns void, so the wire refuses it too and acknowledges rather than inventing a count."
+    },
+    {
       "symbol": "db2_memory_set_valid_from",
       "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
       "disposition": "private-db2",

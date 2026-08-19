@@ -56,6 +56,8 @@ static int decay_confidence_calls;
 static int64_t decay_confidence_last;
 static int workspace_tag_insert_calls;
 static char workspace_tag_insert_last[512];
+static int cognified_kind_calls;
+static char cognified_kind_last[32];
 static char update_content_last[2048];
 static char scope_type_last[64];
 static int64_t link_delete_last;
@@ -458,6 +460,19 @@ static void workspace_tag_insert(int64_t memory_id, const char *workspace)
    (void)memory_id;
    workspace_tag_insert_calls++;
    snprintf(workspace_tag_insert_last, sizeof(workspace_tag_insert_last), "%s", workspace);
+}
+
+void db2_memory_set_cognified_kind(int64_t memory_id, const char *kind)
+{
+   (void)memory_id;
+   (void)kind;
+}
+
+static void set_cognified_kind(int64_t memory_id, const char *kind)
+{
+   (void)memory_id;
+   cognified_kind_calls++;
+   snprintf(cognified_kind_last, sizeof(cognified_kind_last), "%s", kind);
 }
 
 int64_t db2_memory_count(void)
@@ -1137,6 +1152,8 @@ static void reset(void)
    decay_confidence_last = 0;
    workspace_tag_insert_calls = 0;
    workspace_tag_insert_last[0] = '\0';
+   cognified_kind_calls = 0;
+   cognified_kind_last[0] = '\0';
    update_content_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
@@ -2427,6 +2444,45 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_set_cognified_kind_wire(void)
+{
+   uint8_t request[AIMEE_DB2_SET_COGNIFIED_KIND_REQUEST_MAX_LEN];
+   char kind[AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX + 1];
+   uint32_t request_len = 99;
+   uint64_t memory_id = 99;
+   assert(aimee_db2_set_cognified_kind_request_encode(42u, "preference", request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(aimee_db2_set_cognified_kind_request_decode(request, request_len, &memory_id, kind,
+                                                      sizeof(kind)) == 0);
+   assert(memory_id == 42 && strcmp(kind, "preference") == 0);
+
+   assert(aimee_db2_set_cognified_kind_request_encode(0u, "preference", request, sizeof(request),
+                                                      &request_len) == -1);
+   /* The backend refuses an empty kind, so the wire does too. The two setters
+    * that follow this one differ: there an empty value clears the column. */
+   assert(aimee_db2_set_cognified_kind_request_encode(42u, "", request, sizeof(request),
+                                                      &request_len) == -1);
+
+   char at_bound[AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX + 2];
+   memset(at_bound, 'k', AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX);
+   at_bound[AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX] = '\0';
+   assert(aimee_db2_set_cognified_kind_request_encode(42u, at_bound, request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(request_len == AIMEE_DB2_SET_COGNIFIED_KIND_REQUEST_MAX_LEN);
+   at_bound[AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX] = 'k';
+   at_bound[AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX + 1] = '\0';
+   assert(aimee_db2_set_cognified_kind_request_encode(42u, at_bound, request, sizeof(request),
+                                                      &request_len) == -1);
+
+   uint8_t reply[AIMEE_DB2_SET_COGNIFIED_KIND_RESPONSE_LEN] = {0};
+   assert(aimee_db2_set_cognified_kind_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_set_cognified_kind_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_set_cognified_kind_reply_encode(reply, sizeof(reply) - 1) == -1);
+   assert(aimee_db2_set_cognified_kind_reply_encode(reply, sizeof(reply)) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_set_cognified_kind_reply_decode(reply, sizeof(reply)) == -1);
 }
 
 static void test_workspace_tag_insert_wire(void)
@@ -4156,6 +4212,34 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_set_cognified_kind_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.set_cognified_kind = set_cognified_kind};
+   uint8_t request[AIMEE_DB2_SET_COGNIFIED_KIND_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SET_COGNIFIED_KIND_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_SET_COGNIFIED_KIND};
+   assert(aimee_db2_set_cognified_kind_request_encode(42u, "preference", request, sizeof(request),
+                                                      &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(cognified_kind_calls == 1 && strcmp(cognified_kind_last, "preference") == 0);
+   assert(aimee_db2_set_cognified_kind_reply_decode(response, response_len) == 0);
+
+   /* Void backend: no failure path exists, which is pinned rather than left
+    * looking unfinished. */
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(cognified_kind_calls == 2);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_workspace_tag_insert_handler(void)
 {
    reset();
@@ -5528,6 +5612,7 @@ int main(void)
    test_update_content_wire();
    test_decay_confidence_wire();
    test_workspace_tag_insert_wire();
+   test_set_cognified_kind_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5573,6 +5658,7 @@ int main(void)
    test_update_content_handler();
    test_decay_confidence_handler();
    test_workspace_tag_insert_handler();
+   test_set_cognified_kind_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

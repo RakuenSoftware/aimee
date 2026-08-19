@@ -293,6 +293,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .update_content = db2_memory_update_content,
        .decay_confidence = db2_memory_decay_confidence,
        .workspace_tag_insert = db2_memory_workspace_tag_insert,
+       .set_cognified_kind = db2_memory_set_cognified_kind,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1073,6 +1074,24 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_workspace_tag_insert_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t cognified_memory_id = 0u;
+      char cognified_kind[AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX + 1];
+      if (aimee_db2_set_cognified_kind_request_decode(request_body, request_len,
+                                                      &cognified_memory_id, cognified_kind,
+                                                      sizeof(cognified_kind)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_SET_COGNIFIED_KIND_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->set_cognified_kind)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         backend->set_cognified_kind((int64_t)cognified_memory_id, cognified_kind);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_set_cognified_kind_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_SET_COGNIFIED_KIND_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

@@ -1250,6 +1250,33 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 36,
+      "name": "set_cognified_kind",
+      "wire_format": "db2-envelope-u64-string-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The cognified kind is a canonical relational column on the memory row and is not derivable from portable ANN state.",
+      "c_symbols": ["db2_memory_set_cognified_kind"],
+      "request": {
+        "encoded_size_min": 37,
+        "encoded_size_max": 51,
+        "fields": [
+          {"name": "memory_id", "type": "u64", "minimum": 1,
+           "maximum": 9223372036854775807},
+          {"name": "kind", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 15}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
     }
   ]
 }

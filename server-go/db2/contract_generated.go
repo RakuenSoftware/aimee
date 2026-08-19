@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "0c08599d5e518161fef2daca122f6d6efe794d4cd5d7d7616d0963d0cf2e79a8"
+const ContractSHA256 = "31db053255446cbb210b72fbb3ddf5a5973e4e9581d0d4fc421d491c6b9ac45a"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -285,6 +285,11 @@ const StageWorkspaceTagInsert = FamilyMemory
 const OperationWorkspaceTagInsert uint32 = 35
 const WorkspaceTagInsertMemoryIDMax uint64 = 9223372036854775807
 const WorkspaceTagInsertWorkspaceMax = 511
+const EventSetCognifiedKind = EventMemory
+const StageSetCognifiedKind = FamilyMemory
+const OperationSetCognifiedKind uint32 = 36
+const SetCognifiedKindMemoryIDMax uint64 = 9223372036854775807
+const SetCognifiedKindKindMax = 15
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1320,6 +1325,67 @@ func EncodeWorkspaceTagInsertReply() ([]byte, error) {
 func DecodeWorkspaceTagInsertReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationWorkspaceTagInsert ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeSetCognifiedKindRequest emits the memory and its cognified kind.
+func EncodeSetCognifiedKindRequest(memoryID uint64, kind string) ([]byte, error) {
+	if memoryID == 0 || memoryID > SetCognifiedKindMemoryIDMax || len(kind) == 0 ||
+		len(kind) > SetCognifiedKindKindMax || hasNUL(kind) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 12 + len(kind)
+	header, err := EncodeRequestHeader(OperationSetCognifiedKind, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(kind)))
+	copy(payload[12:], kind)
+	return request, nil
+}
+
+// DecodeSetCognifiedKindRequest validates the envelope, memory, and kind.
+func DecodeSetCognifiedKindRequest(request []byte) (uint64, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSetCognifiedKind || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	kindLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > SetCognifiedKindMemoryIDMax || kindLen == 0 ||
+		kindLen > uint32(SetCognifiedKindKindMax) || 12+kindLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	kind := string(payload[12 : 12+kindLen])
+	if hasNUL(kind) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return memoryID, kind, nil
+}
+
+// EncodeSetCognifiedKindReply acknowledges the write without a payload.
+func EncodeSetCognifiedKindReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationSetCognifiedKind, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeSetCognifiedKindReply validates it and refuses any payload.
+func DecodeSetCognifiedKindReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSetCognifiedKind ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != int(EnvelopeHeaderLen) {
 		return ErrMalformedEnvelope

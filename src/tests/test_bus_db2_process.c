@@ -475,6 +475,16 @@ int main(int argc, char **argv)
    assert(aimee_db2_workspace_tag_insert_call(call_client, &client, 9076, 0, 42u, "", NULL, NULL) ==
           AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 does not exist, so the update matches no row; the void backend
+    * swallows that and the process acknowledges. Replayed because writing the
+    * same kind twice leaves the column where the first call left it. */
+   assert(aimee_db2_set_cognified_kind_call(call_client, &client, 9077, 0, 42u, "preference", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_set_cognified_kind_call(call_client, &client, 9078, 0, 42u, "preference", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_set_cognified_kind_call(call_client, &client, 9079, 0, 42u, "", NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

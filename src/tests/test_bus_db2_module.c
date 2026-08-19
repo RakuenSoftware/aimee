@@ -80,6 +80,7 @@ typedef struct
    int (*update_content)(int64_t memory_id, const char *content);
    void (*decay_confidence)(int64_t memory_id);
    void (*workspace_tag_insert)(int64_t memory_id, const char *workspace);
+   void (*set_cognified_kind)(int64_t memory_id, const char *kind);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -139,6 +140,8 @@ static int decay_confidence_calls;
 static int64_t decay_confidence_last;
 static int workspace_tag_insert_calls;
 static char workspace_tag_insert_last[512];
+static int cognified_kind_calls;
+static char cognified_kind_last[32];
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -864,6 +867,19 @@ static void workspace_tag_insert(int64_t memory_id, const char *workspace)
    snprintf(workspace_tag_insert_last, sizeof(workspace_tag_insert_last), "%s", workspace);
 }
 
+void db2_memory_set_cognified_kind(int64_t memory_id, const char *kind)
+{
+   (void)memory_id;
+   (void)kind;
+}
+
+static void set_cognified_kind(int64_t memory_id, const char *kind)
+{
+   (void)memory_id;
+   cognified_kind_calls++;
+   snprintf(cognified_kind_last, sizeof(cognified_kind_last), "%s", kind);
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1198,6 +1214,7 @@ int main(void)
        .update_content = update_content,
        .decay_confidence = decay_confidence,
        .workspace_tag_insert = workspace_tag_insert,
+       .set_cognified_kind = set_cognified_kind,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1461,6 +1478,10 @@ int main(void)
    assert(aimee_db2_workspace_tag_insert_call(call_client, &client, 7064, 0, 42u, "aimee", NULL,
                                               NULL) == AIMEE_MODULE_CALL_OK);
    assert(workspace_tag_insert_calls == 1 && strcmp(workspace_tag_insert_last, "aimee") == 0);
+
+   assert(aimee_db2_set_cognified_kind_call(call_client, &client, 7065, 0, 42u, "preference", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(cognified_kind_calls == 1 && strcmp(cognified_kind_last, "preference") == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

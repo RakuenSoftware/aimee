@@ -229,7 +229,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 45 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 46 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -273,7 +273,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[41].Name != "reject" ||
 		baseline.Operations[42].Name != "update_content" ||
 		baseline.Operations[43].Name != "decay_confidence" ||
-		baseline.Operations[44].Name != "workspace_tag_insert" {
+		baseline.Operations[44].Name != "workspace_tag_insert" ||
+		baseline.Operations[45].Name != "set_cognified_kind" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -470,6 +471,49 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestSetCognifiedKindMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[45]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeSetCognifiedKindRequest(operation.Request.MemoryID, operation.Request.Kind)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, kind, err := DecodeSetCognifiedKindRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID || kind != operation.Request.Kind {
+		t.Fatalf("positive request = (%d, %q, %v)", memoryID, kind, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeSetCognifiedKindRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeSetCognifiedKindReply()
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		if err := DecodeSetCognifiedKindReply(got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeSetCognifiedKindReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	atBound := strings.Repeat("k", SetCognifiedKindKindMax)
+	if _, err := EncodeSetCognifiedKindRequest(42, atBound); err != nil {
+		t.Fatalf("kind at the bound refused: %v", err)
+	}
+	if _, err := EncodeSetCognifiedKindRequest(42, atBound+"k"); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("kind past the bound encoded: %v", err)
+	}
+	// This setter requires a kind; the two that follow accept empty to clear.
+	if _, err := EncodeSetCognifiedKindRequest(42, ""); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("empty kind encoded: %v", err)
 	}
 }
 
