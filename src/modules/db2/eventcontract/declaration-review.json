@@ -1916,6 +1916,14 @@
       "reason": "The legacy-workspace membership probe remains an internal compatibility predicate folded into scoped memory operations, not a separately callable bus capability."
     },
     {
+      "symbol": "db2_memory_workspace_tag_insert",
+      "signature_sha256": "0f141cf024f97d1d64f34db8eb920875f9467899a8fe5f8c2d7e133424d3454c",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.workspace_tag_insert operation replaces the workspace attribution insert, bounded to DB2's own workspace identifier width. The backend returns void and its statement is ON CONFLICT DO NOTHING, so the acknowledgement carries no count: a repeat is a no-op rather than a failure and there is nothing to report either way."
+    },
+    {
       "symbol": "db2_pg_stat_summary",
       "signature_sha256": "cbef9ff5eee86a096a36a66c4153f2aa76a45f7a4bcf026994ee3f6f53ac42f8",
       "disposition": "wire-operation",

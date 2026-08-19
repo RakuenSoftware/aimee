@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a9e26f8e535f62ca4a4fb3875b7cfa53cecb6414710c990e463fbf7f31fb9ef1"
+const ContractSHA256 = "0c08599d5e518161fef2daca122f6d6efe794d4cd5d7d7616d0963d0cf2e79a8"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -280,6 +280,11 @@ const StageDecayConfidence = FamilyMemory
 const OperationDecayConfidence uint32 = 34
 const DecayConfidenceMemoryIDMax uint64 = 9223372036854775807
 const DecayConfidenceMultiplierBits uint64 = 4604480259023595110
+const EventWorkspaceTagInsert = EventMemory
+const StageWorkspaceTagInsert = FamilyMemory
+const OperationWorkspaceTagInsert uint32 = 35
+const WorkspaceTagInsertMemoryIDMax uint64 = 9223372036854775807
+const WorkspaceTagInsertWorkspaceMax = 511
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1254,6 +1259,69 @@ func DecodeDecayConfidenceReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationDecayConfidence || header.Result != ResultOK ||
 		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeWorkspaceTagInsertRequest emits the memory and the workspace it is
+// attributed to.
+func EncodeWorkspaceTagInsertRequest(memoryID uint64, workspace string) ([]byte, error) {
+	if memoryID == 0 || memoryID > WorkspaceTagInsertMemoryIDMax || len(workspace) == 0 ||
+		len(workspace) > WorkspaceTagInsertWorkspaceMax || hasNUL(workspace) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 12 + len(workspace)
+	header, err := EncodeRequestHeader(OperationWorkspaceTagInsert, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(workspace)))
+	copy(payload[12:], workspace)
+	return request, nil
+}
+
+// DecodeWorkspaceTagInsertRequest validates the envelope, memory, and workspace.
+func DecodeWorkspaceTagInsertRequest(request []byte) (uint64, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationWorkspaceTagInsert || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	workspaceLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > WorkspaceTagInsertMemoryIDMax || workspaceLen == 0 ||
+		workspaceLen > uint32(WorkspaceTagInsertWorkspaceMax) ||
+		12+workspaceLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	workspace := string(payload[12 : 12+workspaceLen])
+	if hasNUL(workspace) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return memoryID, workspace, nil
+}
+
+// EncodeWorkspaceTagInsertReply acknowledges the attribution without a payload.
+func EncodeWorkspaceTagInsertReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationWorkspaceTagInsert, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeWorkspaceTagInsertReply validates it and refuses any payload.
+func DecodeWorkspaceTagInsertReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationWorkspaceTagInsert ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != int(EnvelopeHeaderLen) {
 		return ErrMalformedEnvelope
 	}
 	return nil

@@ -47,6 +47,7 @@ type wireBaseline struct {
 			AsOf                       string   `json:"as_of"`
 			ScopeType                  string   `json:"scope_type"`
 			Content                    string   `json:"content"`
+			Workspace                  string   `json:"workspace"`
 			HasValue                   uint32   `json:"has_value"`
 			ValueBits                  uint64   `json:"value_bits"`
 			ThresholdBits              uint64   `json:"threshold_bits"`
@@ -228,7 +229,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 44 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 45 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -271,7 +272,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[40].Name != "has_scope_type" ||
 		baseline.Operations[41].Name != "reject" ||
 		baseline.Operations[42].Name != "update_content" ||
-		baseline.Operations[43].Name != "decay_confidence" {
+		baseline.Operations[43].Name != "decay_confidence" ||
+		baseline.Operations[44].Name != "workspace_tag_insert" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -468,6 +470,50 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestWorkspaceTagInsertMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[44]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeWorkspaceTagInsertRequest(operation.Request.MemoryID, operation.Request.Workspace)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, workspace, err := DecodeWorkspaceTagInsertRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID || workspace != operation.Request.Workspace {
+		t.Fatalf("positive request = (%d, %q, %v)", memoryID, workspace, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeWorkspaceTagInsertRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeWorkspaceTagInsertReply()
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		if err := DecodeWorkspaceTagInsertReply(got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeWorkspaceTagInsertReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	// A truncated workspace name is a different workspace, so the bound is
+	// enforced rather than clamped.
+	atBound := strings.Repeat("w", WorkspaceTagInsertWorkspaceMax)
+	if _, err := EncodeWorkspaceTagInsertRequest(42, atBound); err != nil {
+		t.Fatalf("workspace at the bound refused: %v", err)
+	}
+	if _, err := EncodeWorkspaceTagInsertRequest(42, atBound+"w"); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("workspace past the bound encoded: %v", err)
+	}
+	if _, err := EncodeWorkspaceTagInsertRequest(42, ""); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("empty workspace encoded: %v", err)
 	}
 }
 

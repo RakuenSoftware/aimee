@@ -18935,9 +18935,15 @@
           "line": 150
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.workspace_tag_insert operation replaces the workspace attribution insert, bounded to DB2's own workspace identifier width. The backend returns void and its statement is ON CONFLICT DO NOTHING, so the acknowledgement carries no count: a repeat is a no-op rather than a failure and there is nothing to report either way."
+      },
       "signature": "void db2_memory_workspace_tag_insert ( int64_t memory_id , const char * workspace )",
       "signature_sha256": "0f141cf024f97d1d64f34db8eb920875f9467899a8fe5f8c2d7e133424d3454c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_workspace_tag_insert"
     },
     {
@@ -25920,15 +25926,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a2f2cc273627e50fd5f27bced3171f11f7e23c5be7a46ffc94f73ca63d2270e1",
+  "fingerprint": "b113830236f77d7738e191ff3882643032f137674d970e05017ae92d83fe2644",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 642,
+    "audit_pending": 641,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 316
+    "reviewed": 317
   }
 }

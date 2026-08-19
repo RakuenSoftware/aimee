@@ -232,7 +232,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "link_delete",
                                                                 "reject",
                                                                 "update_content",
-                                                                "decay_confidence") else
+                                                                "decay_confidence",
+                                                                "workspace_tag_insert") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1603,9 +1604,47 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != []):
                 fail("decay-confidence-reply",
                      "reply must acknowledge the decay without a payload")
+        elif key == ("memory", 35) and name == "workspace_tag_insert" and \
+                operation["wire_format"] == "db2-envelope-u64-string-ack-v1":
+            if operation["c_symbols"] != ["db2_memory_workspace_tag_insert"]:
+                fail("operation-c-symbols",
+                     "workspace_tag_insert C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "workspace_tag_insert results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "workspace_tag_insert.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 2:
+                fail("workspace-tag-insert-request",
+                     "request must carry the memory and the workspace")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "workspace_tag_insert.request.fields[0]")
+            workspace_field = _keys(request_fields[1],
+                                    {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                    "workspace_tag_insert.request.fields[1]")
+            # Bounded to DB2's own workspace identifier width, so a value that
+            # survives the wire also survives being read back through the scope
+            # context rather than being truncated into a different workspace.
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 13 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 511 or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    workspace_field != {"name": "workspace", "type": "utf8",
+                                        "minimum_bytes": 1, "maximum_bytes": 511}):
+                fail("workspace-tag-insert-request",
+                     "request must name one positive memory and one non-empty bounded workspace")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "workspace_tag_insert.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("workspace-tag-insert-reply",
+                     "reply must acknowledge the attribution without a payload")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 44 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 45 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1617,9 +1656,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "expire", "demote", "promote_stable", "reclassify_directives",
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
             "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
-            "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence"]:
+            "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
+            "workspace_tag_insert"]:
         fail("unsupported-operation",
-             "the partial generator requires the forty-four supported operations exactly once")
+             "the partial generator requires the forty-five supported operations exactly once")
     return catalog
 
 
@@ -1787,6 +1827,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     reject = catalog["operations"][41]
     update_content = catalog["operations"][42]
     decay_confidence = catalog["operations"][43]
+    workspace_tag_insert = catalog["operations"][44]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2026,6 +2067,14 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     decay_confidence_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(decay_confidence["id"]), 0, b"",
+    )
+    workspace_tag_name = b"aimee"
+    workspace_tag_insert_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(workspace_tag_insert["id"]), 0,
+        _put_u64(42) + _put_u32(len(workspace_tag_name)) + workspace_tag_name,
+    )
+    workspace_tag_insert_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(workspace_tag_insert["id"]), 0, b"",
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -4149,6 +4198,59 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (decay_confidence_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": workspace_tag_insert["family"],
+            "id": workspace_tag_insert["id"],
+            "name": workspace_tag_insert["name"],
+            "request": {
+                "positive": workspace_tag_insert_request.hex(),
+                "memory_id": 42,
+                "workspace": workspace_tag_name.decode("ascii"),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(workspace_tag_insert_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(workspace_tag_insert_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(workspace_tag_insert["id"]), 0,
+                               _put_u64(0) + _put_u32(len(workspace_tag_name)) +
+                               workspace_tag_name).hex()},
+                    {"mutation": "empty_workspace", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(workspace_tag_insert["id"]), 0,
+                               _put_u64(42) + _put_u32(0)).hex()},
+                    {"mutation": "workspace_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(workspace_tag_insert["id"]), 0,
+                               _put_u64(42) + _put_u32(len(workspace_tag_name) + 1) +
+                               workspace_tag_name).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(workspace_tag_insert["id"]), 0,
+                               _put_u64(42) + _put_u32(len(workspace_tag_name)) +
+                               workspace_tag_name[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": workspace_tag_insert_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (workspace_tag_insert_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": workspace_tag_insert_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(workspace_tag_insert_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(workspace_tag_insert_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(workspace_tag_insert["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": workspace_tag_insert_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (workspace_tag_insert_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -4205,6 +4307,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     reject = catalog["operations"][41]
     update_content = catalog["operations"][42]
     decay_confidence = catalog["operations"][43]
+    workspace_tag_insert = catalog["operations"][44]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -4824,6 +4927,22 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{decay_confidence['request']['field']['maximum']}ull"),
         ("AIMEE_DB2_DECAY_CONFIDENCE_MULTIPLIER_BITS",
          f"{decay_confidence['request']['policy']['confidence_multiplier_binary64_bits']}ull"),
+        ("AIMEE_DB2_EVENT_WORKSPACE_TAG_INSERT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_WORKSPACE_TAG_INSERT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_WORKSPACE_TAG_INSERT",
+         f"{workspace_tag_insert['id']}u"),
+        ("AIMEE_DB2_WORKSPACE_TAG_INSERT_REQUEST_MIN_LEN",
+         f"{workspace_tag_insert['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_WORKSPACE_TAG_INSERT_REQUEST_MAX_LEN",
+         f"{workspace_tag_insert['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN",
+         f"{workspace_tag_insert['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_WORKSPACE_TAG_INSERT_ERROR_LEN",
+         f"{workspace_tag_insert['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_WORKSPACE_TAG_INSERT_MEMORY_ID_MAX",
+         f"{workspace_tag_insert['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX",
+         f"{workspace_tag_insert['request']['fields'][1]['maximum_bytes']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -6766,6 +6885,93 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    return 0;
 }}
 
+static inline int aimee_db2_workspace_tag_insert_request_encode(uint64_t memory_id,
+                                                               const char *workspace,
+                                                               uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!workspace || !output || !output_len)
+      return -1;
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX &&
+          workspace[workspace_len])
+      ++workspace_len;
+   size_t payload_len = 12u + workspace_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_WORKSPACE_TAG_INSERT_MEMORY_ID_MAX ||
+       workspace_len == 0u || workspace_len > AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_WORKSPACE_TAG_INSERT, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)workspace_len);
+   memcpy(payload + 12u, workspace, workspace_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_workspace_tag_insert_request_decode(const uint8_t *input,
+                                                                size_t input_len,
+                                                                uint64_t *memory_id,
+                                                                char *workspace,
+                                                                size_t workspace_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\\0';
+   if (!memory_id || !workspace ||
+       workspace_capacity < (size_t)AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_WORKSPACE_TAG_INSERT ||
+       header.payload_len < 13u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t workspace_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u ||
+       decoded_memory_id > AIMEE_DB2_WORKSPACE_TAG_INSERT_MEMORY_ID_MAX ||
+       workspace_len == 0u ||
+       workspace_len > AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX ||
+       (uint32_t)12u + workspace_len != header.payload_len)
+      return -1;
+   /* An embedded NUL would attribute the memory to a shorter workspace name
+    * than the caller sent, which is a different workspace. */
+   for (uint32_t index = 0u; index < workspace_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   memcpy(workspace, payload + 12u, workspace_len);
+   workspace[workspace_len] = '\\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}}
+
+static inline int aimee_db2_workspace_tag_insert_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_WORKSPACE_TAG_INSERT,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_workspace_tag_insert_reply_decode(const uint8_t *input,
+                                                              size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_WORKSPACE_TAG_INSERT &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
 static inline int aimee_db2_decay_confidence_request_encode(uint64_t memory_id,
                                                            uint8_t *output, size_t capacity)
 {{
@@ -8539,6 +8745,11 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t memory_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_workspace_tag_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *workspace, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -9567,6 +9778,31 @@ aimee_module_call_result_t aimee_db2_decay_confidence_call(aimee_db2_call_fn cal
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_workspace_tag_insert_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                    uint64_t deadline_ns, uint64_t memory_id, const char *workspace,
+                                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_WORKSPACE_TAG_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_workspace_tag_insert_request_encode(memory_id, workspace, request, sizeof(request),
+                                                     &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_WORKSPACE_TAG_INSERT,
+            AIMEE_DB2_STAGE_WORKSPACE_TAG_INSERT, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_workspace_tag_insert_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -9850,6 +10086,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     reject = catalog["operations"][41]
     update_content = catalog["operations"][42]
     decay_confidence = catalog["operations"][43]
+    workspace_tag_insert = catalog["operations"][44]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -10131,6 +10368,11 @@ const StageDecayConfidence = FamilyMemory
 const OperationDecayConfidence uint32 = {decay_confidence['id']}
 const DecayConfidenceMemoryIDMax uint64 = {decay_confidence['request']['field']['maximum']}
 const DecayConfidenceMultiplierBits uint64 = {decay_confidence['request']['policy']['confidence_multiplier_binary64_bits']}
+const EventWorkspaceTagInsert = EventMemory
+const StageWorkspaceTagInsert = FamilyMemory
+const OperationWorkspaceTagInsert uint32 = {workspace_tag_insert['id']}
+const WorkspaceTagInsertMemoryIDMax uint64 = {workspace_tag_insert['request']['fields'][0]['maximum']}
+const WorkspaceTagInsertWorkspaceMax = {workspace_tag_insert['request']['fields'][1]['maximum_bytes']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -11103,6 +11345,69 @@ func DecodeDecayConfidenceReply(reply []byte) error {{
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationDecayConfidence || header.Result != ResultOK ||
 		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeWorkspaceTagInsertRequest emits the memory and the workspace it is
+// attributed to.
+func EncodeWorkspaceTagInsertRequest(memoryID uint64, workspace string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > WorkspaceTagInsertMemoryIDMax || len(workspace) == 0 ||
+		len(workspace) > WorkspaceTagInsertWorkspaceMax || hasNUL(workspace) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 12 + len(workspace)
+	header, err := EncodeRequestHeader(OperationWorkspaceTagInsert, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(workspace)))
+	copy(payload[12:], workspace)
+	return request, nil
+}}
+
+// DecodeWorkspaceTagInsertRequest validates the envelope, memory, and workspace.
+func DecodeWorkspaceTagInsertRequest(request []byte) (uint64, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationWorkspaceTagInsert || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	workspaceLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > WorkspaceTagInsertMemoryIDMax || workspaceLen == 0 ||
+		workspaceLen > uint32(WorkspaceTagInsertWorkspaceMax) ||
+		12+workspaceLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	workspace := string(payload[12 : 12+workspaceLen])
+	if hasNUL(workspace) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return memoryID, workspace, nil
+}}
+
+// EncodeWorkspaceTagInsertReply acknowledges the attribution without a payload.
+func EncodeWorkspaceTagInsertReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationWorkspaceTagInsert, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeWorkspaceTagInsertReply validates it and refuses any payload.
+func DecodeWorkspaceTagInsertReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationWorkspaceTagInsert ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != int(EnvelopeHeaderLen) {{
 		return ErrMalformedEnvelope
 	}}
 	return nil

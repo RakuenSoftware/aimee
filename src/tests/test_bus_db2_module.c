@@ -79,6 +79,7 @@ typedef struct
    int (*reject)(int64_t memory_id);
    int (*update_content)(int64_t memory_id, const char *content);
    void (*decay_confidence)(int64_t memory_id);
+   void (*workspace_tag_insert)(int64_t memory_id, const char *workspace);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -136,6 +137,8 @@ static int update_content_calls;
 static char update_content_last[2048];
 static int decay_confidence_calls;
 static int64_t decay_confidence_last;
+static int workspace_tag_insert_calls;
+static char workspace_tag_insert_last[512];
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -848,6 +851,19 @@ static void decay_confidence(int64_t memory_id)
    decay_confidence_last = memory_id;
 }
 
+void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace)
+{
+   (void)memory_id;
+   (void)workspace;
+}
+
+static void workspace_tag_insert(int64_t memory_id, const char *workspace)
+{
+   (void)memory_id;
+   workspace_tag_insert_calls++;
+   snprintf(workspace_tag_insert_last, sizeof(workspace_tag_insert_last), "%s", workspace);
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1181,6 +1197,7 @@ int main(void)
        .reject = reject,
        .update_content = update_content,
        .decay_confidence = decay_confidence,
+       .workspace_tag_insert = workspace_tag_insert,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1440,6 +1457,10 @@ int main(void)
    assert(aimee_db2_decay_confidence_call(call_client, &client, 7063, 0, 42u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(decay_confidence_calls == 1 && decay_confidence_last == 42);
+
+   assert(aimee_db2_workspace_tag_insert_call(call_client, &client, 7064, 0, 42u, "aimee", NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(workspace_tag_insert_calls == 1 && strcmp(workspace_tag_insert_last, "aimee") == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

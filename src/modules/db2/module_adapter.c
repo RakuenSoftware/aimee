@@ -292,6 +292,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .reject = production_reject,
        .update_content = db2_memory_update_content,
        .decay_confidence = db2_memory_decay_confidence,
+       .workspace_tag_insert = db2_memory_workspace_tag_insert,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1051,6 +1052,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_decay_confidence_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t tag_insert_memory_id = 0u;
+      char tag_workspace[AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX + 1];
+      if (aimee_db2_workspace_tag_insert_request_decode(request_body, request_len,
+                                                        &tag_insert_memory_id, tag_workspace,
+                                                        sizeof(tag_workspace)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->workspace_tag_insert)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Void backend over an ON CONFLICT DO NOTHING insert: a repeat is a
+          * no-op and a fault is silent, so the acknowledgement is all there is
+          * to report and a count would have to be invented. */
+         backend->workspace_tag_insert((int64_t)tag_insert_memory_id, tag_workspace);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_workspace_tag_insert_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

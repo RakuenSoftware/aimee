@@ -66,6 +66,7 @@ typedef struct
    int (*reject)(int64_t memory_id);
    int (*update_content)(int64_t memory_id, const char *content);
    void (*decay_confidence)(int64_t memory_id);
+   void (*workspace_tag_insert)(int64_t memory_id, const char *workspace);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
