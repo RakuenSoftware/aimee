@@ -338,10 +338,26 @@ static int agent_is_local(const agent_t *ag)
 }
 
 static agent_route_selection_fn g_route_selection_provider;
+/* Latched once a caller declares a selection authority. It is deliberately NOT
+ * cleared when the provider is: a daemon that has handed selection to the
+ * routing module must never silently resume the in-process balancer if that
+ * module goes away. Losing the module has to look like a refusal, not like a
+ * slightly different routing policy nobody notices. */
+static int g_route_selection_authority;
 
 void agent_set_route_selection_provider(agent_route_selection_fn provider)
 {
    g_route_selection_provider = provider;
+   if (provider)
+      g_route_selection_authority = 1;
+}
+
+/* Test/bench seam: drop the latch so a suite can exercise the built-in balancer
+ * after having installed a provider. Never called by a daemon. */
+void agent_reset_route_selection_authority(void)
+{
+   g_route_selection_provider = NULL;
+   g_route_selection_authority = 0;
 }
 
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
@@ -358,6 +374,17 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
           selected >= (uint32_t)count)
          return NULL;
       return candidates[selected];
+   }
+   if (g_route_selection_authority)
+   {
+      /* Authority declared, provider gone: refuse. The in-process balancer below
+       * is the built-in policy for processes that never had a module, not a
+       * silent understudy for one that failed. */
+      aimee_log(LOG_ERROR, "routing",
+                "selection authority declared but no provider is installed; refusing to route "
+                "%d candidates rather than fall back to the built-in balancer",
+                count);
+      return NULL;
    }
    unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
    return candidates[pick % (unsigned int)count];

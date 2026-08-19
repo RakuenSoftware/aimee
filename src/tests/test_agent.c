@@ -518,6 +518,32 @@ static int test_route_selector(int randomized, uint32_t candidate_count, uint32_
    return 0;
 }
 
+static void test_route_authority_refuses_without_provider(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   for (int i = 0; i < 2; i++)
+   {
+      snprintf(cfg.agents[i].name, sizeof(cfg.agents[i].name), "peer%d", i);
+      strcpy(cfg.agents[i].roles[0], "review");
+      cfg.agents[i].role_count = 1;
+      cfg.agents[i].enabled = 1;
+      cfg.agents[i].cost_tier = 0;
+   }
+   /* No authority yet: the built-in balancer serves equal peers. */
+   agent_reset_route_selection_authority();
+   assert(agent_route(&cfg, "review") != NULL);
+   /* Declare an authority, then lose the provider. The daemon must refuse
+    * rather than quietly resume the built-in balancer under a different
+    * policy than the operator deployed. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(agent_route(&cfg, "review") == NULL);
+   agent_reset_route_selection_authority();
+   assert(agent_route(&cfg, "review") != NULL);
+}
+
 static void test_agent_route_selection_provider(void)
 {
    agent_config_t cfg;
@@ -554,7 +580,10 @@ static void test_agent_route_selection_provider(void)
    g_route_selector_pick = 2;
    assert(agent_route(&cfg, "review") == NULL);
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
-   agent_set_route_selection_provider(NULL);
+   /* Drop the latched authority too: a plain provider=NULL now REFUSES rather
+    * than silently resuming the built-in balancer, which is the whole point of
+    * the latch. Only a suite may undo it. */
+   agent_reset_route_selection_authority();
 }
 
 /* The OpenAI Chat and Responses tool surfaces are generated from one builtin
@@ -3690,6 +3719,7 @@ int main(void)
    test_agent_find();
    test_agent_route();
    test_agent_route_selection_provider();
+   test_route_authority_refuses_without_provider();
    test_agent_route_policy_filter();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();

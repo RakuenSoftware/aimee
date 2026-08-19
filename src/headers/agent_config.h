@@ -110,6 +110,9 @@ int agent_is_available_for_routing(const agent_t *agent);
 typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count,
                                         uint32_t *selected_index);
 void agent_set_route_selection_provider(agent_route_selection_fn provider);
+/* Test/bench seam: clear the provider AND the latched authority, so a suite can
+ * exercise the built-in balancer after installing one. Daemons never call it. */
+void agent_reset_route_selection_authority(void);
 
 /* Why an agent is not a routable delegate. Mirrors the decision order of
  * agent_is_available_for_routing so callers can surface the ACTUAL reason
