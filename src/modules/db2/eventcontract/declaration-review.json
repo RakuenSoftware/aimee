@@ -108,6 +108,14 @@
       "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
     },
     {
+      "symbol": "db2_artifact_gen_id",
+      "signature_sha256": "c1911e29817cc9bb30d28d255c09b434818be47018ce579c1036cef1a398bb4a",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Generates a random artifact identifier in the caller's buffer, touching no database. It stays private, and one property is worth recording while looking at it: when the platform random source fails the bytes are zeroed rather than the failure reported, so every caller in that state generates the same all-zero identifier."
+    },
+    {
       "symbol": "db2_calibration_profile_read",
       "signature_sha256": "09fd9b5b0790dea3a0610b8dda7fc523d8afd38d972b402183476df37c607c46",
       "disposition": "private-db2",
@@ -122,6 +130,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "Parsing DB2-owned profile JSON is private operation logic; the future learning.calibration_threshold reply returns only the validated bounded threshold selected from the same scoped profile read."
+    },
+    {
+      "symbol": "db2_code_index_blast_radius_local_first",
+      "signature_sha256": "665fd461dd166961f6be1cacd477e3f81641a2ef73c5c78e1fa76f4f5a9973fb",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Reorders a result set the caller already holds so local dependents sort first. It is presentation applied to memory the caller owns, issues no statement, and has nothing to do with the database once the results exist."
     },
     {
       "symbol": "db2_code_index_drift_candidates",
@@ -204,12 +220,28 @@
       "reason": "The typed maintenance.curator_reenqueue_extract_all operation replaces the pass that enqueues an extraction job for every current-generation document and re-arms the existing ones. Two properties are recorded rather than smoothed over: it runs three autocommitting statements with no surrounding transaction, so a reader can observe the state between them, and its number comes from a separate count query rather than the rows the mutations touched, so it is the queue afterwards and not the work done."
     },
     {
+      "symbol": "db2_curiosity_gap_type_is_canonical",
+      "signature_sha256": "81e91ce3a68e2621371d12bd70381996eeab45c0994774c75f29d9c87c40708f",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "A pure string comparison against a fixed list of gap types; it issues no statement and reads no state. Crossing the bus to ask whether a word is in a list would be absurd, but the answer still has to agree on both sides: the list is shared vocabulary and belongs in a shared definition, not in a call. A caller that disagrees with DB2 about the canonical set writes gap types the queries never match."
+    },
+    {
       "symbol": "db2_curiosity_rescore_all",
       "signature_sha256": "2fa4af495a36240cf5defc84e76ee62be4412b3e21dd56906d5a49ee6f000a8c",
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.curiosity_rescore_all operation replaces the pass that rescores open curiosity items. The weights decide what the system becomes curious about next, so a caller able to send them could steer its attention; they are fixed policy and travel as integer percents, since a float literal is not the same number on every reader. The pass also writes updated_at back to itself so a rescore does not read as an edit."
+    },
+    {
+      "symbol": "db2_curiosity_state_is_valid",
+      "signature_sha256": "baec77836d688a0d3d80c736dae249d15943be120e1895e776e60f3cc350f9e4",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The same shape as the gap-type predicate beside it: a pure comparison against a fixed state list, no statement, no state read. Shared as a definition rather than as a call, for the same reason -- a caller with a different idea of the valid states stores rows the sweeps skip."
     },
     {
       "symbol": "db2_decision_log_mark_revisit_due",
@@ -282,6 +314,22 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_edge_prune_orphans operation replaces the maintenance pass that drops entity edges no surviving memory references. The tiers that count as a reference are fixed policy behind the handler, so a caller cannot widen or narrow what counts as orphaned."
+    },
+    {
+      "symbol": "db2_entity_node_key_file",
+      "signature_sha256": "af814a907006b2ce3a3e424a227cd5acf340c1bd64a16445fa5005228d248c10",
+      "disposition": "private-db2",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "Builds an entity key from a project and path entirely in memory. It must not become a call: keys are compared, so a caller and DB2 that disagree about the format do not fail, they silently stop matching. The format is shared vocabulary and belongs in one definition both sides compile against."
+    },
+    {
+      "symbol": "db2_entity_node_key_symbol",
+      "signature_sha256": "a0c700af39d0555c29b097260a6b4b9679aca253f1e6a68f94afdcd9001a55f1",
+      "disposition": "private-db2",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The symbol counterpart of the file key builder, and private for the same reason. Both encode their components the same way and both must stay that way; a divergence produces keys that look valid and match nothing."
     },
     {
       "symbol": "db2_evidence_reembed_all",
@@ -2434,6 +2482,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.trace_mining_last_id operation reads the high-water mark the next mining pass resumes from. A never-mined corpus and a failed read are both zero, and the consequence is worth naming: a zero sends the next pass back to the beginning, so a read failure costs a full rescan rather than losing anything. That is recorded because it makes the collapse cheap in one direction and expensive in the other."
+    },
+    {
+      "symbol": "db2_vault_operator_snapshot_equal",
+      "signature_sha256": "ed734ac0bf2c5f1eaecb384910b9f2dd182f1050db2e317d6c20cac1c15c5b2f",
+      "disposition": "private-db2",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "A memcmp of two caller-owned structs. It reads nothing and belongs to whoever holds the snapshots; sending two structures across a boundary to be compared would cost more than the comparison."
     },
     {
       "symbol": "db2_vector_index_sync_suppressed",

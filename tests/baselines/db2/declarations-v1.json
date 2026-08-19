@@ -3327,9 +3327,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Generates a random artifact identifier in the caller's buffer, touching no database. It stays private, and one property is worth recording while looking at it: when the platform random source fails the bytes are zeroed rather than the failure reported, so every caller in that state generates the same all-zero identifier."
+      },
       "signature": "void db2_artifact_gen_id ( char * buf , size_t len )",
       "signature_sha256": "c1911e29817cc9bb30d28d255c09b434818be47018ce579c1036cef1a398bb4a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_gen_id"
     },
     {
@@ -4055,9 +4061,15 @@
           "line": 51
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Reorders a result set the caller already holds so local dependents sort first. It is presentation applied to memory the caller owns, issues no statement, and has nothing to do with the database once the results exist."
+      },
       "signature": "void db2_code_index_blast_radius_local_first ( const char * project , blast_radius_t * out )",
       "signature_sha256": "665fd461dd166961f6be1cacd477e3f81641a2ef73c5c78e1fa76f4f5a9973fb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_blast_radius_local_first"
     },
     {
@@ -6207,9 +6219,15 @@
           "line": 55
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "A pure string comparison against a fixed list of gap types; it issues no statement and reads no state. Crossing the bus to ask whether a word is in a list would be absurd, but the answer still has to agree on both sides: the list is shared vocabulary and belongs in a shared definition, not in a call. A caller that disagrees with DB2 about the canonical set writes gap types the queries never match."
+      },
       "signature": "int db2_curiosity_gap_type_is_canonical ( const char * gap_type )",
       "signature_sha256": "81e91ce3a68e2621371d12bd70381996eeab45c0994774c75f29d9c87c40708f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_curiosity_gap_type_is_canonical"
     },
     {
@@ -6318,9 +6336,15 @@
           "line": 56
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The same shape as the gap-type predicate beside it: a pure comparison against a fixed state list, no statement, no state read. Shared as a definition rather than as a call, for the same reason -- a caller with a different idea of the valid states stores rows the sweeps skip."
+      },
       "signature": "int db2_curiosity_state_is_valid ( const char * state )",
       "signature_sha256": "baec77836d688a0d3d80c736dae249d15943be120e1895e776e60f3cc350f9e4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_curiosity_state_is_valid"
     },
     {
@@ -8050,9 +8074,15 @@
           "line": 43
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "organization",
+        "reason": "Builds an entity key from a project and path entirely in memory. It must not become a call: keys are compared, so a caller and DB2 that disagree about the format do not fail, they silently stop matching. The format is shared vocabulary and belongs in one definition both sides compile against."
+      },
       "signature": "int db2_entity_node_key_file ( const char * project , const char * path , char * out , size_t cap )",
       "signature_sha256": "af814a907006b2ce3a3e424a227cd5acf340c1bd64a16445fa5005228d248c10",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_node_key_file"
     },
     {
@@ -8082,9 +8112,15 @@
           "line": 44
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "organization",
+        "reason": "The symbol counterpart of the file key builder, and private for the same reason. Both encode their components the same way and both must stay that way; a divergence produces keys that look valid and match nothing."
+      },
       "signature": "int db2_entity_node_key_symbol ( const char * project , const char * name , char * out , size_t cap )",
       "signature_sha256": "a0c700af39d0555c29b097260a6b4b9679aca253f1e6a68f94afdcd9001a55f1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_node_key_symbol"
     },
     {
@@ -23021,9 +23057,15 @@
           "line": 136
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "custody",
+        "reason": "A memcmp of two caller-owned structs. It reads nothing and belongs to whoever holds the snapshots; sending two structures across a boundary to be compared would cost more than the comparison."
+      },
       "signature": "int db2_vault_operator_snapshot_equal ( const db2_vault_operator_snapshot_t * , const db2_vault_operator_snapshot_t * )",
       "signature_sha256": "ed734ac0bf2c5f1eaecb384910b9f2dd182f1050db2e317d6c20cac1c15c5b2f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_vault_operator_snapshot_equal"
     },
     {
@@ -26220,15 +26262,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "209c3d78a3be3fa785f5b9a94afd8632659f2ca3f0bb5e3f4db0908718fb594c",
+  "fingerprint": "030f1c98693576075f92ad328dda04815036a569259f4d653e7a54045f203595",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 592,
+    "audit_pending": 585,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 366
+    "reviewed": 373
   }
 }
