@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "6096893cf87ba7e1786ff6e98e36c3f9b43c2ba843aee9aabc036ec30cca84bc"
+const ContractSHA256 = "c8da2995c1be3fc892342a647dc4a3077730b8ad1b259db33521b0b340e3c9d0"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -361,6 +361,9 @@ const EventCuriosityRescoreAll = EventLearning
 const StageCuriosityRescoreAll = FamilyLearning
 const OperationCuriosityRescoreAll uint32 = 2
 const CuriosityRescoreAllMax uint32 = 2147483647
+const EventMiningSeedJobDefaults = EventLearning
+const StageMiningSeedJobDefaults = FamilyLearning
+const OperationMiningSeedJobDefaults uint32 = 3
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2446,6 +2449,49 @@ func DecodeCuriosityRescoreAllReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return itemsRescored, nil
+}
+
+// EncodeMiningSeedJobDefaultsRequest emits the empty request envelope. The
+// seeded jobs and their intervals are policy and never travel.
+func EncodeMiningSeedJobDefaultsRequest() []byte {
+	header, err := EncodeRequestHeader(OperationMiningSeedJobDefaults, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeMiningSeedJobDefaultsRequest validates the exact learning-family
+// envelope.
+func DecodeMiningSeedJobDefaultsRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMiningSeedJobDefaults ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeMiningSeedJobDefaultsReply emits a bare acknowledgement: the result
+// code and no payload. Any count this operation could return would describe
+// seeds attempted rather than rows created.
+func EncodeMiningSeedJobDefaultsReply() []byte {
+	header, err := EncodeReplyHeader(OperationMiningSeedJobDefaults, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeMiningSeedJobDefaultsReply validates the acknowledgement envelope.
+func DecodeMiningSeedJobDefaultsReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationMiningSeedJobDefaults ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

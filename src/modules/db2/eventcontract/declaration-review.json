@@ -2212,6 +2212,14 @@
       "reason": "The typed memory.workspace_tag_insert operation replaces the workspace attribution insert, bounded to DB2's own workspace identifier width. The backend returns void and its statement is ON CONFLICT DO NOTHING, so the acknowledgement carries no count: a repeat is a no-op rather than a failure and there is nothing to report either way."
     },
     {
+      "symbol": "db2_mining_seed_job_defaults",
+      "signature_sha256": "c4dd151558efec998a2733b0153b163e876a4589be5715318001f9fe6f4200ba",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.mining_seed_job_defaults operation registers the mining jobs and their schedules on first run. The job list and intervals are fixed policy, and so is the do-nothing conflict rule: it is what keeps a seed pass from overwriting an interval an operator has since tuned. This operation reports success or failure and no count, because the number it could report would be the seeds attempted rather than the rows created."
+    },
+    {
       "symbol": "db2_pg_stat_summary",
       "signature_sha256": "cbef9ff5eee86a096a36a66c4153f2aa76a45f7a4bcf026994ee3f6f53ac42f8",
       "disposition": "wire-operation",

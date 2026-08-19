@@ -627,6 +627,15 @@ int main(int argc, char **argv)
                                                NULL) == AIMEE_MODULE_CALL_OK);
    assert(items_rescored == 0);
 
+   /* Seeding the mining jobs, then seeding them again. The second pass finds
+    * every job already present, every insert conflicts and does nothing, and
+    * the acknowledgement is identical. That is what makes the seed safe to
+    * replay against a database an operator has since tuned. */
+   assert(aimee_db2_mining_seed_job_defaults_call(call_client, &client, 9112, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_mining_seed_job_defaults_call(call_client, &client, 9113, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and
     * the second call returning the same zero is what the catalog's safe

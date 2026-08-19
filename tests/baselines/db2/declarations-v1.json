@@ -19265,9 +19265,15 @@
           "line": 34
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.mining_seed_job_defaults operation registers the mining jobs and their schedules on first run. The job list and intervals are fixed policy, and so is the do-nothing conflict rule: it is what keeps a seed pass from overwriting an interval an operator has since tuned. This operation reports success or failure and no count, because the number it could report would be the seeds attempted rather than the rows created."
+      },
       "signature": "int db2_mining_seed_job_defaults ( void )",
       "signature_sha256": "c4dd151558efec998a2733b0153b163e876a4589be5715318001f9fe6f4200ba",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_mining_seed_job_defaults"
     },
     {
@@ -26160,15 +26166,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "2c118fe37cdbdd8a9593654bb4df1d7b0347080f4350c3682de6eed8f9f5d26a",
+  "fingerprint": "57c151cc571f02ec0ca5c773ce0fcc4b88552a45b3398a478b684a2da7807426",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 602,
+    "audit_pending": 601,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 356
+    "reviewed": 357
   }
 }

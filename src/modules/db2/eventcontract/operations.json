@@ -1703,6 +1703,32 @@
       }
     },
     {
+      "family": "learning",
+      "id": 3,
+      "name": "mining_seed_job_defaults",
+      "wire_format": "db2-envelope-ack-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Mining job registration and its schedule are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_mining_seed_job_defaults"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"jobs": [{"id": "pattern_cluster", "interval_s": 900},
+                            {"id": "recurrence", "interval_s": 1800}],
+                   "initial_hwm": 0, "enabled": true,
+                   "on_conflict": "do-nothing"}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "payload": "none"
+      }
+    },
+    {
       "family": "maintenance",
       "id": 1,
       "name": "prospective_sweep_expired",

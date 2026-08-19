@@ -15,6 +15,7 @@
 #include "c/learning_synth_ops.h"
 #include "c/decision_log.h"
 #include "c/kb_payload.h"
+#include "c/mining.h"
 #include "c/kb_service_backend.h"
 #include "c/epistemic_directives.h"
 #include "c/kb_service_backend.h"
@@ -327,6 +328,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .cross_repo_rebuild_build_deps = db2_cross_repo_rebuild_build_deps,
        .rules_decay = db2_rules_decay,
        .curiosity_rescore_all = db2_curiosity_rescore_all,
+       .mining_seed_job_defaults = db2_mining_seed_job_defaults,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        /* Of the two identical sweeps, bind the one that reports failure:
         * db2_directive_sweep_expired collapses a failed statement into
@@ -375,6 +377,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS &&
         invocation->stage_id != AIMEE_DB2_STAGE_RULES_DECAY &&
         invocation->stage_id != AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL &&
+        invocation->stage_id != AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1475,7 +1478,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    }
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_RULES_DECAY ||
-       invocation->stage_id == AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL)
+       invocation->stage_id == AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL ||
+       invocation->stage_id == AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS)
    {
       if (aimee_db2_rules_decay_request_decode(request_body, request_len) == 0)
       {
@@ -1517,6 +1521,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_curiosity_rescore_all_reply_encode((uint32_t)items_rescored, response_body,
                                                           response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_mining_seed_job_defaults_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->mining_seed_job_defaults)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The first acknowledgement-only reply on this bus. A count would be
+          * the seeds attempted rather than the rows created -- the do-nothing
+          * conflict rule makes those different numbers -- so this operation
+          * reports only whether the seed pass completed. */
+         if (backend->mining_seed_job_defaults() != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_mining_seed_job_defaults_reply_encode(response_body, response_capacity,
+                                                             response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
