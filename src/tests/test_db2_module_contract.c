@@ -95,6 +95,8 @@ static int curator_reembed_value;
 static int curator_reembed_calls;
 static int synth_reenqueue_value;
 static int synth_reenqueue_calls;
+static int extract_reenqueue_value;
+static int extract_reenqueue_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -745,6 +747,17 @@ static int synth_reenqueue_all(void)
 {
    synth_reenqueue_calls++;
    return synth_reenqueue_value;
+}
+
+int db2_curator_reenqueue_extract_all(void)
+{
+   return 0;
+}
+
+static int curator_reenqueue_extract_all(void)
+{
+   extract_reenqueue_calls++;
+   return extract_reenqueue_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1463,6 +1476,8 @@ static void reset(void)
    curator_reembed_calls = 0;
    synth_reenqueue_value = 13;
    synth_reenqueue_calls = 0;
+   extract_reenqueue_value = 14;
+   extract_reenqueue_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2757,6 +2772,44 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_curator_reenqueue_extract_all_wire(void)
+{
+   uint8_t request[AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_REQUEST_LEN] = {0};
+   assert(aimee_db2_curator_reenqueue_extract_all_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_curator_reenqueue_extract_all_request_decode(request, sizeof(request)) == 0);
+   /* Eighth maintenance operation, so the seven before it must refuse it. */
+   assert(aimee_db2_prospective_sweep_expired_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_directive_sweep_expired_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_mark_revisit_due_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_ingest_queue_reset_running_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_evidence_reembed_all_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_curator_reembed_all_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_synth_reenqueue_all_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_curator_reenqueue_extract_all_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, jobs = 99;
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_encode(14, reply, sizeof(reply),
+                                                               &reply_len) == 0);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_decode(reply, reply_len, &jobs) == 0 &&
+          jobs == 14);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_encode(0, reply, sizeof(reply),
+                                                               &reply_len) == 0);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_decode(reply, reply_len, &jobs) == 0 &&
+          jobs == 0);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_encode(
+              AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_MAX + 1u, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_encode(14, reply, sizeof(reply) - 1,
+                                                               &reply_len) == -1);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_encode(14, reply, sizeof(reply),
+                                                               &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_decode(reply, reply_len, &jobs) == -1 &&
+          jobs == 0);
 }
 
 static void test_synth_reenqueue_all_wire(void)
@@ -5165,6 +5218,54 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_curator_reenqueue_extract_all_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.curator_reenqueue_extract_all =
+                                                   curator_reenqueue_extract_all};
+   uint8_t request[AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_RESPONSE_LEN];
+   uint32_t response_len = 99, jobs = 99;
+   aimee_module_invocation_t invocation = {.stage_id =
+                                               AIMEE_DB2_STAGE_CURATOR_REENQUEUE_EXTRACT_ALL};
+   assert(aimee_db2_curator_reenqueue_extract_all_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(extract_reenqueue_calls == 1);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_decode(response, response_len, &jobs) ==
+              0 &&
+          jobs == 14);
+
+   /* The number is the queue after the pass, not the rows the pass touched.
+    * A second call over an unchanged corpus therefore returns the same number
+    * rather than zero -- the count is a size, and sizes do not go to zero
+    * because nothing moved. */
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_decode(response, response_len, &jobs) ==
+              0 &&
+          jobs == 14);
+   assert(extract_reenqueue_calls == 2);
+
+   /* No connection is zero here, which an empty corpus also produces. */
+   extract_reenqueue_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_curator_reenqueue_extract_all_reply_decode(response, response_len, &jobs) ==
+              0 &&
+          jobs == 0);
+   extract_reenqueue_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   extract_reenqueue_value = 14;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_synth_reenqueue_all_handler(void)
 {
    reset();
@@ -7287,6 +7388,7 @@ int main(void)
    test_evidence_reembed_all_wire();
    test_curator_reembed_all_wire();
    test_synth_reenqueue_all_wire();
+   test_curator_reenqueue_extract_all_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -7351,6 +7453,7 @@ int main(void)
    test_evidence_reembed_all_handler();
    test_curator_reembed_all_handler();
    test_synth_reenqueue_all_handler();
+   test_curator_reenqueue_extract_all_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

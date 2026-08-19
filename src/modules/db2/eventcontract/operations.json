@@ -1731,6 +1731,32 @@
         "field": {"name": "reenqueued_ops", "type": "u32", "minimum": 0,
                   "maximum": 2147483647}
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 8,
+      "name": "curator_reenqueue_extract_all",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Async job rows, document generations and project lifecycle state are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_curator_reenqueue_extract_all"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"job_kind": "extract_doc", "to_state": "pending",
+                   "lifecycle_state": "current", "generation": "current"}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "extract_jobs", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647},
+        "count_source": "separate-query"
+      }
     }
   ]
 }

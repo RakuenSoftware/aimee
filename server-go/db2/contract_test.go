@@ -104,6 +104,7 @@ type wireBaseline struct {
 				RequeuedRows          uint32            `json:"requeued_rows"`
 				DemotedArtifacts      uint32            `json:"demoted_artifacts"`
 				ReenqueuedOps         uint32            `json:"reenqueued_ops"`
+				ExtractJobs           uint32            `json:"extract_jobs"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -249,7 +250,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 64 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 65 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -312,7 +313,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[60].Name != "ingest_queue_reset_running" ||
 		baseline.Operations[61].Name != "evidence_reembed_all" ||
 		baseline.Operations[62].Name != "curator_reembed_all" ||
-		baseline.Operations[63].Name != "synth_reenqueue_all" {
+		baseline.Operations[63].Name != "synth_reenqueue_all" ||
+		baseline.Operations[64].Name != "curator_reenqueue_extract_all" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -508,6 +510,47 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[64]
+	if operation.Family != "maintenance" {
+		t.Fatalf("family = %q, want maintenance", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeCuratorReenqueueExtractAllRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeCuratorReenqueueExtractAllRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	if err := DecodeSynthReenqueueAllRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("synth decoder accepted an extract request: %v", err)
+	}
+	if err := DecodeCuratorReembedAllRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("curator decoder accepted an extract request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeCuratorReenqueueExtractAllRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeCuratorReenqueueExtractAllReply(vector.ExtractJobs)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		jobs, err := DecodeCuratorReenqueueExtractAllReply(got)
+		if err != nil || jobs != vector.ExtractJobs {
+			t.Fatalf("decode = (%d, %v)", jobs, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		jobs, err := DecodeCuratorReenqueueExtractAllReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || jobs != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, jobs, err)
 		}
 	}
 }

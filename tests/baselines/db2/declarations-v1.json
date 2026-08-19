@@ -6146,9 +6146,15 @@
           "line": 111
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.curator_reenqueue_extract_all operation replaces the pass that enqueues an extraction job for every current-generation document and re-arms the existing ones. Two properties are recorded rather than smoothed over: it runs three autocommitting statements with no surrounding transaction, so a reader can observe the state between them, and its number comes from a separate count query rather than the rows the mutations touched, so it is the queue afterwards and not the work done."
+      },
       "signature": "int db2_curator_reenqueue_extract_all ( void )",
       "signature_sha256": "4e2a96b95433ceb855dba4767458f2d52d8c20eb16053e9777e055dcf7ec9674",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_curator_reenqueue_extract_all"
     },
     {
@@ -26118,15 +26124,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1abddd17166667c9d897c96f1750549b9c2835000d0c5ff4711d85907d708a60",
+  "fingerprint": "74a60675298f1ddf1c61eea46fa9df7f0545f986f709029f1aecdd2f095593e3",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 609,
+    "audit_pending": 608,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 349
+    "reviewed": 350
   }
 }

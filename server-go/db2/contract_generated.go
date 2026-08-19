@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "00ccb33cfb7bfe288c0ab5cbbd9129b1ebd9dfbc1e19ad4e1b1b34bb3db56382"
+const ContractSHA256 = "a66005f2702b5dac3fafbba11106621238abcc1b50af5d552fdddcb2a7665b0b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -369,6 +369,10 @@ const EventSynthReenqueueAll = EventMaintenance
 const StageSynthReenqueueAll = FamilyMaintenance
 const OperationSynthReenqueueAll uint32 = 7
 const SynthReenqueueAllMax uint32 = 2147483647
+const EventCuratorReenqueueExtractAll = EventMaintenance
+const StageCuratorReenqueueExtractAll = FamilyMaintenance
+const OperationCuratorReenqueueExtractAll uint32 = 8
+const CuratorReenqueueExtractAllMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2510,6 +2514,57 @@ func DecodeSynthReenqueueAllReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return reenqueuedOps, nil
+}
+
+// EncodeCuratorReenqueueExtractAllRequest emits the empty request envelope. The
+// job kind and the generation filter are policy and never travel.
+func EncodeCuratorReenqueueExtractAllRequest() []byte {
+	header, err := EncodeRequestHeader(OperationCuratorReenqueueExtractAll, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeCuratorReenqueueExtractAllRequest validates the exact
+// maintenance-family envelope.
+func DecodeCuratorReenqueueExtractAllRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCuratorReenqueueExtractAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeCuratorReenqueueExtractAllReply emits one bounded u32 queue size. It is
+// the size of the extract queue after the pass, not the number of rows changed.
+func EncodeCuratorReenqueueExtractAllReply(extractJobs uint32) ([]byte, error) {
+	if extractJobs > CuratorReenqueueExtractAllMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationCuratorReenqueueExtractAll, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], extractJobs)
+	return reply, nil
+}
+
+// DecodeCuratorReenqueueExtractAllReply validates the operation and bounded
+// count.
+func DecodeCuratorReenqueueExtractAllReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCuratorReenqueueExtractAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	extractJobs := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if extractJobs > CuratorReenqueueExtractAllMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return extractJobs, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

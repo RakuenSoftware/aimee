@@ -646,6 +646,18 @@ int main(int argc, char **argv)
                                              NULL) == AIMEE_MODULE_CALL_OK);
    assert(reenqueued_ops == 0);
 
+   /* No document exists on a fresh schema, so the pass enqueues nothing and
+    * the queue it then counts is empty. Replaying it returns the same size,
+    * because the number is a queue size rather than a change count. */
+   uint32_t extract_jobs = 99;
+   assert(aimee_db2_curator_reenqueue_extract_all_call(call_client, &client, 9105, 0, &extract_jobs,
+                                                       NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(extract_jobs == 0);
+   extract_jobs = 99;
+   assert(aimee_db2_curator_reenqueue_extract_all_call(call_client, &client, 9106, 0, &extract_jobs,
+                                                       NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(extract_jobs == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

@@ -164,6 +164,14 @@
       "reason": "The typed maintenance.curator_reembed_all operation replaces the reset that returns committed artifacts to the proposed state after a curator version change. The kind list is the reason the policy is fixed rather than travelling: only those six kinds are re-derivable, and a caller able to send the list could demote artifacts that nothing will ever propose again, stranding them outside the committed set for good."
     },
     {
+      "symbol": "db2_curator_reenqueue_extract_all",
+      "signature_sha256": "4e2a96b95433ceb855dba4767458f2d52d8c20eb16053e9777e055dcf7ec9674",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.curator_reenqueue_extract_all operation replaces the pass that enqueues an extraction job for every current-generation document and re-arms the existing ones. Two properties are recorded rather than smoothed over: it runs three autocommitting statements with no surrounding transaction, so a reader can observe the state between them, and its number comes from a separate count query rather than the rows the mutations touched, so it is the queue afterwards and not the work done."
+    },
+    {
       "symbol": "db2_decision_log_mark_revisit_due",
       "signature_sha256": "68c8c667165a80c21272f9393f008b4d1d813ebe7422b09699cdd71df6e249ab",
       "disposition": "wire-operation",
