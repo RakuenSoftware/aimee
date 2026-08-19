@@ -101,6 +101,8 @@ static int rel_types_seed_calls;
 static int lock_acquire_value;
 static int lock_acquire_calls;
 static int lock_release_calls;
+static int64_t release_active_value;
+static int release_active_calls;
 static int prospective_sweep_value;
 static int prospective_sweep_calls;
 static int directive_sweep_value;
@@ -807,6 +809,17 @@ static int vector_rebuild_lock_try_acquire(void)
 static void vector_rebuild_lock_release(void)
 {
    lock_release_calls++;
+}
+
+int64_t db2_kb_release_get_active(void)
+{
+   return 0;
+}
+
+static int64_t release_get_active(void)
+{
+   release_active_calls++;
+   return release_active_value;
 }
 
 int db2_prospective_sweep_expired(void)
@@ -1624,6 +1637,8 @@ static void reset(void)
    lock_acquire_value = 1;
    lock_acquire_calls = 0;
    lock_release_calls = 0;
+   release_active_value = 21;
+   release_active_calls = 0;
    prospective_sweep_value = 7;
    prospective_sweep_calls = 0;
    directive_sweep_value = 8;
@@ -3190,6 +3205,38 @@ static void test_prospective_sweep_expired_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prospective_sweep_expired_reply_decode(reply, reply_len, &expired) == -1 &&
           expired == 0);
+}
+
+static void test_release_get_active_wire(void)
+{
+   uint8_t request[AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN] = {0};
+   assert(aimee_db2_release_get_active_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_release_get_active_request_decode(request, sizeof(request)) == 0);
+   /* Third custody operation, so the lock pair must refuse it. */
+   assert(aimee_db2_vector_rebuild_lock_try_acquire_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_vector_rebuild_lock_release_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_release_get_active_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99;
+   uint64_t release_id = 99;
+   assert(aimee_db2_release_get_active_reply_encode(21, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_release_get_active_reply_decode(reply, reply_len, &release_id) == 0 &&
+          release_id == 21);
+   assert(aimee_db2_release_get_active_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_release_get_active_reply_decode(reply, reply_len, &release_id) == 0 &&
+          release_id == 0);
+   assert(aimee_db2_release_get_active_reply_encode(AIMEE_DB2_RELEASE_GET_ACTIVE_MAX, reply,
+                                                    sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_release_get_active_reply_encode(AIMEE_DB2_RELEASE_GET_ACTIVE_MAX + 1ull, reply,
+                                                    sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_release_get_active_reply_encode(21, reply, sizeof(reply) - 1, &reply_len) ==
+          -1);
+   assert(aimee_db2_release_get_active_reply_encode(21, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_release_get_active_reply_decode(reply, reply_len, &release_id) == -1 &&
+          release_id == 0);
 }
 
 static void test_vector_rebuild_lock_wire(void)
@@ -6039,6 +6086,47 @@ static void test_prospective_sweep_expired_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_release_get_active_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.release_get_active = release_get_active};
+   uint8_t request[AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   uint64_t release_id = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE};
+   assert(aimee_db2_release_get_active_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(release_active_calls == 1);
+   assert(aimee_db2_release_get_active_reply_decode(response, response_len, &release_id) == 0 &&
+          release_id == 21);
+
+   /* Zero is the interesting value and this is the only place it gets said:
+    * it covers no key at all, a state value that would not parse, and one that
+    * parsed to something not positive. The backend collapses all three before
+    * the boundary sees anything, so no test here can separate them either --
+    * which is exactly why the catalog carries both collapses in writing. */
+   release_active_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_release_get_active_reply_decode(response, response_len, &release_id) == 0 &&
+          release_id == 0);
+
+   /* The backend clamps its own negatives to zero, so a negative reaching the
+    * boundary would mean the backend changed underneath this operation. */
+   release_active_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   release_active_value = 21;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_vector_rebuild_lock_handler(void)
 {
    reset();
@@ -8331,6 +8419,7 @@ int main(void)
    test_proposals_archive_expired_wire();
    test_rel_types_ensure_seed_wire();
    test_vector_rebuild_lock_wire();
+   test_release_get_active_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
    test_mark_revisit_due_wire();
@@ -8406,6 +8495,7 @@ int main(void)
    test_proposals_archive_expired_handler();
    test_rel_types_ensure_seed_handler();
    test_vector_rebuild_lock_handler();
+   test_release_get_active_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();
    test_mark_revisit_due_handler();

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "6e4e3edba3e3e15b24653437055b94d97810184a1d1c27d1bfac23693329ed8a"
+const ContractSHA256 = "6711129dbd83cc2e5d69eda9126e46ecde1e25cff06fc6029c003e0f1ffd56c4"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -378,6 +378,10 @@ const VectorRebuildLockTryAcquireMax uint32 = 1
 const EventVectorRebuildLockRelease = EventCustody
 const StageVectorRebuildLockRelease = FamilyCustody
 const OperationVectorRebuildLockRelease uint32 = 2
+const EventReleaseGetActive = EventCustody
+const StageReleaseGetActive = FamilyCustody
+const OperationReleaseGetActive uint32 = 3
+const ReleaseGetActiveMax uint64 = 9223372036854775807
 const EventProposalsArchiveExpired = EventLearning
 const StageProposalsArchiveExpired = FamilyLearning
 const OperationProposalsArchiveExpired uint32 = 4
@@ -2692,6 +2696,56 @@ func DecodeVectorRebuildLockReleaseReply(reply []byte) error {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+// EncodeReleaseGetActiveRequest emits the empty request envelope. The state key
+// is policy and never travels.
+func EncodeReleaseGetActiveRequest() []byte {
+	header, err := EncodeRequestHeader(OperationReleaseGetActive, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeReleaseGetActiveRequest validates the exact custody-family envelope.
+func DecodeReleaseGetActiveRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReleaseGetActive ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeReleaseGetActiveReply emits one bounded u64 release id. Zero means no
+// active release, a state value that would not parse, or one that was not
+// positive: the backend cannot tell those apart and neither can this.
+func EncodeReleaseGetActiveReply(releaseID uint64) ([]byte, error) {
+	if releaseID > ReleaseGetActiveMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationReleaseGetActive, ResultOK, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:], releaseID)
+	return reply, nil
+}
+
+// DecodeReleaseGetActiveReply validates the operation and bounded id.
+func DecodeReleaseGetActiveReply(reply []byte) (uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReleaseGetActive ||
+		header.Result != ResultOK || header.PayloadLen != 8 {
+		return 0, ErrMalformedEnvelope
+	}
+	releaseID := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
+	if releaseID > ReleaseGetActiveMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return releaseID, nil
 }
 
 // EncodeProposalsArchiveExpiredRequest emits the empty request envelope. The

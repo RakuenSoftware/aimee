@@ -2442,6 +2442,40 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["payload"] != "none"):
                 fail("vector-rebuild-lock-release-reply",
                      "reply must be a bare acknowledgement envelope")
+        elif key == ("custody", 3) and name == "release_get_active" and \
+                operation["wire_format"] == "db2-envelope-u64-v1":
+            # Zero is three answers at once here: no key, a value that will not
+            # parse, and a value that is not positive. atoll returns zero for
+            # garbage without complaining, so a corrupted state row is
+            # indistinguishable from an unset one. Both collapses are recorded
+            # because a zero from this operation looks like a confident "no
+            # active release" and is not one.
+            if operation["c_symbols"] != ["db2_kb_release_get_active"]:
+                fail("operation-c-symbols",
+                     "release_get_active C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "release_get_active results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "release_get_active.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"state_key": "active_release_id",
+                                          "parse": "decimal",
+                                          "non_positive_is_absent": True,
+                                          "unparsable_is_absent": True}):
+                fail("release-get-active-request",
+                     "request must carry no payload and record both zero collapses")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "release_get_active.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "release_get_active.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "release_id", "type": "u64", "minimum": 0,
+                              "maximum": 0x7fffffffffffffff}):
+                fail("release-get-active-reply",
+                     "reply must contain one bounded u64 release id")
         elif key == ("organization", 1) and name == "rel_types_ensure_seed" and \
                 operation["wire_format"] == "db2-envelope-ack-v1":
             # Unlike the mining seed, this one's content is not DB2's. The
@@ -2733,7 +2767,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 76 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 77 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2755,12 +2789,12 @@ def validate_catalog(value: object) -> dict[str, object]:
             "drift_candidates", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
             "proposals_archive_expired", "rel_types_ensure_seed",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
-            "prospective_sweep_expired",
+            "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the seventy-six supported operations exactly once")
+             "the partial generator requires the seventy-seven supported operations exactly once")
     return catalog
 
 
@@ -2952,14 +2986,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     rel_types_ensure_seed = catalog["operations"][65]
     vector_rebuild_lock_try_acquire = catalog["operations"][66]
     vector_rebuild_lock_release = catalog["operations"][67]
-    prospective_sweep_expired = catalog["operations"][68]
-    directive_sweep_expired = catalog["operations"][69]
-    mark_revisit_due = catalog["operations"][70]
-    ingest_queue_reset_running = catalog["operations"][71]
-    evidence_reembed_all = catalog["operations"][72]
-    curator_reembed_all = catalog["operations"][73]
-    synth_reenqueue_all = catalog["operations"][74]
-    curator_reenqueue_extract_all = catalog["operations"][75]
+    release_get_active = catalog["operations"][68]
+    prospective_sweep_expired = catalog["operations"][69]
+    directive_sweep_expired = catalog["operations"][70]
+    mark_revisit_due = catalog["operations"][71]
+    ingest_queue_reset_running = catalog["operations"][72]
+    evidence_reembed_all = catalog["operations"][73]
+    curator_reembed_all = catalog["operations"][74]
+    synth_reenqueue_all = catalog["operations"][75]
+    curator_reenqueue_extract_all = catalog["operations"][76]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3416,6 +3451,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     vector_rebuild_lock_release_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(vector_rebuild_lock_release["id"]), 0, b"",
+    )
+    release_get_active_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(release_get_active["id"]), 0, b"",
+    )
+    release_get_active_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(release_get_active["id"]), 0, _put_u64(21),
+    )
+    release_get_active_absent = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(release_get_active["id"]), 0, _put_u64(0),
     )
     proposals_archive_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(proposals_archive_expired["id"]), 0, b"",
@@ -6621,6 +6665,45 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": release_get_active["family"],
+            "id": release_get_active["id"],
+            "name": release_get_active["name"],
+            "request": {
+                "positive": release_get_active_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(release_get_active_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(release_get_active_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": release_get_active_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (release_get_active_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "release_id": 21, "hex": release_get_active_ok.hex()},
+                    {"result": 0, "release_id": 0,
+                     "hex": release_get_active_absent.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(release_get_active_ok, 8,
+                                int(release_get_active["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(release_get_active_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(release_get_active["id"]), 0, b"").hex()},
+                    {"mutation": "id_too_large", "hex":
+                     (release_get_active_ok[:-8] +
+                      _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": release_get_active_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (release_get_active_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": prospective_sweep_expired["family"],
             "id": prospective_sweep_expired["id"],
             "name": prospective_sweep_expired["name"],
@@ -7036,14 +7119,15 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     rel_types_ensure_seed = catalog["operations"][65]
     vector_rebuild_lock_try_acquire = catalog["operations"][66]
     vector_rebuild_lock_release = catalog["operations"][67]
-    prospective_sweep_expired = catalog["operations"][68]
-    directive_sweep_expired = catalog["operations"][69]
-    mark_revisit_due = catalog["operations"][70]
-    ingest_queue_reset_running = catalog["operations"][71]
-    evidence_reembed_all = catalog["operations"][72]
-    curator_reembed_all = catalog["operations"][73]
-    synth_reenqueue_all = catalog["operations"][74]
-    curator_reenqueue_extract_all = catalog["operations"][75]
+    release_get_active = catalog["operations"][68]
+    prospective_sweep_expired = catalog["operations"][69]
+    directive_sweep_expired = catalog["operations"][70]
+    mark_revisit_due = catalog["operations"][71]
+    ingest_queue_reset_running = catalog["operations"][72]
+    evidence_reembed_all = catalog["operations"][73]
+    curator_reembed_all = catalog["operations"][74]
+    synth_reenqueue_all = catalog["operations"][75]
+    curator_reenqueue_extract_all = catalog["operations"][76]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -7969,6 +8053,17 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{vector_rebuild_lock_release['reply']['encoded_size_ok']}u"),
         ("AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_ERROR_LEN",
          f"{vector_rebuild_lock_release['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EVENT_RELEASE_GET_ACTIVE", "AIMEE_DB2_EVENT_CUSTODY"),
+        ("AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE", "AIMEE_DB2_FAMILY_CUSTODY"),
+        ("AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE", f"{release_get_active['id']}u"),
+        ("AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN",
+         f"{release_get_active['request']['encoded_size']}u"),
+        ("AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN",
+         f"{release_get_active['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_RELEASE_GET_ACTIVE_ERROR_LEN",
+         f"{release_get_active['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_RELEASE_GET_ACTIVE_MAX",
+         f"{release_get_active['reply']['field']['maximum']}ull"),
         ("AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_EVENT_MAINTENANCE"),
         ("AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED", "AIMEE_DB2_FAMILY_MAINTENANCE"),
         ("AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED",
@@ -10489,6 +10584,60 @@ static inline int aimee_db2_proposals_archive_expired_reply_decode(const uint8_t
                   header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
               ? 0
               : -1;
+}}
+
+static inline int aimee_db2_release_get_active_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_release_get_active_request_decode(const uint8_t *input,
+                                                              size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_release_get_active_reply_encode(uint64_t release_id, uint8_t *output,
+                                                            size_t capacity,
+                                                            uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || release_id > AIMEE_DB2_RELEASE_GET_ACTIVE_MAX ||
+       capacity < AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE, AIMEE_DB2_RESULT_OK,
+                                     8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, release_id);
+   *output_len = AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_release_get_active_reply_decode(const uint8_t *input,
+                                                            size_t input_len,
+                                                            uint64_t *release_id)
+{{
+   if (release_id)
+      *release_id = 0u;
+   if (!release_id)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RELEASE_GET_ACTIVE_MAX)
+      return -1;
+   *release_id = decoded;
+   return 0;
 }}
 
 static inline int aimee_db2_vector_rebuild_lock_try_acquire_request_encode(uint8_t *output,
@@ -13924,6 +14073,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_release_get_active_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t *release_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_proposals_archive_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -15578,6 +15731,31 @@ aimee_module_call_result_t aimee_db2_vector_rebuild_lock_release_call(
 }
 
 aimee_module_call_result_t
+aimee_db2_release_get_active_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t *release_id,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !release_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *release_id = 0u;
+   uint8_t request[AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_release_get_active_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RELEASE_GET_ACTIVE, AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_release_get_active_reply_decode(response, response_len, release_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
 aimee_db2_proposals_archive_expired_call(aimee_db2_call_fn call, void *call_context,
                                          uint64_t trace_id, uint64_t deadline_ns,
                                          aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -16106,14 +16284,15 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     rel_types_ensure_seed = catalog["operations"][65]
     vector_rebuild_lock_try_acquire = catalog["operations"][66]
     vector_rebuild_lock_release = catalog["operations"][67]
-    prospective_sweep_expired = catalog["operations"][68]
-    directive_sweep_expired = catalog["operations"][69]
-    mark_revisit_due = catalog["operations"][70]
-    ingest_queue_reset_running = catalog["operations"][71]
-    evidence_reembed_all = catalog["operations"][72]
-    curator_reembed_all = catalog["operations"][73]
-    synth_reenqueue_all = catalog["operations"][74]
-    curator_reenqueue_extract_all = catalog["operations"][75]
+    release_get_active = catalog["operations"][68]
+    prospective_sweep_expired = catalog["operations"][69]
+    directive_sweep_expired = catalog["operations"][70]
+    mark_revisit_due = catalog["operations"][71]
+    ingest_queue_reset_running = catalog["operations"][72]
+    evidence_reembed_all = catalog["operations"][73]
+    curator_reembed_all = catalog["operations"][74]
+    synth_reenqueue_all = catalog["operations"][75]
+    curator_reenqueue_extract_all = catalog["operations"][76]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -16493,6 +16672,10 @@ const VectorRebuildLockTryAcquireMax uint32 = {vector_rebuild_lock_try_acquire['
 const EventVectorRebuildLockRelease = EventCustody
 const StageVectorRebuildLockRelease = FamilyCustody
 const OperationVectorRebuildLockRelease uint32 = {vector_rebuild_lock_release['id']}
+const EventReleaseGetActive = EventCustody
+const StageReleaseGetActive = FamilyCustody
+const OperationReleaseGetActive uint32 = {release_get_active['id']}
+const ReleaseGetActiveMax uint64 = {release_get_active['reply']['field']['maximum']}
 const EventProposalsArchiveExpired = EventLearning
 const StageProposalsArchiveExpired = FamilyLearning
 const OperationProposalsArchiveExpired uint32 = {proposals_archive_expired['id']}
@@ -18805,6 +18988,56 @@ func DecodeVectorRebuildLockReleaseReply(reply []byte) error {{
 		return ErrMalformedEnvelope
 	}}
 	return nil
+}}
+
+// EncodeReleaseGetActiveRequest emits the empty request envelope. The state key
+// is policy and never travels.
+func EncodeReleaseGetActiveRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationReleaseGetActive, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeReleaseGetActiveRequest validates the exact custody-family envelope.
+func DecodeReleaseGetActiveRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReleaseGetActive ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeReleaseGetActiveReply emits one bounded u64 release id. Zero means no
+// active release, a state value that would not parse, or one that was not
+// positive: the backend cannot tell those apart and neither can this.
+func EncodeReleaseGetActiveReply(releaseID uint64) ([]byte, error) {{
+	if releaseID > ReleaseGetActiveMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationReleaseGetActive, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:], releaseID)
+	return reply, nil
+}}
+
+// DecodeReleaseGetActiveReply validates the operation and bounded id.
+func DecodeReleaseGetActiveReply(reply []byte) (uint64, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationReleaseGetActive ||
+		header.Result != ResultOK || header.PayloadLen != 8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	releaseID := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
+	if releaseID > ReleaseGetActiveMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return releaseID, nil
 }}
 
 // EncodeProposalsArchiveExpiredRequest emits the empty request envelope. The

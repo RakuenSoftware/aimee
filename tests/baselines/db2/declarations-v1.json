@@ -10162,9 +10162,15 @@
           "line": 47
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.release_get_active operation reads the pointer to the release the system currently answers as. Zero covers three different situations: no key, a value that does not parse, and a value that is not positive. The parse happens through atoll, which returns zero for garbage without saying so, and the catalog records both collapses rather than letting a zero read as a confident no release."
+      },
       "signature": "int64_t db2_kb_release_get_active ( void )",
       "signature_sha256": "174c8fc20cfe27ee08cbe7b325ee00ebd5a82ac9f350a08e47334c48ff99adf2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_release_get_active"
     },
     {
@@ -26196,15 +26202,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "354c0165cca08d6b49271beed57645d92359f6b59d1384462426d5c2a39ccc9c",
+  "fingerprint": "b97ffcce4120fa8133dda49a48b5688f740789094e200b70d450fe2a902851f2",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 596,
+    "audit_pending": 595,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 362
+    "reviewed": 363
   }
 }

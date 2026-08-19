@@ -332,6 +332,14 @@
       "reason": "The typed maintenance.ingest_queue_reset_running operation replaces the startup recovery that returns queue rows abandoned by a dead worker to the pending pool. The two states and the clearing of started_at are fixed policy. Clearing the claim instant is the part that matters: a row left marked as claimed by a process that no longer exists is work that never runs again, and a caller able to skip the clear would hand back a row that still looks taken."
     },
     {
+      "symbol": "db2_kb_release_get_active",
+      "signature_sha256": "174c8fc20cfe27ee08cbe7b325ee00ebd5a82ac9f350a08e47334c48ff99adf2",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.release_get_active operation reads the pointer to the release the system currently answers as. Zero covers three different situations: no key, a value that does not parse, and a value that is not positive. The parse happens through atoll, which returns zero for garbage without saying so, and the catalog records both collapses rather than letting a zero read as a confident no release."
+    },
+    {
       "symbol": "db2_kb_runtime_state_vector_rebuild_lock_release",
       "signature_sha256": "299e905f09f5782074e7ac3041beb7a925ea72217020b05ffafc05f086c6647c",
       "disposition": "wire-operation",

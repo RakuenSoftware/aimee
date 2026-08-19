@@ -687,6 +687,15 @@ int main(int argc, char **argv)
    assert(aimee_db2_vector_rebuild_lock_release_call(call_client, &client, 9121, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
+   /* No active release is set on a fresh schema. The zero that comes back is
+    * the missing-key case; the other two the catalog records -- a value that
+    * will not parse, and one that is not positive -- need a corrupted row to
+    * produce and are indistinguishable from this one when they do. */
+   uint64_t release_id = 99;
+   assert(aimee_db2_release_get_active_call(call_client, &client, 9123, 0, &release_id, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(release_id == 0);
+
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and
     * the second call returning the same zero is what the catalog's safe

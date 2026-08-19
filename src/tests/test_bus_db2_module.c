@@ -103,6 +103,7 @@ typedef struct
    int (*rel_types_ensure_seed)(void);
    int (*vector_rebuild_lock_try_acquire)(void);
    void (*vector_rebuild_lock_release)(void);
+   int64_t (*release_get_active)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);
@@ -196,6 +197,7 @@ static int proposals_archive_calls;
 static int rel_types_seed_calls;
 static int lock_acquire_calls;
 static int lock_release_calls;
+static int release_active_calls;
 static int prospective_sweep_calls;
 static int directive_sweep_calls;
 static int mark_revisit_calls;
@@ -1208,6 +1210,17 @@ static void vector_rebuild_lock_release(void)
    lock_release_calls++;
 }
 
+int64_t db2_kb_release_get_active(void)
+{
+   return 0;
+}
+
+static int64_t release_get_active(void)
+{
+   release_active_calls++;
+   return 21;
+}
+
 int db2_prospective_sweep_expired(void)
 {
    return 0;
@@ -1673,6 +1686,7 @@ int main(void)
        .rel_types_ensure_seed = rel_types_ensure_seed,
        .vector_rebuild_lock_try_acquire = vector_rebuild_lock_try_acquire,
        .vector_rebuild_lock_release = vector_rebuild_lock_release,
+       .release_get_active = release_get_active,
        .prospective_sweep_expired = prospective_sweep_expired,
        .directive_sweep_expired = directive_sweep_expired,
        .mark_revisit_due = mark_revisit_due,
@@ -2093,6 +2107,11 @@ int main(void)
    assert(aimee_db2_vector_rebuild_lock_release_call(call_client, &client, 7099, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(lock_release_calls == 1);
+
+   uint64_t release_id = 99u;
+   assert(aimee_db2_release_get_active_call(call_client, &client, 7101, 0, &release_id, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(release_id == 21 && release_active_calls == 1);
 
    /* The maintenance family's first crossing of the bus: a new event kind
     * and a new stage, not another operation on one already carrying work. */

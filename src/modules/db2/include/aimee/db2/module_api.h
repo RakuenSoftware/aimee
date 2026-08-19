@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "6e4e3edba3e3e15b24653437055b94d97810184a1d1c27d1bfac23693329ed8a"
+#define AIMEE_DB2_CONTRACT_SHA256 "6711129dbd83cc2e5d69eda9126e46ecde1e25cff06fc6029c003e0f1ffd56c4"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -600,6 +600,13 @@
 #define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN      24u
 #define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN     24u
 #define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_ERROR_LEN        24u
+#define AIMEE_DB2_EVENT_RELEASE_GET_ACTIVE                     AIMEE_DB2_EVENT_CUSTODY
+#define AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE                     AIMEE_DB2_FAMILY_CUSTODY
+#define AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE                 3u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN               24u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN              32u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_ERROR_LEN                 24u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_MAX                       9223372036854775807ull
 #define AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED              AIMEE_DB2_EVENT_MAINTENANCE
 #define AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED              AIMEE_DB2_FAMILY_MAINTENANCE
 #define AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED          1u
@@ -3058,6 +3065,60 @@ static inline int aimee_db2_proposals_archive_expired_reply_decode(const uint8_t
                   header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
               ? 0
               : -1;
+}
+
+static inline int aimee_db2_release_get_active_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_release_get_active_request_decode(const uint8_t *input,
+                                                              size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_release_get_active_reply_encode(uint64_t release_id, uint8_t *output,
+                                                            size_t capacity,
+                                                            uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || release_id > AIMEE_DB2_RELEASE_GET_ACTIVE_MAX ||
+       capacity < AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE, AIMEE_DB2_RESULT_OK,
+                                     8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, release_id);
+   *output_len = AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_release_get_active_reply_decode(const uint8_t *input,
+                                                            size_t input_len,
+                                                            uint64_t *release_id)
+{
+   if (release_id)
+      *release_id = 0u;
+   if (!release_id)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_RELEASE_GET_ACTIVE_MAX)
+      return -1;
+   *release_id = decoded;
+   return 0;
 }
 
 static inline int aimee_db2_vector_rebuild_lock_try_acquire_request_encode(uint8_t *output,

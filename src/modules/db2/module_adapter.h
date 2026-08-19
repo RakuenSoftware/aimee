@@ -90,6 +90,7 @@ typedef struct
    int (*rel_types_ensure_seed)(void);
    int (*vector_rebuild_lock_try_acquire)(void);
    void (*vector_rebuild_lock_release)(void);
+   int64_t (*release_get_active)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);

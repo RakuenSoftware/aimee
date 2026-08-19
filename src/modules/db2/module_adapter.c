@@ -18,6 +18,7 @@
 #include "c/epistemic_directives.h"
 #include "c/evidence_vectors.h"
 #include "c/kb_payload.h"
+#include "c/kb_releases.h"
 #include "c/kb_runtime_state.h"
 #include "c/kb_service_backend.h"
 #include "c/kind_lifecycle.h"
@@ -336,6 +337,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .rel_types_ensure_seed = db2_rel_types_ensure_seed,
        .vector_rebuild_lock_try_acquire = db2_kb_runtime_state_vector_rebuild_lock_try_acquire,
        .vector_rebuild_lock_release = db2_kb_runtime_state_vector_rebuild_lock_release,
+       .release_get_active = db2_kb_release_get_active,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        /* Of the two identical sweeps, bind the one that reports failure:
         * db2_directive_sweep_expired collapses a failed statement into
@@ -390,6 +392,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED &&
         invocation->stage_id != AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE &&
         invocation->stage_id != AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE &&
+        invocation->stage_id != AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1550,6 +1553,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_vector_rebuild_lock_release_reply_encode(response_body, response_capacity,
                                                                 response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_release_get_active_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->release_get_active)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Zero is three answers at once: no key, a value that would not
+          * parse, and a value that was not positive. The parse runs through
+          * atoll, which returns zero for garbage without saying so, and the
+          * boundary cannot recover what the backend threw away. Recorded in
+          * the catalog so a zero is not read as a confident "no release". */
+         int64_t release_id = backend->release_get_active();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (release_id < 0 || (uint64_t)release_id > AIMEE_DB2_RELEASE_GET_ACTIVE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_release_get_active_reply_encode((uint64_t)release_id, response_body,
+                                                       response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
