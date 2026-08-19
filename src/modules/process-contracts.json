@@ -714,6 +714,11 @@
           "id": 13,
           "name": "db1-identity",
           "event_kind": 11789
+        },
+        {
+          "id": 14,
+          "name": "db1-checkpoints",
+          "event_kind": 11790
         }
       ]
     }

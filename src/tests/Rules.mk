@@ -122,6 +122,7 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/wfe_binding.o \
                     $(OBJDIR)/modules/db1/pipelines.o \
                     $(OBJDIR)/modules/db1/roadmap_runtime.o \
+                    $(OBJDIR)/modules/db1/checkpoints.o \
                     $(OBJDIR)/modules/db1/execution_plans.o $(OBJDIR)/execution_plan_list.o \
                     $(OBJDIR)/modules/db1/roundtable_pipeline.o \
                     $(OBJDIR)/modules/db1/remote_client_grant.o $(OBJDIR)/remote_client_claim.o \
@@ -5281,6 +5282,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/roundtable_pipeline.o \
                                        $(OBJDIR)/modules/db1/roundtable_stage.o \
                                        $(OBJDIR)/modules/db1/identity_stage.o \
+                                       $(OBJDIR)/modules/db1/checkpoints_stage.o \
+                                       $(OBJDIR)/modules/db1/economizer_state.o \
                                        $(OBJDIR)/modules/db1/remote_client_grant.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o \
                                        $(OBJDIR)/dstr.o \

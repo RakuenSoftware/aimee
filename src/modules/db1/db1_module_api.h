@@ -496,6 +496,17 @@
 #define AIMEE_DB1_OP_REMOTE_CLIENT_BIND    3u
 #define AIMEE_DB1_OP_REMOTE_CLIENT_TIER    4u
 
+/* Family 14: session checkpoint rows: a label, the session it belongs to and
+ * the snapshot it captured. */
+
+#define AIMEE_DB1_EVENT_CHECKPOINTS 11790u
+#define AIMEE_DB1_STAGE_CHECKPOINTS 14u
+
+#define AIMEE_DB1_OP_CHECKPOINT_INSERT 1u
+#define AIMEE_DB1_OP_CHECKPOINT_GET    2u
+#define AIMEE_DB1_OP_CHECKPOINT_LIST   3u
+#define AIMEE_DB1_OP_CHECKPOINT_DELETE 4u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry
