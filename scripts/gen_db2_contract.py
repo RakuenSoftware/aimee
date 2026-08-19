@@ -235,7 +235,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "decay_confidence",
                                                                 "workspace_tag_insert",
                                                                 "set_cognified_kind",
-                                                                "set_source_session") else
+                                                                "set_source_session",
+                                                                "negation_tokens_update") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1719,9 +1720,47 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != []):
                 fail("set-source-session-reply",
                      "reply must acknowledge the write without a payload")
+        elif key == ("memory", 38) and name == "negation_tokens_update" and \
+                operation["wire_format"] == "db2-envelope-u64-string-ack-v1":
+            if operation["c_symbols"] != ["db2_memory_negation_tokens_update"]:
+                fail("operation-c-symbols",
+                     "negation_tokens_update C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "negation_tokens_update results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "negation_tokens_update.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 2:
+                fail("negation-tokens-update-request",
+                     "request must carry the memory and the tokens")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "negation_tokens_update.request.fields[0]")
+            tokens_field = _keys(request_fields[1],
+                                 {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                 "negation_tokens_update.request.fields[1]")
+            # Minimum zero, like set_source_session: the backend maps a null to
+            # an empty string and stores it, and the extractor legitimately
+            # produces nothing when a memory contains no negations.
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 12 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 2047 or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    tokens_field != {"name": "tokens", "type": "utf8", "minimum_bytes": 0,
+                                     "maximum_bytes": 2047}):
+                fail("negation-tokens-update-request",
+                     "request must name one positive memory and one clearable bounded token set")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "negation_tokens_update.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("negation-tokens-update-reply",
+                     "reply must acknowledge the write without a payload")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 47 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 48 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1734,9 +1773,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
             "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
             "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
-            "workspace_tag_insert", "set_cognified_kind", "set_source_session"]:
+            "workspace_tag_insert", "set_cognified_kind", "set_source_session",
+            "negation_tokens_update"]:
         fail("unsupported-operation",
-             "the partial generator requires the forty-seven supported operations exactly once")
+             "the partial generator requires the forty-eight supported operations exactly once")
     return catalog
 
 
@@ -1907,6 +1947,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     workspace_tag_insert = catalog["operations"][44]
     set_cognified_kind = catalog["operations"][45]
     set_source_session = catalog["operations"][46]
+    negation_tokens_update = catalog["operations"][47]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2174,6 +2215,18 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     set_source_session_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(set_source_session["id"]), 0, b"",
+    )
+    negation_tokens_value = b"not never without"
+    negation_tokens_update_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(negation_tokens_update["id"]), 0,
+        _put_u64(42) + _put_u32(len(negation_tokens_value)) + negation_tokens_value,
+    )
+    negation_tokens_update_cleared = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(negation_tokens_update["id"]), 0,
+        _put_u64(42) + _put_u32(0),
+    )
+    negation_tokens_update_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(negation_tokens_update["id"]), 0, b"",
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -4451,6 +4504,56 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (set_source_session_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": negation_tokens_update["family"],
+            "id": negation_tokens_update["id"],
+            "name": negation_tokens_update["name"],
+            "request": {
+                "positive": negation_tokens_update_request.hex(),
+                "memory_id": 42,
+                "tokens": negation_tokens_value.decode("ascii"),
+                "cleared": negation_tokens_update_cleared.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(negation_tokens_update_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(negation_tokens_update_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(negation_tokens_update["id"]), 0,
+                               _put_u64(0) + _put_u32(len(negation_tokens_value)) +
+                               negation_tokens_value).hex()},
+                    {"mutation": "tokens_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(negation_tokens_update["id"]), 0,
+                               _put_u64(42) + _put_u32(len(negation_tokens_value) + 1) +
+                               negation_tokens_value).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(negation_tokens_update["id"]), 0,
+                               _put_u64(42) + _put_u32(len(negation_tokens_value)) +
+                               negation_tokens_value[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": negation_tokens_update_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (negation_tokens_update_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": negation_tokens_update_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(negation_tokens_update_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(negation_tokens_update_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(negation_tokens_update["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": negation_tokens_update_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (negation_tokens_update_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -4510,6 +4613,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     workspace_tag_insert = catalog["operations"][44]
     set_cognified_kind = catalog["operations"][45]
     set_source_session = catalog["operations"][46]
+    negation_tokens_update = catalog["operations"][47]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -5175,6 +5279,22 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{set_source_session['request']['fields'][0]['maximum']}ull"),
         ("AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX",
          f"{set_source_session['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_EVENT_NEGATION_TOKENS_UPDATE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_NEGATION_TOKENS_UPDATE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_NEGATION_TOKENS_UPDATE",
+         f"{negation_tokens_update['id']}u"),
+        ("AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MIN_LEN",
+         f"{negation_tokens_update['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MAX_LEN",
+         f"{negation_tokens_update['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN",
+         f"{negation_tokens_update['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_NEGATION_TOKENS_UPDATE_ERROR_LEN",
+         f"{negation_tokens_update['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_NEGATION_TOKENS_UPDATE_MEMORY_ID_MAX",
+         f"{negation_tokens_update['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX",
+         f"{negation_tokens_update['request']['fields'][1]['maximum_bytes']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -7115,6 +7235,93 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}}
+
+static inline int aimee_db2_negation_tokens_update_request_encode(uint64_t memory_id,
+                                                                 const char *tokens,
+                                                                 uint8_t *output, size_t capacity,
+                                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!tokens || !output || !output_len)
+      return -1;
+   size_t tokens_len = 0u;
+   while (tokens_len <= AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX && tokens[tokens_len])
+      ++tokens_len;
+   size_t payload_len = 12u + tokens_len;
+   /* No lower bound: a memory with no negations legitimately extracts to
+    * nothing, and storing that empty result is the point. */
+   if (memory_id == 0u || memory_id > AIMEE_DB2_NEGATION_TOKENS_UPDATE_MEMORY_ID_MAX ||
+       tokens_len > AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_NEGATION_TOKENS_UPDATE, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)tokens_len);
+   if (tokens_len != 0u)
+      memcpy(payload + 12u, tokens, tokens_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_negation_tokens_update_request_decode(const uint8_t *input,
+                                                                  size_t input_len,
+                                                                  uint64_t *memory_id,
+                                                                  char *tokens,
+                                                                  size_t tokens_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (tokens && tokens_capacity)
+      tokens[0] = '\\0';
+   if (!memory_id || !tokens ||
+       tokens_capacity < (size_t)AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_NEGATION_TOKENS_UPDATE ||
+       header.payload_len < 12u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t tokens_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u ||
+       decoded_memory_id > AIMEE_DB2_NEGATION_TOKENS_UPDATE_MEMORY_ID_MAX ||
+       tokens_len > AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX ||
+       (uint32_t)12u + tokens_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < tokens_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   if (tokens_len != 0u)
+      memcpy(tokens, payload + 12u, tokens_len);
+   tokens[tokens_len] = '\\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}}
+
+static inline int aimee_db2_negation_tokens_update_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_NEGATION_TOKENS_UPDATE,
+                                        AIMEE_DB2_RESULT_OK, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_negation_tokens_update_reply_decode(const uint8_t *input,
+                                                                size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_NEGATION_TOKENS_UPDATE &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }}
 
 static inline int aimee_db2_set_source_session_request_encode(uint64_t memory_id,
@@ -9159,6 +9366,11 @@ extern "C"
        uint64_t memory_id, const char *session_id, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_negation_tokens_update_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *tokens, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -10262,6 +10474,31 @@ aimee_db2_set_source_session_call(aimee_db2_call_fn call, void *call_context, ui
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_negation_tokens_update_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                      uint64_t deadline_ns, uint64_t memory_id, const char *tokens,
+                                      aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   static _Thread_local uint8_t request[AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_negation_tokens_update_request_encode(memory_id, tokens, request, sizeof(request),
+                                                       &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_NEGATION_TOKENS_UPDATE,
+            AIMEE_DB2_STAGE_NEGATION_TOKENS_UPDATE, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_negation_tokens_update_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -10548,6 +10785,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     workspace_tag_insert = catalog["operations"][44]
     set_cognified_kind = catalog["operations"][45]
     set_source_session = catalog["operations"][46]
+    negation_tokens_update = catalog["operations"][47]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -10844,6 +11082,11 @@ const StageSetSourceSession = FamilyMemory
 const OperationSetSourceSession uint32 = {set_source_session['id']}
 const SetSourceSessionMemoryIDMax uint64 = {set_source_session['request']['fields'][0]['maximum']}
 const SetSourceSessionSessionMax = {set_source_session['request']['fields'][1]['maximum_bytes']}
+const EventNegationTokensUpdate = EventMemory
+const StageNegationTokensUpdate = FamilyMemory
+const OperationNegationTokensUpdate uint32 = {negation_tokens_update['id']}
+const NegationTokensUpdateMemoryIDMax uint64 = {negation_tokens_update['request']['fields'][0]['maximum']}
+const NegationTokensUpdateTokensMax = {negation_tokens_update['request']['fields'][1]['maximum_bytes']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -12001,6 +12244,69 @@ func EncodeSetSourceSessionReply() ([]byte, error) {{
 func DecodeSetSourceSessionReply(reply []byte) error {{
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationSetSourceSession ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeNegationTokensUpdateRequest emits the memory and its extracted tokens.
+// An empty token set is accepted and clears the column.
+func EncodeNegationTokensUpdateRequest(memoryID uint64, tokens string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > NegationTokensUpdateMemoryIDMax ||
+		len(tokens) > NegationTokensUpdateTokensMax || hasNUL(tokens) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 12 + len(tokens)
+	header, err := EncodeRequestHeader(OperationNegationTokensUpdate, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(tokens)))
+	copy(payload[12:], tokens)
+	return request, nil
+}}
+
+// DecodeNegationTokensUpdateRequest validates the envelope, memory, and tokens.
+func DecodeNegationTokensUpdateRequest(request []byte) (uint64, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationNegationTokensUpdate || header.Flags != 0 ||
+		header.PayloadLen < 12 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	tokensLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > NegationTokensUpdateMemoryIDMax ||
+		tokensLen > uint32(NegationTokensUpdateTokensMax) ||
+		12+tokensLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	tokens := string(payload[12 : 12+tokensLen])
+	if hasNUL(tokens) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return memoryID, tokens, nil
+}}
+
+// EncodeNegationTokensUpdateReply acknowledges the write without a payload.
+func EncodeNegationTokensUpdateReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationNegationTokensUpdate, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeNegationTokensUpdateReply validates it and refuses any payload.
+func DecodeNegationTokensUpdateReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationNegationTokensUpdate ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != int(EnvelopeHeaderLen) {{
 		return ErrMalformedEnvelope

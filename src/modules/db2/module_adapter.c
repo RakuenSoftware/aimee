@@ -295,6 +295,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .workspace_tag_insert = db2_memory_workspace_tag_insert,
        .set_cognified_kind = db2_memory_set_cognified_kind,
        .set_source_session = db2_memory_set_source_session,
+       .negation_tokens_update = db2_memory_negation_tokens_update,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1113,6 +1114,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_set_source_session_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t negation_memory_id = 0u;
+      static _Thread_local char negation_tokens[AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX + 1];
+      if (aimee_db2_negation_tokens_update_request_decode(request_body, request_len,
+                                                          &negation_memory_id, negation_tokens,
+                                                          sizeof(negation_tokens)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->negation_tokens_update)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* An empty token set reaches the backend and clears the column: a
+          * memory with no negations is a real extraction result. */
+         backend->negation_tokens_update((int64_t)negation_memory_id, negation_tokens);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_negation_tokens_update_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

@@ -41,6 +41,7 @@ type wireBaseline struct {
 			Key                        string   `json:"key"`
 			Kind                       string   `json:"kind"`
 			SessionID                  string   `json:"session_id"`
+			Tokens                     string   `json:"tokens"`
 			Cleared                    string   `json:"cleared"`
 			TierA                      string   `json:"tier_a"`
 			TierB                      string   `json:"tier_b"`
@@ -231,7 +232,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 47 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 48 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -277,7 +278,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[43].Name != "decay_confidence" ||
 		baseline.Operations[44].Name != "workspace_tag_insert" ||
 		baseline.Operations[45].Name != "set_cognified_kind" ||
-		baseline.Operations[46].Name != "set_source_session" {
+		baseline.Operations[46].Name != "set_source_session" ||
+		baseline.Operations[47].Name != "negation_tokens_update" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -474,6 +476,56 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestNegationTokensUpdateMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[47]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeNegationTokensUpdateRequest(operation.Request.MemoryID, operation.Request.Tokens)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, tokens, err := DecodeNegationTokensUpdateRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID || tokens != operation.Request.Tokens {
+		t.Fatalf("positive request = (%d, %q, %v)", memoryID, tokens, err)
+	}
+	// An empty extraction is a positive vector: a memory with no negations
+	// still has to clear whatever was stored before.
+	wantCleared := decodeHex(t, operation.Request.Cleared)
+	gotCleared, err := EncodeNegationTokensUpdateRequest(operation.Request.MemoryID, "")
+	if err != nil || string(gotCleared) != string(wantCleared) {
+		t.Fatalf("cleared request = (%x, %v), want %x", gotCleared, err, wantCleared)
+	}
+	memoryID, tokens, err = DecodeNegationTokensUpdateRequest(wantCleared)
+	if err != nil || memoryID != operation.Request.MemoryID || tokens != "" {
+		t.Fatalf("cleared request decode = (%d, %q, %v)", memoryID, tokens, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeNegationTokensUpdateRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeNegationTokensUpdateReply()
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		if err := DecodeNegationTokensUpdateReply(got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeNegationTokensUpdateReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+	atBound := strings.Repeat("t", NegationTokensUpdateTokensMax)
+	if _, err := EncodeNegationTokensUpdateRequest(42, atBound); err != nil {
+		t.Fatalf("tokens at the bound refused: %v", err)
+	}
+	if _, err := EncodeNegationTokensUpdateRequest(42, atBound+"t"); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("tokens past the bound encoded: %v", err)
 	}
 }
 

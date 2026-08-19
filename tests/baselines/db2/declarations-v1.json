@@ -17444,9 +17444,15 @@
           "line": 835
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.negation_tokens_update operation replaces the extracted-token write, bounded to the extractor's own output width. The backend maps a null to an empty string and stores it, so an empty value is a request that clears the column rather than a malformed one."
+      },
       "signature": "void db2_memory_negation_tokens_update ( int64_t memory_id , const char * new_tokens )",
       "signature_sha256": "6f6ed69c0c5b235dbb8ab8b15667e06d17a5854ecb51d850b1d3396bf060d33e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_negation_tokens_update"
     },
     {
@@ -25938,15 +25944,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e5582bdb88da27a9ea7b1792b3297e4e3e328817a07d7a5115ac2e437af7e064",
+  "fingerprint": "7d1f96aefa7c634af566e96f8bee8fc8aa2512970cbdd1ed1f6eccb69ddbc429",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 639,
+    "audit_pending": 638,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 319
+    "reviewed": 320
   }
 }

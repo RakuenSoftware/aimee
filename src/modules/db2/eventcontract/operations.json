@@ -1304,6 +1304,33 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 38,
+      "name": "negation_tokens_update",
+      "wire_format": "db2-envelope-u64-string-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Negation tokens are a canonical relational column on the memory row; a portable ANN provider holds a derived vector rather than the extracted tokens.",
+      "c_symbols": ["db2_memory_negation_tokens_update"],
+      "request": {
+        "encoded_size_min": 36,
+        "encoded_size_max": 2083,
+        "fields": [
+          {"name": "memory_id", "type": "u64", "minimum": 1,
+           "maximum": 9223372036854775807},
+          {"name": "tokens", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 2047}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
     }
   ]
 }

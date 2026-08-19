@@ -60,6 +60,8 @@ static int cognified_kind_calls;
 static char cognified_kind_last[32];
 static int source_session_calls;
 static char source_session_last[160];
+static int negation_tokens_calls;
+static char negation_tokens_last[2048];
 static char update_content_last[2048];
 static char scope_type_last[64];
 static int64_t link_delete_last;
@@ -488,6 +490,19 @@ static void set_source_session(int64_t memory_id, const char *session_id)
    (void)memory_id;
    source_session_calls++;
    snprintf(source_session_last, sizeof(source_session_last), "%s", session_id);
+}
+
+void db2_memory_negation_tokens_update(int64_t memory_id, const char *new_tokens)
+{
+   (void)memory_id;
+   (void)new_tokens;
+}
+
+static void negation_tokens_update(int64_t memory_id, const char *tokens)
+{
+   (void)memory_id;
+   negation_tokens_calls++;
+   snprintf(negation_tokens_last, sizeof(negation_tokens_last), "%s", tokens);
 }
 
 int64_t db2_memory_count(void)
@@ -1171,6 +1186,8 @@ static void reset(void)
    cognified_kind_last[0] = '\0';
    source_session_calls = 0;
    source_session_last[0] = '\0';
+   negation_tokens_calls = 0;
+   negation_tokens_last[0] = '\0';
    update_content_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
@@ -2461,6 +2478,51 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_negation_tokens_update_wire(void)
+{
+   static uint8_t request[AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MAX_LEN];
+   static char tokens[AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX + 1];
+   uint32_t request_len = 99;
+   uint64_t memory_id = 99;
+   assert(aimee_db2_negation_tokens_update_request_encode(42u, "not never without", request,
+                                                          sizeof(request), &request_len) == 0);
+   assert(aimee_db2_negation_tokens_update_request_decode(request, request_len, &memory_id, tokens,
+                                                          sizeof(tokens)) == 0);
+   assert(memory_id == 42 && strcmp(tokens, "not never without") == 0);
+
+   /* The extractor legitimately produces nothing for a memory with no
+    * negations, and storing that empty result is the point of the call. */
+   assert(aimee_db2_negation_tokens_update_request_encode(42u, "", request, sizeof(request),
+                                                          &request_len) == 0);
+   assert(request_len == AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MIN_LEN);
+   assert(aimee_db2_negation_tokens_update_request_decode(request, request_len, &memory_id, tokens,
+                                                          sizeof(tokens)) == 0);
+   assert(memory_id == 42 && tokens[0] == '\0');
+
+   assert(aimee_db2_negation_tokens_update_request_encode(0u, "not", request, sizeof(request),
+                                                          &request_len) == -1);
+
+   /* Bounded to the extractor's own output buffer width. */
+   static char at_bound[AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX + 2];
+   memset(at_bound, 't', AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX);
+   at_bound[AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX] = '\0';
+   assert(aimee_db2_negation_tokens_update_request_encode(42u, at_bound, request, sizeof(request),
+                                                          &request_len) == 0);
+   assert(request_len == AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MAX_LEN);
+   at_bound[AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX] = 't';
+   at_bound[AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX + 1] = '\0';
+   assert(aimee_db2_negation_tokens_update_request_encode(42u, at_bound, request, sizeof(request),
+                                                          &request_len) == -1);
+
+   uint8_t reply[AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN] = {0};
+   assert(aimee_db2_negation_tokens_update_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_negation_tokens_update_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_negation_tokens_update_reply_encode(reply, sizeof(reply) - 1) == -1);
+   assert(aimee_db2_negation_tokens_update_reply_encode(reply, sizeof(reply)) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_negation_tokens_update_reply_decode(reply, sizeof(reply)) == -1);
 }
 
 static void test_set_source_session_wire(void)
@@ -4273,6 +4335,37 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_negation_tokens_update_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.negation_tokens_update = negation_tokens_update};
+   static uint8_t request[AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_NEGATION_TOKENS_UPDATE};
+   assert(aimee_db2_negation_tokens_update_request_encode(42u, "not never", request,
+                                                          sizeof(request), &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(negation_tokens_calls == 1 && strcmp(negation_tokens_last, "not never") == 0);
+   assert(aimee_db2_negation_tokens_update_reply_decode(response, response_len) == 0);
+
+   /* The empty extraction must reach the backend rather than being dropped:
+    * dropping it would leave stale negations on a memory that no longer has
+    * any, and the caller would be told the write succeeded. */
+   assert(aimee_db2_negation_tokens_update_request_encode(42u, "", request, sizeof(request),
+                                                          &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(negation_tokens_calls == 2 && negation_tokens_last[0] == '\0');
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_set_source_session_handler(void)
 {
    reset();
@@ -5706,6 +5799,7 @@ int main(void)
    test_workspace_tag_insert_wire();
    test_set_cognified_kind_wire();
    test_set_source_session_wire();
+   test_negation_tokens_update_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5753,6 +5847,7 @@ int main(void)
    test_workspace_tag_insert_handler();
    test_set_cognified_kind_handler();
    test_set_source_session_handler();
+   test_negation_tokens_update_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

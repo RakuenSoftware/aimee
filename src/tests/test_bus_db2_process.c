@@ -494,6 +494,15 @@ int main(int argc, char **argv)
    assert(aimee_db2_set_source_session_call(call_client, &client, 9081, 0, 42u, "", NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
+   /* Same shape as the session setter above: the update matches no row on a
+    * fresh schema and the void backend swallows it. Both a populated and an
+    * empty extraction are exercised, because an empty one is what a memory
+    * with no negations produces and it still has to clear the column. */
+   assert(aimee_db2_negation_tokens_update_call(call_client, &client, 9082, 0, 42u, "not never",
+                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_negation_tokens_update_call(call_client, &client, 9083, 0, 42u, "", NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

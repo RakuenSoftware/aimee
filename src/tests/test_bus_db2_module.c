@@ -82,6 +82,7 @@ typedef struct
    void (*workspace_tag_insert)(int64_t memory_id, const char *workspace);
    void (*set_cognified_kind)(int64_t memory_id, const char *kind);
    void (*set_source_session)(int64_t memory_id, const char *session_id);
+   void (*negation_tokens_update)(int64_t memory_id, const char *tokens);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -145,6 +146,8 @@ static int cognified_kind_calls;
 static char cognified_kind_last[32];
 static int source_session_calls;
 static char source_session_last[160];
+static int negation_tokens_calls;
+static char negation_tokens_last[2048];
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -896,6 +899,19 @@ static void set_source_session(int64_t memory_id, const char *session_id)
    snprintf(source_session_last, sizeof(source_session_last), "%s", session_id);
 }
 
+void db2_memory_negation_tokens_update(int64_t memory_id, const char *new_tokens)
+{
+   (void)memory_id;
+   (void)new_tokens;
+}
+
+static void negation_tokens_update(int64_t memory_id, const char *tokens)
+{
+   (void)memory_id;
+   negation_tokens_calls++;
+   snprintf(negation_tokens_last, sizeof(negation_tokens_last), "%s", tokens);
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1232,6 +1248,7 @@ int main(void)
        .workspace_tag_insert = workspace_tag_insert,
        .set_cognified_kind = set_cognified_kind,
        .set_source_session = set_source_session,
+       .negation_tokens_update = negation_tokens_update,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1507,6 +1524,14 @@ int main(void)
    assert(aimee_db2_set_source_session_call(call_client, &client, 7067, 0, 42u, "", NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(source_session_calls == 2 && source_session_last[0] == '\0');
+
+   assert(aimee_db2_negation_tokens_update_call(call_client, &client, 7068, 0, 42u, "not never",
+                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(negation_tokens_calls == 1 && strcmp(negation_tokens_last, "not never") == 0);
+   /* A memory with no negations extracts to nothing, and that must store. */
+   assert(aimee_db2_negation_tokens_update_call(call_client, &client, 7069, 0, 42u, "", NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(negation_tokens_calls == 2 && negation_tokens_last[0] == '\0');
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

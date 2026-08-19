@@ -69,6 +69,7 @@ typedef struct
    void (*workspace_tag_insert)(int64_t memory_id, const char *workspace);
    void (*set_cognified_kind)(int64_t memory_id, const char *kind);
    void (*set_source_session)(int64_t memory_id, const char *session_id);
+   void (*negation_tokens_update)(int64_t memory_id, const char *tokens);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
