@@ -387,58 +387,222 @@ static int investigate_result_answerable(const cJSON *result)
    return !cJSON_IsArray(results) || cJSON_GetArraySize(results) != 0;
 }
 
-/* One question, answered from the index with the code attached. */
-static cJSON *investigate_one(const char *query, const char *symbol, const char *project)
+static void investigate_collect_paths(const cJSON *node, char paths[][MAX_PATH_LEN], int *count,
+                                      int max)
+{
+   if (!node || !count || *count >= max)
+      return;
+   if (cJSON_IsObject(node))
+   {
+      const cJSON *fp = cJSON_GetObjectItemCaseSensitive(node, "file_path");
+      if (!cJSON_IsString(fp))
+         fp = cJSON_GetObjectItemCaseSensitive(node, "path");
+      if (cJSON_IsString(fp) && fp->valuestring[0])
+      {
+         int duplicate = 0;
+         for (int i = 0; i < *count; i++)
+            if (strcmp(paths[i], fp->valuestring) == 0)
+               duplicate = 1;
+         if (!duplicate)
+            snprintf(paths[(*count)++], MAX_PATH_LEN, "%s", fp->valuestring);
+      }
+   }
+   const cJSON *child = NULL;
+   cJSON_ArrayForEach(child, node) investigate_collect_paths(child, paths, count, max);
+}
+
+static int investigate_path_is_test(const char *path)
+{
+   return path && (strstr(path, "/test") || strstr(path, "tests/") || strstr(path, "_test.") ||
+                   strstr(path, ".spec.") || strstr(path, ".test."));
+}
+
+static int investigate_path_is_boundary(const char *path)
+{
+   return path && (strstr(path, "auth") || strstr(path, "guard") || strstr(path, "policy") ||
+                   strstr(path, "valid") || strstr(path, "security") || strstr(path, "schema"));
+}
+
+static void investigate_attach_code(cJSON *result, const char *project)
+{
+   cJSON *results = result ? cJSON_GetObjectItemCaseSensitive(result, "results") : NULL;
+   if (!cJSON_IsArray(results))
+      return;
+   char root[MAX_PATH_LEN] = "";
+   if (index_project_root(project, root, sizeof(root)) != 0)
+      return;
+   enum
+   {
+      MAX_ITEMS = 4,
+      WINDOW = 60
+   };
+   int attached = 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, results)
+   {
+      if (attached >= MAX_ITEMS)
+         break;
+      cJSON *fp = cJSON_GetObjectItemCaseSensitive(item, "file_path");
+      cJSON *span = cJSON_GetObjectItemCaseSensitive(item, "span");
+      if (!cJSON_IsString(fp) || !cJSON_IsObject(span))
+         continue;
+      cJSON *line = cJSON_GetObjectItemCaseSensitive(span, "line_start");
+      int anchor = cJSON_IsNumber(line) ? line->valueint : 1;
+      int from = anchor > WINDOW / 2 ? anchor - WINDOW / 2 : 1;
+      cJSON *read = code_span_read(project, root, fp->valuestring, from, from + WINDOW - 1, WINDOW);
+      if (!read)
+         continue;
+      cJSON *content = cJSON_DetachItemFromObjectCaseSensitive(read, "content");
+      if (content)
+      {
+         cJSON_AddItemToObject(item, "code", content);
+         cJSON_AddNumberToObject(item, "code_line_start", from);
+         cJSON_AddNumberToObject(item, "code_line_end", from + WINDOW - 1);
+         attached++;
+      }
+      cJSON_Delete(read);
+   }
+}
+
+static void investigate_attach_scope(cJSON *row, const cJSON *result, const char *symbol,
+                                     const char *project)
+{
+   char paths[12][MAX_PATH_LEN] = {{0}};
+   int path_count = 0;
+   investigate_collect_paths(result, paths, &path_count, 12);
+
+   cJSON *scope = cJSON_AddObjectToObject(row, "systemic_scope");
+   cJSON *definitions = cJSON_AddArrayToObject(scope, "symbol_definitions");
+   if (symbol && symbol[0])
+   {
+      term_hit_t hits[32];
+      int count = kb_client_index_find_project(project, symbol, hits, 32);
+      for (int i = 0; i < count; i++)
+      {
+         cJSON *hit = cJSON_CreateObject();
+         cJSON_AddStringToObject(hit, "file_path", hits[i].file_path);
+         cJSON_AddNumberToObject(hit, "line", hits[i].line);
+         cJSON_AddStringToObject(hit, "kind", hits[i].kind);
+         cJSON_AddItemToArray(definitions, hit);
+         int duplicate = 0;
+         for (int j = 0; j < path_count; j++)
+            if (strcmp(paths[j], hits[i].file_path) == 0)
+               duplicate = 1;
+         if (!duplicate && path_count < 12)
+            snprintf(paths[path_count++], MAX_PATH_LEN, "%s", hits[i].file_path);
+      }
+   }
+   cJSON *locations = cJSON_AddArrayToObject(scope, "requested_locations");
+   cJSON *analogues = cJSON_AddArrayToObject(scope, "analogous_implementations");
+   cJSON *boundaries = cJSON_AddArrayToObject(scope, "shared_boundary_candidates");
+   cJSON *same_fix = cJSON_AddArrayToObject(scope, "likely_same_fix");
+   cJSON *tests = cJSON_AddArrayToObject(scope, "suggested_test_surface");
+   for (int i = 0; i < path_count; i++)
+   {
+      cJSON_AddItemToArray(locations, cJSON_CreateString(paths[i]));
+      if (i > 0)
+      {
+         cJSON_AddItemToArray(analogues, cJSON_CreateString(paths[i]));
+         if (!investigate_path_is_test(paths[i]))
+            cJSON_AddItemToArray(same_fix, cJSON_CreateString(paths[i]));
+      }
+      if (investigate_path_is_boundary(paths[i]))
+         cJSON_AddItemToArray(boundaries, cJSON_CreateString(paths[i]));
+      if (investigate_path_is_test(paths[i]))
+         cJSON_AddItemToArray(tests, cJSON_CreateString(paths[i]));
+   }
+
+   cJSON *impact = cJSON_AddArrayToObject(scope, "blast_radius");
+   for (int i = 0; i < path_count && i < 4; i++)
+   {
+      blast_radius_t br;
+      if (kb_client_index_blast_radius(project, paths[i], &br) != 0)
+         continue;
+      cJSON *entry = cJSON_CreateObject();
+      cJSON_AddStringToObject(entry, "file_path", paths[i]);
+      cJSON *dependencies = cJSON_AddArrayToObject(entry, "dependencies");
+      cJSON *dependents = cJSON_AddArrayToObject(entry, "dependents");
+      for (int j = 0; j < br.dependency_count; j++)
+         cJSON_AddItemToArray(dependencies, cJSON_CreateString(br.dependencies[j]));
+      for (int j = 0; j < br.dependent_count; j++)
+         cJSON_AddItemToArray(dependents, cJSON_CreateString(br.dependents[j]));
+      cJSON_AddItemToArray(impact, entry);
+   }
+
+   cJSON *callers = cJSON_AddArrayToObject(scope, "direct_callers");
+   if (symbol && symbol[0])
+   {
+      caller_hit_t hits[32];
+      int count = kb_client_index_find_callers(project, symbol, hits, 32);
+      for (int i = 0; i < count; i++)
+      {
+         cJSON *hit = cJSON_CreateObject();
+         cJSON_AddStringToObject(hit, "file_path", hits[i].file_path);
+         cJSON_AddStringToObject(hit, "caller", hits[i].caller);
+         cJSON_AddNumberToObject(hit, "line", hits[i].line);
+         cJSON_AddItemToArray(callers, hit);
+      }
+   }
+}
+
+cJSON *server_index_investigate_packet(const char *query, const char *symbol, const char *project,
+                                       int include_code, int fallback_enabled)
 {
    cJSON *row = cJSON_CreateObject();
    if (!row)
       return NULL;
    jo_add_str(row, "query", query);
-   int st = -1;
-   char *j = kb_client_code_context(query, symbol, project, &st);
+   cJSON *path = cJSON_AddArrayToObject(row, "retrieval_path");
+   cJSON_AddItemToArray(path, cJSON_CreateString("context"));
+
+   int status = -1;
+   char *json = kb_client_code_context(query, symbol, project, &status);
    kb_client_result_status_t kb_status = kb_client_last_result_status();
-   cJSON *parsed = NULL;
-   if (j)
+   cJSON *result = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   int answerable = investigate_result_answerable(result);
+   if (!answerable && fallback_enabled)
    {
-      parsed = cJSON_Parse(j);
-      if (parsed)
-         cJSON_AddItemToObject(row, "result", parsed);
-      else
-         jo_add_str(row, "result_raw", j);
-      free(j);
+      cJSON_Delete(result);
+      result = NULL;
+      cJSON_AddItemToArray(path, cJSON_CreateString("hybrid"));
+      json = kb_client_code_hybrid_scoped(query, symbol, project, 0, 12, &status);
+      kb_status = kb_client_last_result_status();
+      result = json ? cJSON_Parse(json) : NULL;
+      free(json);
+      answerable = investigate_result_answerable(result);
+      cJSON_AddTrueToObject(row, "fallback_used");
    }
    else
-      cJSON_AddNumberToObject(row, "error_status", st);
+      cJSON_AddFalseToObject(row, "fallback_used");
 
-   /* Say WHY the row carries nothing. An unreachable knowledge service and an
+   /* Say WHY the packet carries nothing. An unreachable knowledge service and an
     * index that simply has no evidence both arrive here as an empty row, and the
-    * only thing separating them was a bare error_status number the caller had to
-    * guess at -- so index.investigate, the call the session guidance tells every
-    * agent to make FIRST, reported an outage as "no evidence" and sent the agent
-    * off to search the tree by hand. Every sibling handler in this file already
-    * publishes the typed kb verdict as result_status; this one did not. */
-   kb_client_result_status_t row_status = kb_status;
-   if (investigate_result_answerable(parsed))
-      row_status = KB_CLIENT_RESULT_OK;
-   else if (kb_status == KB_CLIENT_RESULT_OK)
-      row_status = KB_CLIENT_RESULT_EMPTY;
+    * only thing telling them apart was a bare `error_status` number the caller
+    * had to guess at -- so `index investigate`, the call the ingress guidance
+    * tells every model to make FIRST, reported an outage as "no evidence" and
+    * sent the model off to search the tree by hand. Every sibling handler in
+    * this file already publishes the typed kb verdict as result_status;
+    * investigate was the one that did not. */
+   kb_client_result_status_t row_status = answerable ? KB_CLIENT_RESULT_OK
+                                          : kb_status == KB_CLIENT_RESULT_OK
+                                              ? KB_CLIENT_RESULT_EMPTY
+                                              : kb_status;
    cJSON_AddStringToObject(row, "result_status", kb_client_result_status_name(row_status));
+
+   if (result)
+   {
+      if (include_code)
+         investigate_attach_code(result, project);
+      cJSON_AddItemToObject(row, "result", result);
+      investigate_attach_scope(row, result, symbol, project);
+   }
+   else
+      cJSON_AddNumberToObject(row, "error_status", status);
    return row;
 }
 
-/* Ask the index a plain-words question, as a COMMAND rather than only a tool.
- *
- * This is the call an agent makes FIRST on unfamiliar code -- it returns ranked
- * evidence with the code already attached instead of a list of paths to go read.
- * It was reachable only over MCP, where one call is one turn, so the opening
- * move of every task was also the one that could not be combined with anything
- * else. As a command it chains:
- *
- *   aimee index investigate "how are profiles cached" "what invalidates them"
- *
- * Several questions in ONE invocation, and that invocation folds into a shell
- * call the agent was already making. */
-/* The typed verdict investigate_one stamped on the row. */
+/* The typed verdict the packet stamped on the row. */
 static const char *investigate_row_status(const cJSON *row)
 {
    const cJSON *s = cJSON_GetObjectItemCaseSensitive(row, "result_status");
@@ -457,9 +621,10 @@ static int investigate_status_is_outage(const char *name)
 /* Decide what the whole investigation amounts to.
  *
  * Not one query reaching the knowledge service is an OUTAGE, and saying so is
- * the point: answering ok or empty there is what made a dead kb look like a
- * healthy index with nothing to say. Refuse the way the sibling index handlers
- * refuse, so one caller-side check covers the family. */
+ * the whole point: answering ok or empty there is what made a dead kb look
+ * like a healthy index with nothing to say, and this is the call the ingress
+ * guidance tells every model to make FIRST. Refuse the way the sibling index
+ * handlers refuse, so one caller-side check covers the family. */
 static int investigate_finish(server_conn_t *conn, cJSON *resp, const char *project, int rows,
                               int answered, int outages)
 {
@@ -481,6 +646,18 @@ static int investigate_finish(server_conn_t *conn, cJSON *resp, const char *proj
    return send_and_free(conn, resp);
 }
 
+/* Ask the index a plain-words question, as a COMMAND rather than only a tool.
+ *
+ * This is the call an agent makes FIRST on unfamiliar code -- it returns ranked
+ * evidence with the code already attached instead of a list of paths to go read.
+ * It was reachable only over MCP, where one call is one turn, so the opening
+ * move of every task was also the one that could not be combined with anything
+ * else. As a command it chains:
+ *
+ *   aimee index investigate "how are profiles cached" "what invalidates them"
+ *
+ * Several questions in ONE invocation, and that invocation folds into a shell
+ * call the agent was already making. */
 int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -491,6 +668,8 @@ int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "missing query", NULL);
 
    const char *symbol = jo_str(req, "symbol", NULL);
+   int include_code = jo_bool(req, "include_code", 1);
+   int fallback_enabled = jo_bool(req, "fallback", 1);
    char project_buf[MAX_PATH_LEN] = "";
    const char *project = jo_str(req, "project", NULL);
    if (!project || !project[0])
@@ -511,7 +690,8 @@ int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          if (!cJSON_IsString(e) || !e->valuestring[0])
             continue; /* skip the malformed entry; the rest of the batch still answers */
-         cJSON *row = investigate_one(e->valuestring, symbol, project);
+         cJSON *row = server_index_investigate_packet(e->valuestring, symbol, project, include_code,
+                                                      fallback_enabled);
          if (!row)
             continue;
          rows++;
@@ -524,7 +704,8 @@ int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
    else
    {
-      cJSON *row = investigate_one(single, symbol, project);
+      cJSON *row =
+          server_index_investigate_packet(single, symbol, project, include_code, fallback_enabled);
       if (row)
       {
          rows++;
