@@ -1406,6 +1406,33 @@
         "field": {"name": "ref_key", "type": "utf8", "minimum_bytes": 1,
                   "maximum_bytes": 127}
       }
+    },
+    {
+      "family": "memory",
+      "id": 42,
+      "name": "count_and_max_updated",
+      "wire_format": "db2-envelope-u32-string-reply-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The canonical memory row count and their latest update stamp are relational DB2 aggregates, not portable ANN state.",
+      "c_symbols": ["db2_memory_count_and_max_updated"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_min_ok": 32,
+        "encoded_size_max_ok": 63,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "max_updated_at", "type": "utf8", "minimum_bytes": 0,
+           "maximum_bytes": 31}
+        ]
+      }
     }
   ]
 }

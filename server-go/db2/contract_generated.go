@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "85170fac2a73f56832cfc7cabb42396baecf61cd5e9fbbe06a701656ce1846ec"
+const ContractSHA256 = "a2fe767f0e4e6866936cd2306f6ab8526083463776e6d27f8fd471a1eb0e6a7e"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -315,6 +315,11 @@ const StagePickFirstTemporalRef = FamilyMemory
 const OperationPickFirstTemporalRef uint32 = 41
 const PickFirstTemporalRefMemoryIDMax uint64 = 9223372036854775807
 const PickFirstTemporalRefKeyMax = 127
+const EventCountAndMaxUpdated = EventMemory
+const StageCountAndMaxUpdated = FamilyMemory
+const OperationCountAndMaxUpdated uint32 = 42
+const CountAndMaxUpdatedCountMax uint32 = 2147483647
+const CountAndMaxUpdatedStampMax = 31
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1795,6 +1800,84 @@ func DecodePickFirstTemporalRefReply(reply []byte) (uint32, string, error) {
 		return 0, "", ErrMalformedEnvelope
 	}
 	return header.Result, refKey, nil
+}
+
+// EncodeCountAndMaxUpdatedRequest emits the empty request envelope.
+func EncodeCountAndMaxUpdatedRequest() []byte {
+	header, err := EncodeRequestHeader(OperationCountAndMaxUpdated, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeCountAndMaxUpdatedRequest validates the exact envelope.
+func DecodeCountAndMaxUpdatedRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCountAndMaxUpdated ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeCountAndMaxUpdatedReply carries the count and the stamp together, or
+// reports that the aggregate could not be computed. An empty stamp is a real
+// answer -- an empty corpus has no latest update -- so it rides on ok.
+func EncodeCountAndMaxUpdatedReply(result uint32, count uint32, maxUpdatedAt string) ([]byte, error) {
+	if result == ResultInvalidState {
+		if count != 0 || maxUpdatedAt != "" {
+			return nil, ErrMalformedEnvelope
+		}
+		header, err := EncodeReplyHeader(OperationCountAndMaxUpdated, result, 0)
+		if err != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		return header, nil
+	}
+	if result != ResultOK || count > CountAndMaxUpdatedCountMax ||
+		len(maxUpdatedAt) > CountAndMaxUpdatedStampMax || hasNUL(maxUpdatedAt) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 8 + len(maxUpdatedAt)
+	header, err := EncodeReplyHeader(OperationCountAndMaxUpdated, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, count)
+	binary.LittleEndian.PutUint32(payload[4:], uint32(len(maxUpdatedAt)))
+	copy(payload[8:], maxUpdatedAt)
+	return reply, nil
+}
+
+// DecodeCountAndMaxUpdatedReply keeps an empty corpus distinct from a failure.
+func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCountAndMaxUpdated {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 &&
+		len(reply) == int(EnvelopeHeaderLen) {
+		return header.Result, 0, "", nil
+	}
+	if header.Result != ResultOK || header.PayloadLen < 8 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	stampLen := binary.LittleEndian.Uint32(payload[4:])
+	if count > CountAndMaxUpdatedCountMax || stampLen > uint32(CountAndMaxUpdatedStampMax) ||
+		8+stampLen != header.PayloadLen {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	maxUpdatedAt := string(payload[8 : 8+stampLen])
+	if hasNUL(maxUpdatedAt) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	return header.Result, count, maxUpdatedAt, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

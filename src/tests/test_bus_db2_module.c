@@ -86,6 +86,7 @@ typedef struct
    int (*get_content)(int64_t memory_id, char *out, int out_len);
    int (*get_source_session)(int64_t memory_id, char *out, int out_len);
    int (*pick_first_temporal_ref)(int64_t memory_id, char *out, int out_len);
+   int (*count_and_max_updated)(int *out_count, char *out_ts, int out_ts_len);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -154,6 +155,7 @@ static char negation_tokens_last[2048];
 static int get_content_calls;
 static int get_source_session_calls;
 static int temporal_ref_calls;
+static int corpus_stat_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -969,6 +971,23 @@ static int pick_first_temporal_ref(int64_t memory_id, char *out, int out_len)
    return 1;
 }
 
+int db2_memory_count_and_max_updated(int *out_count, char *out_ts, int out_ts_len)
+{
+   if (out_count)
+      *out_count = 0;
+   if (out_ts && out_ts_len > 0)
+      out_ts[0] = '\0';
+   return 0;
+}
+
+static int count_and_max_updated(int *out_count, char *out_ts, int out_ts_len)
+{
+   corpus_stat_calls++;
+   *out_count = 7;
+   snprintf(out_ts, (size_t)out_ts_len, "%s", "2026-08-19 09:00:00");
+   return 1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1309,6 +1328,7 @@ int main(void)
        .get_content = get_content,
        .get_source_session = get_source_session,
        .pick_first_temporal_ref = pick_first_temporal_ref,
+       .count_and_max_updated = count_and_max_updated,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1627,6 +1647,14 @@ int main(void)
                                                  ref_back, sizeof(ref_back), NULL,
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(ref_result == AIMEE_DB2_RESULT_NOT_FOUND && ref_back[0] == '\0');
+
+   uint32_t corpus_result = 99u, corpus_count = 99u;
+   char corpus_stamp[AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX + 1];
+   assert(aimee_db2_count_and_max_updated_call(call_client, &client, 7076, 0, &corpus_result,
+                                               &corpus_count, corpus_stamp, sizeof(corpus_stamp),
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(corpus_result == AIMEE_DB2_RESULT_OK && corpus_count == 7 &&
+          strcmp(corpus_stamp, "2026-08-19 09:00:00") == 0 && corpus_stat_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

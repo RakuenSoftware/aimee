@@ -15656,9 +15656,15 @@
           "line": 432
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.count_and_max_updated operation replaces the aggregate that fingerprints the memory corpus. The stamp is empty for an empty corpus, which is a real answer rather than an absent one, so the reply carries a zero-minimum string alongside the count and reserves invalid_state for an aggregate that could not be computed."
+      },
       "signature": "int db2_memory_count_and_max_updated ( int * out_count , char * out_ts , int out_ts_len )",
       "signature_sha256": "0cf3ea950395ad7e74e707148a22f9dfa9077e3b38d948e3543d32b653efee6b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_count_and_max_updated"
     },
     {
@@ -26040,15 +26046,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a523359c84ce5b449f5f2547be71534c921e16fe45e7a2b4fdff6b7f69d6024a",
+  "fingerprint": "5d297220416989b658c5ba38767ce9197bffaffc041d3024466425317a3fdff8",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 622,
+    "audit_pending": 621,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 336
+    "reviewed": 337
   }
 }

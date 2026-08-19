@@ -299,6 +299,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .get_content = db2_memory_get_content,
        .get_source_session = db2_memory_get_source_session,
        .pick_first_temporal_ref = db2_memory_pick_first_temporal_ref,
+       .count_and_max_updated = db2_memory_count_and_max_updated,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1207,6 +1208,31 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_pick_first_temporal_ref_reply_encode(
                  picked ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND,
                  picked ? picked_ref : NULL, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_count_and_max_updated_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->count_and_max_updated)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int corpus_count = 0;
+         char corpus_stamp[AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX + 1];
+         corpus_stamp[0] = '\0';
+         int computed =
+             backend->count_and_max_updated(&corpus_count, corpus_stamp, (int)sizeof(corpus_stamp));
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (computed && (corpus_count < 0 ||
+                          (uint32_t)corpus_count > AIMEE_DB2_COUNT_AND_MAX_UPDATED_COUNT_MAX))
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         /* The aggregate always yields a row when it runs, so a failure means
+          * it did not run -- invalid_state, carrying neither number. */
+         if (aimee_db2_count_and_max_updated_reply_encode(
+                 computed ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_INVALID_STATE,
+                 computed ? (uint32_t)corpus_count : 0u, computed ? corpus_stamp : NULL,
+                 response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

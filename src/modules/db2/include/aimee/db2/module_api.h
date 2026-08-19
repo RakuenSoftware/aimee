@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "85170fac2a73f56832cfc7cabb42396baecf61cd5e9fbbe06a701656ce1846ec"
+#define AIMEE_DB2_CONTRACT_SHA256 "a2fe767f0e4e6866936cd2306f6ab8526083463776e6d27f8fd471a1eb0e6a7e"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -482,6 +482,15 @@
 #define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN        24u
 #define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_MEMORY_ID_MAX    9223372036854775807ull
 #define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX          127u
+#define AIMEE_DB2_EVENT_COUNT_AND_MAX_UPDATED              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COUNT_AND_MAX_UPDATED              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED          42u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_REQUEST_LEN        24u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MIN_LEN   32u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MAX_LEN   63u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN          24u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_COUNT_MAX          2147483647u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX          31u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2395,6 +2404,112 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_count_and_max_updated_request_encode(uint8_t *output,
+                                                                size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED, 0u, 0u,
+                                           output, capacity);
+}
+
+static inline int aimee_db2_count_and_max_updated_request_decode(const uint8_t *input,
+                                                                 size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_COUNT_AND_MAX_UPDATED_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_count_and_max_updated_reply_encode(uint32_t result, uint32_t count,
+                                                               const char *max_updated_at,
+                                                               uint8_t *output, size_t capacity,
+                                                               uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_INVALID_STATE)
+   {
+      /* An aggregate that could not be computed carries neither number. */
+      if (count != 0u || max_updated_at != NULL ||
+          capacity < AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN ||
+          aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED, result, 0u,
+                                        output, capacity) != 0)
+         return -1;
+      *output_len = AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN;
+      return 0;
+   }
+   if (result != AIMEE_DB2_RESULT_OK || !max_updated_at ||
+       count > AIMEE_DB2_COUNT_AND_MAX_UPDATED_COUNT_MAX)
+      return -1;
+   size_t stamp_len = 0u;
+   while (stamp_len <= AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX && max_updated_at[stamp_len])
+      ++stamp_len;
+   uint32_t payload_len = (uint32_t)(8u + stamp_len);
+   if (stamp_len > AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX ||
+       capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED,
+                                     AIMEE_DB2_RESULT_OK, payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   aimee_db2_put_u32(payload + 4u, (uint32_t)stamp_len);
+   if (stamp_len != 0u)
+      memcpy(payload + 8u, max_updated_at, stamp_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *input,
+                                                               size_t input_len,
+                                                               uint32_t *result, uint32_t *count,
+                                                               char *max_updated_at,
+                                                               size_t stamp_capacity)
+{
+   if (result)
+      *result = 0u;
+   if (count)
+      *count = 0u;
+   if (max_updated_at && stamp_capacity)
+      max_updated_at[0] = '\0';
+   if (!result || !count || !max_updated_at ||
+       stamp_capacity < (size_t)AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX + 1u)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u &&
+       input_len == AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 8u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_count = aimee_db2_get_u32(payload);
+   uint32_t stamp_len = aimee_db2_get_u32(payload + 4u);
+   if (decoded_count > AIMEE_DB2_COUNT_AND_MAX_UPDATED_COUNT_MAX ||
+       stamp_len > AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX ||
+       (uint32_t)8u + stamp_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < stamp_len; ++index)
+      if (payload[8u + index] == 0u)
+         return -1;
+   if (stamp_len != 0u)
+      memcpy(max_updated_at, payload + 8u, stamp_len);
+   max_updated_at[stamp_len] = '\0';
+   *result = header.result;
+   *count = decoded_count;
    return 0;
 }
 

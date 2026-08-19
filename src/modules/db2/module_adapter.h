@@ -73,6 +73,7 @@ typedef struct
    int (*get_content)(int64_t memory_id, char *out, int out_len);
    int (*get_source_session)(int64_t memory_id, char *out, int out_len);
    int (*pick_first_temporal_ref)(int64_t memory_id, char *out, int out_len);
+   int (*count_and_max_updated)(int *out_count, char *out_ts, int out_ts_len);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

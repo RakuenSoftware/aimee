@@ -1412,6 +1412,14 @@
       "reason": "The typed memory.total_count operation replaces the read-only global corpus count while preserving the legacy 64-bit result width; canonical relational memory rows remain DB2 authority."
     },
     {
+      "symbol": "db2_memory_count_and_max_updated",
+      "signature_sha256": "0cf3ea950395ad7e74e707148a22f9dfa9077e3b38d948e3543d32b653efee6b",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.count_and_max_updated operation replaces the aggregate that fingerprints the memory corpus. The stamp is empty for an empty corpus, which is a real answer rather than an absent one, so the reply carries a zero-minimum string alongside the count and reserves invalid_state for an aggregate that could not be computed."
+    },
+    {
       "symbol": "db2_memory_count_l2",
       "signature_sha256": "225725868415d80e5299f9f46705008e0f1369ccc57fd8435bec4a26a4267a04",
       "disposition": "wire-operation",

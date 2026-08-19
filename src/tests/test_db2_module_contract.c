@@ -68,6 +68,10 @@ static int get_source_session_rc;
 static int get_source_session_calls;
 static int temporal_ref_hit;
 static int temporal_ref_calls;
+static int corpus_stat_rc;
+static int corpus_stat_count;
+static int corpus_stat_calls;
+static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
 static char get_content_value[2048];
@@ -565,6 +569,25 @@ static int pick_first_temporal_ref(int64_t memory_id, char *out, int out_len)
    if (!temporal_ref_hit)
       return 0;
    snprintf(out, (size_t)out_len, "%s", temporal_ref_value);
+   return 1;
+}
+
+int db2_memory_count_and_max_updated(int *out_count, char *out_ts, int out_ts_len)
+{
+   if (out_count)
+      *out_count = 0;
+   if (out_ts && out_ts_len > 0)
+      out_ts[0] = '\0';
+   return 0;
+}
+
+static int count_and_max_updated(int *out_count, char *out_ts, int out_ts_len)
+{
+   corpus_stat_calls++;
+   if (!corpus_stat_rc)
+      return 0;
+   *out_count = corpus_stat_count;
+   snprintf(out_ts, (size_t)out_ts_len, "%s", corpus_stat_stamp);
    return 1;
 }
 
@@ -1257,6 +1280,10 @@ static void reset(void)
    get_source_session_calls = 0;
    temporal_ref_hit = 1;
    temporal_ref_calls = 0;
+   corpus_stat_rc = 1;
+   corpus_stat_count = 7;
+   corpus_stat_calls = 0;
+   snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
    snprintf(get_content_value, sizeof(get_content_value), "%s", "stored text");
@@ -2550,6 +2577,52 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_count_and_max_updated_wire(void)
+{
+   uint8_t request[AIMEE_DB2_COUNT_AND_MAX_UPDATED_REQUEST_LEN] = {0};
+   assert(aimee_db2_count_and_max_updated_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_count_and_max_updated_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_count_and_max_updated_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MAX_LEN];
+   char stamp[AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX + 1];
+   uint32_t reply_len = 99, result = 99, count = 99;
+   assert(aimee_db2_count_and_max_updated_reply_encode(AIMEE_DB2_RESULT_OK, 7,
+                                                       "2026-08-19 09:00:00", reply, sizeof(reply),
+                                                       &reply_len) == 0);
+   assert(aimee_db2_count_and_max_updated_reply_decode(reply, reply_len, &result, &count, stamp,
+                                                       sizeof(stamp)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && count == 7 && strcmp(stamp, "2026-08-19 09:00:00") == 0);
+
+   /* AN EMPTY CORPUS IS A REAL ANSWER. Zero rows means there is no latest
+    * update, so the stamp is empty and the result is still ok. That must not
+    * collapse into the invalid_state below, which means the aggregate never
+    * ran at all. */
+   assert(aimee_db2_count_and_max_updated_reply_encode(AIMEE_DB2_RESULT_OK, 0, "", reply,
+                                                       sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MIN_LEN);
+   assert(aimee_db2_count_and_max_updated_reply_decode(reply, reply_len, &result, &count, stamp,
+                                                       sizeof(stamp)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && count == 0 && stamp[0] == '\0');
+
+   assert(aimee_db2_count_and_max_updated_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 0, NULL,
+                                                       reply, sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN);
+   assert(aimee_db2_count_and_max_updated_reply_decode(reply, reply_len, &result, &count, stamp,
+                                                       sizeof(stamp)) == 0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && count == 0 && stamp[0] == '\0');
+
+   /* invalid_state carries neither number. */
+   assert(aimee_db2_count_and_max_updated_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 1, NULL,
+                                                       reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_count_and_max_updated_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 0, "", reply,
+                                                       sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_count_and_max_updated_reply_encode(
+              AIMEE_DB2_RESULT_OK, AIMEE_DB2_COUNT_AND_MAX_UPDATED_COUNT_MAX + 1u, "", reply,
+              sizeof(reply), &reply_len) == -1);
 }
 
 static void test_pick_first_temporal_ref_wire(void)
@@ -4526,6 +4599,52 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_count_and_max_updated_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.count_and_max_updated = count_and_max_updated};
+   uint8_t request[AIMEE_DB2_COUNT_AND_MAX_UPDATED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MAX_LEN];
+   char stamp[AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX + 1];
+   uint32_t response_len = 99, result = 99, count = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_COUNT_AND_MAX_UPDATED};
+   assert(aimee_db2_count_and_max_updated_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(corpus_stat_calls == 1);
+   assert(aimee_db2_count_and_max_updated_reply_decode(response, response_len, &result, &count,
+                                                       stamp, sizeof(stamp)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && count == 7);
+
+   /* Empty corpus: ok with zero and no stamp. */
+   corpus_stat_count = 0;
+   corpus_stat_stamp[0] = '\0';
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_count_and_max_updated_reply_decode(response, response_len, &result, &count,
+                                                       stamp, sizeof(stamp)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && count == 0 && stamp[0] == '\0');
+
+   /* Aggregate did not run: invalid_state, not a zero count that a caller
+    * would read as an empty corpus. */
+   corpus_stat_rc = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(response_len == AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN);
+   assert(aimee_db2_count_and_max_updated_reply_decode(response, response_len, &result, &count,
+                                                       stamp, sizeof(stamp)) == 0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE);
+   corpus_stat_rc = 1;
+   corpus_stat_count = 7;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response,
+                 AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pick_first_temporal_ref_handler(void)
 {
    reset();
@@ -6121,6 +6240,7 @@ int main(void)
    test_get_content_wire();
    test_get_source_session_wire();
    test_pick_first_temporal_ref_wire();
+   test_count_and_max_updated_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6172,6 +6292,7 @@ int main(void)
    test_get_content_handler();
    test_get_source_session_handler();
    test_pick_first_temporal_ref_handler();
+   test_count_and_max_updated_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

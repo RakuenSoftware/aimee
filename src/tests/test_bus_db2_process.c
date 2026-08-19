@@ -535,6 +535,16 @@ int main(int argc, char **argv)
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(ref_result == AIMEE_DB2_RESULT_NOT_FOUND && read_ref[0] == '\0');
 
+   /* The aggregate runs against an empty corpus: zero rows, no latest update.
+    * That is ok with an empty stamp, NOT invalid_state -- the boundary this
+    * operation exists to keep, exercised against the real process. */
+   uint32_t corpus_result = 99, corpus_count = 99;
+   char corpus_stamp[AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX + 1];
+   assert(aimee_db2_count_and_max_updated_call(call_client, &client, 9088, 0, &corpus_result,
+                                               &corpus_count, corpus_stamp, sizeof(corpus_stamp),
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(corpus_result == AIMEE_DB2_RESULT_OK && corpus_count == 0 && corpus_stamp[0] == '\0');
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

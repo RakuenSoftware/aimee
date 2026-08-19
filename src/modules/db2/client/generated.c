@@ -1164,6 +1164,36 @@ aimee_db2_pick_first_temporal_ref_call(aimee_db2_call_fn call, void *call_contex
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_count_and_max_updated_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, uint32_t *domain_result, uint32_t *count,
+                                     char *max_updated_at, size_t stamp_capacity,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !domain_result || !count || !max_updated_at ||
+       stamp_capacity < (size_t)AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX + 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *domain_result = 0u;
+   *count = 0u;
+   max_updated_at[0] = '\0';
+   uint8_t request[AIMEE_DB2_COUNT_AND_MAX_UPDATED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_count_and_max_updated_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_COUNT_AND_MAX_UPDATED,
+            AIMEE_DB2_STAGE_COUNT_AND_MAX_UPDATED, trace_id, deadline_ns, request, sizeof(request),
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_count_and_max_updated_reply_decode(response, response_len, domain_result, count,
+                                                    max_updated_at, stamp_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
