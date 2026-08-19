@@ -49,6 +49,20 @@
 #define TYPE_NUMBER_LAX  "number_lenient"
 #define TYPE_BOOL        "bool"
 #define TYPE_TRUE_IF_SET "true_if_set"
+/* A bool that is the NEGATION of a flag's presence: `compress` is true unless
+ * --no-compress was given. Always emitted, like TYPE_BOOL.
+ *
+ * I refused this once, on the grounds that the vocabulary "deliberately has no
+ * negation". That was a weaker line than the one actually being held, which is
+ * that a field's rule may depend on ITS OWN value and nothing else -- the same
+ * standard that admitted empty:"drop" and omit_if_nonpositive. Inversion meets
+ * it: no other field is consulted, and no branch decides which fields exist. */
+#define TYPE_BOOL_INVERTED "bool_inverted"
+/* A constant STRING emitted when a flag is present: --review sends
+ * "status": "ambiguous". Exactly true_if_set with a literal other than true,
+ * so the same reasoning admits it -- one field, its own flag, no branch. The
+ * literal travels in `value`. */
+#define TYPE_CONST_IF_SET "const_if_set"
 
 /* Two numeric conventions, and "number" is the RARE one: 53 sites parse with
  * atoi()/cli_args_get_int(), so "12x" becomes 12 and "abc" becomes 0, while 3
@@ -85,6 +99,7 @@ static int known_type(const char *type)
     * say so in every row. */
    return !type || !strcmp(type, TYPE_STRING) || !strcmp(type, TYPE_NUMBER) ||
           !strcmp(type, TYPE_NUMBER_LAX) || !strcmp(type, TYPE_BOOL) ||
+          !strcmp(type, TYPE_BOOL_INVERTED) || !strcmp(type, TYPE_CONST_IF_SET) ||
           !strcmp(type, TYPE_TRUE_IF_SET);
 }
 
@@ -117,6 +132,12 @@ int cli_argspec_supported(const cJSON *spec)
          return 0;
       if (!known_empty(field_str(f, "empty")))
          return 0;
+      {
+         /* A constant field with no constant says nothing. */
+         const char *ty = field_str(f, "type");
+         if (ty && !strcmp(ty, TYPE_CONST_IF_SET) && !field_str(f, "value"))
+            return 0;
+      }
       /* A source must carry what it reads from, or the row means nothing. */
       if ((!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL_FLAG)) && !field_str(f, "flag"))
          return 0;
@@ -220,6 +241,22 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       for (int i = 0; i < argc; i++)
          cJSON_AddItemToArray(arr, cJSON_CreateString(argv[i]));
       cJSON_AddItemToObject(req, json_name, arr);
+      return 0;
+   }
+
+   if (type && !strcmp(type, TYPE_CONST_IF_SET))
+   {
+      const char *lit = field_str(field, "value");
+      if (!lit)
+         return -1;
+      if (cli_args_get(opts, field_str(field, "flag")))
+         cJSON_AddStringToObject(req, json_name, lit);
+      return 0;
+   }
+
+   if (type && !strcmp(type, TYPE_BOOL_INVERTED))
+   {
+      cJSON_AddBoolToObject(req, json_name, cli_args_get(opts, field_str(field, "flag")) ? 0 : 1);
       return 0;
    }
 

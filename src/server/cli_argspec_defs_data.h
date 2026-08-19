@@ -326,3 +326,14 @@
 {"workspace.remove",
  "{\"fields\":[{\"json\":\"args\",\"from\":\"argv_array\"}]}"},
 
+{"index.deps",
+ "{\"bool_flags\":[\"review\",\"reverse\",\"dry-run\"],\"fields\":[{\"json\":\"project\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"min_tier\",\"from\":\"flag\",\"flag\":\"tier\"},{\"json\":\"status\",\"from\":\"flag\",\"flag\":\"review\",\"type\":\"const_if_set\",\"value\":\"ambiguous\"},{\"json\":\"direction\",\"from\":\"flag\",\"flag\":\"reverse\",\"type\":\"const_if_set\",\"value\":\"in\"},{\"json\":\"dry_run\",\"from\":\"flag\",\"flag\":\"dry-run\",\"type\":\"true_if_set\"}]}"},
+
+/* The inverted-flag pair: `compress` is true unless --no-compress was given. */
+
+{"trajectory.export",
+ "{\"bool_flags\":[\"no-compress\"],\"usage\":\"usage: aimee trajectory export <session_id> [--no-compress] [--max-result-bytes N]\",\"fields\":[{\"json\":\"session_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"session\",\"required\":true},{\"json\":\"compress\",\"from\":\"flag\",\"flag\":\"no-compress\",\"type\":\"bool_inverted\"},{\"json\":\"max_result_bytes\",\"from\":\"flag\",\"flag\":\"max-result-bytes\",\"type\":\"number_lenient\",\"default\":512,\"omit_if_nonpositive\":true}]}"},
+
+{"trajectory.batch",
+ "{\"bool_flags\":[\"no-compress\"],\"usage\":\"usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]\",\"fields\":[{\"json\":\"tasks_path\",\"from\":\"flag\",\"flag\":\"tasks\",\"required\":true},{\"json\":\"toolset_dist\",\"from\":\"flag\",\"flag\":\"toolset-dist\"},{\"json\":\"out_dir\",\"from\":\"flag\",\"flag\":\"out\"},{\"json\":\"compress\",\"from\":\"flag\",\"flag\":\"no-compress\",\"type\":\"bool_inverted\"},{\"json\":\"max_result_bytes\",\"from\":\"flag\",\"flag\":\"max-result-bytes\",\"type\":\"number_lenient\",\"default\":512,\"omit_if_nonpositive\":true}]}"},
+
