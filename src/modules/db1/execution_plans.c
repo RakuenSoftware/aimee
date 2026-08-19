@@ -89,24 +89,37 @@ static void fill_plan_step(plan_step_t *step, sqlite3_stmt *stmt)
    }
 }
 
-int db1_execution_plan_create(const char *agent_name, const char *task, const cJSON *steps_json)
+int db1_execution_plan_create(const char *agent_name, const char *task, const char *steps_json)
 {
    if (!agent_name || !task || !steps_json)
       return -1;
+   cJSON *steps = cJSON_Parse(steps_json);
+   if (!cJSON_IsArray(steps))
+   {
+      cJSON_Delete(steps);
+      return -1;
+   }
    sqlite3 *db = db1_conn();
    if (!db)
+   {
+      cJSON_Delete(steps);
       return -1;
+   }
 
    sqlite3_stmt *stmt = NULL;
    static const char *plan_sql = "INSERT INTO execution_plans (agent_name, task, status)"
                                  " VALUES (?, ?, 'pending')";
    if (sqlite3_prepare_v2(db, plan_sql, -1, &stmt, NULL) != SQLITE_OK)
+   {
+      cJSON_Delete(steps);
       return -1;
+   }
    sqlite3_bind_text(stmt, 1, agent_name, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 2, task, -1, SQLITE_TRANSIENT);
    if (sqlite3_step(stmt) != SQLITE_DONE)
    {
       sqlite3_finalize(stmt);
+      cJSON_Delete(steps);
       return -1;
    }
    sqlite3_finalize(stmt);
@@ -116,12 +129,15 @@ int db1_execution_plan_create(const char *agent_name, const char *task, const cJ
                                  " success_predicate, rollback, deps, status)"
                                  " VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')";
    if (sqlite3_prepare_v2(db, step_sql, -1, &stmt, NULL) != SQLITE_OK)
+   {
+      cJSON_Delete(steps);
       return plan_id;
+   }
 
-   int n = cJSON_GetArraySize((cJSON *)steps_json);
+   int n = cJSON_GetArraySize(steps);
    for (int i = 0; i < n && i < AGENT_MAX_PLAN_STEPS; i++)
    {
-      cJSON *step = cJSON_GetArrayItem((cJSON *)steps_json, i);
+      cJSON *step = cJSON_GetArrayItem(steps, i);
       if (!step)
          continue;
       sqlite3_reset(stmt);
@@ -130,6 +146,7 @@ int db1_execution_plan_create(const char *agent_name, const char *task, const cJ
       (void)sqlite3_step(stmt);
    }
    sqlite3_finalize(stmt);
+   cJSON_Delete(steps);
 
    return plan_id;
 }
@@ -172,9 +189,9 @@ int db1_execution_plan_get(int plan_id, plan_t *out)
    return 0;
 }
 
-int db1_execution_plan_list(plan_t *out, int max)
+int db1_execution_plan_list_ids(int *out_ids, int max)
 {
-   if (!out || max <= 0)
+   if (!out_ids || max <= 0)
       return -1;
    sqlite3 *db = db1_conn();
    if (!db)
@@ -187,11 +204,7 @@ int db1_execution_plan_list(plan_t *out, int max)
    sqlite3_bind_int(stmt, 1, max);
    int n = 0;
    while (n < max && sqlite3_step(stmt) == SQLITE_ROW)
-   {
-      int id = sqlite3_column_int(stmt, 0);
-      if (db1_execution_plan_get(id, &out[n]) == 0)
-         n++;
-   }
+      out_ids[n++] = sqlite3_column_int(stmt, 0);
    sqlite3_finalize(stmt);
    return n;
 }

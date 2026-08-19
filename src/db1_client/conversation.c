@@ -1090,7 +1090,13 @@ int db1_windows_delete_after_turn(const char *session_id, int turn)
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", turn);
    const char *fields[] = {session_id, arg1};
-   return write_result(call_stage(AIMEE_DB1_OP_WINDOWS_DELETE_AFTER_TURN, fields, 2, NULL, NULL, 0, NULL));
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOWS_DELETE_AFTER_TURN, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_user_memory_list_recall(db1_user_recall_section_t section, db1_user_memory_row_t *rows, int cap)

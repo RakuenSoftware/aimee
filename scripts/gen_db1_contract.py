@@ -147,7 +147,7 @@ def load_json(path: Path) -> object:
 
 # A field name, or one element of an expanded array or nested member: "qa[3]",
 # "hypothesis.content", "qa[3].answer" -- the way C spells each of them.
-ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?(\.[a-z][a-z0-9_]*)?")
+ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?(\.[a-z][a-z0-9_]*(\[[0-9]+\])?)?")
 
 
 def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -168,11 +168,17 @@ def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
         if nested is not None and "repeat" in field:
             for index in range(int(field["repeat"])):
                 for member in nested:
-                    inner = dict(member)
-                    inner["name"] = f"{field['name']}[{index}].{member['name']}"
-                    if "required" in field:
-                        inner.setdefault("required", field["required"])
-                    grown.append(inner)
+                    # A member that is itself an array expands again, and
+                    # "outer[i].inner[j]" is how C spells that too, so the
+                    # emitters keep working for the same reason.
+                    span = range(int(member["repeat"])) if "repeat" in member else (None,)
+                    for at in span:
+                        inner = {k: v for k, v in member.items() if k != "repeat"}
+                        inner["name"] = (f"{field['name']}[{index}].{member['name']}"
+                                         + ("" if at is None else f"[{at}]"))
+                        if "required" in field:
+                            inner.setdefault("required", field["required"])
+                        grown.append(inner)
             continue
         if nested is not None and "repeat" not in field:
             for member in nested:
@@ -764,8 +770,20 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             shape = keys(declared, allowed_field, f"{name}.reply.fields[{position}]")
             if nested_member:
                 for at, member in enumerate(shape["fields"]):
-                    inner = keys(member, {"name", "type"},
+                    # A row's own member may be an array: plan_step_t holds
+                    # depends_on[AGENT_MAX_PLAN_DEPS], and a plan holds 32 of
+                    # those steps. Declaring it is the only way to carry it, and
+                    # carrying it is not optional -- the struct-members rule
+                    # requires every member, so a step's dependencies cannot be
+                    # quietly left behind on the far side of the wire.
+                    inner_keys = ({"name", "type", "repeat"}
+                                  if isinstance(member, dict) and "repeat" in member
+                                  else {"name", "type"})
+                    inner = keys(member, inner_keys,
                                  f"{name}.reply.fields[{position}].fields[{at}]")
+                    if "repeat" in inner:
+                        integer(inner["repeat"],
+                                f"{name}.reply.fields[{position}].fields[{at}].repeat", 2, 64)
                     if inner["type"] not in PAYLOADS or inner["type"] == "none":
                         fail("field-nested",
                              f"{name} nested member {inner['name']!r} type must be a payload")

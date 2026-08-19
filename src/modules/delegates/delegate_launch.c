@@ -385,8 +385,12 @@ int delegate_launch_coord_job(cJSON *plan, int max_concurrent, const char *cwd,
    }
 
    const char *title = json_str(plan, "title");
-   int plan_id = db1_execution_plan_create("delegate-plan",
-                                           title[0] ? title : "delegate work packet plan", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id =
+       steps_doc ? db1_execution_plan_create(
+                       "delegate-plan", title[0] ? title : "delegate work packet plan", steps_doc)
+                 : -1;
+   free(steps_doc);
    cJSON_Delete(steps);
    if (plan_id <= 0)
    {

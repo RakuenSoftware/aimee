@@ -38,6 +38,7 @@
 #include "wfe_binding.h"
 #include "pipelines.h"
 #include "roadmap_runtime.h"
+#include "execution_plans.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -1169,6 +1170,99 @@ static void test_the_roadmap_selector_keeps_all_three_answers(void)
    printf("  PASS: the roadmap selector keeps all three answers\n");
 }
 
+/* A plan is the deepest row in this contract: 32 steps, each holding its own
+   array of dependency indices. That inner array is the point of the case --
+   an expansion that stopped at the step would leave every step's dependencies
+   behind, and a plan whose steps all look independent still executes, just in
+   the wrong order and all at once. */
+static void test_a_plan_carries_its_steps_and_their_dependencies(void)
+{
+   /* "after" is the document's word for a step's prerequisites; depends_on is
+      what the struct calls them once stored. */
+   const char *steps = "["
+                       "{\"action\":\"build\",\"precondition\":\"clean tree\","
+                       "\"success_predicate\":\"exit 0\",\"rollback\":\"git clean\"},"
+                       "{\"action\":\"test\",\"after\":[0]},"
+                       "{\"action\":\"ship\",\"after\":[0,1]}]";
+   int plan_id = db1_execution_plan_create("bus-agent", "build test ship", steps);
+   must(plan_id > 0, "created a plan and got its id back as the return value");
+   must(db1_execution_plan_create("bus-agent", "bad", "{not json") < 0,
+        "a document that is not an array of steps is refused");
+
+   must(db1_execution_plan_exists(plan_id) == 1, "the plan exists");
+   must(db1_execution_plan_exists(999999) == 0, "and an absent one does not");
+   must(db1_execution_plan_count_steps(plan_id) == 3, "it has three steps");
+
+   plan_t plan;
+   memset(&plan, 0, sizeof plan);
+   must(db1_execution_plan_get(plan_id, &plan) == 0, "read the plan back");
+   must(strcmp(plan.agent_name, "bus-agent") == 0, "the agent crossed");
+   must(strcmp(plan.task, "build test ship") == 0, "and the task");
+   must(plan.step_count == 3, "and all three steps");
+   must(strcmp(plan.steps[0].action, "build") == 0, "the first step's action");
+   must(strcmp(plan.steps[0].precondition, "clean tree") == 0, "and its precondition");
+   must(strcmp(plan.steps[0].rollback, "git clean") == 0, "and its rollback");
+
+   /* The inner arrays: step 1 depends on step 0, step 2 on both. */
+   must(plan.steps[0].dep_count == 0, "the first step depends on nothing");
+   must(plan.steps[1].dep_count == 1, "the second depends on one");
+   must(plan.steps[1].depends_on[0] == 0, "and it is the first");
+   must(plan.steps[2].dep_count == 2, "the third depends on two");
+   must(plan.steps[2].depends_on[0] == 0 && plan.steps[2].depends_on[1] == 1,
+        "and they are the first and second, in order");
+
+   int ids[8];
+   memset(ids, 0, sizeof ids);
+   int n = db1_execution_plan_list_ids(ids, 8);
+   must(n >= 1, "the plan is listed");
+   plan_t listed[4];
+   memset(listed, 0, sizeof listed);
+   must(db1_execution_plan_list(listed, 4) >= 1, "and the composed list still answers whole plans");
+
+   /* These answer how many rows they changed, not 0: declared as plain writes
+      they would report success as FAILED, because the stage reads a non-zero
+      return from a write as the store refusing. */
+   must(db1_plan_step_set_status_output(plan.steps[0].id, "done", "built ok") == 1,
+        "recorded a step outcome, and said it changed one row");
+   must(db1_plan_step_set_status_output(999999, "done", "nothing") == 0,
+        "and changing no rows is zero rather than an error");
+   memset(&plan, 0, sizeof plan);
+   must(db1_execution_plan_get(plan_id, &plan) == 0, "re-read the plan");
+   must(strcmp(plan.steps[0].output, "built ok") == 0, "the output landed on its own step");
+   must(plan.steps[1].output[0] == 0, "and not on any other");
+
+   must(db1_step_evidence_insert(plan_id, plan.steps[0].id, "test", "all green", 1, "strong") == 0,
+        "attached evidence");
+   db1_step_evidence_latest_t ev;
+   memset(&ev, 0, sizeof ev);
+   must(db1_step_evidence_get_latest(plan.steps[0].id, &ev) == 0, "read the latest evidence");
+   must(ev.passed == 1 && strcmp(ev.strength, "strong") == 0, "with its verdict and strength");
+   must(db1_step_evidence_get_latest(plan.steps[2].id, &ev) != 0,
+        "a step with no evidence has none");
+
+   db1_execution_plan_summary_t summaries[8];
+   memset(summaries, 0, sizeof summaries);
+   int sn = db1_execution_plan_list_recent_summaries(summaries, 8);
+   must(sn >= 1, "summarised the recent plans");
+   int seen = 0;
+   for (int at = 0; at < sn; at++)
+   {
+      if (summaries[at].id != plan_id)
+         continue;
+      seen = 1;
+      must(summaries[at].total_steps == 3, "the summary counts every step");
+      must(summaries[at].done_steps == 1, "and only the finished one as done");
+   }
+   must(seen, "and ours is among them");
+
+   must(db1_execution_plan_set_status(plan_id, "running") == 1, "set a status on one plan");
+   must(db1_execution_plan_cancel_by_id(plan_id, "bus test") >= 1, "cancelled the plan");
+   must(db1_plan_step_cancel_active_for_plan(plan_id) >= 0, "cancelled its active steps");
+   must(db1_plan_step_cancel_orphans() >= 0, "and swept orphans");
+
+   printf("  PASS: a plan carries its steps and their dependencies\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1219,6 +1313,7 @@ int main(int argc, char **argv)
    test_a_binding_refusal_is_not_a_broken_store();
    test_a_pipeline_row_survives_a_nine_parameter_update();
    test_the_roadmap_selector_keeps_all_three_answers();
+   test_a_plan_carries_its_steps_and_their_dependencies();
 
    stop_module();
    obs_bus_stop();

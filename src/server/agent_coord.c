@@ -485,7 +485,9 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
       return agent_run(cfg, "execute", NULL, task, 0, out);
    }
 
-   int plan_id = db1_execution_plan_create(cfg->default_agent, task, plan_json);
+   char *steps_doc = cJSON_PrintUnformatted(plan_json);
+   int plan_id = steps_doc ? db1_execution_plan_create(cfg->default_agent, task, steps_doc) : -1;
+   free(steps_doc);
    cJSON_Delete(plan_json);
 
    if (plan_id < 0)

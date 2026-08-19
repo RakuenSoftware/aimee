@@ -243,7 +243,9 @@ static int create_test_plan(void)
    cJSON_AddStringToObject(step, "action", "run focused test");
    cJSON_AddItemToArray(steps, step);
 
-   int plan_id = db1_execution_plan_create("unit", "coord job test", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("unit", "coord job test", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    assert(plan_id > 0);
    return plan_id;

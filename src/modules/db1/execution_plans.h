@@ -47,8 +47,15 @@ extern "C"
       char created_at[DB1_PLAN_TS_LEN];
    } db1_step_evidence_latest_t;
 
-   int db1_execution_plan_create(const char *agent_name, const char *task, const cJSON *steps_json);
+   /* steps_json is the document, not a tree: a cJSON pointer does not cross a
+    * process boundary, and the caller already holds the text. */
+   int db1_execution_plan_create(const char *agent_name, const char *task, const char *steps_json);
    int db1_execution_plan_get(int plan_id, plan_t *out);
+   /* list_ids is what the store does; _list is that plus a get per id, which
+    * is composition rather than storage and lives beside the caller. Whole
+    * plans do not travel in one reply: each is a nested row of 32 steps, so
+    * twenty of them is a reply nobody reads twenty of. */
+   int db1_execution_plan_list_ids(int *out_ids, int max);
    int db1_execution_plan_list(plan_t *out, int max);
    int db1_execution_plan_exists(int plan_id);
    int db1_execution_plan_count_steps(int plan_id);

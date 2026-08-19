@@ -325,7 +325,9 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
       return agent_execute(agent, system_prompt, user_prompt, max_tokens, temperature, out);
    }
 
-   int plan_id = db1_execution_plan_create(agent->name, user_prompt, json);
+   char *steps_doc = cJSON_PrintUnformatted(json);
+   int plan_id = steps_doc ? db1_execution_plan_create(agent->name, user_prompt, steps_doc) : -1;
+   free(steps_doc);
    cJSON_Delete(json);
    free(plan_res.response);
    if (plan_id < 0)

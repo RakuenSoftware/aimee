@@ -435,6 +435,22 @@
 #define AIMEE_DB1_OP_ROADMAP_UNIT_SET_COORD_JOB             31u
 #define AIMEE_DB1_OP_ROADMAP_UNIT_INCREMENT_VERIFY_ATTEMPTS 32u
 #define AIMEE_DB1_OP_ROADMAP_UNIT_SELECT_NEXT               33u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_CREATE                  34u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_GET                     35u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_LIST_IDS                36u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_EXISTS                  37u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_COUNT_STEPS             38u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RUNNING_IDS        39u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RECENT_SUMMARIES   40u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_SET_STATUS              41u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_BY_ID            42u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_STALE            43u
+#define AIMEE_DB1_OP_PLAN_STEP_SET_STATUS                   44u
+#define AIMEE_DB1_OP_PLAN_STEP_SET_STATUS_OUTPUT            45u
+#define AIMEE_DB1_OP_PLAN_STEP_CANCEL_ACTIVE_FOR_PLAN       46u
+#define AIMEE_DB1_OP_PLAN_STEP_CANCEL_ORPHANS               47u
+#define AIMEE_DB1_OP_STEP_EVIDENCE_INSERT                   48u
+#define AIMEE_DB1_OP_STEP_EVIDENCE_GET_LATEST               49u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and

@@ -246,7 +246,9 @@ static void test_assign_waves_db_roundtrip(void)
    cJSON_AddItemToObject(s3, "after", after3);
    cJSON_AddItemToArray(steps, s3);
 
-   int plan_id = db1_execution_plan_create("test-agent", "roundtrip task", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", "roundtrip task", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    assert(plan_id > 0);
 
@@ -301,7 +303,9 @@ static void test_execute_waves_creates_coord_jobs(void)
    cJSON_AddItemToObject(sC, "after", afterC);
    cJSON_AddItemToArray(steps, sC);
 
-   int plan_id = db1_execution_plan_create("test-agent", "wave job test", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", "wave job test", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    assert(plan_id > 0);
 
@@ -364,7 +368,9 @@ static void test_execute_waves_gating(void)
    cJSON_AddItemToObject(sB, "after", afterB);
    cJSON_AddItemToArray(steps, sB);
 
-   int plan_id = db1_execution_plan_create("test-agent", "gating test", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", "gating test", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    assert(plan_id > 0);
 
@@ -422,7 +428,9 @@ static void test_wave_file_conflict_detection(void)
    cJSON_AddStringToObject(s1, "action", "also edit src/foo.c");
    cJSON_AddItemToArray(steps, s1);
 
-   int plan_id = db1_execution_plan_create("test-agent", "conflict test", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", "conflict test", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    assert(plan_id > 0);
 
@@ -473,7 +481,9 @@ static void test_plan_verify_records_strong_and_weak_evidence(void)
    cJSON_AddStringToObject(s1, "action", "step without predicate");
    cJSON_AddItemToArray(steps, s1);
 
-   int plan_id = db1_execution_plan_create("test-agent", "verify evidence", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", "verify evidence", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    assert(plan_id > 0);
 
@@ -515,7 +525,9 @@ static void test_plan_verify_marks_missing_predicate_as_failed(void)
    cJSON_AddStringToObject(s0, "success_predicate", "needle");
    cJSON_AddItemToArray(steps, s0);
 
-   int plan_id = db1_execution_plan_create("test-agent", "verify failure", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", "verify failure", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    assert(plan_id > 0);
 
