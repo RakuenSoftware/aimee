@@ -117,6 +117,90 @@ static int production_scoped_ids(int (*read)(memory_t *out, int max), int scope_
    return listed;
 }
 
+/* Same shape as production_scoped_ids, with a search term and an explicit
+ * limit the statement binds. */
+static int
+production_scoped_term_ids(int (*read)(const char *term, int limit, memory_t *out, int max),
+                           const char *term, int limit, int scope_active, int include_all,
+                           const char *workspace, const char *project, int64_t *out, int max)
+{
+   if (!read || !term || !out || max <= 0 || limit <= 0)
+      return -1;
+   memory_t *rows = calloc((size_t)max, sizeof(*rows));
+   if (!rows)
+      return -1;
+
+   db2_memory_scope_context_t saved;
+   memset(&saved, 0, sizeof(saved));
+   db2_memory_scope_context_get(&saved);
+   if (scope_active)
+      db2_memory_scope_context_set(workspace, project, include_all);
+   else
+      db2_memory_scope_context_clear();
+
+   int listed = read(term, limit, rows, max);
+
+   if (saved.active)
+      db2_memory_scope_context_set(saved.workspace, saved.project, saved.include_all);
+   else
+      db2_memory_scope_context_clear();
+
+   if (listed > max)
+      listed = max;
+   for (int index = 0; index < listed; index++)
+      out[index] = rows[index].id;
+   free(rows);
+   return listed;
+}
+
+static int production_collect_alias_matches(const char *term, int limit, int scope_active,
+                                            int include_all, const char *workspace,
+                                            const char *project, int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_collect_alias_matches, term, limit, scope_active,
+                                     include_all, workspace, project, out, max);
+}
+
+static int production_collect_entity_matches(const char *term, int limit, int scope_active,
+                                             int include_all, const char *workspace,
+                                             const char *project, int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_collect_entity_matches, term, limit, scope_active,
+                                     include_all, workspace, project, out, max);
+}
+
+static int production_collect_event_frame_matches(const char *term, int limit, int scope_active,
+                                                  int include_all, const char *workspace,
+                                                  const char *project, int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_collect_event_frame_matches, term, limit,
+                                     scope_active, include_all, workspace, project, out, max);
+}
+
+static int production_collect_relation_token_matches(const char *term, int limit, int scope_active,
+                                                     int include_all, const char *workspace,
+                                                     const char *project, int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_collect_relation_token_matches, term, limit,
+                                     scope_active, include_all, workspace, project, out, max);
+}
+
+static int production_collect_summary_matches(const char *term, int limit, int scope_active,
+                                              int include_all, const char *workspace,
+                                              const char *project, int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_collect_summary_matches, term, limit, scope_active,
+                                     include_all, workspace, project, out, max);
+}
+
+static int production_collect_temporal_matches(const char *term, int limit, int scope_active,
+                                               int include_all, const char *workspace,
+                                               const char *project, int64_t *out, int max)
+{
+   return production_scoped_term_ids(db2_memory_collect_temporal_matches, term, limit, scope_active,
+                                     include_all, workspace, project, out, max);
+}
+
 static int production_top_l2_facts(int scope_active, int include_all, const char *workspace,
                                    const char *project, int64_t *out, int max)
 {
@@ -345,6 +429,12 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .list_l2_memory_ids = db2_memory_health_list_l2_memory_ids,
        .top_l2_facts = production_top_l2_facts,
        .list_session_scope_priority = production_list_session_scope_priority,
+       .collect_alias_matches = production_collect_alias_matches,
+       .collect_entity_matches = production_collect_entity_matches,
+       .collect_event_frame_matches = production_collect_event_frame_matches,
+       .collect_relation_token_matches = production_collect_relation_token_matches,
+       .collect_summary_matches = production_collect_summary_matches,
+       .collect_temporal_matches = production_collect_temporal_matches,
        .count_memories = db2_memory_health_count_memories,
        .count_recent_conflicts = db2_memory_health_count_recent_conflicts,
        .health_record = db2_memory_health_record,
@@ -771,8 +861,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             encode = aimee_db2_top_l2_facts_reply_encode;
          }
          else if (aimee_db2_list_session_scope_priority_request_decode(
-                      request_body, request_len, &limit, &scope_flags, workspace,
-                      sizeof(workspace), project, sizeof(project)) == 0)
+                      request_body, request_len, &limit, &scope_flags, workspace, sizeof(workspace),
+                      project, sizeof(project)) == 0)
          {
             read = backend ? backend->list_session_scope_priority : NULL;
             encode = aimee_db2_list_session_scope_priority_reply_encode;
@@ -794,6 +884,84 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             for (int index = 0; index < listed; index++)
             {
                if (rows[index] < (int64_t)AIMEE_DB2_TOP_L2_FACTS_ID_MIN)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               memory_ids[index] = (uint64_t)rows[index];
+            }
+            if (encode(memory_ids, (uint32_t)listed, response_body, response_capacity,
+                       response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         /* All six term probes decode the same way and differ only in which
+          * reviewed backend they reach, so one branch serves them all. */
+         uint32_t limit = 0u, scope_flags = 0u;
+         char term[AIMEE_DB2_COLLECT_ALIAS_MATCHES_TERM_MAX + 1];
+         char workspace[AIMEE_DB2_COLLECT_ALIAS_MATCHES_WORKSPACE_MAX + 1];
+         char project[AIMEE_DB2_COLLECT_ALIAS_MATCHES_PROJECT_MAX + 1];
+         int (*read)(const char *, int, int, int, const char *, const char *, int64_t *, int) =
+             NULL;
+         int (*encode)(const uint64_t *, uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         if (!encode && aimee_db2_collect_alias_matches_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->collect_alias_matches : NULL;
+            encode = aimee_db2_collect_alias_matches_reply_encode;
+         }
+         if (!encode && aimee_db2_collect_entity_matches_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->collect_entity_matches : NULL;
+            encode = aimee_db2_collect_entity_matches_reply_encode;
+         }
+         if (!encode && aimee_db2_collect_event_frame_matches_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->collect_event_frame_matches : NULL;
+            encode = aimee_db2_collect_event_frame_matches_reply_encode;
+         }
+         if (!encode && aimee_db2_collect_relation_token_matches_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->collect_relation_token_matches : NULL;
+            encode = aimee_db2_collect_relation_token_matches_reply_encode;
+         }
+         if (!encode && aimee_db2_collect_summary_matches_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->collect_summary_matches : NULL;
+            encode = aimee_db2_collect_summary_matches_reply_encode;
+         }
+         if (!encode && aimee_db2_collect_temporal_matches_request_decode(
+                            request_body, request_len, term, sizeof(term), &limit, &scope_flags,
+                            workspace, sizeof(workspace), project, sizeof(project)) == 0)
+         {
+            read = backend ? backend->collect_temporal_matches : NULL;
+            encode = aimee_db2_collect_temporal_matches_reply_encode;
+         }
+         if (encode)
+         {
+            if (response_capacity < AIMEE_DB2_COLLECT_ALIAS_MATCHES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int64_t rows[AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX];
+            int listed = read(term, (int)limit, (int)(scope_flags & 1u),
+                              (int)((scope_flags >> 1) & 1u), workspace, project, rows, (int)limit);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (listed < 0 || listed > (int)limit)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint64_t memory_ids[AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX];
+            for (int index = 0; index < listed; index++)
+            {
+               if (rows[index] < (int64_t)AIMEE_DB2_COLLECT_ALIAS_MATCHES_ID_MIN)
                   return AIMEE_MODULE_STATUS_INTERNAL;
                memory_ids[index] = (uint64_t)rows[index];
             }

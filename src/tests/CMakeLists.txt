@@ -197,9 +197,11 @@ aimee_add_test(test_routing_module test_routing_module.c ../modules/routing/modu
 target_include_directories(test_routing_module PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/routing/include)
+file(GLOB DB2_CLIENT_SOURCES CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/client/generated_*.c)
 aimee_add_test(test_db2_module_contract
   test_db2_module_contract.c
-  ../modules/db2/client/generated.c
+  ${DB2_CLIENT_SOURCES}
   ../modules/db2/module_adapter.c)
 target_include_directories(test_db2_module_contract PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
@@ -207,7 +209,7 @@ target_include_directories(test_db2_module_contract PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
 aimee_add_test(test_bus_db2_module
   test_bus_db2_module.c
-  ../modules/db2/client/generated.c
+  ${DB2_CLIENT_SOURCES}
   ../modules/db2/module_adapter.c)
 target_include_directories(test_bus_db2_module PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
@@ -217,7 +219,7 @@ target_link_libraries(test_bus_db2_module PRIVATE aimee-core-event-bus Threads::
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(test_bus_db2_process
     test_bus_db2_process.c
-    ../modules/db2/client/generated.c)
+    ${DB2_CLIENT_SOURCES})
   target_include_directories(test_bus_db2_process PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)

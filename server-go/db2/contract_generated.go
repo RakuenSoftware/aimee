@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "69389ad2fdf85a6130e0ad3dedcb582774c60bc440b94cf52a81f8fbad968163"
+const ContractSHA256 = "de57df0da005b0d4cf533d01d7c9762e2f399199a66960253ff590de44607c96"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -342,6 +342,84 @@ const ListSessionScopePriorityProjectMax = 511
 const ListSessionScopePriorityMax uint32 = 64
 const ListSessionScopePriorityIDMin uint64 = 1
 const ListSessionScopePriorityIDMax uint64 = 9223372036854775807
+const EventCollectAliasMatches = EventMemory
+const StageCollectAliasMatches = FamilyMemory
+const OperationCollectAliasMatches uint32 = 45
+const CollectAliasMatchesLimitMin uint32 = 1
+const CollectAliasMatchesLimitMax uint32 = 64
+const CollectAliasMatchesScopeFlagsMax uint32 = 3
+const CollectAliasMatchesTermMin = 1
+const CollectAliasMatchesTermMax = 511
+const CollectAliasMatchesWorkspaceMax = 511
+const CollectAliasMatchesProjectMax = 511
+const CollectAliasMatchesMax uint32 = 64
+const CollectAliasMatchesIDMin uint64 = 1
+const CollectAliasMatchesIDMax uint64 = 9223372036854775807
+const EventCollectEntityMatches = EventMemory
+const StageCollectEntityMatches = FamilyMemory
+const OperationCollectEntityMatches uint32 = 46
+const CollectEntityMatchesLimitMin uint32 = 1
+const CollectEntityMatchesLimitMax uint32 = 64
+const CollectEntityMatchesScopeFlagsMax uint32 = 3
+const CollectEntityMatchesTermMin = 1
+const CollectEntityMatchesTermMax = 511
+const CollectEntityMatchesWorkspaceMax = 511
+const CollectEntityMatchesProjectMax = 511
+const CollectEntityMatchesMax uint32 = 64
+const CollectEntityMatchesIDMin uint64 = 1
+const CollectEntityMatchesIDMax uint64 = 9223372036854775807
+const EventCollectEventFrameMatches = EventMemory
+const StageCollectEventFrameMatches = FamilyMemory
+const OperationCollectEventFrameMatches uint32 = 47
+const CollectEventFrameMatchesLimitMin uint32 = 1
+const CollectEventFrameMatchesLimitMax uint32 = 64
+const CollectEventFrameMatchesScopeFlagsMax uint32 = 3
+const CollectEventFrameMatchesTermMin = 1
+const CollectEventFrameMatchesTermMax = 511
+const CollectEventFrameMatchesWorkspaceMax = 511
+const CollectEventFrameMatchesProjectMax = 511
+const CollectEventFrameMatchesMax uint32 = 64
+const CollectEventFrameMatchesIDMin uint64 = 1
+const CollectEventFrameMatchesIDMax uint64 = 9223372036854775807
+const EventCollectRelationTokenMatches = EventMemory
+const StageCollectRelationTokenMatches = FamilyMemory
+const OperationCollectRelationTokenMatches uint32 = 48
+const CollectRelationTokenMatchesLimitMin uint32 = 1
+const CollectRelationTokenMatchesLimitMax uint32 = 64
+const CollectRelationTokenMatchesScopeFlagsMax uint32 = 3
+const CollectRelationTokenMatchesTermMin = 1
+const CollectRelationTokenMatchesTermMax = 511
+const CollectRelationTokenMatchesWorkspaceMax = 511
+const CollectRelationTokenMatchesProjectMax = 511
+const CollectRelationTokenMatchesMax uint32 = 64
+const CollectRelationTokenMatchesIDMin uint64 = 1
+const CollectRelationTokenMatchesIDMax uint64 = 9223372036854775807
+const EventCollectSummaryMatches = EventMemory
+const StageCollectSummaryMatches = FamilyMemory
+const OperationCollectSummaryMatches uint32 = 49
+const CollectSummaryMatchesLimitMin uint32 = 1
+const CollectSummaryMatchesLimitMax uint32 = 64
+const CollectSummaryMatchesScopeFlagsMax uint32 = 3
+const CollectSummaryMatchesTermMin = 1
+const CollectSummaryMatchesTermMax = 511
+const CollectSummaryMatchesWorkspaceMax = 511
+const CollectSummaryMatchesProjectMax = 511
+const CollectSummaryMatchesMax uint32 = 64
+const CollectSummaryMatchesIDMin uint64 = 1
+const CollectSummaryMatchesIDMax uint64 = 9223372036854775807
+const EventCollectTemporalMatches = EventMemory
+const StageCollectTemporalMatches = FamilyMemory
+const OperationCollectTemporalMatches uint32 = 50
+const CollectTemporalMatchesLimitMin uint32 = 1
+const CollectTemporalMatchesLimitMax uint32 = 64
+const CollectTemporalMatchesScopeFlagsMax uint32 = 3
+const CollectTemporalMatchesTermMin = 1
+const CollectTemporalMatchesTermMax = 511
+const CollectTemporalMatchesWorkspaceMax = 511
+const CollectTemporalMatchesProjectMax = 511
+const CollectTemporalMatchesMax uint32 = 64
+const CollectTemporalMatchesIDMin uint64 = 1
+const CollectTemporalMatchesIDMax uint64 = 9223372036854775807
 const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = 1
@@ -2235,6 +2313,660 @@ func DecodeListSessionScopePriorityReply(reply []byte) ([]uint64, error) {
 	for index := range memoryIDs {
 		id := binary.LittleEndian.Uint64(payload[4+index*8:])
 		if id < ListSessionScopePriorityIDMin || id > ListSessionScopePriorityIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeCollectAliasMatchesRequest carries the term, the limit and the session scope.
+func EncodeCollectAliasMatchesRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < CollectAliasMatchesLimitMin || limit > CollectAliasMatchesLimitMax || scopeFlags > CollectAliasMatchesScopeFlagsMax ||
+		len(term) < CollectAliasMatchesTermMin || len(term) > CollectAliasMatchesTermMax ||
+		len(workspace) > CollectAliasMatchesWorkspaceMax || len(project) > CollectAliasMatchesProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationCollectAliasMatches, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeCollectAliasMatchesRequest walks the three length prefixes rather than trusting them.
+func DecodeCollectAliasMatchesRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCollectAliasMatches || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < CollectAliasMatchesLimitMin || limit > CollectAliasMatchesLimitMax || scopeFlags > CollectAliasMatchesScopeFlagsMax ||
+		termLen < CollectAliasMatchesTermMin || termLen > CollectAliasMatchesTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > CollectAliasMatchesWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > CollectAliasMatchesProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeCollectAliasMatchesReply emits the counted, bounded identifier list.
+func EncodeCollectAliasMatchesReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > CollectAliasMatchesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < CollectAliasMatchesIDMin || id > CollectAliasMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationCollectAliasMatches, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeCollectAliasMatchesReply validates the operation and every bounded identifier.
+func DecodeCollectAliasMatchesReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCollectAliasMatches || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > CollectAliasMatchesMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < CollectAliasMatchesIDMin || id > CollectAliasMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeCollectEntityMatchesRequest carries the term, the limit and the session scope.
+func EncodeCollectEntityMatchesRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < CollectEntityMatchesLimitMin || limit > CollectEntityMatchesLimitMax || scopeFlags > CollectEntityMatchesScopeFlagsMax ||
+		len(term) < CollectEntityMatchesTermMin || len(term) > CollectEntityMatchesTermMax ||
+		len(workspace) > CollectEntityMatchesWorkspaceMax || len(project) > CollectEntityMatchesProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationCollectEntityMatches, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeCollectEntityMatchesRequest walks the three length prefixes rather than trusting them.
+func DecodeCollectEntityMatchesRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCollectEntityMatches || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < CollectEntityMatchesLimitMin || limit > CollectEntityMatchesLimitMax || scopeFlags > CollectEntityMatchesScopeFlagsMax ||
+		termLen < CollectEntityMatchesTermMin || termLen > CollectEntityMatchesTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > CollectEntityMatchesWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > CollectEntityMatchesProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeCollectEntityMatchesReply emits the counted, bounded identifier list.
+func EncodeCollectEntityMatchesReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > CollectEntityMatchesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < CollectEntityMatchesIDMin || id > CollectEntityMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationCollectEntityMatches, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeCollectEntityMatchesReply validates the operation and every bounded identifier.
+func DecodeCollectEntityMatchesReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCollectEntityMatches || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > CollectEntityMatchesMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < CollectEntityMatchesIDMin || id > CollectEntityMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeCollectEventFrameMatchesRequest carries the term, the limit and the session scope.
+func EncodeCollectEventFrameMatchesRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < CollectEventFrameMatchesLimitMin || limit > CollectEventFrameMatchesLimitMax || scopeFlags > CollectEventFrameMatchesScopeFlagsMax ||
+		len(term) < CollectEventFrameMatchesTermMin || len(term) > CollectEventFrameMatchesTermMax ||
+		len(workspace) > CollectEventFrameMatchesWorkspaceMax || len(project) > CollectEventFrameMatchesProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationCollectEventFrameMatches, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeCollectEventFrameMatchesRequest walks the three length prefixes rather than trusting them.
+func DecodeCollectEventFrameMatchesRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCollectEventFrameMatches || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < CollectEventFrameMatchesLimitMin || limit > CollectEventFrameMatchesLimitMax || scopeFlags > CollectEventFrameMatchesScopeFlagsMax ||
+		termLen < CollectEventFrameMatchesTermMin || termLen > CollectEventFrameMatchesTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > CollectEventFrameMatchesWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > CollectEventFrameMatchesProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeCollectEventFrameMatchesReply emits the counted, bounded identifier list.
+func EncodeCollectEventFrameMatchesReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > CollectEventFrameMatchesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < CollectEventFrameMatchesIDMin || id > CollectEventFrameMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationCollectEventFrameMatches, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeCollectEventFrameMatchesReply validates the operation and every bounded identifier.
+func DecodeCollectEventFrameMatchesReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCollectEventFrameMatches || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > CollectEventFrameMatchesMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < CollectEventFrameMatchesIDMin || id > CollectEventFrameMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeCollectRelationTokenMatchesRequest carries the term, the limit and the session scope.
+func EncodeCollectRelationTokenMatchesRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < CollectRelationTokenMatchesLimitMin || limit > CollectRelationTokenMatchesLimitMax || scopeFlags > CollectRelationTokenMatchesScopeFlagsMax ||
+		len(term) < CollectRelationTokenMatchesTermMin || len(term) > CollectRelationTokenMatchesTermMax ||
+		len(workspace) > CollectRelationTokenMatchesWorkspaceMax || len(project) > CollectRelationTokenMatchesProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationCollectRelationTokenMatches, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeCollectRelationTokenMatchesRequest walks the three length prefixes rather than trusting them.
+func DecodeCollectRelationTokenMatchesRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCollectRelationTokenMatches || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < CollectRelationTokenMatchesLimitMin || limit > CollectRelationTokenMatchesLimitMax || scopeFlags > CollectRelationTokenMatchesScopeFlagsMax ||
+		termLen < CollectRelationTokenMatchesTermMin || termLen > CollectRelationTokenMatchesTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > CollectRelationTokenMatchesWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > CollectRelationTokenMatchesProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeCollectRelationTokenMatchesReply emits the counted, bounded identifier list.
+func EncodeCollectRelationTokenMatchesReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > CollectRelationTokenMatchesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < CollectRelationTokenMatchesIDMin || id > CollectRelationTokenMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationCollectRelationTokenMatches, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeCollectRelationTokenMatchesReply validates the operation and every bounded identifier.
+func DecodeCollectRelationTokenMatchesReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCollectRelationTokenMatches || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > CollectRelationTokenMatchesMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < CollectRelationTokenMatchesIDMin || id > CollectRelationTokenMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeCollectSummaryMatchesRequest carries the term, the limit and the session scope.
+func EncodeCollectSummaryMatchesRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < CollectSummaryMatchesLimitMin || limit > CollectSummaryMatchesLimitMax || scopeFlags > CollectSummaryMatchesScopeFlagsMax ||
+		len(term) < CollectSummaryMatchesTermMin || len(term) > CollectSummaryMatchesTermMax ||
+		len(workspace) > CollectSummaryMatchesWorkspaceMax || len(project) > CollectSummaryMatchesProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationCollectSummaryMatches, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeCollectSummaryMatchesRequest walks the three length prefixes rather than trusting them.
+func DecodeCollectSummaryMatchesRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCollectSummaryMatches || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < CollectSummaryMatchesLimitMin || limit > CollectSummaryMatchesLimitMax || scopeFlags > CollectSummaryMatchesScopeFlagsMax ||
+		termLen < CollectSummaryMatchesTermMin || termLen > CollectSummaryMatchesTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > CollectSummaryMatchesWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > CollectSummaryMatchesProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeCollectSummaryMatchesReply emits the counted, bounded identifier list.
+func EncodeCollectSummaryMatchesReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > CollectSummaryMatchesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < CollectSummaryMatchesIDMin || id > CollectSummaryMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationCollectSummaryMatches, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeCollectSummaryMatchesReply validates the operation and every bounded identifier.
+func DecodeCollectSummaryMatchesReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCollectSummaryMatches || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > CollectSummaryMatchesMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < CollectSummaryMatchesIDMin || id > CollectSummaryMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeCollectTemporalMatchesRequest carries the term, the limit and the session scope.
+func EncodeCollectTemporalMatchesRequest(term string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < CollectTemporalMatchesLimitMin || limit > CollectTemporalMatchesLimitMax || scopeFlags > CollectTemporalMatchesScopeFlagsMax ||
+		len(term) < CollectTemporalMatchesTermMin || len(term) > CollectTemporalMatchesTermMax ||
+		len(workspace) > CollectTemporalMatchesWorkspaceMax || len(project) > CollectTemporalMatchesProjectMax ||
+		hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 20 + len(term) + len(workspace) + len(project)
+	header, err := EncodeRequestHeader(OperationCollectTemporalMatches, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, limit)
+	binary.LittleEndian.PutUint32(payload[4:], scopeFlags)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(term)))
+	copy(payload[12:], term)
+	binary.LittleEndian.PutUint32(payload[12+len(term):], uint32(len(workspace)))
+	copy(payload[16+len(term):], workspace)
+	binary.LittleEndian.PutUint32(payload[16+len(term)+len(workspace):], uint32(len(project)))
+	copy(payload[20+len(term)+len(workspace):], project)
+	return request, nil
+}
+
+// DecodeCollectTemporalMatchesRequest walks the three length prefixes rather than trusting them.
+func DecodeCollectTemporalMatchesRequest(request []byte) (string, uint32, uint32, string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCollectTemporalMatches || header.Flags != 0 ||
+		header.PayloadLen < 21 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	limit := binary.LittleEndian.Uint32(payload)
+	scopeFlags := binary.LittleEndian.Uint32(payload[4:])
+	termLen := binary.LittleEndian.Uint32(payload[8:])
+	if limit < CollectTemporalMatchesLimitMin || limit > CollectTemporalMatchesLimitMax || scopeFlags > CollectTemporalMatchesScopeFlagsMax ||
+		termLen < CollectTemporalMatchesTermMin || termLen > CollectTemporalMatchesTermMax ||
+		header.PayloadLen < 20+termLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	workspaceLen := binary.LittleEndian.Uint32(payload[12+termLen:])
+	if workspaceLen > CollectTemporalMatchesWorkspaceMax || header.PayloadLen < 20+termLen+workspaceLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	projectLen := binary.LittleEndian.Uint32(payload[16+termLen+workspaceLen:])
+	if projectLen > CollectTemporalMatchesProjectMax ||
+		header.PayloadLen != 20+termLen+workspaceLen+projectLen {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	term := string(payload[12 : 12+termLen])
+	workspace := string(payload[16+termLen : 16+termLen+workspaceLen])
+	project := string(payload[20+termLen+workspaceLen : 20+termLen+workspaceLen+projectLen])
+	if hasNUL(term) || hasNUL(workspace) || hasNUL(project) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return term, limit, scopeFlags, workspace, project, nil
+}
+
+// EncodeCollectTemporalMatchesReply emits the counted, bounded identifier list.
+func EncodeCollectTemporalMatchesReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > CollectTemporalMatchesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < CollectTemporalMatchesIDMin || id > CollectTemporalMatchesIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationCollectTemporalMatches, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeCollectTemporalMatchesReply validates the operation and every bounded identifier.
+func DecodeCollectTemporalMatchesReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCollectTemporalMatches || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > CollectTemporalMatchesMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < CollectTemporalMatchesIDMin || id > CollectTemporalMatchesIDMax {
 			return nil, ErrMalformedEnvelope
 		}
 		memoryIDs[index] = id

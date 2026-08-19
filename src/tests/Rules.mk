@@ -3355,7 +3355,7 @@ $(OBJDIR)/modules/db2/module_adapter.o: C_FLAGS += -Icore/event_bus/include \
                                                    -Imodules/db2/include
 $(TESTPREFIX)/unit-test-db2-module-contract: \
                                         $(OBJDIR)/tests/test_db2_module_contract.o \
-                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(DB2_CLIENT_OBJS) \
                                         $(OBJDIR)/modules/db2/module_adapter.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
@@ -3377,11 +3377,11 @@ unit-test-db2-module-init: $(TESTPREFIX)/unit-test-db2-module-init
 $(OBJDIR)/tests/test_bus_db2_module.o: C_FLAGS += -Icore/event_bus/include \
                                                    -Imodules/db2 \
                                                    -Imodules/db2/include
-$(OBJDIR)/modules/db2/client/generated.o: C_FLAGS += -Icore/event_bus/include \
+$(DB2_CLIENT_OBJS): C_FLAGS += -Icore/event_bus/include \
                                                         -Imodules/db2/include
 $(TESTPREFIX)/unit-test-bus-db2-module: \
                                         $(OBJDIR)/tests/test_bus_db2_module.o \
-                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(DB2_CLIENT_OBJS) \
                                         $(OBJDIR)/modules/db2/module_adapter.o \
                                         $(OBJDIR)/core/event_bus/module_client.o \
                                         $(OBJDIR)/core/event_bus/module_runtime.o \
@@ -3407,7 +3407,7 @@ $(OBJDIR)/tests/test_bus_db2_process.o: C_FLAGS += -Icore/event_bus/include \
                                                     -Imodules/db2/include
 $(TESTPREFIX)/unit-test-bus-db2-process: \
                                         $(OBJDIR)/tests/test_bus_db2_process.o \
-                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(DB2_CLIENT_OBJS) \
                                         $(OBJDIR)/core/event_bus/module_client.o \
                                         $(OBJDIR)/core/event_bus/module_protocol.o \
                                         $(OBJDIR)/core/event_bus/bus_runtime.o \

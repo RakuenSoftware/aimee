@@ -6,10 +6,11 @@ clang-format wraps the signature differently from what was typed, hand-edit the
 template, run the generator again. The wrapping depends on identifier length, so
 it is not predictable while writing.
 
-The template for src/modules/db2/client/generated.c is a plain triple-quoted
-string with no interpolation, which makes the fix mechanical: format the
-generated file, and where the formatter changed a definition, put the formatted
-text back into the template it came from.
+The template for the generated client is a plain triple-quoted string with no
+interpolation, which makes the fix mechanical: format the generated files, and
+where the formatter changed a definition, put the formatted text back into the
+template it came from. The client is emitted one file per operation family, so
+every one of them is checked.
 
     python3 scripts/gen_db2_contract.py --write
     python3 scripts/db2_sync_client_format.py
@@ -25,14 +26,14 @@ import sys
 from pathlib import Path
 
 GENERATOR = Path("scripts/gen_db2_contract.py")
-GENERATED = Path("src/modules/db2/client/generated.c")
+GENERATED = sorted(Path("src/modules/db2/client").glob("generated_*.c"))
 FORMATTER = "clang-format-19"
 
 
-def _formatted(text: str) -> str:
-    # Format through a file inside the tree so the repository's .clang-format
-    # applies; the formatter resolves its configuration by path.
-    scratch = GENERATED.with_name("_sync_client_format_tmp.c")
+def _formatted(path: Path, text: str) -> str:
+    # Format through a file beside the original so the repository's
+    # .clang-format applies; the formatter resolves its configuration by path.
+    scratch = path.with_name("_sync_client_format_tmp.c")
     scratch.write_text(text, encoding="utf-8")
     try:
         subprocess.run([FORMATTER, "-i", str(scratch)], check=True)
@@ -55,35 +56,38 @@ def _definitions(text: str) -> list[str]:
 
 
 def main() -> int:
-    if not GENERATED.is_file() or not GENERATOR.is_file():
+    if not GENERATED or not GENERATOR.is_file():
         print("run from the repository root", file=sys.stderr)
         return 2
 
-    source = GENERATED.read_text(encoding="utf-8")
-    wanted = _formatted(source)
-    if wanted == source:
+    generator = GENERATOR.read_text(encoding="utf-8")
+    patched = 0
+    for path in GENERATED:
+        source = path.read_text(encoding="utf-8")
+        wanted = _formatted(path, source)
+        if wanted == source:
+            continue
+
+        before, after = _definitions(source), _definitions(wanted)
+        if len(before) != len(after):
+            print(f"db2_sync_client_format: formatting changed the definition structure in "
+                  f"{path.name}; reconcile by hand", file=sys.stderr)
+            return 1
+
+        for old, new in zip(before, after):
+            if old == new:
+                continue
+            occurrences = generator.count(old)
+            if occurrences != 1:
+                print(f"db2_sync_client_format: {occurrences} matches in the template for a "
+                      f"changed definition in {path.name}; reconcile by hand", file=sys.stderr)
+                return 1
+            generator = generator.replace(old, new)
+            patched += 1
+
+    if patched == 0:
         print("db2_sync_client_format: already formatted")
         return 0
-
-    generator = GENERATOR.read_text(encoding="utf-8")
-    before, after = _definitions(source), _definitions(wanted)
-    if len(before) != len(after):
-        print("db2_sync_client_format: formatting changed the definition structure; "
-              "reconcile by hand", file=sys.stderr)
-        return 1
-
-    patched = 0
-    for old, new in zip(before, after):
-        if old == new:
-            continue
-        occurrences = generator.count(old)
-        if occurrences != 1:
-            print(f"db2_sync_client_format: {occurrences} matches in the template for a "
-                  "changed definition; reconcile by hand", file=sys.stderr)
-            return 1
-        generator = generator.replace(old, new)
-        patched += 1
-
     GENERATOR.write_text(generator, encoding="utf-8")
     print(f"db2_sync_client_format: reconciled {patched} definition(s); "
           "re-run the generator to emit them")

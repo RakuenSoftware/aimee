@@ -281,6 +281,50 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(scoped_count == 0);
 
+   uint64_t probe_ids[AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX];
+   uint32_t probe_count = 99;
+   probe_count = 99;
+   assert(aimee_db2_collect_alias_matches_call(call_client, &client, 9040, 0, "replay-term", 4u, 1u,
+                                               "replay-workspace", "replay-project", probe_ids,
+                                               AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX, &probe_count,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_collect_entity_matches_call(call_client, &client, 9041, 0, "replay-term", 4u,
+                                                1u, "replay-workspace", "replay-project", probe_ids,
+                                                AIMEE_DB2_COLLECT_ENTITY_MATCHES_MAX, &probe_count,
+                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_collect_event_frame_matches_call(
+              call_client, &client, 9042, 0, "replay-term", 4u, 1u, "replay-workspace",
+              "replay-project", probe_ids, AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_MAX, &probe_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_collect_relation_token_matches_call(
+              call_client, &client, 9043, 0, "replay-term", 4u, 1u, "replay-workspace",
+              "replay-project", probe_ids, AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_MAX,
+              &probe_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_collect_summary_matches_call(call_client, &client, 9044, 0, "replay-term", 4u,
+                                                 1u, "replay-workspace", "replay-project",
+                                                 probe_ids, AIMEE_DB2_COLLECT_SUMMARY_MATCHES_MAX,
+                                                 &probe_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
+   probe_count = 99;
+   assert(aimee_db2_collect_temporal_matches_call(
+              call_client, &client, 9045, 0, "replay-term", 4u, 1u, "replay-workspace",
+              "replay-project", probe_ids, AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_MAX, &probe_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

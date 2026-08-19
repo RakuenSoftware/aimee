@@ -49,6 +49,22 @@ typedef struct
                        const char *project, int64_t *out, int max);
    int (*list_session_scope_priority)(int scope_active, int include_all, const char *workspace,
                                       const char *project, int64_t *out, int max);
+   int (*collect_alias_matches)(const char *term, int limit, int scope_active, int include_all,
+                                const char *workspace, const char *project, int64_t *out, int max);
+   int (*collect_entity_matches)(const char *term, int limit, int scope_active, int include_all,
+                                 const char *workspace, const char *project, int64_t *out, int max);
+   int (*collect_event_frame_matches)(const char *term, int limit, int scope_active,
+                                      int include_all, const char *workspace, const char *project,
+                                      int64_t *out, int max);
+   int (*collect_relation_token_matches)(const char *term, int limit, int scope_active,
+                                         int include_all, const char *workspace,
+                                         const char *project, int64_t *out, int max);
+   int (*collect_summary_matches)(const char *term, int limit, int scope_active, int include_all,
+                                  const char *workspace, const char *project, int64_t *out,
+                                  int max);
+   int (*collect_temporal_matches)(const char *term, int limit, int scope_active, int include_all,
+                                   const char *workspace, const char *project, int64_t *out,
+                                   int max);
    int (*count_memories)(void);
    int (*count_recent_conflicts)(int days);
    void (*health_record)(int total_memories, int contradictions_detected, int promotions,
@@ -252,6 +268,10 @@ static int effectiveness_stats_calls;
 static int list_l2_memory_ids_calls;
 static int top_l2_facts_calls;
 static int list_session_scope_priority_calls;
+static int term_probe_calls[6];
+static char term_probe_term_seen[64];
+static int term_probe_limit_seen;
+static int term_probe_active_seen;
 static int scoped_active_seen;
 static int scoped_include_all_seen;
 static int scoped_limit_seen;
@@ -519,6 +539,65 @@ static int effectiveness_stats(double low_threshold, double *avg_effectiveness,
                                    high_impact);
 }
 
+static int term_probe_impl(int which, const char *term, int limit, int scope_active,
+                           int include_all, const char *workspace, const char *project,
+                           int64_t *out, int max)
+{
+   (void)include_all;
+   (void)workspace;
+   (void)project;
+   term_probe_calls[which]++;
+   term_probe_limit_seen = limit;
+   term_probe_active_seen = scope_active;
+   snprintf(term_probe_term_seen, sizeof(term_probe_term_seen), "%s", term ? term : "");
+   int listed = 0;
+   /* The identifier encodes which probe answered, so a request that reached the
+    * wrong operation is visible in the reply rather than merely plausible. */
+   for (; listed < 2 && listed < max; listed++)
+      out[listed] = (int64_t)(which + 1) * 100 + listed;
+   return listed;
+}
+
+static int collect_alias_matches(const char *term, int limit, int scope_active, int include_all,
+                                 const char *workspace, const char *project, int64_t *out, int max)
+{
+   return term_probe_impl(0, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int collect_entity_matches(const char *term, int limit, int scope_active, int include_all,
+                                  const char *workspace, const char *project, int64_t *out, int max)
+{
+   return term_probe_impl(1, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int collect_event_frame_matches(const char *term, int limit, int scope_active,
+                                       int include_all, const char *workspace, const char *project,
+                                       int64_t *out, int max)
+{
+   return term_probe_impl(2, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int collect_relation_token_matches(const char *term, int limit, int scope_active,
+                                          int include_all, const char *workspace,
+                                          const char *project, int64_t *out, int max)
+{
+   return term_probe_impl(3, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int collect_summary_matches(const char *term, int limit, int scope_active, int include_all,
+                                   const char *workspace, const char *project, int64_t *out,
+                                   int max)
+{
+   return term_probe_impl(4, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
+static int collect_temporal_matches(const char *term, int limit, int scope_active, int include_all,
+                                    const char *workspace, const char *project, int64_t *out,
+                                    int max)
+{
+   return term_probe_impl(5, term, limit, scope_active, include_all, workspace, project, out, max);
+}
+
 static int scoped_ids_impl(int scope_active, int include_all, const char *workspace,
                            const char *project, int64_t *out, int max, int64_t first)
 {
@@ -650,6 +729,60 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    (void)promote_confidence;
    (void)out;
    return -1;
+}
+
+int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_entity_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_event_frame_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_relation_token_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_summary_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_temporal_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
 }
 
 /* memory_t and the scope context are host types too. The adapter's scoped
@@ -1862,6 +1995,12 @@ int main(void)
        .list_l2_memory_ids = list_l2_memory_ids,
        .top_l2_facts = top_l2_facts,
        .list_session_scope_priority = list_session_scope_priority,
+       .collect_alias_matches = collect_alias_matches,
+       .collect_entity_matches = collect_entity_matches,
+       .collect_event_frame_matches = collect_event_frame_matches,
+       .collect_relation_token_matches = collect_relation_token_matches,
+       .collect_summary_matches = collect_summary_matches,
+       .collect_temporal_matches = collect_temporal_matches,
        .count_memories = count_memories,
        .count_recent_conflicts = count_recent_conflicts,
        .health_record = health_record,
@@ -2087,6 +2226,67 @@ int main(void)
                                       AIMEE_DB2_TOP_L2_FACTS_MAX, &scoped_count, NULL,
                                       NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
    assert(top_l2_facts_calls == 1);
+
+   /* Six operations share one envelope shape and are told apart only by the
+    * operation number, so each is called in turn and identified by what comes
+    * back. A request routed to the wrong probe fails here. */
+   uint64_t probe_ids[AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX];
+   uint32_t probe_count = 99;
+   assert(aimee_db2_collect_alias_matches_call(call_client, &client, 7050, 0, "needle", 2u, 1u,
+                                               "probe-workspace", "probe-project", probe_ids,
+                                               AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX, &probe_count,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 100 && probe_ids[1] == 101 &&
+          term_probe_calls[0] == 1 && term_probe_limit_seen == 2 && term_probe_active_seen == 1 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   assert(aimee_db2_collect_entity_matches_call(call_client, &client, 7051, 0, "needle", 3u, 1u,
+                                                "probe-workspace", "probe-project", probe_ids,
+                                                AIMEE_DB2_COLLECT_ENTITY_MATCHES_MAX, &probe_count,
+                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 200 && probe_ids[1] == 201 &&
+          term_probe_calls[1] == 1 && term_probe_limit_seen == 3 && term_probe_active_seen == 1 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   assert(aimee_db2_collect_event_frame_matches_call(
+              call_client, &client, 7052, 0, "needle", 4u, 1u, "probe-workspace", "probe-project",
+              probe_ids, AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_MAX, &probe_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 300 && probe_ids[1] == 301 &&
+          term_probe_calls[2] == 1 && term_probe_limit_seen == 4 && term_probe_active_seen == 1 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   assert(aimee_db2_collect_relation_token_matches_call(
+              call_client, &client, 7053, 0, "needle", 5u, 1u, "probe-workspace", "probe-project",
+              probe_ids, AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_MAX, &probe_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 400 && probe_ids[1] == 401 &&
+          term_probe_calls[3] == 1 && term_probe_limit_seen == 5 && term_probe_active_seen == 1 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   assert(aimee_db2_collect_summary_matches_call(call_client, &client, 7054, 0, "needle", 6u, 1u,
+                                                 "probe-workspace", "probe-project", probe_ids,
+                                                 AIMEE_DB2_COLLECT_SUMMARY_MATCHES_MAX,
+                                                 &probe_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 500 && probe_ids[1] == 501 &&
+          term_probe_calls[4] == 1 && term_probe_limit_seen == 6 && term_probe_active_seen == 1 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   assert(aimee_db2_collect_temporal_matches_call(
+              call_client, &client, 7055, 0, "needle", 7u, 1u, "probe-workspace", "probe-project",
+              probe_ids, AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_MAX, &probe_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(probe_count == 2 && probe_ids[0] == 600 && probe_ids[1] == 601 &&
+          term_probe_calls[5] == 1 && term_probe_limit_seen == 7 && term_probe_active_seen == 1 &&
+          strcmp(term_probe_term_seen, "needle") == 0);
+
+   /* An empty term is not a wildcard: every one of these statements would match
+    * nothing, so the encoder refuses it rather than asking. */
+   assert(aimee_db2_collect_alias_matches_call(call_client, &client, 7060, 0, "", 4u, 0u, "", "",
+                                               probe_ids, AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX,
+                                               &probe_count, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(term_probe_calls[0] == 1);
 
    assert(aimee_db2_health_record_call(call_client, &client, 7033, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);

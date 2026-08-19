@@ -33,6 +33,24 @@ typedef struct
                        const char *project, int64_t *out, int max);
    int (*list_session_scope_priority)(int scope_active, int include_all, const char *workspace,
                                       const char *project, int64_t *out, int max);
+   /* The six term probes share one shape: one search term, one limit, the
+    * session scope, and identifiers back for the reason above. */
+   int (*collect_alias_matches)(const char *term, int limit, int scope_active, int include_all,
+                                const char *workspace, const char *project, int64_t *out, int max);
+   int (*collect_entity_matches)(const char *term, int limit, int scope_active, int include_all,
+                                 const char *workspace, const char *project, int64_t *out, int max);
+   int (*collect_event_frame_matches)(const char *term, int limit, int scope_active,
+                                      int include_all, const char *workspace, const char *project,
+                                      int64_t *out, int max);
+   int (*collect_relation_token_matches)(const char *term, int limit, int scope_active,
+                                         int include_all, const char *workspace,
+                                         const char *project, int64_t *out, int max);
+   int (*collect_summary_matches)(const char *term, int limit, int scope_active, int include_all,
+                                  const char *workspace, const char *project, int64_t *out,
+                                  int max);
+   int (*collect_temporal_matches)(const char *term, int limit, int scope_active, int include_all,
+                                   const char *workspace, const char *project, int64_t *out,
+                                   int max);
    /* health_record composes these three: DB2 owns the corpus total and the
     * fixed conflict window, so only the cycle counters cross the bus. */
    int (*count_memories)(void);

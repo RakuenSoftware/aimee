@@ -1355,6 +1355,60 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    return -1;
 }
 
+int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_entity_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_event_frame_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_relation_token_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_summary_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_collect_temporal_matches(const char *term, int limit, void *out, int max)
+{
+   (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 /* memory_t and the scope context are host types too. The adapter's scoped
  * identifier readers reach these; the tests below drive the backend directly. */
 int db2_memory_top_l2_facts(void *out, int max)

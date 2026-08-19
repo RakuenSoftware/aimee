@@ -1501,6 +1501,216 @@
       }
     },
     {
+      "family": "memory",
+      "id": 45,
+      "name": "collect_alias_matches",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory aliases are a relational DB2 table joined to the canonical rows, so alias resolution stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_collect_alias_matches"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the alias exactly, as a prefix, or anywhere within it",
+                   "ranking": "session-scope rank, then exact alias before prefix before substring, then alias weight, then tier (L3, L2, L1, other), then use_count, then confidence"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 46,
+      "name": "collect_entity_matches",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory entities are a relational DB2 table joined to the canonical rows, so entity resolution stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_collect_entity_matches"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the entity exactly, as a prefix, or anywhere within it",
+                   "ranking": "session-scope rank, then exact entity before prefix before substring, then entity weight, then confidence, then use_count"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 47,
+      "name": "collect_event_frame_matches",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Event frames are a relational DB2 table joined to the canonical rows, so frame matching stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_collect_event_frame_matches"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the actor, the action, the location or the event time exactly, or the object anywhere within it",
+                   "ranking": "session-scope rank, then confidence, then use_count; which field matched does not change the order"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 48,
+      "name": "collect_relation_token_matches",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory relations are a relational DB2 table joined to the canonical rows, so relation matching stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_collect_relation_token_matches"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the source entity, the destination entity or the relation exactly, or the fact text anywhere within it, all case-insensitively",
+                   "ranking": "session-scope rank, then the greatest matching relation weight, then confidence, then use_count"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 49,
+      "name": "collect_summary_matches",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory summaries are a relational DB2 table joined to the canonical rows, so summary matching stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_collect_summary_matches"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the summary anywhere within it, case-insensitively",
+                   "ranking": "session-scope rank, then a case-insensitive prefix match before any other, then confidence, then use_count"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "memory",
+      "id": 50,
+      "name": "collect_temporal_matches",
+      "wire_format": "db2-envelope-scoped-string-u32-u64-list-v1",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Temporal references are a relational DB2 table joined to the canonical rows, so temporal matching stays DB2 authority; identifiers cross and the caller reattaches content.",
+      "c_symbols": ["db2_memory_collect_temporal_matches"],
+      "request": {
+        "encoded_size_min": 45,
+        "encoded_size_max": 1577,
+        "policy": {"maximum_ids": 64,
+                   "matches": "the reference key exactly or as a prefix",
+                   "ranking": "session-scope rank, then exact reference before prefix, then reference weight, then confidence, then use_count"},
+        "fields": [
+          {"name": "limit", "type": "u32", "minimum": 1, "maximum": 64},
+          {"name": "scope_flags", "type": "u32", "minimum": 0, "maximum": 3},
+          {"name": "term", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
+          {"name": "workspace", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511},
+          {"name": "project", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 540,
+        "encoded_size_error": 24,
+        "field": {"name": "memory_ids", "type": "u64-list", "minimum_items": 0,
+                  "maximum_items": 64, "item_minimum": 1,
+                  "item_maximum": 9223372036854775807}
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

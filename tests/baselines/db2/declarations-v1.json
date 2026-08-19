@@ -15650,9 +15650,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.collect_alias_matches operation replaces the alias probe. The three ways an alias can match and the order they rank in are DB2's, computed in one statement against the alias table, so they stay behind the handler. It returns identifiers rather than rows for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+      },
       "signature": "int db2_memory_collect_alias_matches ( const char * alias , int limit , memory_t * out , int max )",
       "signature_sha256": "a50f37b1226481d8bea97023d0abba86c95df4e26264f6ee6d8fc14de24ed5c8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_collect_alias_matches"
     },
     {
@@ -15666,9 +15672,15 @@
           "line": 63
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.collect_entity_matches operation replaces the entity probe. Exact, prefix and substring matches all come back from one statement and rank in that order, which the caller cannot reconstruct from a plain list. It returns identifiers rather than rows for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+      },
       "signature": "int db2_memory_collect_entity_matches ( const char * term , int limit , memory_t * out , int max )",
       "signature_sha256": "4836fc601581f3e2866cc8b388662e4917ce22a9a886d9f9b07d2cd3282c266f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_collect_entity_matches"
     },
     {
@@ -15681,9 +15693,15 @@
           "line": 76
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.collect_event_frame_matches operation replaces the frame probe. One term is tried against the actor, the action, the location and the event time exactly and against the object as a substring; which field matched does not reach the caller and does not change the order. It returns identifiers rather than rows for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+      },
       "signature": "int db2_memory_collect_event_frame_matches ( const char * term , int limit , memory_t * out , int max )",
       "signature_sha256": "1d06656a12e0c3a08621fce537f4554292e6ecbc768fd85efacb2d6d9bd179ba",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_collect_event_frame_matches"
     },
     {
@@ -15696,9 +15714,15 @@
           "line": 630
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.collect_relation_token_matches operation replaces the relation probe. A memory can match through several relations, so the statement groups by memory and ranks on the greatest matching weight; that collapse is DB2's and stays behind the handler. It returns identifiers rather than rows for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+      },
       "signature": "int db2_memory_collect_relation_token_matches ( const char * token , int limit , memory_t * out , int max )",
       "signature_sha256": "0925135abfebc1d84f16bd49ea2ef5f100bfea812178912665a2bfc6940bf1fe",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_collect_relation_token_matches"
     },
     {
@@ -15711,9 +15735,15 @@
           "line": 71
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.collect_summary_matches operation replaces the summary probe. The match is a case-insensitive substring and a prefix outranks the rest, which is policy the caller does not choose. It returns identifiers rather than rows for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+      },
       "signature": "int db2_memory_collect_summary_matches ( const char * term , int limit , memory_t * out , int max )",
       "signature_sha256": "e586a300c5f952fa1ca472db921e7c2c497cb3a21f4b311631fcd001ecb6e95b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_collect_summary_matches"
     },
     {
@@ -15726,9 +15756,15 @@
           "line": 67
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.collect_temporal_matches operation replaces the temporal probe. Only exact and prefix reference keys match -- there is no substring arm here, unlike the alias and entity probes -- and exact outranks prefix. It returns identifiers rather than rows for the reason top_l2_facts records, and the session scope travels in the request because the backend reads it from a thread-local that does not follow a call into another process."
+      },
       "signature": "int db2_memory_collect_temporal_matches ( const char * term , int limit , memory_t * out , int max )",
       "signature_sha256": "ce23a49eeb98dbe1933233caf5dafb025555fc05646f1ab245ebd4c80306cf68",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_collect_temporal_matches"
     },
     {
@@ -26358,15 +26394,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "36577825bf2fb4d56c49fd196c42e9d1cd12e41ea1493ddc53bc8563324554d3",
+  "fingerprint": "f5c4e35e095c6e21d09d2d1d688141a1ddc79cbf2a27e4d98c122f35a11cef3c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 569,
+    "audit_pending": 563,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 389
+    "reviewed": 395
   }
 }
