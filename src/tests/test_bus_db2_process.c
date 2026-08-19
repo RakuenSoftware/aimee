@@ -595,6 +595,14 @@ int main(int argc, char **argv)
                                                    NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(route_count == 0);
 
+   /* No manifest is indexed on a fresh schema, so the identity rebuild writes
+    * nothing. Zero here is an empty result, not the -1 a rollback produces. */
+   uint32_t identities_written = 99;
+   assert(aimee_db2_cross_repo_rebuild_identities_call(call_client, &client, 9108, 0,
+                                                       &identities_written, NULL,
+                                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(identities_written == 0);
+
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and
     * the second call returning the same zero is what the catalog's safe

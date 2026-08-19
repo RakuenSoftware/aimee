@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "f0f991fd5532c72949e267856b16e3644a8df955c87f96418070795663dc4ebb"
+const ContractSHA256 = "97b7dd88b5c98f86b6722fd07e551ed53cc0de33f1388ff881e40419e7918bd0"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -345,6 +345,10 @@ const EventCrossRepoRebuildRoutes = EventIndex
 const StageCrossRepoRebuildRoutes = FamilyIndex
 const OperationCrossRepoRebuildRoutes uint32 = 6
 const CrossRepoRebuildRoutesMax uint32 = 2147483647
+const EventCrossRepoRebuildIdentities = EventIndex
+const StageCrossRepoRebuildIdentities = FamilyIndex
+const OperationCrossRepoRebuildIdentities uint32 = 7
+const CrossRepoRebuildIdentitiesMax uint32 = 2147483647
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2226,6 +2230,58 @@ func DecodeCrossRepoRebuildRoutesReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return routeCount, nil
+}
+
+// EncodeCrossRepoRebuildIdentitiesRequest emits the empty request envelope. The
+// manifest list and the vendored exclusion are policy and never travel.
+func EncodeCrossRepoRebuildIdentitiesRequest() []byte {
+	header, err := EncodeRequestHeader(OperationCrossRepoRebuildIdentities, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeCrossRepoRebuildIdentitiesRequest validates the exact index-family
+// envelope.
+func DecodeCrossRepoRebuildIdentitiesRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCrossRepoRebuildIdentities ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeCrossRepoRebuildIdentitiesReply emits one bounded u32 attempt count. It
+// counts inserts attempted, not rows stored: a duplicate identity is counted
+// and discarded, so the number can exceed the table size.
+func EncodeCrossRepoRebuildIdentitiesReply(identitiesWritten uint32) ([]byte, error) {
+	if identitiesWritten > CrossRepoRebuildIdentitiesMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationCrossRepoRebuildIdentities, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], identitiesWritten)
+	return reply, nil
+}
+
+// DecodeCrossRepoRebuildIdentitiesReply validates the operation and bounded
+// count.
+func DecodeCrossRepoRebuildIdentitiesReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCrossRepoRebuildIdentities ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	identitiesWritten := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if identitiesWritten > CrossRepoRebuildIdentitiesMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return identitiesWritten, nil
 }
 
 // EncodeProspectiveSweepExpiredRequest emits the empty request envelope. The

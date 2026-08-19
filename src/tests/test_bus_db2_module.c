@@ -93,6 +93,7 @@ typedef struct
    int (*purge_hidden_pollution)(void);
    int (*requeue_drifted)(void);
    int (*cross_repo_rebuild_routes)(void);
+   int (*cross_repo_rebuild_identities)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);
@@ -176,6 +177,7 @@ static int project_count_calls;
 static int purge_pollution_calls;
 static int requeue_drifted_calls;
 static int rebuild_routes_calls;
+static int rebuild_identities_calls;
 static int prospective_sweep_calls;
 static int directive_sweep_calls;
 static int mark_revisit_calls;
@@ -1082,6 +1084,17 @@ static int cross_repo_rebuild_routes(void)
    return 15;
 }
 
+int db2_cross_repo_rebuild_identities(void)
+{
+   return 0;
+}
+
+static int cross_repo_rebuild_identities(void)
+{
+   rebuild_identities_calls++;
+   return 16;
+}
+
 int db2_prospective_sweep_expired(void)
 {
    return 0;
@@ -1427,6 +1440,7 @@ int main(void)
                               AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION,
                               AIMEE_DB2_EVENT_REQUEUE_DRIFTED,
                               AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_ROUTES,
+                              AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_IDENTITIES,
                               AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_MARK_REVISIT_DUE,
@@ -1476,6 +1490,8 @@ int main(void)
        {AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION, AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION},
        {AIMEE_DB2_EVENT_REQUEUE_DRIFTED, AIMEE_DB2_STAGE_REQUEUE_DRIFTED},
        {AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_ROUTES, AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES},
+       {AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_IDENTITIES,
+        AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES},
        {AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED},
        {AIMEE_DB2_EVENT_MARK_REVISIT_DUE, AIMEE_DB2_STAGE_MARK_REVISIT_DUE},
@@ -1551,6 +1567,7 @@ int main(void)
        .purge_hidden_pollution = purge_hidden_pollution,
        .requeue_drifted = requeue_drifted,
        .cross_repo_rebuild_routes = cross_repo_rebuild_routes,
+       .cross_repo_rebuild_identities = cross_repo_rebuild_identities,
        .prospective_sweep_expired = prospective_sweep_expired,
        .directive_sweep_expired = directive_sweep_expired,
        .mark_revisit_due = mark_revisit_due,
@@ -1918,6 +1935,12 @@ int main(void)
    assert(aimee_db2_cross_repo_rebuild_routes_call(call_client, &client, 7090, 0, &route_count,
                                                    NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(route_count == 15 && rebuild_routes_calls == 1);
+
+   uint32_t identities_written = 99u;
+   assert(aimee_db2_cross_repo_rebuild_identities_call(call_client, &client, 7091, 0,
+                                                       &identities_written, NULL,
+                                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(identities_written == 16 && rebuild_identities_calls == 1);
 
    /* The maintenance family's first crossing of the bus: a new event kind
     * and a new stage, not another operation on one already carrying work. */

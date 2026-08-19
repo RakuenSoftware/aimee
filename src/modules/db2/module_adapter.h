@@ -80,6 +80,7 @@ typedef struct
    int (*purge_hidden_pollution)(void);
    int (*requeue_drifted)(void);
    int (*cross_repo_rebuild_routes)(void);
+   int (*cross_repo_rebuild_identities)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
    int (*mark_revisit_due)(void);

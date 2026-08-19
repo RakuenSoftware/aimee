@@ -7,6 +7,7 @@
 #include "c/db2_pool.h"
 #include "c/code_index.h"
 #include "c/code_index_ops.h"
+#include "c/cross_repo_identity.h"
 #include "c/cross_repo_route.h"
 #include "c/artifacts.h"
 #include "c/learning_synth_ops.h"
@@ -318,6 +319,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .purge_hidden_pollution = db2_code_index_purge_hidden_pollution,
        .requeue_drifted = db2_code_index_requeue_drifted,
        .cross_repo_rebuild_routes = db2_cross_repo_rebuild_routes,
+       .cross_repo_rebuild_identities = db2_cross_repo_rebuild_identities,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        .directive_sweep_expired = db2_directive_sweep_expired,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
@@ -359,6 +361,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION &&
         invocation->stage_id != AIMEE_DB2_STAGE_REQUEUE_DRIFTED &&
         invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES &&
+        invocation->stage_id != AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
@@ -1289,7 +1292,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        invocation->stage_id == AIMEE_DB2_STAGE_PROJECT_COUNT ||
        invocation->stage_id == AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION ||
        invocation->stage_id == AIMEE_DB2_STAGE_REQUEUE_DRIFTED ||
-       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES)
+       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES ||
+       invocation->stage_id == AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES)
    {
       if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
       {
@@ -1406,6 +1410,28 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_cross_repo_rebuild_routes_reply_encode((uint32_t)route_count, response_body,
                                                               response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_cross_repo_rebuild_identities_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->cross_repo_rebuild_identities)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Transactional like the route rebuild beside it, and -1 stays a
+          * failure for the same reason. The number differs in kind though: it
+          * counts inserts attempted, and a duplicate identity is counted and
+          * then discarded by ON CONFLICT, so it can exceed the table size.
+          * The catalog says so; the wire carries a number, not a claim. */
+         int identities_written = backend->cross_repo_rebuild_identities();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (identities_written < 0 ||
+             (uint32_t)identities_written > AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_cross_repo_rebuild_identities_reply_encode(
+                 (uint32_t)identities_written, response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

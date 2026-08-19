@@ -156,6 +156,14 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_cross_repo_rebuild_identities",
+      "signature_sha256": "254f5fa6d4a6311d15a0869356166daa645d68c99a26830145d5a2f81bc86d5c",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.cross_repo_rebuild_identities operation replaces the pass that rebuilds project identities from indexed manifests inside one transaction. The manifest list and the vendored exclusion are fixed policy: a vendored manifest declares the vendored library's identity, not the host repository's, and claiming it would mis-resolve directives to the wrong repo."
+    },
+    {
       "symbol": "db2_cross_repo_rebuild_routes",
       "signature_sha256": "387c0ce5b6c1234f226812d1f6953057697ae34f018a2840663738722dfa732d",
       "disposition": "wire-operation",
