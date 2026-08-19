@@ -2324,6 +2324,22 @@
       "reason": "Purging a session's L0 memories and provenance is a private mutation inside the future memory.session_fold transaction; it cannot be an independent wire operation without risking loss between checkpoint creation and deletion."
     },
     {
+      "symbol": "db2_memory_session_neighbors_after",
+      "signature_sha256": "7d8e162251b372c6aa483d04145fdba60753c71000c2acb8e6caaae3e07a0353",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.session_neighbors_after operation replaces the forward walk. It is the mirror of session_neighbors_before and shares its format; the difference is the comparison and the direction, which the two policies state. An anchor of zero selects the whole session from its first memory here rather than nothing, which is the one place the two operations answer a caller's zero differently."
+    },
+    {
+      "symbol": "db2_memory_session_neighbors_before",
+      "signature_sha256": "a65c958b3ec62ebc5740f4f163da4a7c7cef221e9435f95e94151bb24eac8e08",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.session_neighbors_before operation replaces the backward walk. It returns identifiers for the reason top_l2_facts records. It is not session-scoped in the sense the scoped reads are: the session identifier in the request is the filter itself, not the ranking context, so no scope triple travels with it. An anchor of zero selects nothing, which is a property of the comparison rather than an error, and is recorded because the reply cannot distinguish it from a session with no earlier memories."
+    },
+    {
       "symbol": "db2_memory_set_cognified_kind",
       "signature_sha256": "55aeffe8c671bad6ba68e92b467bb548a4ab0b5a6a36e7b97db178091dfc94dc",
       "disposition": "wire-operation",

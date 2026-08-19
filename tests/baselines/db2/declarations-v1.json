@@ -18767,9 +18767,15 @@
           "line": 662
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.session_neighbors_after operation replaces the forward walk. It is the mirror of session_neighbors_before and shares its format; the difference is the comparison and the direction, which the two policies state. An anchor of zero selects the whole session from its first memory here rather than nothing, which is the one place the two operations answer a caller's zero differently."
+      },
       "signature": "int db2_memory_session_neighbors_after ( const char * session_id , int64_t after_id , int limit , memory_t * out , int max )",
       "signature_sha256": "7d8e162251b372c6aa483d04145fdba60753c71000c2acb8e6caaae3e07a0353",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_session_neighbors_after"
     },
     {
@@ -18782,9 +18788,15 @@
           "line": 657
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.session_neighbors_before operation replaces the backward walk. It returns identifiers for the reason top_l2_facts records. It is not session-scoped in the sense the scoped reads are: the session identifier in the request is the filter itself, not the ranking context, so no scope triple travels with it. An anchor of zero selects nothing, which is a property of the comparison rather than an error, and is recorded because the reply cannot distinguish it from a session with no earlier memories."
+      },
       "signature": "int db2_memory_session_neighbors_before ( const char * session_id , int64_t before_id , int limit , memory_t * out , int max )",
       "signature_sha256": "a65c958b3ec62ebc5740f4f163da4a7c7cef221e9435f95e94151bb24eac8e08",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_session_neighbors_before"
     },
     {
@@ -26412,15 +26424,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1290b4417cd3592b4d504f3a9ceca33d91032ba330b486df33b5ce1756642a1e",
+  "fingerprint": "b10b2b7ebb86d17813b57bab9ee23363af53a8b42e5d134cfec0d59538d98fb4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 560,
+    "audit_pending": 558,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 398
+    "reviewed": 400
   }
 }

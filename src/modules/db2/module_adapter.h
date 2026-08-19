@@ -58,6 +58,11 @@ typedef struct
                                            const char *project, int64_t *out, int max);
    int (*negation_fts_search)(const char *term, int limit, int scope_active, int include_all,
                               const char *workspace, const char *project, int64_t *out, int max);
+   /* The session walks take no scope: the session identifier is the filter. */
+   int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
+                                   int64_t *out, int max);
+   int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
+                                  int64_t *out, int max);
    /* health_record composes these three: DB2 owns the corpus total and the
     * fixed conflict window, so only the cycle counters cross the bus. */
    int (*count_memories)(void);

@@ -1383,6 +1383,28 @@ int db2_memory_negation_fts_search(const char *term, int limit, void *out, int m
    return 0;
 }
 
+int db2_memory_session_neighbors_before(const char *session_id, int64_t anchor_id, int limit,
+                                        void *out, int max)
+{
+   (void)session_id;
+   (void)anchor_id;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_session_neighbors_after(const char *session_id, int64_t anchor_id, int limit,
+                                       void *out, int max)
+{
+   (void)session_id;
+   (void)anchor_id;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
 {
    (void)term;

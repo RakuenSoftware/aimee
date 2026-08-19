@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "7c43066fbfd6e173e17ca7719579c89f27cb71025d9bb842786b2c85d843f068"
+#define AIMEE_DB2_CONTRACT_SHA256 "9e625afe3697e1a4792caaf20a08c170ad12e85a65ee557b2b06d9cfc38fc519"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -685,6 +685,38 @@
 #define AIMEE_DB2_NEGATION_FTS_SEARCH_MAX                           64u
 #define AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MIN                        1u
 #define AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MAX                        9223372036854775807ull
+#define AIMEE_DB2_EVENT_SESSION_NEIGHBORS_BEFORE                    AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SESSION_NEIGHBORS_BEFORE                    AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_BEFORE                54u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MIN_LEN          41u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MAX_LEN          167u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ANCHOR_MAX               9223372036854775807ull
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MIN                1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MAX                64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MIN              1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX              127u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_RESPONSE_MIN_LEN         28u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_RESPONSE_MAX_LEN         540u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ERROR_LEN                24u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX                      64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MIN                   1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MAX                   9223372036854775807ull
+#define AIMEE_DB2_EVENT_SESSION_NEIGHBORS_AFTER                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SESSION_NEIGHBORS_AFTER                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_AFTER                 55u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MIN_LEN           41u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MAX_LEN           167u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ANCHOR_MAX                9223372036854775807ull
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MIN                 1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MAX                 64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MIN               1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MAX               127u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_RESPONSE_MIN_LEN          28u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_RESPONSE_MAX_LEN          540u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ERROR_LEN                 24u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_MAX                       64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MIN                    1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MAX                    9223372036854775807ull
 #define AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS                   AIMEE_DB2_EVENT_INDEX
 #define AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS                   AIMEE_DB2_FAMILY_INDEX
 #define AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS               1u
@@ -6546,6 +6578,248 @@ static inline int aimee_db2_negation_fts_search_reply_decode(const uint8_t *inpu
    {
       uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
       if (value < AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MIN || value > AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }
+   *count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_before_request_encode(const char *session_id, uint64_t anchor_id,
+                                                   uint32_t limit, uint8_t *output,
+                                                   size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!session_id || !output || !output_len || anchor_id > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ANCHOR_MAX ||
+       limit < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MIN || limit > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MAX)
+      return -1;
+   size_t session_len = 0u;
+   while (session_len <= AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX && session_id[session_len])
+      ++session_len;
+   size_t payload_len = 16u + session_len;
+   if (session_len < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MIN ||
+       session_len > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_BEFORE, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, anchor_id);
+   aimee_db2_put_u32(payload + 8u, limit);
+   aimee_db2_put_u32(payload + 12u, (uint32_t)session_len);
+   memcpy(payload + 16u, session_id, session_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_before_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *session_id, size_t session_capacity,
+                                                   uint64_t *anchor_id, uint32_t *limit)
+{
+   if (session_id && session_capacity)
+      session_id[0] = '\0';
+   if (anchor_id)
+      *anchor_id = 0u;
+   if (limit)
+      *limit = 0u;
+   if (!session_id || !anchor_id || !limit ||
+       session_capacity < (size_t)AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_BEFORE || header.flags != 0u ||
+       input_len < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MAX_LEN || header.payload_len < 17u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_anchor = aimee_db2_get_u64(payload);
+   uint32_t decoded_limit = aimee_db2_get_u32(payload + 8u);
+   uint32_t session_len = aimee_db2_get_u32(payload + 12u);
+   if (decoded_anchor > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ANCHOR_MAX ||
+       decoded_limit < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MIN ||
+       decoded_limit > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MAX ||
+       session_len < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MIN ||
+       session_len > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX ||
+       header.payload_len != 16u + session_len ||
+       memchr(payload + 16u, '\0', session_len) != NULL)
+      return -1;
+   memcpy(session_id, payload + 16u, session_len);
+   session_id[session_len] = '\0';
+   *anchor_id = decoded_anchor;
+   *limit = decoded_limit;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_before_reply_encode(const uint64_t *memory_ids, uint32_t count,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) || count > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MAX)
+         return -1;
+   uint32_t payload_len = 4u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_BEFORE, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 4u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_before_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint64_t *memory_ids, uint32_t capacity,
+                                                 uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_BEFORE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX || header.payload_len != 4u + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
+      if (value < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MIN || value > AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MAX)
+         return -1;
+      memory_ids[index] = value;
+   }
+   *count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_after_request_encode(const char *session_id, uint64_t anchor_id,
+                                                   uint32_t limit, uint8_t *output,
+                                                   size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!session_id || !output || !output_len || anchor_id > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ANCHOR_MAX ||
+       limit < AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MIN || limit > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MAX)
+      return -1;
+   size_t session_len = 0u;
+   while (session_len <= AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MAX && session_id[session_len])
+      ++session_len;
+   size_t payload_len = 16u + session_len;
+   if (session_len < AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MIN ||
+       session_len > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_AFTER, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, anchor_id);
+   aimee_db2_put_u32(payload + 8u, limit);
+   aimee_db2_put_u32(payload + 12u, (uint32_t)session_len);
+   memcpy(payload + 16u, session_id, session_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_after_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *session_id, size_t session_capacity,
+                                                   uint64_t *anchor_id, uint32_t *limit)
+{
+   if (session_id && session_capacity)
+      session_id[0] = '\0';
+   if (anchor_id)
+      *anchor_id = 0u;
+   if (limit)
+      *limit = 0u;
+   if (!session_id || !anchor_id || !limit ||
+       session_capacity < (size_t)AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_AFTER || header.flags != 0u ||
+       input_len < AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MAX_LEN || header.payload_len < 17u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_anchor = aimee_db2_get_u64(payload);
+   uint32_t decoded_limit = aimee_db2_get_u32(payload + 8u);
+   uint32_t session_len = aimee_db2_get_u32(payload + 12u);
+   if (decoded_anchor > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ANCHOR_MAX ||
+       decoded_limit < AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MIN ||
+       decoded_limit > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MAX ||
+       session_len < AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MIN ||
+       session_len > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MAX ||
+       header.payload_len != 16u + session_len ||
+       memchr(payload + 16u, '\0', session_len) != NULL)
+      return -1;
+   memcpy(session_id, payload + 16u, session_len);
+   session_id[session_len] = '\0';
+   *anchor_id = decoded_anchor;
+   *limit = decoded_limit;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_after_reply_encode(const uint64_t *memory_ids, uint32_t count,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !memory_ids) || count > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_MAX)
+      return -1;
+   for (uint32_t index = 0u; index < count; index++)
+      if (memory_ids[index] < AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MIN ||
+          memory_ids[index] > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MAX)
+         return -1;
+   uint32_t payload_len = 4u + count * 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_AFTER, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, count);
+   for (uint32_t index = 0u; index < count; index++)
+      aimee_db2_put_u64(payload + 4u + index * 8u, memory_ids[index]);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_session_neighbors_after_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint64_t *memory_ids, uint32_t capacity,
+                                                 uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !memory_ids))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_AFTER ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_MAX || header.payload_len != 4u + decoded * 8u ||
+       decoded > capacity)
+      return -1;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      uint64_t value = aimee_db2_get_u64(payload + 4u + index * 8u);
+      if (value < AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MIN || value > AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MAX)
          return -1;
       memory_ids[index] = value;
    }

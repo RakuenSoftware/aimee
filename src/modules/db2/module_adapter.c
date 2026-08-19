@@ -188,6 +188,42 @@ static int production_negation_fts_search(const char *term, int limit, int scope
                                      include_all, workspace, project, out, max);
 }
 
+/* A session walk returns rows the same way the scoped reads do, so it takes the
+ * same detour through the heap and hands back only the identifiers. There is no
+ * scope to set: the session identifier in the statement is the filter. */
+static int production_session_ids(int (*read)(const char *session_id, int64_t anchor_id, int limit,
+                                              memory_t *out, int max),
+                                  const char *session_id, int64_t anchor_id, int limit,
+                                  int64_t *out, int max)
+{
+   if (!read || !session_id || !out || max <= 0 || limit <= 0)
+      return -1;
+   memory_t *rows = calloc((size_t)max, sizeof(*rows));
+   if (!rows)
+      return -1;
+   int listed = read(session_id, anchor_id, limit, rows, max);
+   if (listed > max)
+      listed = max;
+   for (int index = 0; index < listed; index++)
+      out[index] = rows[index].id;
+   free(rows);
+   return listed;
+}
+
+static int production_session_neighbors_before(const char *session_id, int64_t anchor_id, int limit,
+                                               int64_t *out, int max)
+{
+   return production_session_ids(db2_memory_session_neighbors_before, session_id, anchor_id, limit,
+                                 out, max);
+}
+
+static int production_session_neighbors_after(const char *session_id, int64_t anchor_id, int limit,
+                                              int64_t *out, int max)
+{
+   return production_session_ids(db2_memory_session_neighbors_after, session_id, anchor_id, limit,
+                                 out, max);
+}
+
 static int production_collect_alias_matches(const char *term, int limit, int scope_active,
                                             int include_all, const char *workspace,
                                             const char *project, int64_t *out, int max)
@@ -473,6 +509,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .find_facts_like = production_find_facts_like,
        .list_session_scope_priority_like = production_list_session_scope_priority_like,
        .negation_fts_search = production_negation_fts_search,
+       .session_neighbors_before = production_session_neighbors_before,
+       .session_neighbors_after = production_session_neighbors_after,
        .count_memories = db2_memory_health_count_memories,
        .count_recent_conflicts = db2_memory_health_count_recent_conflicts,
        .health_record = db2_memory_health_record,
@@ -1021,6 +1059,53 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             for (int index = 0; index < listed; index++)
             {
                if (rows[index] < (int64_t)AIMEE_DB2_COLLECT_ALIAS_MATCHES_ID_MIN)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               memory_ids[index] = (uint64_t)rows[index];
+            }
+            if (encode(memory_ids, (uint32_t)listed, response_body, response_capacity,
+                       response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         /* The two session walks decode the same way and differ only in which
+          * reviewed backend they reach, so one branch serves both. */
+         uint64_t anchor_id = 0u;
+         uint32_t limit = 0u;
+         char session_id[AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX + 1];
+         int (*read)(const char *, int64_t, int, int64_t *, int) = NULL;
+         int (*encode)(const uint64_t *, uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         if (!encode && aimee_db2_session_neighbors_before_request_decode(
+                            request_body, request_len, session_id, sizeof(session_id), &anchor_id,
+                            &limit) == 0)
+         {
+            read = backend ? backend->session_neighbors_before : NULL;
+            encode = aimee_db2_session_neighbors_before_reply_encode;
+         }
+         if (!encode && aimee_db2_session_neighbors_after_request_decode(
+                            request_body, request_len, session_id, sizeof(session_id), &anchor_id,
+                            &limit) == 0)
+         {
+            read = backend ? backend->session_neighbors_after : NULL;
+            encode = aimee_db2_session_neighbors_after_reply_encode;
+         }
+         if (encode)
+         {
+            if (response_capacity < AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int64_t rows[AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX];
+            int listed = read(session_id, (int64_t)anchor_id, (int)limit, rows, (int)limit);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (listed < 0 || listed > (int)limit)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint64_t memory_ids[AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX];
+            for (int index = 0; index < listed; index++)
+            {
+               if (rows[index] < (int64_t)AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MIN)
                   return AIMEE_MODULE_STATUS_INTERNAL;
                memory_ids[index] = (uint64_t)rows[index];
             }

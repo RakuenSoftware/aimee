@@ -72,6 +72,10 @@ typedef struct
                                            const char *project, int64_t *out, int max);
    int (*negation_fts_search)(const char *term, int limit, int scope_active, int include_all,
                               const char *workspace, const char *project, int64_t *out, int max);
+   int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
+                                   int64_t *out, int max);
+   int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
+                                  int64_t *out, int max);
    int (*count_memories)(void);
    int (*count_recent_conflicts)(int days);
    void (*health_record)(int total_memories, int contradictions_detected, int promotions,
@@ -276,6 +280,10 @@ static int list_l2_memory_ids_calls;
 static int top_l2_facts_calls;
 static int list_session_scope_priority_calls;
 static int term_probe_calls[9];
+static int walk_calls[2];
+static char walk_session_seen[64];
+static int64_t walk_anchor_seen;
+static int walk_limit_seen;
 static char term_probe_term_seen[64];
 static int term_probe_limit_seen;
 static int term_probe_active_seen;
@@ -584,6 +592,31 @@ static int negation_fts_search(const char *term, int limit, int scope_active, in
    return term_probe_impl(8, term, limit, scope_active, include_all, workspace, project, out, max);
 }
 
+static int walk_impl(int which, const char *session_id, int64_t anchor_id, int limit, int64_t *out,
+                     int max)
+{
+   walk_calls[which]++;
+   walk_anchor_seen = anchor_id;
+   walk_limit_seen = limit;
+   snprintf(walk_session_seen, sizeof(walk_session_seen), "%s", session_id ? session_id : "");
+   int listed = 0;
+   for (; listed < 2 && listed < max; listed++)
+      out[listed] = (int64_t)(which + 1) * 1000 + listed;
+   return listed;
+}
+
+static int session_neighbors_before(const char *session_id, int64_t anchor_id, int limit,
+                                    int64_t *out, int max)
+{
+   return walk_impl(0, session_id, anchor_id, limit, out, max);
+}
+
+static int session_neighbors_after(const char *session_id, int64_t anchor_id, int limit,
+                                   int64_t *out, int max)
+{
+   return walk_impl(1, session_id, anchor_id, limit, out, max);
+}
+
 static int collect_alias_matches(const char *term, int limit, int scope_active, int include_all,
                                  const char *workspace, const char *project, int64_t *out, int max)
 {
@@ -779,6 +812,28 @@ int db2_memory_list_session_scope_priority_like(const char *pattern, void *out, 
 int db2_memory_negation_fts_search(const char *term, int limit, void *out, int max)
 {
    (void)term;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_session_neighbors_before(const char *session_id, int64_t anchor_id, int limit,
+                                        void *out, int max)
+{
+   (void)session_id;
+   (void)anchor_id;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_session_neighbors_after(const char *session_id, int64_t anchor_id, int limit,
+                                       void *out, int max)
+{
+   (void)session_id;
+   (void)anchor_id;
    (void)limit;
    (void)out;
    (void)max;
@@ -2058,6 +2113,8 @@ int main(void)
        .find_facts_like = find_facts_like,
        .list_session_scope_priority_like = list_session_scope_priority_like,
        .negation_fts_search = negation_fts_search,
+       .session_neighbors_before = session_neighbors_before,
+       .session_neighbors_after = session_neighbors_after,
        .count_memories = count_memories,
        .count_recent_conflicts = count_recent_conflicts,
        .health_record = health_record,
@@ -2363,6 +2420,36 @@ int main(void)
    assert(probe_count == 2 && probe_ids[0] == 900 && probe_ids[1] == 901 &&
           term_probe_calls[8] == 1 && term_probe_limit_seen == 4 &&
           strcmp(term_probe_term_seen, "needle") == 0);
+
+   /* The two session walks share an envelope shape as well, and a zero anchor is
+    * a legal request on both -- so both are called with one. */
+   uint64_t walk_ids[AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX];
+   uint32_t walk_count = 99;
+   walk_count = 99;
+   assert(aimee_db2_session_neighbors_before_call(call_client, &client, 7080, 0, "session-9f2a", 0u,
+                                                  3u, walk_ids,
+                                                  AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX,
+                                                  &walk_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(walk_count == 2 && walk_ids[0] == 1000 && walk_ids[1] == 1001 && walk_calls[0] == 1 &&
+          walk_anchor_seen == 0 && walk_limit_seen == 3 &&
+          strcmp(walk_session_seen, "session-9f2a") == 0);
+
+   walk_count = 99;
+   assert(aimee_db2_session_neighbors_after_call(call_client, &client, 7081, 0, "session-9f2a", 0u,
+                                                 4u, walk_ids,
+                                                 AIMEE_DB2_SESSION_NEIGHBORS_AFTER_MAX, &walk_count,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(walk_count == 2 && walk_ids[0] == 2000 && walk_ids[1] == 2001 && walk_calls[1] == 1 &&
+          walk_anchor_seen == 0 && walk_limit_seen == 4 &&
+          strcmp(walk_session_seen, "session-9f2a") == 0);
+
+   /* An empty session identifier is refused: it is the whole filter, and an
+    * empty filter would select every session's memories rather than none. */
+   assert(aimee_db2_session_neighbors_before_call(call_client, &client, 7090, 0, "", 4u, 4u,
+                                                  walk_ids, AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX,
+                                                  &walk_count, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(walk_calls[0] == 1);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

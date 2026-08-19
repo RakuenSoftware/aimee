@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "7c43066fbfd6e173e17ca7719579c89f27cb71025d9bb842786b2c85d843f068"
+const ContractSHA256 = "9e625afe3697e1a4792caaf20a08c170ad12e85a65ee557b2b06d9cfc38fc519"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -459,6 +459,28 @@ const NegationFtsSearchProjectMax = 511
 const NegationFtsSearchMax uint32 = 64
 const NegationFtsSearchIDMin uint64 = 1
 const NegationFtsSearchIDMax uint64 = 9223372036854775807
+const EventSessionNeighborsBefore = EventMemory
+const StageSessionNeighborsBefore = FamilyMemory
+const OperationSessionNeighborsBefore uint32 = 54
+const SessionNeighborsBeforeAnchorMax uint64 = 9223372036854775807
+const SessionNeighborsBeforeLimitMin uint32 = 1
+const SessionNeighborsBeforeLimitMax uint32 = 64
+const SessionNeighborsBeforeSessionMin = 1
+const SessionNeighborsBeforeSessionMax = 127
+const SessionNeighborsBeforeMax uint32 = 64
+const SessionNeighborsBeforeIDMin uint64 = 1
+const SessionNeighborsBeforeIDMax uint64 = 9223372036854775807
+const EventSessionNeighborsAfter = EventMemory
+const StageSessionNeighborsAfter = FamilyMemory
+const OperationSessionNeighborsAfter uint32 = 55
+const SessionNeighborsAfterAnchorMax uint64 = 9223372036854775807
+const SessionNeighborsAfterLimitMin uint32 = 1
+const SessionNeighborsAfterLimitMax uint32 = 64
+const SessionNeighborsAfterSessionMin = 1
+const SessionNeighborsAfterSessionMax = 127
+const SessionNeighborsAfterMax uint32 = 64
+const SessionNeighborsAfterIDMin uint64 = 1
+const SessionNeighborsAfterIDMax uint64 = 9223372036854775807
 const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = 1
@@ -3333,6 +3355,192 @@ func DecodeNegationFtsSearchReply(reply []byte) ([]uint64, error) {
 	for index := range memoryIDs {
 		id := binary.LittleEndian.Uint64(payload[4+index*8:])
 		if id < NegationFtsSearchIDMin || id > NegationFtsSearchIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeSessionNeighborsBeforeRequest carries the session, the anchor and the limit.
+func EncodeSessionNeighborsBeforeRequest(sessionID string, anchorID uint64, limit uint32) ([]byte, error) {
+	if anchorID > SessionNeighborsBeforeAnchorMax || limit < SessionNeighborsBeforeLimitMin || limit > SessionNeighborsBeforeLimitMax ||
+		len(sessionID) < SessionNeighborsBeforeSessionMin || len(sessionID) > SessionNeighborsBeforeSessionMax ||
+		hasNUL(sessionID) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 16 + len(sessionID)
+	header, err := EncodeRequestHeader(OperationSessionNeighborsBefore, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, anchorID)
+	binary.LittleEndian.PutUint32(payload[8:], limit)
+	binary.LittleEndian.PutUint32(payload[12:], uint32(len(sessionID)))
+	copy(payload[16:], sessionID)
+	return request, nil
+}
+
+// DecodeSessionNeighborsBeforeRequest validates the anchor, the limit and the session.
+func DecodeSessionNeighborsBeforeRequest(request []byte) (string, uint64, uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSessionNeighborsBefore || header.Flags != 0 ||
+		header.PayloadLen < 17 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	anchorID := binary.LittleEndian.Uint64(payload)
+	limit := binary.LittleEndian.Uint32(payload[8:])
+	sessionLen := binary.LittleEndian.Uint32(payload[12:])
+	if anchorID > SessionNeighborsBeforeAnchorMax || limit < SessionNeighborsBeforeLimitMin || limit > SessionNeighborsBeforeLimitMax ||
+		sessionLen < SessionNeighborsBeforeSessionMin || sessionLen > SessionNeighborsBeforeSessionMax ||
+		header.PayloadLen != 16+sessionLen {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	sessionID := string(payload[16 : 16+sessionLen])
+	if hasNUL(sessionID) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	return sessionID, anchorID, limit, nil
+}
+
+// EncodeSessionNeighborsBeforeReply emits the counted, bounded identifier list.
+func EncodeSessionNeighborsBeforeReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > SessionNeighborsBeforeMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < SessionNeighborsBeforeIDMin || id > SessionNeighborsBeforeIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationSessionNeighborsBefore, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeSessionNeighborsBeforeReply validates the operation and every bounded identifier.
+func DecodeSessionNeighborsBeforeReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSessionNeighborsBefore || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > SessionNeighborsBeforeMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < SessionNeighborsBeforeIDMin || id > SessionNeighborsBeforeIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+		memoryIDs[index] = id
+	}
+	return memoryIDs, nil
+}
+
+// EncodeSessionNeighborsAfterRequest carries the session, the anchor and the limit.
+func EncodeSessionNeighborsAfterRequest(sessionID string, anchorID uint64, limit uint32) ([]byte, error) {
+	if anchorID > SessionNeighborsAfterAnchorMax || limit < SessionNeighborsAfterLimitMin || limit > SessionNeighborsAfterLimitMax ||
+		len(sessionID) < SessionNeighborsAfterSessionMin || len(sessionID) > SessionNeighborsAfterSessionMax ||
+		hasNUL(sessionID) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 16 + len(sessionID)
+	header, err := EncodeRequestHeader(OperationSessionNeighborsAfter, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, anchorID)
+	binary.LittleEndian.PutUint32(payload[8:], limit)
+	binary.LittleEndian.PutUint32(payload[12:], uint32(len(sessionID)))
+	copy(payload[16:], sessionID)
+	return request, nil
+}
+
+// DecodeSessionNeighborsAfterRequest validates the anchor, the limit and the session.
+func DecodeSessionNeighborsAfterRequest(request []byte) (string, uint64, uint32, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSessionNeighborsAfter || header.Flags != 0 ||
+		header.PayloadLen < 17 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	anchorID := binary.LittleEndian.Uint64(payload)
+	limit := binary.LittleEndian.Uint32(payload[8:])
+	sessionLen := binary.LittleEndian.Uint32(payload[12:])
+	if anchorID > SessionNeighborsAfterAnchorMax || limit < SessionNeighborsAfterLimitMin || limit > SessionNeighborsAfterLimitMax ||
+		sessionLen < SessionNeighborsAfterSessionMin || sessionLen > SessionNeighborsAfterSessionMax ||
+		header.PayloadLen != 16+sessionLen {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	sessionID := string(payload[16 : 16+sessionLen])
+	if hasNUL(sessionID) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	return sessionID, anchorID, limit, nil
+}
+
+// EncodeSessionNeighborsAfterReply emits the counted, bounded identifier list.
+func EncodeSessionNeighborsAfterReply(memoryIDs []uint64) ([]byte, error) {
+	if uint32(len(memoryIDs)) > SessionNeighborsAfterMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for _, id := range memoryIDs {
+		if id < SessionNeighborsAfterIDMin || id > SessionNeighborsAfterIDMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 + len(memoryIDs)*8
+	header, err := EncodeReplyHeader(OperationSessionNeighborsAfter, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(memoryIDs)))
+	for index, id := range memoryIDs {
+		binary.LittleEndian.PutUint64(payload[4+index*8:], id)
+	}
+	return reply, nil
+}
+
+// DecodeSessionNeighborsAfterReply validates the operation and every bounded identifier.
+func DecodeSessionNeighborsAfterReply(reply []byte) ([]uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSessionNeighborsAfter || header.Result != ResultOK ||
+		header.PayloadLen < 4 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return nil, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	count := binary.LittleEndian.Uint32(payload)
+	if count > SessionNeighborsAfterMax || header.PayloadLen != 4+count*8 {
+		return nil, ErrMalformedEnvelope
+	}
+	memoryIDs := make([]uint64, count)
+	for index := range memoryIDs {
+		id := binary.LittleEndian.Uint64(payload[4+index*8:])
+		if id < SessionNeighborsAfterIDMin || id > SessionNeighborsAfterIDMax {
 			return nil, ErrMalformedEnvelope
 		}
 		memoryIDs[index] = id

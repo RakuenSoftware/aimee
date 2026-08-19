@@ -346,6 +346,22 @@ int main(int argc, char **argv)
                                              NULL) == AIMEE_MODULE_CALL_OK);
    assert(probe_count == 0);
 
+   uint64_t walk_ids[AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX];
+   uint32_t walk_count = 99;
+   walk_count = 99;
+   assert(aimee_db2_session_neighbors_before_call(call_client, &client, 9060, 0, "replay-session",
+                                                  4096u, 4u, walk_ids,
+                                                  AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX,
+                                                  &walk_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(walk_count == 0);
+
+   walk_count = 99;
+   assert(aimee_db2_session_neighbors_after_call(call_client, &client, 9061, 0, "replay-session",
+                                                 4096u, 4u, walk_ids,
+                                                 AIMEE_DB2_SESSION_NEIGHBORS_AFTER_MAX, &walk_count,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(walk_count == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
