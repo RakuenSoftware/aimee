@@ -90,6 +90,12 @@ int kb_client_health(kb_health_t *out);
  * the curator block (richer than the flat kb_health_t snapshot). */
 char *kb_client_health_json(void);
 
+/* Fetch the KB's agent-facing one-surface capability projection from
+ * /v1/capabilities. Returns a heap JSON object with cli_only and mcp_only
+ * arrays, or NULL when the KB is unreachable or does not advertise the
+ * projection. The runtime merges this into its client-facing capabilities. */
+char *kb_client_agent_surfaces_json(void);
+
 /* Cached read of the KB's advertised typed-facts state (proposal §8). aimee-server
  * gates per-turn fact injection on this instead of owning typed_facts_enabled. */
 int kb_client_typed_facts_enabled(void);

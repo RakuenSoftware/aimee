@@ -549,6 +549,19 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    if (primary_default)
       return primary_default;
 
+   /* An operator-selected delegate is a preference, not a hard pin. It wins
+    * only while it is enabled, role-eligible, and healthy/routable; otherwise
+    * the ordinary capability/cost router below takes over. Explicit request
+    * pins already disable every other seat before reaching this function, so a
+    * stale preference cannot override --via/--provider/--tier. */
+   if (cfg && cfg->default_delegate[0])
+   {
+      agent_t *preferred = agent_find(cfg, cfg->default_delegate);
+      if (preferred && preferred->enabled && agent_supports_role(preferred, role) &&
+          agent_is_available_for_routing(preferred))
+         return preferred;
+   }
+
    /* First pass: find the minimum tier; note if any tmux agent is there
     * (tmux sessions are stateful and always preferred over HTTP peers). */
    int min_tier = -1;
@@ -750,6 +763,20 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
        (!(required_caps || min_context > 0) ||
         agent_satisfies_required_caps(primary_default, required_caps, min_context, scope)))
       return primary_default;
+
+   /* Keep the operator's delegate preference in force when capability routing
+    * is enabled too. It remains a soft preference: a missing capability, scope
+    * ceiling, health/policy block, or role mismatch sends selection through the
+    * ordinary candidate router below. */
+   if (cfg && cfg->default_delegate[0])
+   {
+      agent_t *preferred = agent_find(cfg, cfg->default_delegate);
+      if (preferred && preferred->enabled && agent_supports_role(preferred, role) &&
+          agent_is_available_for_routing(preferred) && agent_scope_admits(preferred, scope) &&
+          (!(required_caps || min_context > 0) ||
+           agent_satisfies_required_caps(preferred, required_caps, min_context, scope)))
+         return preferred;
+   }
 
    /* prefer_local must be decided BEFORE min_tier, not after. Applying it to the
     * cheapest-tier candidate list only ever preferred a local seat among peers
