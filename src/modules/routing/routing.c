@@ -337,6 +337,18 @@ static int agent_is_local(const agent_t *ag)
    return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
 }
 
+/* Set whenever a selection is refused because the module authority could not be
+ * consulted, and cleared at the start of each routing attempt. Without it the
+ * refusal reaches the caller as a bare NULL, which every caller already renders
+ * as "no agent available for role" -- sending an operator to audit the roster
+ * while the routing module is what is broken. */
+static _Thread_local int g_route_last_fault;
+
+int agent_route_last_was_module_fault(void)
+{
+   return g_route_last_fault;
+}
+
 static agent_route_selection_fn g_route_selection_provider;
 /* Latched once a caller declares a selection authority. It is deliberately NOT
  * cleared when the provider is: a daemon that has handed selection to the
@@ -363,6 +375,7 @@ void agent_reset_route_selection_authority(void)
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
 {
    static unsigned cursor;
+   g_route_last_fault = 0;
    if (count <= 0)
       return NULL;
    if (count == 1)
@@ -372,7 +385,10 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
       uint32_t selected = 0;
       if (g_route_selection_provider(0, (uint32_t)count, &selected) != 0 ||
           selected >= (uint32_t)count)
+      {
+         g_route_last_fault = 1;
          return NULL;
+      }
       return candidates[selected];
    }
    if (g_route_selection_authority)
@@ -384,6 +400,7 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
                 "selection authority declared but no provider is installed; refusing to route "
                 "%d candidates rather than fall back to the built-in balancer",
                 count);
+      g_route_last_fault = 1;
       return NULL;
    }
    unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);

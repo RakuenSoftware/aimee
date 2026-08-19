@@ -113,6 +113,10 @@ void agent_set_route_selection_provider(agent_route_selection_fn provider);
 /* Test/bench seam: clear the provider AND the latched authority, so a suite can
  * exercise the built-in balancer after installing one. Daemons never call it. */
 void agent_reset_route_selection_authority(void);
+/* Did the last routing attempt fail because the selection authority could not be
+ * consulted, rather than because no agent was eligible? Callers use it to report
+ * the real fault instead of blaming the roster. */
+int agent_route_last_was_module_fault(void);
 
 /* Why an agent is not a routable delegate. Mirrors the decision order of
  * agent_is_available_for_routing so callers can surface the ACTUAL reason
