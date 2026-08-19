@@ -9732,9 +9732,15 @@
           "line": 353
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.file_index_delete_project operation removes a project's file index entries. It normalises the project name as the document clears do, and unlike them it is a single statement with nothing to leave half-done. It does not check whether the statement finished, so a failure reports zero deleted rather than an error."
+      },
       "signature": "int db2_kb_file_index_delete_project ( const char * project )",
       "signature_sha256": "b52dc0573377b86c812b5f4e07d93855dcd86409ab8b99c3e0b721bf2f7e170c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_file_index_delete_project"
     },
     {
@@ -10741,9 +10747,15 @@
           "line": 370
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.clear_current_project operation deletes only the current generation's documents for a project, with the vector index operations that point at them. It differs from clear_project in scope and in one other way worth naming: a failed index-operation delete is fatal here and ignored there. Like its sibling it normalises the project name and runs its two statements without a transaction."
+      },
       "signature": "int db2_kb_service_clear_current_project ( const char * project )",
       "signature_sha256": "58993e81a3310fb0215c1d4cf65b846e5ffaf2a5d5f515de168815bf6776a745",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_clear_current_project"
     },
     {
@@ -10758,9 +10770,15 @@
           "line": 369
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.clear_project operation deletes a project's documents and the vector index operations pointing at them. Three things are recorded rather than left in the source: the project name is normalised before matching, so what a caller sends is not necessarily what is deleted; the index-operation delete runs first because no foreign key cascades it; and its failure is ignored here while the current-generation variant treats it as fatal."
+      },
       "signature": "int db2_kb_service_clear_project ( const char * project )",
       "signature_sha256": "0cb14878b2a7ca248d157f44462a60590af45a6453e0b4738d3d6004aa5baf35",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_clear_project"
     },
     {
@@ -26328,15 +26346,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a33ed65c4b0af51270754dabf0726a4388ecc57ccc91cc34203683d00c07e3f7",
+  "fingerprint": "d936518449f125aec7a032f772a868b58aeabcb35a1a15e142f2a36ad6a813fe",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 574,
+    "audit_pending": 571,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 384
+    "reviewed": 387
   }
 }

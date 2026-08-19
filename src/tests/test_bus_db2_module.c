@@ -113,6 +113,9 @@ typedef struct
    int (*anti_pattern_delete)(int64_t anti_pattern_id);
    int (*doc_delete)(int64_t doc_id);
    int (*task_delete)(int64_t task_id);
+   int (*file_index_delete_project)(const char *project);
+   int (*clear_project)(const char *project);
+   int (*clear_current_project)(const char *project);
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);
@@ -220,6 +223,12 @@ static int64_t doc_delete_seen;
 static int doc_delete_calls;
 static int64_t task_delete_seen;
 static int task_delete_calls;
+static char file_index_delete_project_seen[128];
+static int file_index_delete_project_calls;
+static char clear_project_seen[128];
+static int clear_project_calls;
+static char clear_current_project_seen[128];
+static int clear_current_project_calls;
 static int mark_revisit_calls;
 static int queue_reset_calls;
 static int evidence_reembed_calls;
@@ -1351,6 +1360,47 @@ static int task_delete(int64_t task_id)
    return 0;
 }
 
+int db2_kb_file_index_delete_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+static int file_index_delete_project(const char *project)
+{
+   file_index_delete_project_calls++;
+   snprintf(file_index_delete_project_seen, sizeof(file_index_delete_project_seen), "%s",
+            project ? project : "");
+   return 51;
+}
+
+int db2_kb_service_clear_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+static int clear_project(const char *project)
+{
+   clear_project_calls++;
+   snprintf(clear_project_seen, sizeof(clear_project_seen), "%s", project ? project : "");
+   return 52;
+}
+
+int db2_kb_service_clear_current_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+static int clear_current_project(const char *project)
+{
+   clear_current_project_calls++;
+   snprintf(clear_current_project_seen, sizeof(clear_current_project_seen), "%s",
+            project ? project : "");
+   return 53;
+}
+
 static int directive_sweep_expired(void)
 {
    directive_sweep_calls++;
@@ -1805,6 +1855,9 @@ int main(void)
        .anti_pattern_delete = anti_pattern_delete,
        .doc_delete = doc_delete,
        .task_delete = task_delete,
+       .file_index_delete_project = file_index_delete_project,
+       .clear_project = clear_project,
+       .clear_current_project = clear_current_project,
        .mark_revisit_due = mark_revisit_due,
        .ingest_queue_reset_running = ingest_queue_reset_running,
        .evidence_reembed_all = evidence_reembed_all,
@@ -2270,6 +2323,27 @@ int main(void)
    assert(aimee_db2_task_delete_call(call_client, &client, 7108, 0, 44, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(task_delete_calls == 1 && task_delete_seen == 44);
+
+   /* The project name has to survive the round trip, not merely be sent. */
+   uint32_t file_index_delete_project_count = 99u;
+   assert(aimee_db2_file_index_delete_project_call(call_client, &client, 7109, 0, "demo",
+                                                   &file_index_delete_project_count, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(file_index_delete_project_count == 51 && file_index_delete_project_calls == 1);
+   assert(strcmp(file_index_delete_project_seen, "demo") == 0);
+
+   uint32_t clear_project_count = 99u;
+   assert(aimee_db2_clear_project_call(call_client, &client, 7110, 0, "demo", &clear_project_count,
+                                       NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(clear_project_count == 52 && clear_project_calls == 1);
+   assert(strcmp(clear_project_seen, "demo") == 0);
+
+   uint32_t clear_current_project_count = 99u;
+   assert(aimee_db2_clear_current_project_call(call_client, &client, 7111, 0, "demo",
+                                               &clear_current_project_count, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   assert(clear_current_project_count == 53 && clear_current_project_calls == 1);
+   assert(strcmp(clear_current_project_seen, "demo") == 0);
 
    uint32_t marked = 99u;
    assert(aimee_db2_mark_revisit_due_call(call_client, &client, 7084, 0, &marked, NULL, NULL) ==

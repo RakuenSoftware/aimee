@@ -245,6 +245,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "anti_pattern_bump",
                                                                 "anti_pattern_delete",
                                                                 "doc_delete",
+                                                                "file_index_delete_project",
                                                                 "directive_record_surface",
                                                                 "prospective_sweep_expired",
                                                                 "proposals_archive_expired",
@@ -265,7 +266,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 # so a concurrent reader can see between them.
                                 "multi-statement"
                                 if name in ("curator_reenqueue_extract_all",
-                                            "task_delete",
+                                            "task_delete", "clear_project",
+                                            "clear_current_project",
                                             "rules_decay",
                                             "curiosity_rescore_all",
                                             "mining_seed_job_defaults",
@@ -2956,9 +2958,105 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
                     reply["fields"] != []):
                 fail("task-delete-reply", "reply must be a bare acknowledgement")
+        elif key == ("organization", 4) and name == "clear_project" and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            # Deletes every document in a project and the vector index operations
+            # that point at them. There is no foreign key from documents to index
+            # operations, which is why the second table is cleared explicitly; the
+            # failure of that first statement is ignored here and fatal in the
+            # current-generation variant beside it, so both are recorded. Neither
+            # runs in a transaction.
+            if operation["c_symbols"] != ["db2_kb_service_clear_project"]:
+                fail("operation-c-symbols",
+                     "clear_project C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "clear_project results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "field", "policy"},
+                            "clear_project.request")
+            field = _keys(request["field"],
+                          {"name", "type", "minimum_bytes", "maximum_bytes"},
+                          "clear_project.request.field")
+            if (request["policy"] != {"resolves_project_name": True, "deletes_index_ops_first": True, "index_ops_failure": "ignored", "atomic": False, "generation_scope": "all"} or
+                    field != {"name": "project", "type": "utf8", "minimum_bytes": 1,
+                              "maximum_bytes": 127}):
+                fail("clear-project-request",
+                     "request must carry one bounded project name and its normalisation policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "clear_project.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "clear_project.reply.field")
+            if reply_field != {"name": "deleted_documents", "type": "u32", "minimum": 0,
+                               "maximum": 0x7fffffff}:
+                fail("clear-project-reply",
+                     "reply must contain one bounded u32 deletion count")
+        elif key == ("organization", 5) and name == "clear_current_project" and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            # The same shape as clear_project but scoped to the project's current
+            # generation, and it treats a failed index-operation delete as fatal
+            # where the other ignores it. The pair disagree; both are on the record.
+            if operation["c_symbols"] != ["db2_kb_service_clear_current_project"]:
+                fail("operation-c-symbols",
+                     "clear_current_project C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "clear_current_project results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "field", "policy"},
+                            "clear_current_project.request")
+            field = _keys(request["field"],
+                          {"name", "type", "minimum_bytes", "maximum_bytes"},
+                          "clear_current_project.request.field")
+            if (request["policy"] != {"resolves_project_name": True, "deletes_index_ops_first": True, "index_ops_failure": "fatal", "atomic": False, "generation_scope": "current"} or
+                    field != {"name": "project", "type": "utf8", "minimum_bytes": 1,
+                              "maximum_bytes": 127}):
+                fail("clear-current-project-request",
+                     "request must carry one bounded project name and its normalisation policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "clear_current_project.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "clear_current_project.reply.field")
+            if reply_field != {"name": "deleted_documents", "type": "u32", "minimum": 0,
+                               "maximum": 0x7fffffff}:
+                fail("clear-current-project-reply",
+                     "reply must contain one bounded u32 deletion count")
+        elif key == ("index", 10) and name == "file_index_delete_project" and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            # One statement over one table, so unlike the document clears beside it
+            # there is nothing here that can half-succeed. It shares their project
+            # name normalisation.
+            # It also ignores whether the statement finished, returning the change
+            # count either way -- so a failed delete reports zero rather than an
+            # error, the same collapse the counts elsewhere on this bus carry.
+            if operation["c_symbols"] != ["db2_kb_file_index_delete_project"]:
+                fail("operation-c-symbols",
+                     "file_index_delete_project C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "file_index_delete_project results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "field", "policy"},
+                            "file_index_delete_project.request")
+            field = _keys(request["field"],
+                          {"name", "type", "minimum_bytes", "maximum_bytes"},
+                          "file_index_delete_project.request.field")
+            if (request["policy"] != {"resolves_project_name": True, "atomic": True} or
+                    field != {"name": "project", "type": "utf8", "minimum_bytes": 1,
+                              "maximum_bytes": 127}):
+                fail("file-index-delete-project-request",
+                     "request must carry one bounded project name and its normalisation policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "file_index_delete_project.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "file_index_delete_project.reply.field")
+            if reply_field != {"name": "deleted_entries", "type": "u32", "minimum": 0,
+                               "maximum": 0x7fffffff}:
+                fail("file-index-delete-project-reply",
+                     "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 84 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 87 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2977,9 +3075,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
-            "drift_candidates", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
+            "drift_candidates", "file_index_delete_project", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
             "proposals_archive_expired", "trace_mining_last_id", "anti_pattern_bump",
             "anti_pattern_delete", "rel_types_ensure_seed", "doc_delete", "task_delete",
+            "clear_project", "clear_current_project",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
             "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
@@ -2987,7 +3086,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the eighty-four supported operations exactly once")
+             "the partial generator requires the eighty-seven supported operations exactly once")
     return catalog
 
 
@@ -3172,29 +3271,32 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
     drift_candidates = catalog["operations"][60]
-    rules_decay = catalog["operations"][61]
-    curiosity_rescore_all = catalog["operations"][62]
-    mining_seed_job_defaults = catalog["operations"][63]
-    proposals_archive_expired = catalog["operations"][64]
-    trace_mining_last_id = catalog["operations"][65]
-    anti_pattern_bump = catalog["operations"][66]
-    anti_pattern_delete = catalog["operations"][67]
-    rel_types_ensure_seed = catalog["operations"][68]
-    doc_delete = catalog["operations"][69]
-    task_delete = catalog["operations"][70]
-    vector_rebuild_lock_try_acquire = catalog["operations"][71]
-    vector_rebuild_lock_release = catalog["operations"][72]
-    release_get_active = catalog["operations"][73]
-    prospective_sweep_expired = catalog["operations"][74]
-    directive_sweep_expired = catalog["operations"][75]
-    mark_revisit_due = catalog["operations"][76]
-    ingest_queue_reset_running = catalog["operations"][77]
-    evidence_reembed_all = catalog["operations"][78]
-    curator_reembed_all = catalog["operations"][79]
-    synth_reenqueue_all = catalog["operations"][80]
-    curator_reenqueue_extract_all = catalog["operations"][81]
-    directive_suppress = catalog["operations"][82]
-    directive_record_surface = catalog["operations"][83]
+    file_index_delete_project = catalog["operations"][61]
+    rules_decay = catalog["operations"][62]
+    curiosity_rescore_all = catalog["operations"][63]
+    mining_seed_job_defaults = catalog["operations"][64]
+    proposals_archive_expired = catalog["operations"][65]
+    trace_mining_last_id = catalog["operations"][66]
+    anti_pattern_bump = catalog["operations"][67]
+    anti_pattern_delete = catalog["operations"][68]
+    rel_types_ensure_seed = catalog["operations"][69]
+    doc_delete = catalog["operations"][70]
+    task_delete = catalog["operations"][71]
+    clear_project = catalog["operations"][72]
+    clear_current_project = catalog["operations"][73]
+    vector_rebuild_lock_try_acquire = catalog["operations"][74]
+    vector_rebuild_lock_release = catalog["operations"][75]
+    release_get_active = catalog["operations"][76]
+    prospective_sweep_expired = catalog["operations"][77]
+    directive_sweep_expired = catalog["operations"][78]
+    mark_revisit_due = catalog["operations"][79]
+    ingest_queue_reset_running = catalog["operations"][80]
+    evidence_reembed_all = catalog["operations"][81]
+    curator_reembed_all = catalog["operations"][82]
+    synth_reenqueue_all = catalog["operations"][83]
+    curator_reenqueue_extract_all = catalog["operations"][84]
+    directive_suppress = catalog["operations"][85]
+    directive_record_surface = catalog["operations"][86]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3761,6 +3863,36 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     directive_record_surface_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(directive_record_surface["id"]), 0, b"",
+    )
+    file_index_delete_project_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(file_index_delete_project["id"]), 0,
+        _put_u32(len(b"demo")) + b"demo",
+    )
+    file_index_delete_project_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(file_index_delete_project["id"]), 0, _put_u32(51),
+    )
+    file_index_delete_project_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(file_index_delete_project["id"]), 0, _put_u32(0),
+    )
+    clear_project_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(clear_project["id"]), 0,
+        _put_u32(len(b"demo")) + b"demo",
+    )
+    clear_project_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(clear_project["id"]), 0, _put_u32(52),
+    )
+    clear_project_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(clear_project["id"]), 0, _put_u32(0),
+    )
+    clear_current_project_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(clear_current_project["id"]), 0,
+        _put_u32(len(b"demo")) + b"demo",
+    )
+    clear_current_project_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(clear_current_project["id"]), 0, _put_u32(53),
+    )
+    clear_current_project_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(clear_current_project["id"]), 0, _put_u32(0),
     )
     anti_pattern_bump_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(anti_pattern_bump["id"]), 0, _put_u64(41),
@@ -6661,6 +6793,43 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": file_index_delete_project["family"],
+            "id": file_index_delete_project["id"],
+            "name": file_index_delete_project["name"],
+            "request": {
+                "positive": file_index_delete_project_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(file_index_delete_project_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(file_index_delete_project_request, 16, 99).hex()},
+                    {"mutation": "empty_project", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(file_index_delete_project["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": file_index_delete_project_request[:-1].hex()},
+                    {"mutation": "long", "hex": (file_index_delete_project_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "deleted_entries": 51, "hex": file_index_delete_project_ok.hex()},
+                    {"result": 0, "deleted_entries": 0, "hex": file_index_delete_project_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(file_index_delete_project_ok, 8, int(file_index_delete_project["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(file_index_delete_project_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(file_index_delete_project["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (file_index_delete_project_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": file_index_delete_project_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (file_index_delete_project_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": rules_decay["family"],
             "id": rules_decay["id"],
             "name": rules_decay["name"],
@@ -7011,6 +7180,80 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                      mutate_u32(task_delete_ok, 16, 4).hex()},
                     {"mutation": "short", "hex": task_delete_ok[:-1].hex()},
                     {"mutation": "long", "hex": (task_delete_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": clear_project["family"],
+            "id": clear_project["id"],
+            "name": clear_project["name"],
+            "request": {
+                "positive": clear_project_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(clear_project_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(clear_project_request, 16, 99).hex()},
+                    {"mutation": "empty_project", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(clear_project["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": clear_project_request[:-1].hex()},
+                    {"mutation": "long", "hex": (clear_project_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "deleted_documents": 52, "hex": clear_project_ok.hex()},
+                    {"result": 0, "deleted_documents": 0, "hex": clear_project_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(clear_project_ok, 8, int(clear_project["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(clear_project_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(clear_project["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (clear_project_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": clear_project_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (clear_project_ok + b"\0").hex()},
+                ],
+            },
+        }, {
+            "family": clear_current_project["family"],
+            "id": clear_current_project["id"],
+            "name": clear_current_project["name"],
+            "request": {
+                "positive": clear_current_project_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(clear_current_project_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(clear_current_project_request, 16, 99).hex()},
+                    {"mutation": "empty_project", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(clear_current_project["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": clear_current_project_request[:-1].hex()},
+                    {"mutation": "long", "hex": (clear_current_project_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "deleted_documents": 53, "hex": clear_current_project_ok.hex()},
+                    {"result": 0, "deleted_documents": 0, "hex": clear_current_project_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(clear_current_project_ok, 8, int(clear_current_project["id"]) + 100).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(clear_current_project_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(clear_current_project["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (clear_current_project_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": clear_current_project_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (clear_current_project_ok + b"\0").hex()},
                 ],
             },
         }, {
@@ -7603,29 +7846,32 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
     drift_candidates = catalog["operations"][60]
-    rules_decay = catalog["operations"][61]
-    curiosity_rescore_all = catalog["operations"][62]
-    mining_seed_job_defaults = catalog["operations"][63]
-    proposals_archive_expired = catalog["operations"][64]
-    trace_mining_last_id = catalog["operations"][65]
-    anti_pattern_bump = catalog["operations"][66]
-    anti_pattern_delete = catalog["operations"][67]
-    rel_types_ensure_seed = catalog["operations"][68]
-    doc_delete = catalog["operations"][69]
-    task_delete = catalog["operations"][70]
-    vector_rebuild_lock_try_acquire = catalog["operations"][71]
-    vector_rebuild_lock_release = catalog["operations"][72]
-    release_get_active = catalog["operations"][73]
-    prospective_sweep_expired = catalog["operations"][74]
-    directive_sweep_expired = catalog["operations"][75]
-    mark_revisit_due = catalog["operations"][76]
-    ingest_queue_reset_running = catalog["operations"][77]
-    evidence_reembed_all = catalog["operations"][78]
-    curator_reembed_all = catalog["operations"][79]
-    synth_reenqueue_all = catalog["operations"][80]
-    curator_reenqueue_extract_all = catalog["operations"][81]
-    directive_suppress = catalog["operations"][82]
-    directive_record_surface = catalog["operations"][83]
+    file_index_delete_project = catalog["operations"][61]
+    rules_decay = catalog["operations"][62]
+    curiosity_rescore_all = catalog["operations"][63]
+    mining_seed_job_defaults = catalog["operations"][64]
+    proposals_archive_expired = catalog["operations"][65]
+    trace_mining_last_id = catalog["operations"][66]
+    anti_pattern_bump = catalog["operations"][67]
+    anti_pattern_delete = catalog["operations"][68]
+    rel_types_ensure_seed = catalog["operations"][69]
+    doc_delete = catalog["operations"][70]
+    task_delete = catalog["operations"][71]
+    clear_project = catalog["operations"][72]
+    clear_current_project = catalog["operations"][73]
+    vector_rebuild_lock_try_acquire = catalog["operations"][74]
+    vector_rebuild_lock_release = catalog["operations"][75]
+    release_get_active = catalog["operations"][76]
+    prospective_sweep_expired = catalog["operations"][77]
+    directive_sweep_expired = catalog["operations"][78]
+    mark_revisit_due = catalog["operations"][79]
+    ingest_queue_reset_running = catalog["operations"][80]
+    evidence_reembed_all = catalog["operations"][81]
+    curator_reembed_all = catalog["operations"][82]
+    synth_reenqueue_all = catalog["operations"][83]
+    curator_reenqueue_extract_all = catalog["operations"][84]
+    directive_suppress = catalog["operations"][85]
+    directive_record_surface = catalog["operations"][86]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -8732,6 +8978,51 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{task_delete['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_TASK_DELETE_ID_MAX",
          f"{task_delete['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_FILE_INDEX_DELETE_PROJECT", "AIMEE_DB2_EVENT_INDEX"),
+        ("AIMEE_DB2_STAGE_FILE_INDEX_DELETE_PROJECT", "AIMEE_DB2_FAMILY_INDEX"),
+        ("AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT", f"{file_index_delete_project['id']}u"),
+        ("AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MIN",
+         f"{file_index_delete_project['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MAX",
+         f"{file_index_delete_project['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX",
+         f"{file_index_delete_project['request']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN",
+         f"{file_index_delete_project['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_ERROR_LEN",
+         f"{file_index_delete_project['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX",
+         f"{file_index_delete_project['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_CLEAR_PROJECT", "AIMEE_DB2_EVENT_ORGANIZATION"),
+        ("AIMEE_DB2_STAGE_CLEAR_PROJECT", "AIMEE_DB2_FAMILY_ORGANIZATION"),
+        ("AIMEE_DB2_OPERATION_CLEAR_PROJECT", f"{clear_project['id']}u"),
+        ("AIMEE_DB2_CLEAR_PROJECT_REQUEST_MIN",
+         f"{clear_project['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX",
+         f"{clear_project['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX",
+         f"{clear_project['request']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN",
+         f"{clear_project['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_CLEAR_PROJECT_ERROR_LEN",
+         f"{clear_project['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_CLEAR_PROJECT_MAX",
+         f"{clear_project['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_CLEAR_CURRENT_PROJECT", "AIMEE_DB2_EVENT_ORGANIZATION"),
+        ("AIMEE_DB2_STAGE_CLEAR_CURRENT_PROJECT", "AIMEE_DB2_FAMILY_ORGANIZATION"),
+        ("AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT", f"{clear_current_project['id']}u"),
+        ("AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MIN",
+         f"{clear_current_project['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MAX",
+         f"{clear_current_project['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX",
+         f"{clear_current_project['request']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN",
+         f"{clear_current_project['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_CLEAR_CURRENT_PROJECT_ERROR_LEN",
+         f"{clear_current_project['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX",
+         f"{clear_current_project['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -10671,6 +10962,240 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_file_index_delete_project_request_encode(const char *project, uint8_t *output,
+                                                  size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len == 0u || project_len > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + project_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT, 0u,
+                                       4u + (uint32_t)project_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)project_len);
+   memcpy(payload + 4, project, project_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)project_len;
+   return 0;
+}}
+
+static inline int aimee_db2_file_index_delete_project_request_decode(const uint8_t *input, size_t input_len,
+                                                  char *project, size_t project_capacity)
+{{
+   if (project && project_capacity)
+      project[0] = '\\0';
+   if (!project || project_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT || header.flags != 0u ||
+       header.payload_len < 4u || input_len != AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t project_len = aimee_db2_get_u32(payload);
+   if (project_len == 0u || project_len > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX ||
+       header.payload_len != 4u + project_len || project_capacity < project_len + 1u)
+      return -1;
+   memcpy(project, payload + 4, project_len);
+   project[project_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_file_index_delete_project_reply_encode(uint32_t deleted_entries, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_entries > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX ||
+       capacity < AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_entries);
+   *output_len = AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_file_index_delete_project_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *deleted_entries)
+{{
+   if (deleted_entries)
+      *deleted_entries = 0u;
+   if (!deleted_entries)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX)
+      return -1;
+   *deleted_entries = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_clear_project_request_encode(const char *project, uint8_t *output,
+                                                  size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + project_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CLEAR_PROJECT, 0u,
+                                       4u + (uint32_t)project_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)project_len);
+   memcpy(payload + 4, project, project_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)project_len;
+   return 0;
+}}
+
+static inline int aimee_db2_clear_project_request_decode(const uint8_t *input, size_t input_len,
+                                                  char *project, size_t project_capacity)
+{{
+   if (project && project_capacity)
+      project[0] = '\\0';
+   if (!project || project_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_PROJECT || header.flags != 0u ||
+       header.payload_len < 4u || input_len != AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t project_len = aimee_db2_get_u32(payload);
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX ||
+       header.payload_len != 4u + project_len || project_capacity < project_len + 1u)
+      return -1;
+   memcpy(project, payload + 4, project_len);
+   project[project_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_clear_project_reply_encode(uint32_t deleted_documents, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_documents > AIMEE_DB2_CLEAR_PROJECT_MAX ||
+       capacity < AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CLEAR_PROJECT, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_documents);
+   *output_len = AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_clear_project_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *deleted_documents)
+{{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!deleted_documents)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_PROJECT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CLEAR_PROJECT_MAX)
+      return -1;
+   *deleted_documents = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_clear_current_project_request_encode(const char *project, uint8_t *output,
+                                                  size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + project_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT, 0u,
+                                       4u + (uint32_t)project_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)project_len);
+   memcpy(payload + 4, project, project_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)project_len;
+   return 0;
+}}
+
+static inline int aimee_db2_clear_current_project_request_decode(const uint8_t *input, size_t input_len,
+                                                  char *project, size_t project_capacity)
+{{
+   if (project && project_capacity)
+      project[0] = '\\0';
+   if (!project || project_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT || header.flags != 0u ||
+       header.payload_len < 4u || input_len != AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t project_len = aimee_db2_get_u32(payload);
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX ||
+       header.payload_len != 4u + project_len || project_capacity < project_len + 1u)
+      return -1;
+   memcpy(project, payload + 4, project_len);
+   project[project_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_clear_current_project_reply_encode(uint32_t deleted_documents, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_documents > AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_documents);
+   *output_len = AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_clear_current_project_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *deleted_documents)
+{{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!deleted_documents)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX)
+      return -1;
+   *deleted_documents = decoded;
    return 0;
 }}
 
@@ -15086,6 +15611,21 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t anti_pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_file_index_delete_project_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, uint32_t *deleted_entries, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_clear_project_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, uint32_t *deleted_documents, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_clear_current_project_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, uint32_t *deleted_documents, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_anti_pattern_delete_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t anti_pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -17137,6 +17677,92 @@ aimee_module_call_result_t aimee_db2_task_delete_call(aimee_db2_call_fn call, vo
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_file_index_delete_project_call(aimee_db2_call_fn call, void *call_context,
+                                         uint64_t trace_id, uint64_t deadline_ns,
+                                         const char *project, uint32_t *deleted_entries,
+                                         aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (deleted_entries)
+      *deleted_entries = 0u;
+   if (!call || !project || !deleted_entries)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MAX];
+   uint8_t response[AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_file_index_delete_project_request_encode(project, request, sizeof(request),
+                                                          &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FILE_INDEX_DELETE_PROJECT,
+            AIMEE_DB2_STAGE_FILE_INDEX_DELETE_PROJECT, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_file_index_delete_project_reply_decode(response, response_len, deleted_entries) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_clear_project_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                             uint64_t deadline_ns, const char *project, uint32_t *deleted_documents,
+                             aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!call || !project || !deleted_documents)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX];
+   uint8_t response[AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_clear_project_request_encode(project, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CLEAR_PROJECT, AIMEE_DB2_STAGE_CLEAR_PROJECT, trace_id,
+            deadline_ns, request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_clear_project_reply_decode(response, response_len, deleted_documents) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_clear_current_project_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, const char *project,
+                                     uint32_t *deleted_documents,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!call || !project || !deleted_documents)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MAX];
+   uint8_t response[AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_clear_current_project_request_encode(project, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CLEAR_CURRENT_PROJECT,
+            AIMEE_DB2_STAGE_CLEAR_CURRENT_PROJECT, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_clear_current_project_reply_decode(response, response_len, deleted_documents) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -17437,29 +18063,32 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     cross_repo_rebuild_identities = catalog["operations"][58]
     cross_repo_rebuild_build_deps = catalog["operations"][59]
     drift_candidates = catalog["operations"][60]
-    rules_decay = catalog["operations"][61]
-    curiosity_rescore_all = catalog["operations"][62]
-    mining_seed_job_defaults = catalog["operations"][63]
-    proposals_archive_expired = catalog["operations"][64]
-    trace_mining_last_id = catalog["operations"][65]
-    anti_pattern_bump = catalog["operations"][66]
-    anti_pattern_delete = catalog["operations"][67]
-    rel_types_ensure_seed = catalog["operations"][68]
-    doc_delete = catalog["operations"][69]
-    task_delete = catalog["operations"][70]
-    vector_rebuild_lock_try_acquire = catalog["operations"][71]
-    vector_rebuild_lock_release = catalog["operations"][72]
-    release_get_active = catalog["operations"][73]
-    prospective_sweep_expired = catalog["operations"][74]
-    directive_sweep_expired = catalog["operations"][75]
-    mark_revisit_due = catalog["operations"][76]
-    ingest_queue_reset_running = catalog["operations"][77]
-    evidence_reembed_all = catalog["operations"][78]
-    curator_reembed_all = catalog["operations"][79]
-    synth_reenqueue_all = catalog["operations"][80]
-    curator_reenqueue_extract_all = catalog["operations"][81]
-    directive_suppress = catalog["operations"][82]
-    directive_record_surface = catalog["operations"][83]
+    file_index_delete_project = catalog["operations"][61]
+    rules_decay = catalog["operations"][62]
+    curiosity_rescore_all = catalog["operations"][63]
+    mining_seed_job_defaults = catalog["operations"][64]
+    proposals_archive_expired = catalog["operations"][65]
+    trace_mining_last_id = catalog["operations"][66]
+    anti_pattern_bump = catalog["operations"][67]
+    anti_pattern_delete = catalog["operations"][68]
+    rel_types_ensure_seed = catalog["operations"][69]
+    doc_delete = catalog["operations"][70]
+    task_delete = catalog["operations"][71]
+    clear_project = catalog["operations"][72]
+    clear_current_project = catalog["operations"][73]
+    vector_rebuild_lock_try_acquire = catalog["operations"][74]
+    vector_rebuild_lock_release = catalog["operations"][75]
+    release_get_active = catalog["operations"][76]
+    prospective_sweep_expired = catalog["operations"][77]
+    directive_sweep_expired = catalog["operations"][78]
+    mark_revisit_due = catalog["operations"][79]
+    ingest_queue_reset_running = catalog["operations"][80]
+    evidence_reembed_all = catalog["operations"][81]
+    curator_reembed_all = catalog["operations"][82]
+    synth_reenqueue_all = catalog["operations"][83]
+    curator_reenqueue_extract_all = catalog["operations"][84]
+    directive_suppress = catalog["operations"][85]
+    directive_record_surface = catalog["operations"][86]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -17906,6 +18535,21 @@ const EventTaskDelete = EventOrganization
 const StageTaskDelete = FamilyOrganization
 const OperationTaskDelete uint32 = {task_delete['id']}
 const TaskDeleteIDMax uint64 = {task_delete['request']['field']['maximum']}
+const EventFileIndexDeleteProject = EventIndex
+const StageFileIndexDeleteProject = FamilyIndex
+const OperationFileIndexDeleteProject uint32 = {file_index_delete_project['id']}
+const FileIndexDeleteProjectProjectMax = {file_index_delete_project['request']['field']['maximum_bytes']}
+const FileIndexDeleteProjectMax uint32 = {file_index_delete_project['reply']['field']['maximum']}
+const EventClearProject = EventOrganization
+const StageClearProject = FamilyOrganization
+const OperationClearProject uint32 = {clear_project['id']}
+const ClearProjectProjectMax = {clear_project['request']['field']['maximum_bytes']}
+const ClearProjectMax uint32 = {clear_project['reply']['field']['maximum']}
+const EventClearCurrentProject = EventOrganization
+const StageClearCurrentProject = FamilyOrganization
+const OperationClearCurrentProject uint32 = {clear_current_project['id']}
+const ClearCurrentProjectProjectMax = {clear_current_project['request']['field']['maximum_bytes']}
+const ClearCurrentProjectMax uint32 = {clear_current_project['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -21010,6 +21654,177 @@ func DecodeTaskDeleteReply(reply []byte) error {{
 		return ErrMalformedEnvelope
 	}}
 	return nil
+}}
+
+// EncodeFileIndexDeleteProjectRequest emits the project name. Whether the name is normalised
+// before matching is policy and does not travel.
+func EncodeFileIndexDeleteProjectRequest(project string) ([]byte, error) {{
+	if len(project) == 0 || len(project) > FileIndexDeleteProjectProjectMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationFileIndexDeleteProject, 0, uint32(4+len(project)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(project)))
+	return append(request, project...), nil
+}}
+
+// DecodeFileIndexDeleteProjectRequest validates the exact envelope and bounded name.
+func DecodeFileIndexDeleteProjectRequest(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFileIndexDeleteProject || header.Flags != 0 ||
+		header.PayloadLen < 4 || len(request) != EnvelopeHeaderLen+int(header.PayloadLen) {{
+		return "", ErrMalformedEnvelope
+	}}
+	length := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if length == 0 || length > FileIndexDeleteProjectProjectMax || header.PayloadLen != 4+length {{
+		return "", ErrMalformedEnvelope
+	}}
+	return string(request[EnvelopeHeaderLen+4:]), nil
+}}
+
+// EncodeFileIndexDeleteProjectReply emits one bounded u32 deletion count.
+func EncodeFileIndexDeleteProjectReply(deletedEntries uint32) ([]byte, error) {{
+	if deletedEntries > FileIndexDeleteProjectMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationFileIndexDeleteProject, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedEntries)
+	return reply, nil
+}}
+
+// DecodeFileIndexDeleteProjectReply validates the operation and bound.
+func DecodeFileIndexDeleteProjectReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationFileIndexDeleteProject || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	deletedEntries := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedEntries > FileIndexDeleteProjectMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return deletedEntries, nil
+}}
+
+// EncodeClearProjectRequest emits the project name. Whether the name is normalised
+// before matching is policy and does not travel.
+func EncodeClearProjectRequest(project string) ([]byte, error) {{
+	if len(project) == 0 || len(project) > ClearProjectProjectMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationClearProject, 0, uint32(4+len(project)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(project)))
+	return append(request, project...), nil
+}}
+
+// DecodeClearProjectRequest validates the exact envelope and bounded name.
+func DecodeClearProjectRequest(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationClearProject || header.Flags != 0 ||
+		header.PayloadLen < 4 || len(request) != EnvelopeHeaderLen+int(header.PayloadLen) {{
+		return "", ErrMalformedEnvelope
+	}}
+	length := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if length == 0 || length > ClearProjectProjectMax || header.PayloadLen != 4+length {{
+		return "", ErrMalformedEnvelope
+	}}
+	return string(request[EnvelopeHeaderLen+4:]), nil
+}}
+
+// EncodeClearProjectReply emits one bounded u32 deletion count.
+func EncodeClearProjectReply(deletedDocuments uint32) ([]byte, error) {{
+	if deletedDocuments > ClearProjectMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationClearProject, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedDocuments)
+	return reply, nil
+}}
+
+// DecodeClearProjectReply validates the operation and bound.
+func DecodeClearProjectReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationClearProject || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	deletedDocuments := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedDocuments > ClearProjectMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return deletedDocuments, nil
+}}
+
+// EncodeClearCurrentProjectRequest emits the project name. Whether the name is normalised
+// before matching is policy and does not travel.
+func EncodeClearCurrentProjectRequest(project string) ([]byte, error) {{
+	if len(project) == 0 || len(project) > ClearCurrentProjectProjectMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationClearCurrentProject, 0, uint32(4+len(project)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(project)))
+	return append(request, project...), nil
+}}
+
+// DecodeClearCurrentProjectRequest validates the exact envelope and bounded name.
+func DecodeClearCurrentProjectRequest(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationClearCurrentProject || header.Flags != 0 ||
+		header.PayloadLen < 4 || len(request) != EnvelopeHeaderLen+int(header.PayloadLen) {{
+		return "", ErrMalformedEnvelope
+	}}
+	length := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if length == 0 || length > ClearCurrentProjectProjectMax || header.PayloadLen != 4+length {{
+		return "", ErrMalformedEnvelope
+	}}
+	return string(request[EnvelopeHeaderLen+4:]), nil
+}}
+
+// EncodeClearCurrentProjectReply emits one bounded u32 deletion count.
+func EncodeClearCurrentProjectReply(deletedDocuments uint32) ([]byte, error) {{
+	if deletedDocuments > ClearCurrentProjectMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationClearCurrentProject, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedDocuments)
+	return reply, nil
+}}
+
+// DecodeClearCurrentProjectReply validates the operation and bound.
+func DecodeClearCurrentProjectReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationClearCurrentProject || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	deletedDocuments := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedDocuments > ClearCurrentProjectMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return deletedDocuments, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

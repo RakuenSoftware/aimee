@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "2be83d190a1bfa4b4bf8584b5f8451edebc0f2deebcc5e63b65a409663be72a4"
+#define AIMEE_DB2_CONTRACT_SHA256 "4db866595a5fa726e082b78c1ad9f56bf606393898925a9a462d73e4a9a39710"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -712,6 +712,33 @@
 #define AIMEE_DB2_TASK_DELETE_RESPONSE_LEN                     24u
 #define AIMEE_DB2_TASK_DELETE_ERROR_LEN                        24u
 #define AIMEE_DB2_TASK_DELETE_ID_MAX                           9223372036854775807ull
+#define AIMEE_DB2_EVENT_FILE_INDEX_DELETE_PROJECT              AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_FILE_INDEX_DELETE_PROJECT              AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT          10u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MIN        29u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MAX        155u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX        127u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN       28u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_ERROR_LEN          24u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX                2147483647u
+#define AIMEE_DB2_EVENT_CLEAR_PROJECT                          AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_CLEAR_PROJECT                          AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_CLEAR_PROJECT                      4u
+#define AIMEE_DB2_CLEAR_PROJECT_REQUEST_MIN                    29u
+#define AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX                    155u
+#define AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX                    127u
+#define AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN                   28u
+#define AIMEE_DB2_CLEAR_PROJECT_ERROR_LEN                      24u
+#define AIMEE_DB2_CLEAR_PROJECT_MAX                            2147483647u
+#define AIMEE_DB2_EVENT_CLEAR_CURRENT_PROJECT                  AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_CLEAR_CURRENT_PROJECT                  AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT              5u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MIN            29u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MAX            155u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX            127u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN           28u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_ERROR_LEN              24u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX                    2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2625,6 +2652,240 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_file_index_delete_project_request_encode(const char *project, uint8_t *output,
+                                                  size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len == 0u || project_len > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + project_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT, 0u,
+                                       4u + (uint32_t)project_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)project_len);
+   memcpy(payload + 4, project, project_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)project_len;
+   return 0;
+}
+
+static inline int aimee_db2_file_index_delete_project_request_decode(const uint8_t *input, size_t input_len,
+                                                  char *project, size_t project_capacity)
+{
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!project || project_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT || header.flags != 0u ||
+       header.payload_len < 4u || input_len != AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t project_len = aimee_db2_get_u32(payload);
+   if (project_len == 0u || project_len > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX ||
+       header.payload_len != 4u + project_len || project_capacity < project_len + 1u)
+      return -1;
+   memcpy(project, payload + 4, project_len);
+   project[project_len] = '\0';
+   return 0;
+}
+
+static inline int aimee_db2_file_index_delete_project_reply_encode(uint32_t deleted_entries, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_entries > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX ||
+       capacity < AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_entries);
+   *output_len = AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_file_index_delete_project_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *deleted_entries)
+{
+   if (deleted_entries)
+      *deleted_entries = 0u;
+   if (!deleted_entries)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX)
+      return -1;
+   *deleted_entries = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_clear_project_request_encode(const char *project, uint8_t *output,
+                                                  size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + project_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CLEAR_PROJECT, 0u,
+                                       4u + (uint32_t)project_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)project_len);
+   memcpy(payload + 4, project, project_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)project_len;
+   return 0;
+}
+
+static inline int aimee_db2_clear_project_request_decode(const uint8_t *input, size_t input_len,
+                                                  char *project, size_t project_capacity)
+{
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!project || project_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_PROJECT || header.flags != 0u ||
+       header.payload_len < 4u || input_len != AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t project_len = aimee_db2_get_u32(payload);
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX ||
+       header.payload_len != 4u + project_len || project_capacity < project_len + 1u)
+      return -1;
+   memcpy(project, payload + 4, project_len);
+   project[project_len] = '\0';
+   return 0;
+}
+
+static inline int aimee_db2_clear_project_reply_encode(uint32_t deleted_documents, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_documents > AIMEE_DB2_CLEAR_PROJECT_MAX ||
+       capacity < AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CLEAR_PROJECT, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_documents);
+   *output_len = AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_clear_project_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *deleted_documents)
+{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!deleted_documents)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_PROJECT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CLEAR_PROJECT_MAX)
+      return -1;
+   *deleted_documents = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_clear_current_project_request_encode(const char *project, uint8_t *output,
+                                                  size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + project_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT, 0u,
+                                       4u + (uint32_t)project_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)project_len);
+   memcpy(payload + 4, project, project_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)project_len;
+   return 0;
+}
+
+static inline int aimee_db2_clear_current_project_request_decode(const uint8_t *input, size_t input_len,
+                                                  char *project, size_t project_capacity)
+{
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!project || project_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT || header.flags != 0u ||
+       header.payload_len < 4u || input_len != AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t project_len = aimee_db2_get_u32(payload);
+   if (project_len == 0u || project_len > AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX ||
+       header.payload_len != 4u + project_len || project_capacity < project_len + 1u)
+      return -1;
+   memcpy(project, payload + 4, project_len);
+   project[project_len] = '\0';
+   return 0;
+}
+
+static inline int aimee_db2_clear_current_project_reply_encode(uint32_t deleted_documents, uint8_t *output,
+                                                size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || deleted_documents > AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX ||
+       capacity < AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, deleted_documents);
+   *output_len = AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_clear_current_project_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *deleted_documents)
+{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!deleted_documents)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX)
+      return -1;
+   *deleted_documents = decoded;
    return 0;
 }
 

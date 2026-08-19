@@ -356,6 +356,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .anti_pattern_delete = db2_anti_pattern_delete,
        .doc_delete = db2_kb_doc_delete,
        .task_delete = db2_task_delete,
+       .file_index_delete_project = db2_kb_file_index_delete_project,
+       .clear_project = db2_kb_service_clear_project,
+       .clear_current_project = db2_kb_service_clear_current_project,
        .mark_revisit_due = db2_decision_log_mark_revisit_due,
        .ingest_queue_reset_running = db2_kb_ingest_queue_reset_running,
        .evidence_reembed_all = db2_evidence_reembed_all,
@@ -415,6 +418,9 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_ANTI_PATTERN_DELETE &&
         invocation->stage_id != AIMEE_DB2_STAGE_DOC_DELETE &&
         invocation->stage_id != AIMEE_DB2_STAGE_TASK_DELETE &&
+        invocation->stage_id != AIMEE_DB2_STAGE_FILE_INDEX_DELETE_PROJECT &&
+        invocation->stage_id != AIMEE_DB2_STAGE_CLEAR_PROJECT &&
+        invocation->stage_id != AIMEE_DB2_STAGE_CLEAR_CURRENT_PROJECT &&
         invocation->stage_id != AIMEE_DB2_STAGE_MARK_REVISIT_DUE &&
         invocation->stage_id != AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING &&
         invocation->stage_id != AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL &&
@@ -1530,6 +1536,30 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
+      char project[AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX + 1] = {0};
+      if (aimee_db2_file_index_delete_project_request_decode(request_body, request_len, project,
+                                                             sizeof(project)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->file_index_delete_project)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* One statement over one table, so nothing here can half-succeed.
+          * It normalises the project name before matching, so the name that
+          * arrives is not necessarily the one deleted, and it does not check
+          * whether the statement finished -- a failure reports zero rather
+          * than an error. */
+         int deleted_entries = backend->file_index_delete_project(project);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (deleted_entries < 0 ||
+             (uint32_t)deleted_entries > AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_file_index_delete_project_reply_encode(
+                 (uint32_t)deleted_entries, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }
 
@@ -1658,6 +1688,49 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_task_delete_reply_encode(response_body, response_capacity, response_len) !=
              0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      char project[AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX + 1] = {0};
+      if (aimee_db2_clear_project_request_decode(request_body, request_len, project,
+                                                 sizeof(project)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->clear_project)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Deletes a project's documents and the vector index operations
+          * pointing at them. No foreign key cascades the second table,
+          * which is why it is cleared explicitly; that statement's failure
+          * is ignored here and fatal in the current-generation clear below,
+          * and neither runs in a transaction. */
+         int deleted_documents = backend->clear_project(project);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (deleted_documents < 0 || (uint32_t)deleted_documents > AIMEE_DB2_CLEAR_PROJECT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_clear_project_reply_encode((uint32_t)deleted_documents, response_body,
+                                                  response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_clear_current_project_request_decode(request_body, request_len, project,
+                                                         sizeof(project)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->clear_current_project)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The same work scoped to the project's current generation, and
+          * the one that treats a failed index-operation delete as fatal. */
+         int deleted_documents = backend->clear_current_project(project);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (deleted_documents < 0 ||
+             (uint32_t)deleted_documents > AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_clear_current_project_reply_encode(
+                 (uint32_t)deleted_documents, response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

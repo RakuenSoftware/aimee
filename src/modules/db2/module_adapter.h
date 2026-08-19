@@ -100,6 +100,9 @@ typedef struct
    int (*anti_pattern_delete)(int64_t anti_pattern_id);
    int (*doc_delete)(int64_t doc_id);
    int (*task_delete)(int64_t task_id);
+   int (*file_index_delete_project)(const char *project);
+   int (*clear_project)(const char *project);
+   int (*clear_current_project)(const char *project);
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);

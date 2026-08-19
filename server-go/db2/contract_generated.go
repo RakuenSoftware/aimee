@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "2be83d190a1bfa4b4bf8584b5f8451edebc0f2deebcc5e63b65a409663be72a4"
+const ContractSHA256 = "4db866595a5fa726e082b78c1ad9f56bf606393898925a9a462d73e4a9a39710"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -445,6 +445,21 @@ const EventTaskDelete = EventOrganization
 const StageTaskDelete = FamilyOrganization
 const OperationTaskDelete uint32 = 3
 const TaskDeleteIDMax uint64 = 9223372036854775807
+const EventFileIndexDeleteProject = EventIndex
+const StageFileIndexDeleteProject = FamilyIndex
+const OperationFileIndexDeleteProject uint32 = 10
+const FileIndexDeleteProjectProjectMax = 127
+const FileIndexDeleteProjectMax uint32 = 2147483647
+const EventClearProject = EventOrganization
+const StageClearProject = FamilyOrganization
+const OperationClearProject uint32 = 4
+const ClearProjectProjectMax = 127
+const ClearProjectMax uint32 = 2147483647
+const EventClearCurrentProject = EventOrganization
+const StageClearCurrentProject = FamilyOrganization
+const OperationClearCurrentProject uint32 = 5
+const ClearCurrentProjectProjectMax = 127
+const ClearCurrentProjectMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -3551,6 +3566,177 @@ func DecodeTaskDeleteReply(reply []byte) error {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+// EncodeFileIndexDeleteProjectRequest emits the project name. Whether the name is normalised
+// before matching is policy and does not travel.
+func EncodeFileIndexDeleteProjectRequest(project string) ([]byte, error) {
+	if len(project) == 0 || len(project) > FileIndexDeleteProjectProjectMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationFileIndexDeleteProject, 0, uint32(4+len(project)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(project)))
+	return append(request, project...), nil
+}
+
+// DecodeFileIndexDeleteProjectRequest validates the exact envelope and bounded name.
+func DecodeFileIndexDeleteProjectRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFileIndexDeleteProject || header.Flags != 0 ||
+		header.PayloadLen < 4 || len(request) != EnvelopeHeaderLen+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	length := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if length == 0 || length > FileIndexDeleteProjectProjectMax || header.PayloadLen != 4+length {
+		return "", ErrMalformedEnvelope
+	}
+	return string(request[EnvelopeHeaderLen+4:]), nil
+}
+
+// EncodeFileIndexDeleteProjectReply emits one bounded u32 deletion count.
+func EncodeFileIndexDeleteProjectReply(deletedEntries uint32) ([]byte, error) {
+	if deletedEntries > FileIndexDeleteProjectMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationFileIndexDeleteProject, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedEntries)
+	return reply, nil
+}
+
+// DecodeFileIndexDeleteProjectReply validates the operation and bound.
+func DecodeFileIndexDeleteProjectReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationFileIndexDeleteProject || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	deletedEntries := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedEntries > FileIndexDeleteProjectMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return deletedEntries, nil
+}
+
+// EncodeClearProjectRequest emits the project name. Whether the name is normalised
+// before matching is policy and does not travel.
+func EncodeClearProjectRequest(project string) ([]byte, error) {
+	if len(project) == 0 || len(project) > ClearProjectProjectMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationClearProject, 0, uint32(4+len(project)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(project)))
+	return append(request, project...), nil
+}
+
+// DecodeClearProjectRequest validates the exact envelope and bounded name.
+func DecodeClearProjectRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationClearProject || header.Flags != 0 ||
+		header.PayloadLen < 4 || len(request) != EnvelopeHeaderLen+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	length := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if length == 0 || length > ClearProjectProjectMax || header.PayloadLen != 4+length {
+		return "", ErrMalformedEnvelope
+	}
+	return string(request[EnvelopeHeaderLen+4:]), nil
+}
+
+// EncodeClearProjectReply emits one bounded u32 deletion count.
+func EncodeClearProjectReply(deletedDocuments uint32) ([]byte, error) {
+	if deletedDocuments > ClearProjectMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationClearProject, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedDocuments)
+	return reply, nil
+}
+
+// DecodeClearProjectReply validates the operation and bound.
+func DecodeClearProjectReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationClearProject || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	deletedDocuments := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedDocuments > ClearProjectMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return deletedDocuments, nil
+}
+
+// EncodeClearCurrentProjectRequest emits the project name. Whether the name is normalised
+// before matching is policy and does not travel.
+func EncodeClearCurrentProjectRequest(project string) ([]byte, error) {
+	if len(project) == 0 || len(project) > ClearCurrentProjectProjectMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationClearCurrentProject, 0, uint32(4+len(project)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(project)))
+	return append(request, project...), nil
+}
+
+// DecodeClearCurrentProjectRequest validates the exact envelope and bounded name.
+func DecodeClearCurrentProjectRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationClearCurrentProject || header.Flags != 0 ||
+		header.PayloadLen < 4 || len(request) != EnvelopeHeaderLen+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	length := binary.LittleEndian.Uint32(request[EnvelopeHeaderLen:])
+	if length == 0 || length > ClearCurrentProjectProjectMax || header.PayloadLen != 4+length {
+		return "", ErrMalformedEnvelope
+	}
+	return string(request[EnvelopeHeaderLen+4:]), nil
+}
+
+// EncodeClearCurrentProjectReply emits one bounded u32 deletion count.
+func EncodeClearCurrentProjectReply(deletedDocuments uint32) ([]byte, error) {
+	if deletedDocuments > ClearCurrentProjectMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationClearCurrentProject, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedDocuments)
+	return reply, nil
+}
+
+// DecodeClearCurrentProjectReply validates the operation and bound.
+func DecodeClearCurrentProjectReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationClearCurrentProject || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	deletedDocuments := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedDocuments > ClearCurrentProjectMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return deletedDocuments, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

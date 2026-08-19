@@ -336,6 +336,21 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t anti_pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_file_index_delete_project_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, uint32_t *deleted_entries, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_clear_project_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, uint32_t *deleted_documents, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_clear_current_project_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, uint32_t *deleted_documents, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_anti_pattern_delete_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t anti_pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);

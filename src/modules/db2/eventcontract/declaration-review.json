@@ -404,6 +404,14 @@
       "reason": "The typed organization.doc_delete operation removes a document row by identifier, reporting an error when nothing matched."
     },
     {
+      "symbol": "db2_kb_file_index_delete_project",
+      "signature_sha256": "b52dc0573377b86c812b5f4e07d93855dcd86409ab8b99c3e0b721bf2f7e170c",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.file_index_delete_project operation removes a project's file index entries. It normalises the project name as the document clears do, and unlike them it is a single statement with nothing to leave half-done. It does not check whether the statement finished, so a failure reports zero deleted rather than an error."
+    },
+    {
       "symbol": "db2_kb_health_probe",
       "signature_sha256": "c0cc00bd5827a435e096d3c14146348e2b71393d97cb0760c9dd8d6603f74dcf",
       "disposition": "wire-operation",
@@ -530,6 +538,22 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The one declaration in a DB2 header implemented outside the module: it resolves the host executable and spawns a drain worker, issuing no statement. It must not become a wire operation. A bus caller able to reach it could ask the DB2 module to start a process on the host, which is exactly the authority the module boundary exists to withhold. The declaration belongs in the KB service headers."
+    },
+    {
+      "symbol": "db2_kb_service_clear_current_project",
+      "signature_sha256": "58993e81a3310fb0215c1d4cf65b846e5ffaf2a5d5f515de168815bf6776a745",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.clear_current_project operation deletes only the current generation's documents for a project, with the vector index operations that point at them. It differs from clear_project in scope and in one other way worth naming: a failed index-operation delete is fatal here and ignored there. Like its sibling it normalises the project name and runs its two statements without a transaction."
+    },
+    {
+      "symbol": "db2_kb_service_clear_project",
+      "signature_sha256": "0cb14878b2a7ca248d157f44462a60590af45a6453e0b4738d3d6004aa5baf35",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.clear_project operation deletes a project's documents and the vector index operations pointing at them. Three things are recorded rather than left in the source: the project name is normalised before matching, so what a caller sends is not necessarily what is deleted; the index-operation delete runs first because no foreign key cascades it; and its failure is ignored here while the current-generation variant treats it as fatal."
     },
     {
       "symbol": "db2_kb_service_code_audit_json",

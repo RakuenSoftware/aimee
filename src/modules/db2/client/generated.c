@@ -1983,6 +1983,92 @@ aimee_module_call_result_t aimee_db2_task_delete_call(aimee_db2_call_fn call, vo
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_file_index_delete_project_call(aimee_db2_call_fn call, void *call_context,
+                                         uint64_t trace_id, uint64_t deadline_ns,
+                                         const char *project, uint32_t *deleted_entries,
+                                         aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (deleted_entries)
+      *deleted_entries = 0u;
+   if (!call || !project || !deleted_entries)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MAX];
+   uint8_t response[AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_file_index_delete_project_request_encode(project, request, sizeof(request),
+                                                          &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FILE_INDEX_DELETE_PROJECT,
+            AIMEE_DB2_STAGE_FILE_INDEX_DELETE_PROJECT, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_file_index_delete_project_reply_decode(response, response_len, deleted_entries) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_clear_project_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                             uint64_t deadline_ns, const char *project, uint32_t *deleted_documents,
+                             aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!call || !project || !deleted_documents)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX];
+   uint8_t response[AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_clear_project_request_encode(project, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CLEAR_PROJECT, AIMEE_DB2_STAGE_CLEAR_PROJECT, trace_id,
+            deadline_ns, request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_clear_project_reply_decode(response, response_len, deleted_documents) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_clear_current_project_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, const char *project,
+                                     uint32_t *deleted_documents,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (deleted_documents)
+      *deleted_documents = 0u;
+   if (!call || !project || !deleted_documents)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MAX];
+   uint8_t response[AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_clear_current_project_request_encode(project, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CLEAR_CURRENT_PROJECT,
+            AIMEE_DB2_STAGE_CLEAR_CURRENT_PROJECT, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_clear_current_project_reply_decode(response, response_len, deleted_documents) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,

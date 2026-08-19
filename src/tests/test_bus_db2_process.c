@@ -744,6 +744,22 @@ int main(int argc, char **argv)
    assert(aimee_db2_task_delete_call(call_client, &client, 9130, 0, 44, NULL, NULL) ==
           AIMEE_MODULE_CALL_INTERNAL);
 
+   /* The three project clears against real Postgres. No project exists, so all
+    * three delete nothing and report zero -- which for the file index is also
+    * what a failed statement would report, since it does not check. */
+   uint32_t cleared = 99;
+   assert(aimee_db2_file_index_delete_project_call(call_client, &client, 9131, 0, "demo", &cleared,
+                                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(cleared == 0);
+   cleared = 99;
+   assert(aimee_db2_clear_project_call(call_client, &client, 9132, 0, "demo", &cleared, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(cleared == 0);
+   cleared = 99;
+   assert(aimee_db2_clear_current_project_call(call_client, &client, 9133, 0, "demo", &cleared,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(cleared == 0);
+
    /* No decision is logged on a fresh schema, so none is due for review. This
     * backend reports a failed statement as -1 rather than as zero, so the zero
     * arriving here is the sweep having genuinely run and found nothing. */

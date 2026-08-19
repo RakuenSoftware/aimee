@@ -1667,6 +1667,32 @@
       }
     },
     {
+      "family": "index",
+      "id": 10,
+      "name": "file_index_delete_project",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Project documents and their index rows are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_kb_file_index_delete_project"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "field": {"name": "project", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127},
+        "policy": {"resolves_project_name": true, "atomic": true}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "deleted_entries", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -1922,6 +1948,62 @@
         "encoded_size_ok": 24,
         "encoded_size_error": 24,
         "fields": []
+      }
+    },
+    {
+      "family": "organization",
+      "id": 4,
+      "name": "clear_project",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Project documents and their index rows are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_kb_service_clear_project"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "field": {"name": "project", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127},
+        "policy": {"resolves_project_name": true, "deletes_index_ops_first": true,
+                   "index_ops_failure": "ignored", "atomic": false,
+                   "generation_scope": "all"}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "deleted_documents", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
+    },
+    {
+      "family": "organization",
+      "id": 5,
+      "name": "clear_current_project",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Project documents and their index rows are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_kb_service_clear_current_project"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "field": {"name": "project", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127},
+        "policy": {"resolves_project_name": true, "deletes_index_ops_first": true,
+                   "index_ops_failure": "fatal", "atomic": false,
+                   "generation_scope": "current"}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "deleted_documents", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
       }
     },
     {

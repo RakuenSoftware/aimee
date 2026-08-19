@@ -126,6 +126,15 @@ static int64_t doc_delete_seen;
 static int task_delete_value;
 static int task_delete_calls;
 static int64_t task_delete_seen;
+static int file_index_delete_project_value;
+static int file_index_delete_project_calls;
+static char file_index_delete_project_seen[128];
+static int clear_project_value;
+static int clear_project_calls;
+static char clear_project_seen[128];
+static int clear_current_project_value;
+static int clear_current_project_calls;
+static char clear_current_project_seen[128];
 static int64_t directive_surface_id;
 static int mark_revisit_value;
 static int mark_revisit_calls;
@@ -952,6 +961,47 @@ static int task_delete(int64_t task_id)
    return task_delete_value;
 }
 
+int db2_kb_file_index_delete_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+static int file_index_delete_project(const char *project)
+{
+   file_index_delete_project_calls++;
+   snprintf(file_index_delete_project_seen, sizeof(file_index_delete_project_seen), "%s",
+            project ? project : "");
+   return file_index_delete_project_value;
+}
+
+int db2_kb_service_clear_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+static int clear_project(const char *project)
+{
+   clear_project_calls++;
+   snprintf(clear_project_seen, sizeof(clear_project_seen), "%s", project ? project : "");
+   return clear_project_value;
+}
+
+int db2_kb_service_clear_current_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+static int clear_current_project(const char *project)
+{
+   clear_current_project_calls++;
+   snprintf(clear_current_project_seen, sizeof(clear_current_project_seen), "%s",
+            project ? project : "");
+   return clear_current_project_value;
+}
+
 static int directive_sweep_expired(void)
 {
    directive_sweep_calls++;
@@ -1771,6 +1821,15 @@ static void reset(void)
    task_delete_value = 0;
    task_delete_calls = 0;
    task_delete_seen = 0;
+   file_index_delete_project_value = 51;
+   file_index_delete_project_calls = 0;
+   file_index_delete_project_seen[0] = '\0';
+   clear_project_value = 52;
+   clear_project_calls = 0;
+   clear_project_seen[0] = '\0';
+   clear_current_project_value = 53;
+   clear_current_project_calls = 0;
+   clear_current_project_seen[0] = '\0';
    directive_surface_id = 0;
    mark_revisit_value = 9;
    mark_revisit_calls = 0;
@@ -3265,6 +3324,40 @@ static void test_mark_revisit_due_wire(void)
    assert(aimee_db2_mark_revisit_due_reply_encode(9, reply, sizeof(reply), &reply_len) == 0);
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_mark_revisit_due_reply_decode(reply, reply_len, &marked) == -1 && marked == 0);
+}
+
+static void test_project_clear_operations_wire(void)
+{
+   uint8_t request[AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX] = {0};
+   uint32_t request_len = 0;
+   char project[128] = "";
+   assert(aimee_db2_clear_project_request_encode("demo", request, sizeof(request), &request_len) ==
+          0);
+   assert(aimee_db2_clear_project_request_decode(request, request_len, project, sizeof(project)) ==
+          0);
+   assert(strcmp(project, "demo") == 0);
+   /* An empty project name is refused rather than sent as a statement that
+    * would match every row or none depending on the query. */
+   assert(aimee_db2_clear_project_request_encode("", request, sizeof(request), &request_len) == -1);
+   assert(aimee_db2_clear_project_request_encode("demo", request, sizeof(request), &request_len) ==
+          0);
+   /* Same family and the same payload shape as the current-generation clear:
+    * confusing them would delete every generation instead of one. */
+   assert(aimee_db2_clear_current_project_request_decode(request, request_len, project,
+                                                         sizeof(project)) == -1);
+   /* A buffer too small for the name plus its terminator is refused rather
+    * than truncating a project name into a different project. */
+   assert(aimee_db2_clear_project_request_decode(request, request_len, project, 4) == -1);
+
+   uint8_t reply[AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, deleted = 99;
+   assert(aimee_db2_clear_project_reply_encode(52, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_clear_project_reply_decode(reply, reply_len, &deleted) == 0 && deleted == 52);
+   assert(aimee_db2_clear_project_reply_encode(AIMEE_DB2_CLEAR_PROJECT_MAX + 1u, reply,
+                                               sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_clear_project_reply_encode(52, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_clear_project_reply_decode(reply, reply_len, &deleted) == -1 && deleted == 0);
 }
 
 static void test_by_id_operations_wire(void)
@@ -6236,6 +6329,45 @@ static void test_mark_revisit_due_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_project_clear_operations_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.file_index_delete_project =
+                                                   file_index_delete_project,
+                                               .clear_project = clear_project,
+                                               .clear_current_project = clear_current_project};
+   uint8_t request[AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX];
+   uint8_t response[AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99, deleted = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_CLEAR_PROJECT};
+   assert(aimee_db2_clear_project_request_encode("demo", request, sizeof(request), &request_len) ==
+          0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(clear_project_calls == 1 && strcmp(clear_project_seen, "demo") == 0);
+   assert(aimee_db2_clear_project_reply_decode(response, response_len, &deleted) == 0 &&
+          deleted == 52);
+
+   /* The name that arrives here is not necessarily the name that gets matched:
+    * the backend normalises it before building the statement. That is recorded
+    * as policy because it means a caller cannot predict from its own string
+    * which rows will go, and no test on this side can show it. */
+   assert(strcmp(clear_project_seen, "demo") == 0);
+
+   /* A negative from the backend is a failed statement rather than an empty
+    * project, and the boundary keeps it as one. */
+   clear_project_value = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   clear_project_value = 52;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_by_id_operations_handler(void)
 {
    reset();
@@ -8787,6 +8919,7 @@ int main(void)
    test_directive_sweep_expired_wire();
    test_directive_id_operations_wire();
    test_by_id_operations_wire();
+   test_project_clear_operations_wire();
    test_mark_revisit_due_wire();
    test_ingest_queue_reset_running_wire();
    test_evidence_reembed_all_wire();
@@ -8866,6 +8999,7 @@ int main(void)
    test_directive_sweep_expired_handler();
    test_directive_id_operations_handler();
    test_by_id_operations_handler();
+   test_project_clear_operations_handler();
    test_mark_revisit_due_handler();
    test_ingest_queue_reset_running_handler();
    test_evidence_reembed_all_handler();
