@@ -1470,6 +1470,30 @@ int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t labe
    return 0;
 }
 
+int db2_anti_pattern_exists_exact(const char *pattern)
+{
+   (void)pattern;
+   return 0;
+}
+
+int db2_anti_pattern_exists_by_source_ref(const char *source_ref)
+{
+   (void)source_ref;
+   return 0;
+}
+
+int db2_artifact_citation_count(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_learning_commits_in_last_7_days(const char *sink)
+{
+   (void)sink;
+   return 0;
+}
+
 int db2_kb_service_memory_record_exists(int64_t record_id)
 {
    (void)record_id;

@@ -2657,6 +2657,106 @@
       }
     },
     {
+      "family": "learning",
+      "id": 9,
+      "name": "anti_pattern_exists_exact",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Anti-patterns are relational DB2 rows, so whether one is already recorded is DB2 authority.",
+      "c_symbols": ["db2_anti_pattern_exists_exact"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 539,
+        "policy": {"counts": "the pattern text exactly; a near-match is not a match"},
+        "field": {"name": "pattern", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 511}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+      }
+    },
+    {
+      "family": "learning",
+      "id": 10,
+      "name": "anti_pattern_exists_by_source_ref",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The source reference an anti-pattern was drawn from is a relational DB2 column, so whether one exists for it is DB2 authority.",
+      "c_symbols": ["db2_anti_pattern_exists_by_source_ref"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 539,
+        "policy": {"counts": "the source reference exactly"},
+        "field": {"name": "source_ref", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 511}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+      }
+    },
+    {
+      "family": "learning",
+      "id": 11,
+      "name": "artifact_citation_count",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifact citations are relational DB2 rows, so how many distinct sources cite an artifact is DB2 authority.",
+      "c_symbols": ["db2_artifact_citation_count"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "policy": {"counts": "distinct citing sources, so an artifact cited twice by one source counts once"},
+        "field": {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
+      "family": "learning",
+      "id": 12,
+      "name": "commits_in_last_7_days",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposals and their commit stamps are relational DB2 rows, so counting recent commits stays DB2 authority.",
+      "c_symbols": ["db2_learning_commits_in_last_7_days"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "policy": {"counts": "proposals committed to this sink within seven days of DB2's own clock; the window is fixed"},
+        "field": {"name": "sink", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",

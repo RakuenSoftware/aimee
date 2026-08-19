@@ -124,6 +124,30 @@
       "reason": "The typed learning.anti_pattern_delete operation removes an anti-pattern by identifier and reports an error when no row matched. That is the opposite of the bump beside it, which treats a missing row as success. Both choices are now on the record rather than being a difference nobody wrote down."
     },
     {
+      "symbol": "db2_anti_pattern_exists_by_source_ref",
+      "signature_sha256": "c75f2f7ff0ff759c8d617aa2335d6eb1f9223562ec9d33380b4f61ea44717539",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_exists_by_source_ref operation replaces the second duplicate check, which looks up the same table by the reference a pattern was drawn from rather than by its text. It is a separate operation rather than a flag on the first because the two answer differently for the same anti-pattern."
+    },
+    {
+      "symbol": "db2_anti_pattern_exists_exact",
+      "signature_sha256": "fad44e52e47b020c27f1c396d8a55877ca48ea3cdf46ecee761df01fb766c452",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_exists_exact operation replaces the duplicate check. The match is exact: a pattern that differs by a character is a different pattern, which is what makes this usable as a duplicate guard and is worth stating because the wire cannot show it. A statement that could not run answers false, the same as an absent row."
+    },
+    {
+      "symbol": "db2_artifact_citation_count",
+      "signature_sha256": "d1a95bada8987b2edd068342779b93a69afb4c3e367b49365762d7d41e57b36f",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_citation_count operation replaces the citation count. It counts distinct sources, not citation rows, so an artifact cited twice by one source counts once -- a caller given a plain number cannot tell which was meant, so the policy says."
+    },
+    {
       "symbol": "db2_artifact_gen_id",
       "signature_sha256": "c1911e29817cc9bb30d28d255c09b434818be47018ce579c1036cef1a398bb4a",
       "disposition": "private-db2",
@@ -1578,6 +1602,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Per-kind promotion, demotion, and expiry thresholds are a private input to the tier-cycle operations that apply them; exposing the lookup alone would let a caller act on thresholds DB2 had already superseded."
+    },
+    {
+      "symbol": "db2_learning_commits_in_last_7_days",
+      "signature_sha256": "bf340c574a22fd440da36daa584727cfe3dd8ab2e07b82777b489898bc8cac45",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.commits_in_last_7_days operation replaces the recent-commit count. The seven-day window and the clock it is measured against are both DB2's and never cross, so a caller cannot widen the window or supply its own now; the count is only meaningful beside that fact."
     },
     {
       "symbol": "db2_learning_proposals_archive_expired",

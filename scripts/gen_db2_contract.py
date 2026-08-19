@@ -2524,6 +2524,55 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["fields"] != []):
                 fail("trace-mining-record-reply",
                      "reply must acknowledge the write without a payload")
+        elif key in tuple(("learning", identifier) for identifier in range(9, 13)) and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            # One string in, one number out. What the number counts is the part
+            # a caller cannot see: distinct sources rather than rows, or a
+            # window fixed at seven days of DB2's own clock. Each says.
+            expected = {
+                "anti_pattern_exists_exact": ("db2_anti_pattern_exists_exact", "pattern", 511,
+                                              "exists", 1),
+                "anti_pattern_exists_by_source_ref": (
+                    "db2_anti_pattern_exists_by_source_ref", "source_ref", 511, "exists", 1),
+                "artifact_citation_count": ("db2_artifact_citation_count", "artifact_id", 127,
+                                            "count", 0x7fffffff),
+                "commits_in_last_7_days": ("db2_learning_commits_in_last_7_days", "sink", 127,
+                                           "count", 0x7fffffff),
+            }
+            if name not in expected:
+                fail("unsupported-operation", f"unsupported single-string read {name!r}")
+            symbol, argument, argument_max, reply_name, reply_max = expected[name]
+            rule = name.replace("_", "-")
+            if operation["c_symbols"] != [symbol]:
+                fail("operation-c-symbols", f"{name} C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", f"{name} results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "policy", "field"},
+                            f"{name}.request")
+            request_field = _keys(request["field"],
+                                  {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                  f"{name}.request.field")
+            policy = request["policy"]
+            if not isinstance(policy, dict) or set(policy) != {"counts"}:
+                fail(f"{rule}-request", "request policy must say what the number counts")
+            _string(policy["counts"], f"{name}.request.policy.counts", 160)
+            # An empty argument is refused rather than matched: none of these
+            # statements means anything against the empty string.
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 5 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 4 + argument_max or
+                    request_field != {"name": argument, "type": "utf8", "minimum_bytes": 1,
+                                      "maximum_bytes": argument_max}):
+                fail(f"{rule}-request", "request must carry one non-empty bounded string")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "field"},
+                          f"{name}.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                f"{name}.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": reply_name, "type": "u32", "minimum": 0,
+                                    "maximum": reply_max}):
+                fail(f"{rule}-reply", "reply must carry one bounded number")
         elif key == ("index", 1) and name == "entity_edge_prune_orphans" and \
                 operation["wire_format"] == "db2-envelope-u32-v1":
             # First operation of the index family. The tiers that count as a
@@ -3634,7 +3683,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 110 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 114 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3662,7 +3711,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
             "drift_candidates", "file_index_delete_project", "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
             "proposals_archive_expired", "trace_mining_last_id", "anti_pattern_bump",
-            "anti_pattern_delete", "trace_mining_record", "rel_types_ensure_seed",
+            "anti_pattern_delete", "trace_mining_record", "anti_pattern_exists_exact",
+            "anti_pattern_exists_by_source_ref", "artifact_citation_count",
+            "commits_in_last_7_days", "rel_types_ensure_seed",
             "doc_delete", "task_delete",
             "clear_project", "clear_current_project", "document_exists",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
@@ -3672,7 +3723,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             "curator_reenqueue_extract_all", "directive_suppress",
             "directive_record_surface"]:
         fail("unsupported-operation",
-             "the partial generator requires the one hundred and ten supported operations exactly once")
+             "the partial generator requires the one hundred and fourteen supported operations exactly once")
     return catalog
 
 
@@ -3872,6 +3923,10 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     record_exists = named["record_exists"]
     trace_mining_record = named["trace_mining_record"]
     document_exists = named["document_exists"]
+    anti_pattern_exists_exact = named["anti_pattern_exists_exact"]
+    anti_pattern_exists_by_source_ref = named["anti_pattern_exists_by_source_ref"]
+    artifact_citation_count = named["artifact_citation_count"]
+    commits_in_last_7_days = named["commits_in_last_7_days"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -4262,6 +4317,10 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     record_exists_vectors = _u64_probe_vectors(catalog, record_exists)
     trace_mining_record_vectors = _u64_ack_vectors(catalog, trace_mining_record)
     document_exists_vectors = _u64_probe_vectors(catalog, document_exists)
+    anti_pattern_exists_exact_vectors = _string_count_vectors(catalog, anti_pattern_exists_exact)
+    anti_pattern_exists_by_source_ref_vectors = _string_count_vectors(catalog, anti_pattern_exists_by_source_ref)
+    artifact_citation_count_vectors = _string_count_vectors(catalog, artifact_citation_count)
+    commits_in_last_7_days_vectors = _string_count_vectors(catalog, commits_in_last_7_days)
     entity_edge_prune_orphans_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(entity_edge_prune_orphans["id"]), 0, b"",
     )
@@ -7715,7 +7774,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (anti_pattern_delete_ok + b"\0").hex()},
                 ],
             },
-        }, trace_mining_record_vectors, {
+        }, trace_mining_record_vectors, anti_pattern_exists_exact_vectors, anti_pattern_exists_by_source_ref_vectors, artifact_citation_count_vectors, commits_in_last_7_days_vectors, {
             "family": rel_types_ensure_seed["family"],
             "id": rel_types_ensure_seed["id"],
             "name": rel_types_ensure_seed["name"],
@@ -8656,7 +8715,7 @@ def _scoped_id_list_vectors(catalog: dict[str, object],
                 {"result": 0, "memory_ids": [], "hex": reply_empty.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "ok_without_count", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
@@ -9081,7 +9140,7 @@ def _scoped_term_list_vectors(catalog: dict[str, object],
                 {"result": 0, "memory_ids": [], "hex": reply_empty.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "ok_without_count", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
@@ -9452,7 +9511,7 @@ def _neighbor_list_vectors(catalog: dict[str, object],
                 {"result": 0, "memory_ids": [], "hex": reply_empty.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "ok_without_count", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
@@ -9941,7 +10000,7 @@ def _memory_row_vectors(catalog: dict[str, object],
                 {"result": 1, "hex": reply_absent.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "not_found_with_payload", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 1, body).hex()},
@@ -10346,7 +10405,7 @@ def _key_list_vectors(catalog: dict[str, object],
                 {"result": 0, "memory_ids": [], "hex": reply_empty.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "ok_without_count", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
@@ -10737,7 +10796,7 @@ def _filter_list_vectors(catalog: dict[str, object],
                 {"result": 0, "memory_ids": [], "hex": reply_empty.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "ok_without_count", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"").hex()},
@@ -11225,7 +11284,7 @@ def _aggregate_vectors(catalog: dict[str, object],
                 {"result": 0, "truncated": 0, "memory_ids": [], "hex": reply_empty.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "ok_without_count", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0)).hex()},
@@ -11286,7 +11345,7 @@ def _corpus_vectors(catalog: dict[str, object],
                 {"result": 0, "label": "", "memory_ids": [], "hex": reply_empty.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(reply_ok, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(reply_ok, 12, 5).hex()},
                 {"mutation": "ok_without_label", "hex":
                  _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0)).hex()},
@@ -11711,7 +11770,7 @@ def _u64_probe_vectors(catalog: dict[str, object],
                 {"result": 0, "exists": 0, "hex": absent.hex()},
             ],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(present, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(present, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex": _mutate_u32(present, 12, 5).hex()},
                 {"mutation": "above_maximum", "hex":
                  _mutate_u32(present, ENVELOPE_HEADER_LEN, 2).hex()},
@@ -11735,7 +11794,7 @@ def _u64_ack_vectors(catalog: dict[str, object],
         "reply": {
             "positive": [{"result": 0, "hex": acknowledged.hex()}],
             "negative": [
-                {"mutation": "wrong_operation", "hex": _mutate_u32(acknowledged, 8, 12).hex()},
+                {"mutation": "wrong_operation", "hex": _mutate_u32(acknowledged, 8, 0).hex()},
                 {"mutation": "unsupported_result", "hex":
                  _mutate_u32(acknowledged, 12, 5).hex()},
                 {"mutation": "ok_with_payload", "hex":
@@ -11902,6 +11961,251 @@ def _clang_formatted(path: Path, text: str) -> str:
         scratch.unlink(missing_ok=True)
 
 
+
+def _string_count_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-string-u32-v1."""
+    upper = str(operation["name"]).upper()
+    family = str(operation["family"]).upper()
+    request, reply = operation["request"], operation["reply"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", f"AIMEE_DB2_EVENT_{family}"),
+        (f"AIMEE_DB2_STAGE_{upper}", f"AIMEE_DB2_FAMILY_{family}"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MIN_LEN", f"{request['encoded_size_min']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MAX_LEN", f"{request['encoded_size_max']}u"),
+        (f"AIMEE_DB2_{upper}_ARGUMENT_MIN", f"{request['field']['minimum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_ARGUMENT_MAX", f"{request['field']['maximum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_LEN", f"{reply['encoded_size_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+        (f"AIMEE_DB2_{upper}_MAX", f"{reply['field']['maximum']}u"),
+    ]
+
+
+def _string_count_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-string-u32-v1."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    argument = str(operation["request"]["field"]["name"])
+    answer = str(operation["reply"]["field"]["name"])
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(const char *{argument}, uint8_t *output,
+                                                   size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!{argument} || !output || !output_len)
+      return -1;
+   size_t argument_len = 0u;
+   while (argument_len <= AIMEE_DB2_{upper}_ARGUMENT_MAX && {argument}[argument_len])
+      ++argument_len;
+   size_t payload_len = 4u + argument_len;
+   if (argument_len < AIMEE_DB2_{upper}_ARGUMENT_MIN ||
+       argument_len > AIMEE_DB2_{upper}_ARGUMENT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)argument_len);
+   memcpy(payload + 4u, {argument}, argument_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *{argument}, size_t argument_capacity)
+{{
+   if ({argument} && argument_capacity)
+      {argument}[0] = '\\0';
+   if (!{argument} || argument_capacity < (size_t)AIMEE_DB2_{upper}_ARGUMENT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       input_len < AIMEE_DB2_{upper}_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_{upper}_REQUEST_MAX_LEN || header.payload_len < 5u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, header.payload_len, &cursor, {argument},
+                                 AIMEE_DB2_{upper}_ARGUMENT_MAX) != 0 ||
+       cursor != header.payload_len ||
+       {argument}[0] == '\\0')
+      return -1;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_encode(uint32_t {answer}, uint8_t *output,
+                                                 size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || {answer} > AIMEE_DB2_{upper}_MAX ||
+       capacity < AIMEE_DB2_{upper}_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK, 4u, output,
+                                     capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, {answer});
+   *output_len = AIMEE_DB2_{upper}_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *{answer})
+{{
+   if ({answer})
+      *{answer} = 0u;
+   if (!{answer})
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_{upper}_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t value = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (value > AIMEE_DB2_{upper}_MAX)
+      return -1;
+   *{answer} = value;
+   return 0;
+}}
+"""
+
+
+def _string_count_vectors(catalog: dict[str, object],
+                          operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for one db2-envelope-string-u32-v1 operation."""
+    identifier = int(operation["id"])
+    argument = str(operation["request"]["field"]["name"])
+    answer = str(operation["reply"]["field"]["name"])
+    maximum = int(operation["reply"]["field"]["maximum"])
+    value = b"probe-argument"
+
+    def request_bytes(text: bytes) -> bytes:
+        return _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0,
+                         _put_u32(len(text)) + text)
+
+    request = request_bytes(value)
+    length_at = ENVELOPE_HEADER_LEN
+    high = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(maximum))
+    low = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0))
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {
+            "positive": request.hex(),
+            argument: value.decode("ascii"),
+            "negative": [
+                {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+                {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+                {"mutation": "argument_empty", "hex": request_bytes(b"").hex()},
+                {"mutation": "argument_length_exceeds_payload", "hex":
+                 _mutate_u32(request, length_at, len(value) + 1).hex()},
+                {"mutation": "argument_embedded_nul", "hex":
+                 request_bytes(b"probe\0argument").hex()},
+                {"mutation": "short", "hex": request[:-1].hex()},
+                {"mutation": "long", "hex": (request + b"\0").hex()},
+            ],
+        },
+        "reply": {
+            "positive": [
+                {"result": 0, answer: maximum, "hex": high.hex()},
+                {"result": 0, answer: 0, "hex": low.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(high, 8, 0).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(high, 12, 5).hex()},
+                {"mutation": "above_maximum", "hex":
+                 _mutate_u32(high, ENVELOPE_HEADER_LEN, maximum + 1).hex()},
+                {"mutation": "short", "hex": high[:-1].hex()},
+                {"mutation": "long", "hex": (high + b"\0").hex()},
+            ],
+        },
+    }
+
+
+def _string_count_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for db2-envelope-string-u32-v1."""
+    name = _go_name(str(operation["name"]))
+    family = _go_name(str(operation["family"]))
+    request, reply = operation["request"], operation["reply"]
+    argument = _go_name(str(request["field"]["name"]))
+    argument = argument[0].lower() + argument[1:]
+    answer = _go_name(str(reply["field"]["name"]))
+    answer = answer[0].lower() + answer[1:]
+    return f"""const Event{name} = Event{family}
+const Stage{name} = Family{family}
+const Operation{name} uint32 = {operation['id']}
+const {name}ArgumentMin = {request['field']['minimum_bytes']}
+const {name}ArgumentMax = {request['field']['maximum_bytes']}
+const {name}Max uint32 = {reply['field']['maximum']}
+
+// Encode{name}Request carries one non-empty bounded string.
+func Encode{name}Request({argument} string) ([]byte, error) {{
+	if len({argument}) < {name}ArgumentMin || len({argument}) > {name}ArgumentMax ||
+		hasNUL({argument}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	var payload []byte
+	if err := putRowText(&payload, {argument}, {name}ArgumentMax); err != nil {{
+		return nil, err
+	}}
+	header, err := EncodeRequestHeader(Operation{name}, 0, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Request rejects an empty argument as well as an oversized one.
+func Decode{name}Request(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	{argument}, err := takeRowText(payload, &cursor, {name}ArgumentMax)
+	if err != nil || cursor != len(payload) || len({argument}) < {name}ArgumentMin {{
+		return "", ErrMalformedEnvelope
+	}}
+	return {argument}, nil
+}}
+
+// Encode{name}Reply emits the bounded answer.
+func Encode{name}Reply({answer} uint32) ([]byte, error) {{
+	if {answer} > {name}Max {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], {answer})
+	return reply, nil
+}}
+
+// Decode{name}Reply rejects any answer outside its bound.
+func Decode{name}Reply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > {name}Max {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return value, nil
+}}
+
+"""
+
+
 def header_bytes(catalog: dict[str, object]) -> bytes:
     def macros(rows: list[tuple[str, str]]) -> str:
         width = max(len(name) for name, _ in rows)
@@ -11985,6 +12289,10 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     record_exists = named["record_exists"]
     trace_mining_record = named["trace_mining_record"]
     document_exists = named["document_exists"]
+    anti_pattern_exists_exact = named["anti_pattern_exists_exact"]
+    anti_pattern_exists_by_source_ref = named["anti_pattern_exists_by_source_ref"]
+    artifact_citation_count = named["artifact_citation_count"]
+    commits_in_last_7_days = named["commits_in_last_7_days"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -12787,6 +13095,10 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         *_u64_probe_constants(record_exists),
         *_u64_ack_constants(trace_mining_record),
         *_u64_probe_constants(document_exists),
+        *_string_count_constants(anti_pattern_exists_exact),
+        *_string_count_constants(anti_pattern_exists_by_source_ref),
+        *_string_count_constants(artifact_citation_count),
+        *_string_count_constants(commits_in_last_7_days),
         ("AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_EVENT_INDEX"),
         ("AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS", "AIMEE_DB2_FAMILY_INDEX"),
         ("AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS",
@@ -17189,7 +17501,7 @@ static inline int aimee_db2_count_and_max_updated_reply_decode(const uint8_t *in
 }}
 
 {_scoped_id_list_codecs(top_l2_facts)}{_scoped_id_list_codecs(list_session_scope_priority)}
-{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}{_aggregate_codecs(aggregate)}{_corpus_codecs(load_eval_corpus)}{_u64_probe_codecs(record_exists)}{_u64_ack_codecs(trace_mining_record)}{_u64_probe_codecs(document_exists)}
+{_scoped_term_list_codecs(collect_alias_matches)}{_scoped_term_list_codecs(collect_entity_matches)}{_scoped_term_list_codecs(collect_event_frame_matches)}{_scoped_term_list_codecs(collect_relation_token_matches)}{_scoped_term_list_codecs(collect_summary_matches)}{_scoped_term_list_codecs(collect_temporal_matches)}{_scoped_term_list_codecs(find_facts_like)}{_scoped_term_list_codecs(list_session_scope_priority_like)}{_scoped_term_list_codecs(negation_fts_search)}{_neighbor_list_codecs(session_neighbors_before)}{_neighbor_list_codecs(session_neighbors_after)}{_memory_row_shared_codecs()}{_memory_row_codecs(row_get)}{_memory_row_codecs(row_get_by_unit_id)}{_scoped_term_list_codecs(search_facts_patterns_by_keyword)}{_key_list_codecs(fact_history)}{_filter_list_codecs(list_rows)}{_aggregate_codecs(aggregate)}{_corpus_codecs(load_eval_corpus)}{_u64_probe_codecs(record_exists)}{_u64_ack_codecs(trace_mining_record)}{_u64_probe_codecs(document_exists)}{_string_count_codecs(anti_pattern_exists_exact)}{_string_count_codecs(anti_pattern_exists_by_source_ref)}{_string_count_codecs(artifact_citation_count)}{_string_count_codecs(commits_in_last_7_days)}
 static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
                                                                   uint8_t *output,
                                                                   size_t capacity)
@@ -19808,6 +20120,26 @@ extern "C"
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_anti_pattern_exists_exact_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *pattern, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_anti_pattern_exists_by_source_ref_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *source_ref, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_artifact_citation_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *artifact_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_commits_in_last_7_days_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *sink, uint32_t *count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -21880,6 +22212,118 @@ aimee_module_call_result_t aimee_db2_document_exists_call(
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_anti_pattern_exists_exact_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *pattern, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !exists || !pattern)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_anti_pattern_exists_exact_request_encode(pattern, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ANTI_PATTERN_EXISTS_EXACT, AIMEE_DB2_STAGE_ANTI_PATTERN_EXISTS_EXACT, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_anti_pattern_exists_exact_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_anti_pattern_exists_by_source_ref_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *source_ref, uint32_t *exists, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !exists || !source_ref)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_anti_pattern_exists_by_source_ref_request_encode(source_ref, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ANTI_PATTERN_EXISTS_BY_SOURCE_REF, AIMEE_DB2_STAGE_ANTI_PATTERN_EXISTS_BY_SOURCE_REF, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_anti_pattern_exists_by_source_ref_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_artifact_citation_count_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *artifact_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !artifact_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ARTIFACT_CITATION_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ARTIFACT_CITATION_COUNT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_artifact_citation_count_request_encode(artifact_id, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ARTIFACT_CITATION_COUNT, AIMEE_DB2_STAGE_ARTIFACT_CITATION_COUNT, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_artifact_citation_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_commits_in_last_7_days_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *sink, uint32_t *count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || !sink)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_commits_in_last_7_days_request_encode(sink, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_COMMITS_IN_LAST_7_DAYS, AIMEE_DB2_STAGE_COMMITS_IN_LAST_7_DAYS, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_commits_in_last_7_days_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_entity_edge_prune_orphans_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *pruned_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -23068,6 +23512,10 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     record_exists = named["record_exists"]
     trace_mining_record = named["trace_mining_record"]
     document_exists = named["document_exists"]
+    anti_pattern_exists_exact = named["anti_pattern_exists_exact"]
+    anti_pattern_exists_by_source_ref = named["anti_pattern_exists_by_source_ref"]
+    artifact_citation_count = named["artifact_citation_count"]
+    commits_in_last_7_days = named["commits_in_last_7_days"]
     entity_edge_prune_orphans = named["entity_edge_prune_orphans"]
     entity_edge_normalize_weights = named["entity_edge_normalize_weights"]
     project_count = named["project_count"]
@@ -25122,7 +25570,7 @@ func DecodeCountAndMaxUpdatedReply(reply []byte) (uint32, uint32, string, error)
 	return header.Result, count, maxUpdatedAt, nil
 }}
 
-{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}{_aggregate_go(aggregate)}{_corpus_go(load_eval_corpus)}{_u64_probe_go(record_exists)}{_u64_ack_go(trace_mining_record)}{_u64_probe_go(document_exists)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
+{_scoped_id_list_go_codecs(top_l2_facts)}{_scoped_id_list_go_codecs(list_session_scope_priority)}{_scoped_term_list_go_codecs(collect_alias_matches)}{_scoped_term_list_go_codecs(collect_entity_matches)}{_scoped_term_list_go_codecs(collect_event_frame_matches)}{_scoped_term_list_go_codecs(collect_relation_token_matches)}{_scoped_term_list_go_codecs(collect_summary_matches)}{_scoped_term_list_go_codecs(collect_temporal_matches)}{_scoped_term_list_go_codecs(find_facts_like)}{_scoped_term_list_go_codecs(list_session_scope_priority_like)}{_scoped_term_list_go_codecs(negation_fts_search)}{_neighbor_list_go_codecs(session_neighbors_before)}{_neighbor_list_go_codecs(session_neighbors_after)}{_memory_row_go_shared()}{_memory_row_go_operation(row_get)}{_memory_row_go_operation(row_get_by_unit_id)}{_scoped_term_list_go_constants(search_facts_patterns_by_keyword)}{_key_list_go_constants(fact_history)}{_scoped_term_list_go_codecs(search_facts_patterns_by_keyword)}{_key_list_go_codecs(fact_history)}{_filter_list_go(list_rows)}{_aggregate_go(aggregate)}{_corpus_go(load_eval_corpus)}{_u64_probe_go(record_exists)}{_u64_ack_go(trace_mining_record)}{_u64_probe_go(document_exists)}{_string_count_go(anti_pattern_exists_exact)}{_string_count_go(anti_pattern_exists_by_source_ref)}{_string_count_go(artifact_citation_count)}{_string_count_go(commits_in_last_7_days)}// EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
 // tiers that count as a surviving reference are policy and never travel.
 func EncodeEntityEdgePruneOrphansRequest() []byte {{
 	header, err := EncodeRequestHeader(OperationEntityEdgePruneOrphans, 0, 0)

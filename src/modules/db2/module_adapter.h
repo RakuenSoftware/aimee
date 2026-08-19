@@ -76,6 +76,10 @@ typedef struct
    int (*record_exists)(int64_t record_id);
    int (*document_exists)(int64_t document_id);
    int (*trace_mining_record)(int64_t last_trace_id);
+   int (*anti_pattern_exists_exact)(const char *pattern);
+   int (*anti_pattern_exists_by_source_ref)(const char *source_ref);
+   int (*artifact_citation_count)(const char *artifact_id);
+   int (*commits_in_last_7_days)(const char *sink);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);

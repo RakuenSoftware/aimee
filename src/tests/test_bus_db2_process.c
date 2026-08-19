@@ -454,6 +454,34 @@ int main(int argc, char **argv)
    assert(aimee_db2_trace_mining_record_call(call_client, &client, 9112, 0, 90210u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
+   /* Four different tables on an empty schema, so each answers zero -- which is
+    * only meaningful because a statement that failed to prepare would abort the
+    * call rather than answer. */
+   uint32_t string_answer = 99;
+   string_answer = 99;
+   assert(aimee_db2_anti_pattern_exists_exact_call(call_client, &client, 9120, 0, "replay-argument",
+                                                   &string_answer, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_anti_pattern_exists_by_source_ref_call(call_client, &client, 9121, 0,
+                                                           "replay-argument", &string_answer, NULL,
+                                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_artifact_citation_count_call(call_client, &client, 9122, 0, "replay-argument",
+                                                 &string_answer, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_commits_in_last_7_days_call(call_client, &client, 9123, 0, "replay-argument",
+                                                &string_answer, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

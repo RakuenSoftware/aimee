@@ -671,6 +671,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .record_exists = db2_kb_service_memory_record_exists,
        .document_exists = db2_kb_service_kb_document_exists,
        .trace_mining_record = db2_trace_mining_record,
+       .anti_pattern_exists_exact = db2_anti_pattern_exists_exact,
+       .anti_pattern_exists_by_source_ref = db2_anti_pattern_exists_by_source_ref,
+       .artifact_citation_count = db2_artifact_citation_count,
+       .commits_in_last_7_days = db2_learning_commits_in_last_7_days,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -2620,6 +2624,61 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             if (aimee_db2_trace_mining_record_reply_encode(response_body, response_capacity,
                                                            response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         /* Four reads that take one string and answer one number. They share an
+          * argument buffer because the widest bound covers them all, and each
+          * clamps its own answer: an existence probe must not report two. */
+         char argument[AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ARGUMENT_MAX + 1];
+         int (*read)(const char *) = NULL;
+         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
+         uint32_t bound = 0u;
+         if (!answer && aimee_db2_anti_pattern_exists_exact_request_decode(
+                            request_body, request_len, argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->anti_pattern_exists_exact : NULL;
+            answer = aimee_db2_anti_pattern_exists_exact_reply_encode;
+            bound = AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_MAX;
+         }
+         if (!answer && aimee_db2_anti_pattern_exists_by_source_ref_request_decode(
+                            request_body, request_len, argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->anti_pattern_exists_by_source_ref : NULL;
+            answer = aimee_db2_anti_pattern_exists_by_source_ref_reply_encode;
+            bound = AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_MAX;
+         }
+         if (!answer && aimee_db2_artifact_citation_count_request_decode(
+                            request_body, request_len, argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->artifact_citation_count : NULL;
+            answer = aimee_db2_artifact_citation_count_reply_encode;
+            bound = AIMEE_DB2_ARTIFACT_CITATION_COUNT_MAX;
+         }
+         if (!answer && aimee_db2_commits_in_last_7_days_request_decode(
+                            request_body, request_len, argument, sizeof(argument)) == 0)
+         {
+            read = backend ? backend->commits_in_last_7_days : NULL;
+            answer = aimee_db2_commits_in_last_7_days_reply_encode;
+            bound = AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_MAX;
+         }
+         if (answer)
+         {
+            if (response_capacity < AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_RESPONSE_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            int counted = read(argument);
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (counted < 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            uint32_t value = (uint32_t)counted;
+            if (value > bound)
+               value = bound;
+            if (answer(value, response_body, response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

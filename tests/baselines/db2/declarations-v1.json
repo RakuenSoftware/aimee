@@ -3109,9 +3109,15 @@
           "line": 52
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.anti_pattern_exists_by_source_ref operation replaces the second duplicate check, which looks up the same table by the reference a pattern was drawn from rather than by its text. It is a separate operation rather than a flag on the first because the two answer differently for the same anti-pattern."
+      },
       "signature": "int db2_anti_pattern_exists_by_source_ref ( const char * source_ref )",
       "signature_sha256": "c75f2f7ff0ff759c8d617aa2335d6eb1f9223562ec9d33380b4f61ea44717539",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_anti_pattern_exists_by_source_ref"
     },
     {
@@ -3125,9 +3131,15 @@
           "line": 48
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.anti_pattern_exists_exact operation replaces the duplicate check. The match is exact: a pattern that differs by a character is a different pattern, which is what makes this usable as a duplicate guard and is worth stating because the wire cannot show it. A statement that could not run answers false, the same as an absent row."
+      },
       "signature": "int db2_anti_pattern_exists_exact ( const char * pattern )",
       "signature_sha256": "fad44e52e47b020c27f1c396d8a55877ca48ea3cdf46ecee761df01fb766c452",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_anti_pattern_exists_exact"
     },
     {
@@ -3210,9 +3222,15 @@
           "line": 56
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_citation_count operation replaces the citation count. It counts distinct sources, not citation rows, so an artifact cited twice by one source counts once -- a caller given a plain number cannot tell which was meant, so the policy says."
+      },
       "signature": "int db2_artifact_citation_count ( const char * artifact_id )",
       "signature_sha256": "d1a95bada8987b2edd068342779b93a69afb4c3e367b49365762d7d41e57b36f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_citation_count"
     },
     {
@@ -13873,9 +13891,15 @@
           "line": 38
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.commits_in_last_7_days operation replaces the recent-commit count. The seven-day window and the clock it is measured against are both DB2's and never cross, so a caller cannot widen the window or supply its own now; the count is only meaningful beside that fact."
+      },
       "signature": "int db2_learning_commits_in_last_7_days ( const char * sink )",
       "signature_sha256": "bf340c574a22fd440da36daa584727cfe3dd8ab2e07b82777b489898bc8cac45",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_commits_in_last_7_days"
     },
     {
@@ -26484,15 +26508,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "2f98b2005b735b6f4f2032e7a4927142f9fb122fe1eef045f23b4e2787c67494",
+  "fingerprint": "e220ab0d21c79d6cbe4929005b63deb0495dc1a47a4a4813c11dec2fed829347",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 548,
+    "audit_pending": 544,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 410
+    "reviewed": 414
   }
 }

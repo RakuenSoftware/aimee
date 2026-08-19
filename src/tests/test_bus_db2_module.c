@@ -85,6 +85,10 @@ typedef struct
    int (*record_exists)(int64_t record_id);
    int (*document_exists)(int64_t document_id);
    int (*trace_mining_record)(int64_t last_trace_id);
+   int (*anti_pattern_exists_exact)(const char *pattern);
+   int (*anti_pattern_exists_by_source_ref)(const char *source_ref);
+   int (*artifact_citation_count)(const char *artifact_id);
+   int (*commits_in_last_7_days)(const char *sink);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -304,6 +308,8 @@ static int corpus_calls;
 static int probe_calls[2];
 static int64_t probe_identifier_seen;
 static int mining_calls;
+static int string_read_calls[4];
+static char string_read_argument_seen[64];
 static int64_t mining_watermark_seen;
 static int corpus_limit_seen;
 static char list_tier_seen[8];
@@ -724,6 +730,36 @@ static int document_exists(int64_t document_id)
    return probe_impl(1, document_id);
 }
 
+/* Each read answers a different number so the reply says which one ran, and
+ * the third answers past the Boolean bound to show the handler clamps. */
+static int string_read_impl(int which, const char *argument)
+{
+   string_read_calls[which]++;
+   snprintf(string_read_argument_seen, sizeof(string_read_argument_seen), "%s",
+            argument ? argument : "");
+   return which == 2 ? 77 : which;
+}
+
+static int anti_pattern_exists_exact(const char *pattern)
+{
+   return string_read_impl(0, pattern);
+}
+
+static int anti_pattern_exists_by_source_ref(const char *source_ref)
+{
+   return string_read_impl(1, source_ref);
+}
+
+static int artifact_citation_count(const char *artifact_id)
+{
+   return string_read_impl(2, artifact_id);
+}
+
+static int commits_in_last_7_days(const char *sink)
+{
+   return string_read_impl(3, sink);
+}
+
 static int trace_mining_record(int64_t last_trace_id)
 {
    mining_calls++;
@@ -1055,6 +1091,30 @@ int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t labe
    (void)max;
    if (label_out && label_len)
       label_out[0] = '\0';
+   return 0;
+}
+
+int db2_anti_pattern_exists_exact(const char *pattern)
+{
+   (void)pattern;
+   return 0;
+}
+
+int db2_anti_pattern_exists_by_source_ref(const char *source_ref)
+{
+   (void)source_ref;
+   return 0;
+}
+
+int db2_artifact_citation_count(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_learning_commits_in_last_7_days(const char *sink)
+{
+   (void)sink;
    return 0;
 }
 
@@ -2357,6 +2417,10 @@ int main(void)
        .record_exists = record_exists,
        .document_exists = document_exists,
        .trace_mining_record = trace_mining_record,
+       .anti_pattern_exists_exact = anti_pattern_exists_exact,
+       .anti_pattern_exists_by_source_ref = anti_pattern_exists_by_source_ref,
+       .artifact_citation_count = artifact_citation_count,
+       .commits_in_last_7_days = commits_in_last_7_days,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -2839,6 +2903,51 @@ int main(void)
    assert(aimee_db2_trace_mining_record_call(call_client, &client, 7145, 0, 90210u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(mining_calls == 1 && mining_watermark_seen == 90210);
+
+   /* Four reads on one envelope shape, told apart only by the operation number,
+    * so each is called and identified by the number it answers. */
+   uint32_t string_answer = 99;
+   string_answer = 99;
+   assert(aimee_db2_anti_pattern_exists_exact_call(call_client, &client, 7150, 0, "probe-argument",
+                                                   &string_answer, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0 && string_read_calls[0] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_anti_pattern_exists_by_source_ref_call(call_client, &client, 7151, 0,
+                                                           "probe-argument", &string_answer, NULL,
+                                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && string_read_calls[1] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_artifact_citation_count_call(call_client, &client, 7152, 0, "probe-argument",
+                                                 &string_answer, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 77 && string_read_calls[2] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_commits_in_last_7_days_call(call_client, &client, 7153, 0, "probe-argument",
+                                                &string_answer, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 3 && string_read_calls[3] == 1 &&
+          strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   /* The existence probes clamp: their backend answering two would otherwise
+    * put a value on the wire that the contract says cannot appear. */
+   string_answer = 99;
+   assert(aimee_db2_anti_pattern_exists_by_source_ref_call(call_client, &client, 7160, 0, "probe",
+                                                           &string_answer, NULL,
+                                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1);
+
+   /* An empty argument is refused before the bus: none of these statements
+    * means anything against the empty string. */
+   assert(aimee_db2_artifact_citation_count_call(call_client, &client, 7161, 0, "", &string_answer,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(string_read_calls[2] == 1);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */
