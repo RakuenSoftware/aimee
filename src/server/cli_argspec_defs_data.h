@@ -129,24 +129,12 @@
  "{\"fields\":[{\"json\":\"out\",\"from\":\"flag\",\"flag\":\"out\","
  "\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
-{"index.blast_radius",
- "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"project\",\"from\":"
- "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"file_path\""
- ",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
- "\"cwd\",\"from\":\"cwd\"}]}"},
-
 {"index.find_callers",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"symbol\",\"from\":"
  "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"project\","
  "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
  "\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"},{"
  "\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
-
-{"index.structure",
- "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"project\",\"from\":"
- "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"file_path\""
- ",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
- "\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"kb.search",
  "{\"fields\":[{\"json\":\"query\",\"from\":\"positional\",\"index\":0,"

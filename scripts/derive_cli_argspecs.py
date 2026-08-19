@@ -295,8 +295,25 @@ def spec_for(method):
     # so `aimee index hybrid a b` would have searched for "a" alone. Which
     # fields EXIST must not depend on the input; that is the half of the line
     # this crosses.
-    if re.search(r"pos_count == \d+", body) and "AddArrayToObject" in body:
-        return None, "field-set branch: the field name depends on the count"
+    # A branch on the COUNT that changes WHICH fields are sent.
+    #
+    # The first version of this only caught `pos_count == N` together with an
+    # array (index.hybrid). marshal_index_file_request uses `pos_count > 1` and
+    # no array: two positionals mean <project> <file_path>, one means
+    # <file_path> alone. The generated spec put positional[0] in `project`
+    # unconditionally, so `aimee index structure <file>` sent the file as a
+    # PROJECT and the server answered "missing file_path".
+    #
+    # The differential test did not catch it, because samples are built from the
+    # spec: with two fields it generated two positionals and three, never ONE.
+    # Found by driving the real command against a real server.
+    # Judge the EXPANDED body: index.structure is a two-line wrapper around
+    # marshal_index_file_request, so the branch lives in the callee and checking
+    # only the direct body saw nothing at all.
+    if re.search(r"pos_count (?:==|>) \d+", expanded) and re.search(
+            r"else if \(opts\.pos_count > \d+\)|"
+            r"pos_count == \d+[^\n]*\n[^\n]*AddArrayToObject", expanded):
+        return None, "field-set branch: which fields exist depends on the count"
     if re.search(r"else if \(cli_args_get", body):
         return None, "conditional: exclusive flags"
     if re.search(r"for \(int \w+ = 0; \w+ < argc", body) or "argv[i]" in body:
