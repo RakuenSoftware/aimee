@@ -969,12 +969,23 @@ go-unit-tests:
 # `main`, and verify-local runs on branches whose whole job is to move the
 # vendored source ahead of it. `make repository-lock-check` still runs it on
 # demand, and the c-repository-pins workflow runs it for `main`.
+# NOT the same set CI runs. build-integrity and integration-tests are the two
+# heavy ones left out, deliberately -- they build the full shipped artifact set
+# and stand up servers, which is too slow for the edit/verify loop this target
+# exists for.
+#
+# The omission is named in the output because "verify-local: ok" reads as "this
+# would pass CI", and it does not. A branch that added a client help entry
+# passed this target and then failed build-integrity in CI, because the banned
+# term it introduced is only visible once the shipped client is inspected.
 verify-local: all
 	@$(MAKE) check-linking
 	@$(MAKE) lint
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@$(MAKE) go-unit-tests
-	@echo "verify-local: ok"
+	@echo "verify-local: ok (lint, unit, go-unit, linking)"
+	@echo "verify-local: NOT run here -- build-integrity, integration-tests;" \
+	      "run those before pushing anything that changes the shipped surface"
 
 server: retire-obsolete-binaries $(SERVER) $(KB) $(KB_RESOLVER) $(FORWARDER)
 
