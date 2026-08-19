@@ -57,7 +57,7 @@ int server_write_tier_replay_db1(void *ctx, const server_identity_token_claims_t
    record.issued_at = claims->issued_at;
    record.expires_at = claims->expires_at;
 
-   switch (server_identity_jti_consume(&record, now))
+   switch (db1_identity_jti_consume(&record, now))
    {
    case SERVER_IDENTITY_JTI_OK:
       return 0; /* previously unseen, now durably recorded */

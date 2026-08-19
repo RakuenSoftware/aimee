@@ -934,9 +934,17 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             spelled = declared_return(root, str(operation["c_name"]))
             # A cost is returned as a double, and rounding it at the boundary
             # would bill differently on each side of it.
+            # An enum is an int with names on it, and the wire has no names --
+            # the JTI replay checks answer ok / replay / saturated / storage /
+            # invalid, and the caller admits a request on the first and refuses
+            # it on the rest, so the VALUE has to survive. It travels as an int
+            # and the client casts it back to the declared type, which is what
+            # keeps "storage failed" distinguishable from "this is a replay".
+            enum_return = spelled.endswith("_result_t")
             wanted = (("double",) if spelled == "double"
                       else ("float",) if spelled == "float"
-                      else ("int", "int64") if spelled == "int" else ("int64",))
+                      else ("int", "int64") if spelled in ("int", "long") or enum_return
+                      else ("int64",))
             if len(reply_fields) != 1 or str(reply_fields[0]["type"]) not in wanted:
                 fail("c-returns",
                      f"{name} hands back its return value, so its reply must declare "
@@ -1722,12 +1730,15 @@ def pointer_members(root: Path, struct: str) -> set[str]:
     the wrong one. An array member CAN still be empty, which is why this is
     separate from whether the field is required.
     """
+    # struct_body rather than a regex: the non-greedy form this used matched from
+    # the FIRST "typedef struct {" in the file to this struct's closing name, so
+    # for a header holding two structs it returned the wrong one's members --
+    # silently, and spelled the same way, which is why it read as correct.
     body = ""
     for _name, raw, _stripped in header_texts(root):
-        found = re.search(r"typedef\s+struct\s*\{(.*?)\}\s*" + re.escape(struct) + r"\s*;",
-                          raw, re.S)
-        if found:
-            body = found.group(1)
+        found = struct_body(raw, struct)
+        if found is not None:
+            body = found
             break
     names: set[str] = set()
     for member in body.split(";"):
@@ -1735,6 +1746,18 @@ def pointer_members(root: Path, struct: str) -> set[str]:
         matched = re.search(r"\*\s*([A-Za-z_][A-Za-z0-9_]*)$", member)
         if matched:
             names.add(matched.group(1))
+    # A member that is itself a struct contributes its own pointer members under
+    # a dotted name, because that is how the expansion spells them: a request
+    # row holding a token holds "token.jti", and asking this set about the outer
+    # struct alone would call that an inline array and try to snprintf into a
+    # const char *.
+    for member in body.split(";"):
+        member = re.sub(r"/\*.*?\*/", "", member, flags=re.S).strip()
+        nested = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*_t)\s+([A-Za-z_][A-Za-z0-9_]*)", member)
+        if not nested or nested.group(1) == struct:
+            continue
+        for inner in pointer_members(root, nested.group(1)):
+            names.add(f"{nested.group(2)}.{inner}")
     return names
 
 

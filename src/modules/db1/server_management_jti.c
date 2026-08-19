@@ -166,8 +166,8 @@ rollback:
    return SERVER_MANAGEMENT_JTI_STORAGE;
 }
 
-server_management_jti_result_t server_management_jti_consume(const server_management_jti_t *token,
-                                                             int64_t consumed_at)
+server_management_jti_result_t db1_management_jti_consume(const server_management_jti_t *token,
+                                                          int64_t consumed_at)
 {
    return consume(token, consumed_at, SERVER_MANAGEMENT_JTI_LIVE_LIMIT);
 }
@@ -177,4 +177,12 @@ server_management_jti_consume_for_test(const server_management_jti_t *token, int
                                        size_t live_limit)
 {
    return consume(token, consumed_at, live_limit);
+}
+
+server_management_jti_result_t
+db1_management_jti_consume_row(const db1_management_jti_consume_t *in)
+{
+   if (!in)
+      return SERVER_MANAGEMENT_JTI_INVALID;
+   return db1_management_jti_consume(&in->token, in->consumed_at);
 }

@@ -5159,6 +5159,7 @@ $(TESTPREFIX)/unit-test-db1-module-bus: \
                                        $(OBJDIR)/ensemble_view.o \
                                        $(OBJDIR)/execution_plan_list.o \
                                        $(OBJDIR)/remote_client_claim.o \
+                                       $(OBJDIR)/jti_replay_consume.o \
                                        $(OBS_BUS_LINK_OBJS) \
                                        $(OBJDIR)/core/event_bus/bus_client.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -5283,6 +5284,9 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/roundtable_stage.o \
                                        $(OBJDIR)/modules/db1/identity_stage.o \
                                        $(OBJDIR)/modules/db1/checkpoints_stage.o \
+                                       $(OBJDIR)/modules/db1/jti_replay_stage.o \
+                                       $(OBJDIR)/modules/db1/server_identity_jti.o \
+                                       $(OBJDIR)/modules/db1/server_management_jti.o \
                                        $(OBJDIR)/modules/db1/economizer_state.o \
                                        $(OBJDIR)/modules/db1/remote_client_grant.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o \
@@ -6111,6 +6115,8 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
+                     $(OBJDIR)/modules/db1/server_management_jti.o \
+                     $(OBJDIR)/modules/db1/server_identity_jti.o \
                      $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                      $(OBJDIR)/tests/delegate_permissions_stub.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \

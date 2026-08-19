@@ -507,6 +507,17 @@
 #define AIMEE_DB1_OP_CHECKPOINT_LIST   3u
 #define AIMEE_DB1_OP_CHECKPOINT_DELETE 4u
 
+/* Family 15: single-use JTI replay windows for the identity and management
+ * token paths. Reserved: these entry points are not named db1_, which the
+ * catalog requires, and each has a _consume_for_test twin that a production
+ * wire has no place for. */
+
+#define AIMEE_DB1_EVENT_JTI_REPLAY 11791u
+#define AIMEE_DB1_STAGE_JTI_REPLAY 15u
+
+#define AIMEE_DB1_OP_IDENTITY_JTI_CONSUME   1u
+#define AIMEE_DB1_OP_MANAGEMENT_JTI_CONSUME 2u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

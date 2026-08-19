@@ -54,6 +54,7 @@
     "src/modules/db1/guardrail_state_stage.c",
     "src/modules/db1/identity_stage.c",
     "src/modules/db1/interaction_events.c",
+    "src/modules/db1/jti_replay_stage.c",
     "src/modules/db1/local_operator.c",
     "src/modules/db1/maintenance.c",
     "src/modules/db1/mcp_osv_cache.c",

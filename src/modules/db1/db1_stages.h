@@ -80,5 +80,10 @@ aimee_module_status_t aimee_db1_stage_checkpoints(const uint8_t *request_body, u
                                          uint32_t response_capacity,
                                          uint32_t *response_len);
 
+aimee_module_status_t aimee_db1_stage_jti_replay(const uint8_t *request_body, uint32_t request_len,
+                                        uint8_t *response_body,
+                                        uint32_t response_capacity,
+                                        uint32_t *response_len);
+
 #endif /* AIMEE_DB1_STAGES_H */
 /* clang-format on */

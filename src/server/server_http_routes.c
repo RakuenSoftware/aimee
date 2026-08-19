@@ -203,7 +203,7 @@ static server_mgmt_endpoint_jti_result_t management_jti(void *ctx,
        c->issued_at,
        c->expires_at,
    };
-   server_management_jti_result_t rc = server_management_jti_consume(&token, rq->now);
+   server_management_jti_result_t rc = db1_management_jti_consume(&token, rq->now);
    return rc == SERVER_MANAGEMENT_JTI_OK       ? SERVER_MGMT_JTI_OK
           : rc == SERVER_MANAGEMENT_JTI_REPLAY ? SERVER_MGMT_JTI_REPLAY
                                                : SERVER_MGMT_JTI_FAILED;

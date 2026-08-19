@@ -719,6 +719,11 @@
           "id": 14,
           "name": "db1-checkpoints",
           "event_kind": 11790
+        },
+        {
+          "id": 15,
+          "name": "db1-jti-replay",
+          "event_kind": 11791
         }
       ]
     }

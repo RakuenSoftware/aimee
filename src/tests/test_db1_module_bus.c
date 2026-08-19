@@ -41,6 +41,7 @@
 #include "execution_plans.h"
 #include "roundtable_pipeline.h"
 #include "remote_client_grant.h"
+#include "server_identity_jti.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -81,6 +82,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_GUARDRAIL_STATE,  AIMEE_DB1_EVENT_ENSEMBLE,
     AIMEE_DB1_EVENT_WORKFLOW,         AIMEE_DB1_EVENT_ROUNDTABLE,
     AIMEE_DB1_EVENT_IDENTITY,         AIMEE_DB1_EVENT_CHECKPOINTS,
+    AIMEE_DB1_EVENT_JTI_REPLAY,
 };
 
 static pid_t g_module = -1;
@@ -1435,6 +1437,45 @@ static void test_a_first_user_claim_says_how_it_went(void)
    printf("  PASS: a first-user claim says how it went\n");
 }
 
+/* A replay check has to keep OK apart from every other answer: the caller
+   admits a request on OK and refuses it on the rest. Flattened to a status the
+   refusals become one value, and the one that matters -- "this token has been
+   used before" -- would be indistinguishable from "the store is down". */
+static void test_a_replayed_token_is_not_a_broken_store(void)
+{
+   server_identity_jti_t token;
+   memset(&token, 0, sizeof token);
+   token.jti = "jti-bus-1";
+   token.issuer = "https://issuer.example";
+   token.kid = "kid-1";
+   token.audience = "aimee";
+   token.subject = "user-1";
+   token.team_id = 7;
+   token.tier = "data";
+   token.issued_at = 100;
+   token.expires_at = 1000;
+
+   must(db1_identity_jti_consume(&token, 101) == SERVER_IDENTITY_JTI_OK,
+        "a token seen for the first time is consumed");
+   must(db1_identity_jti_consume(&token, 102) == SERVER_IDENTITY_JTI_REPLAY,
+        "and the same token again is a replay, which is its own answer");
+
+   server_identity_jti_t other = token;
+   other.jti = "jti-bus-2";
+   must(db1_identity_jti_consume(&other, 103) == SERVER_IDENTITY_JTI_OK,
+        "a different jti is still fresh");
+
+   server_identity_jti_t empty = token;
+   empty.jti = "";
+   must(db1_identity_jti_consume(&empty, 104) == SERVER_IDENTITY_JTI_INVALID,
+        "and a token with no jti is refused as malformed, not as a replay");
+
+   must(db1_identity_jti_consume(NULL, 105) == SERVER_IDENTITY_JTI_INVALID,
+        "as is no token at all");
+
+   printf("  PASS: a replayed token is not a broken store\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1488,6 +1529,7 @@ int main(int argc, char **argv)
    test_a_plan_carries_its_steps_and_their_dependencies();
    test_a_roundtable_run_round_trips_and_swaps_once();
    test_a_first_user_claim_says_how_it_went();
+   test_a_replayed_token_is_not_a_broken_store();
 
    stop_module();
    obs_bus_stop();

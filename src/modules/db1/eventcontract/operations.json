@@ -318,7 +318,7 @@
    "id": 15,
    "name": "jti_replay",
    "event_kind": 11791,
-   "active": false,
+   "active": true,
    "doc": "single-use JTI replay windows for the identity and management token paths. Reserved: these entry points are not named db1_, which the catalog requires, and each has a _consume_for_test twin that a production wire has no place for.",
    "client_doc": "",
    "covers": "server_identity_jti, server_management_jti",
@@ -326,7 +326,10 @@
     "server_identity_jti",
     "server_management_jti"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "server_identity_jti.c",
+    "server_management_jti.c"
+   ]
   },
   {
    "id": 16,
@@ -21736,6 +21739,188 @@
    "reply": {
     "fields": [],
     "max_bytes": 0
+   }
+  },
+  {
+   "family": "jti_replay",
+   "id": 1,
+   "name": "identity_jti_consume",
+   "c_name": "db1_identity_jti_consume_row",
+   "c_params": [
+    "in"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_identity_jti_consume_t",
+    "fields": [
+     {
+      "name": "token",
+      "type": "struct",
+      "fields": [
+       {
+        "name": "jti",
+        "type": "text"
+       },
+       {
+        "name": "issuer",
+        "type": "text"
+       },
+       {
+        "name": "kid",
+        "type": "text"
+       },
+       {
+        "name": "audience",
+        "type": "text"
+       },
+       {
+        "name": "subject",
+        "type": "text"
+       },
+       {
+        "name": "team_id",
+        "type": "int64"
+       },
+       {
+        "name": "tier",
+        "type": "text"
+       },
+       {
+        "name": "issued_at",
+        "type": "int64"
+       },
+       {
+        "name": "expires_at",
+        "type": "int64"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "consumed_at",
+      "type": "int64",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "result",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "jti_replay",
+   "id": 2,
+   "name": "management_jti_consume",
+   "c_name": "db1_management_jti_consume_row",
+   "c_params": [
+    "in"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_management_jti_consume_t",
+    "fields": [
+     {
+      "name": "token",
+      "type": "struct",
+      "fields": [
+       {
+        "name": "jti",
+        "type": "text"
+       },
+       {
+        "name": "issuer",
+        "type": "text"
+       },
+       {
+        "name": "kid",
+        "type": "text"
+       },
+       {
+        "name": "audience",
+        "type": "text"
+       },
+       {
+        "name": "subject",
+        "type": "text"
+       },
+       {
+        "name": "team_id",
+        "type": "int64"
+       },
+       {
+        "name": "capability",
+        "type": "text"
+       },
+       {
+        "name": "peer_issuer",
+        "type": "text"
+       },
+       {
+        "name": "peer_serial",
+        "type": "text"
+       },
+       {
+        "name": "peer_fingerprint",
+        "type": "text"
+       },
+       {
+        "name": "request_sha256",
+        "type": "text"
+       },
+       {
+        "name": "correlation_id",
+        "type": "text"
+       },
+       {
+        "name": "issued_at",
+        "type": "int64"
+       },
+       {
+        "name": "expires_at",
+        "type": "int64"
+       }
+      ],
+      "required": false
+     },
+     {
+      "name": "consumed_at",
+      "type": "int64",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "result",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
    }
   }
  ]
