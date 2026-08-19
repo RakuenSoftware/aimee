@@ -257,3 +257,15 @@
 {"session.list",
  "{\"fields\":[{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":0,\"omit_if_nonpositive\":true}]}"},
 
+{"curator.contradictions",
+ "{\"fields\":[{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20}]}"},
+
+{"job.list",
+ "{\"fields\":[{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20}]}"},
+
+{"jobs.list",
+ "{\"fields\":[{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20}]}"},
+
+{"notes.search",
+ "{\"fields\":[{\"json\":\"query\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"query\",\"empty\":\"emit\"},{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20}]}"},
+
