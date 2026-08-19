@@ -93,6 +93,7 @@ static int curiosity_rescore_value;
 static int curiosity_rescore_calls;
 static int mining_seed_value;
 static int mining_seed_calls;
+static int proposals_archive_calls;
 static int rel_types_seed_value;
 static int rel_types_seed_calls;
 static int prospective_sweep_value;
@@ -750,6 +751,15 @@ static int mining_seed_job_defaults(void)
 {
    mining_seed_calls++;
    return mining_seed_value;
+}
+
+void db2_learning_proposals_archive_expired(void)
+{
+}
+
+static void proposals_archive_expired(void)
+{
+   proposals_archive_calls++;
 }
 
 int db2_rel_types_ensure_seed(void)
@@ -1570,6 +1580,7 @@ static void reset(void)
    curiosity_rescore_calls = 0;
    mining_seed_value = 0;
    mining_seed_calls = 0;
+   proposals_archive_calls = 0;
    rel_types_seed_value = 0;
    rel_types_seed_calls = 0;
    prospective_sweep_value = 7;
@@ -3169,6 +3180,32 @@ static void test_rel_types_ensure_seed_wire(void)
    assert(aimee_db2_rel_types_ensure_seed_reply_encode(reply, sizeof(reply), &reply_len) == 0);
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_rel_types_ensure_seed_reply_decode(reply, reply_len) == -1);
+}
+
+static void test_proposals_archive_expired_wire(void)
+{
+   uint8_t request[AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN] = {0};
+   assert(aimee_db2_proposals_archive_expired_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_proposals_archive_expired_request_decode(request, sizeof(request)) == 0);
+   /* Fourth learning operation, so the three before it must refuse it. */
+   assert(aimee_db2_rules_decay_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_curiosity_rescore_all_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_mining_seed_job_defaults_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_proposals_archive_expired_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN + 4] = {0};
+   uint32_t reply_len = 99;
+   assert(aimee_db2_proposals_archive_expired_reply_encode(reply, sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN);
+   assert(aimee_db2_proposals_archive_expired_reply_decode(reply, reply_len) == 0);
+   assert(aimee_db2_proposals_archive_expired_reply_decode(reply, reply_len + 4) == -1);
+   assert(aimee_db2_proposals_archive_expired_reply_decode(reply, reply_len - 1) == -1);
+   assert(aimee_db2_proposals_archive_expired_reply_encode(
+              reply, AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN - 1, &reply_len) == -1);
+   assert(aimee_db2_proposals_archive_expired_reply_encode(reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_proposals_archive_expired_reply_decode(reply, reply_len) == -1);
 }
 
 static void test_mining_seed_job_defaults_wire(void)
@@ -5942,6 +5979,37 @@ static void test_rel_types_ensure_seed_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_proposals_archive_expired_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.proposals_archive_expired =
+                                                   proposals_archive_expired};
+   uint8_t request[AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED};
+   assert(aimee_db2_proposals_archive_expired_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(proposals_archive_calls == 1);
+   assert(aimee_db2_proposals_archive_expired_reply_decode(response, response_len) == 0);
+
+   /* There is no failure case to pin here, and that absence is the finding.
+    * The backend returns void: a broken statement is logged and the caller is
+    * told nothing, so the boundary answers ok whatever happened. Every other
+    * operation on this bus can distinguish a failed sweep from an empty one;
+    * this one cannot, and the catalog says so with reports_failure false. */
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(proposals_archive_calls == 2);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_mining_seed_job_defaults_handler(void)
 {
    reset();
@@ -8038,6 +8106,7 @@ int main(void)
    test_rules_decay_wire();
    test_curiosity_rescore_all_wire();
    test_mining_seed_job_defaults_wire();
+   test_proposals_archive_expired_wire();
    test_rel_types_ensure_seed_wire();
    test_prospective_sweep_expired_wire();
    test_directive_sweep_expired_wire();
@@ -8110,6 +8179,7 @@ int main(void)
    test_rules_decay_handler();
    test_curiosity_rescore_all_handler();
    test_mining_seed_job_defaults_handler();
+   test_proposals_archive_expired_handler();
    test_rel_types_ensure_seed_handler();
    test_prospective_sweep_expired_handler();
    test_directive_sweep_expired_handler();

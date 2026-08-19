@@ -647,6 +647,12 @@ int main(int argc, char **argv)
    assert(aimee_db2_rel_types_ensure_seed_call(call_client, &client, 9115, 0, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 
+   /* No learning proposal exists on a fresh schema, so the archive sweep has
+    * nothing to retire. It would answer ok either way: this is the one
+    * operation on the bus whose backend cannot report a failure. */
+   assert(aimee_db2_proposals_archive_expired_call(call_client, &client, 9116, 0, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+
    /* The maintenance family reaching the real process for the first time. No
     * prospective memory is armed on a fresh schema, so nothing expires, and
     * the second call returning the same zero is what the catalog's safe

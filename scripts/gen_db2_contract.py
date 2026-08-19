@@ -242,6 +242,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "purge_hidden_pollution",
                                                                 "requeue_drifted",
                                                                 "prospective_sweep_expired",
+                                                                "proposals_archive_expired",
                                                                 "directive_sweep_expired",
                                                                 "mark_revisit_due",
                                                                 "ingest_queue_reset_running",
@@ -2304,6 +2305,39 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["payload"] != "none"):
                 fail("mining-seed-job-defaults-reply",
                      "reply must be a bare acknowledgement envelope")
+        elif key == ("learning", 4) and name == "proposals_archive_expired" and \
+                operation["wire_format"] == "db2-envelope-ack-v1":
+            # This backend returns void and logs its failures, so the boundary
+            # has nothing to report one with: the acknowledgement is always ok.
+            # reports_failure records that the guarantee is absent rather than
+            # letting a bare ok imply one. Fixing it means changing the backend
+            # signature, which is a separate change and should look like one.
+            if operation["c_symbols"] != ["db2_learning_proposals_archive_expired"]:
+                fail("operation-c-symbols",
+                     "proposals_archive_expired C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results",
+                     "proposals_archive_expired results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "proposals_archive_expired.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"from_state": "pending",
+                                          "to_state": "archived",
+                                          "archive_reason": "expired",
+                                          "clock": "database",
+                                          "requires_expires_at": True,
+                                          "reports_failure": False}):
+                fail("proposals-archive-expired-request",
+                     "request must carry no payload and fix the states and the clock")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "payload"},
+                          "proposals_archive_expired.reply")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["payload"] != "none"):
+                fail("proposals-archive-expired-reply",
+                     "reply must be a bare acknowledgement envelope")
         elif key == ("organization", 1) and name == "rel_types_ensure_seed" and \
                 operation["wire_format"] == "db2-envelope-ack-v1":
             # Unlike the mining seed, this one's content is not DB2's. The
@@ -2595,7 +2629,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 queue size from its own query")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 72 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 73 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2615,12 +2649,13 @@ def validate_catalog(value: object) -> dict[str, object]:
             "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
             "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
             "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
-            "rel_types_ensure_seed", "prospective_sweep_expired",
+            "proposals_archive_expired", "rel_types_ensure_seed",
+            "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the seventy-two supported operations exactly once")
+             "the partial generator requires the seventy-three supported operations exactly once")
     return catalog
 
 
@@ -2807,15 +2842,16 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     rules_decay = catalog["operations"][60]
     curiosity_rescore_all = catalog["operations"][61]
     mining_seed_job_defaults = catalog["operations"][62]
-    rel_types_ensure_seed = catalog["operations"][63]
-    prospective_sweep_expired = catalog["operations"][64]
-    directive_sweep_expired = catalog["operations"][65]
-    mark_revisit_due = catalog["operations"][66]
-    ingest_queue_reset_running = catalog["operations"][67]
-    evidence_reembed_all = catalog["operations"][68]
-    curator_reembed_all = catalog["operations"][69]
-    synth_reenqueue_all = catalog["operations"][70]
-    curator_reenqueue_extract_all = catalog["operations"][71]
+    proposals_archive_expired = catalog["operations"][63]
+    rel_types_ensure_seed = catalog["operations"][64]
+    prospective_sweep_expired = catalog["operations"][65]
+    directive_sweep_expired = catalog["operations"][66]
+    mark_revisit_due = catalog["operations"][67]
+    ingest_queue_reset_running = catalog["operations"][68]
+    evidence_reembed_all = catalog["operations"][69]
+    curator_reembed_all = catalog["operations"][70]
+    synth_reenqueue_all = catalog["operations"][71]
+    curator_reenqueue_extract_all = catalog["operations"][72]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -3246,6 +3282,12 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     rel_types_ensure_seed_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(rel_types_ensure_seed["id"]), 0, b"",
+    )
+    proposals_archive_expired_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(proposals_archive_expired["id"]), 0, b"",
+    )
+    proposals_archive_expired_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(proposals_archive_expired["id"]), 0, b"",
     )
     prospective_sweep_expired_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(prospective_sweep_expired["id"]), 0, b"",
@@ -6266,6 +6308,40 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                 ],
             },
         }, {
+            "family": proposals_archive_expired["family"],
+            "id": proposals_archive_expired["id"],
+            "name": proposals_archive_expired["name"],
+            "request": {
+                "positive": proposals_archive_expired_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(proposals_archive_expired_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(proposals_archive_expired_request, 16, 1).hex()},
+                    {"mutation": "short", "hex":
+                     proposals_archive_expired_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (proposals_archive_expired_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": proposals_archive_expired_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(proposals_archive_expired_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(proposals_archive_expired_ok, 12, 5).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(proposals_archive_expired_ok, 16, 4).hex()},
+                    {"mutation": "short", "hex":
+                     proposals_archive_expired_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (proposals_archive_expired_ok + b"\0").hex()},
+                ],
+            },
+        }, {
             "family": rel_types_ensure_seed["family"],
             "id": rel_types_ensure_seed["id"],
             "name": rel_types_ensure_seed["name"],
@@ -6604,6 +6680,19 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
             },
         }],
     }
+    # The fixture blocks above are hand-sequenced, so their order is not the
+    # catalog's by construction. It has drifted once already: a learning
+    # operation was emitted after an organization one, which the Go name guard
+    # caught only because that guard lists every name in order. Check it here
+    # instead, where the failure names the operation rather than printing the
+    # whole baseline.
+    emitted = [str(entry["name"]) for entry in value["operations"]]
+    expected = [str(entry["name"]) for entry in catalog["operations"]]
+    if emitted != expected:
+        first = next(index for index, pair in enumerate(zip(emitted, expected))
+                     if pair[0] != pair[1])
+        fail("baseline-order",
+             f"wire fixture {first} is {emitted[first]!r}, catalog says {expected[first]!r}")
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
@@ -6677,15 +6766,16 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     rules_decay = catalog["operations"][60]
     curiosity_rescore_all = catalog["operations"][61]
     mining_seed_job_defaults = catalog["operations"][62]
-    rel_types_ensure_seed = catalog["operations"][63]
-    prospective_sweep_expired = catalog["operations"][64]
-    directive_sweep_expired = catalog["operations"][65]
-    mark_revisit_due = catalog["operations"][66]
-    ingest_queue_reset_running = catalog["operations"][67]
-    evidence_reembed_all = catalog["operations"][68]
-    curator_reembed_all = catalog["operations"][69]
-    synth_reenqueue_all = catalog["operations"][70]
-    curator_reenqueue_extract_all = catalog["operations"][71]
+    proposals_archive_expired = catalog["operations"][63]
+    rel_types_ensure_seed = catalog["operations"][64]
+    prospective_sweep_expired = catalog["operations"][65]
+    directive_sweep_expired = catalog["operations"][66]
+    mark_revisit_due = catalog["operations"][67]
+    ingest_queue_reset_running = catalog["operations"][68]
+    evidence_reembed_all = catalog["operations"][69]
+    curator_reembed_all = catalog["operations"][70]
+    synth_reenqueue_all = catalog["operations"][71]
+    curator_reenqueue_extract_all = catalog["operations"][72]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -7558,6 +7648,16 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{mining_seed_job_defaults['reply']['encoded_size_ok']}u"),
         ("AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_ERROR_LEN",
          f"{mining_seed_job_defaults['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EVENT_PROPOSALS_ARCHIVE_EXPIRED", "AIMEE_DB2_EVENT_LEARNING"),
+        ("AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED", "AIMEE_DB2_FAMILY_LEARNING"),
+        ("AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED",
+         f"{proposals_archive_expired['id']}u"),
+        ("AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN",
+         f"{proposals_archive_expired['request']['encoded_size']}u"),
+        ("AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN",
+         f"{proposals_archive_expired['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_ERROR_LEN",
+         f"{proposals_archive_expired['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED", "AIMEE_DB2_EVENT_ORGANIZATION"),
         ("AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED", "AIMEE_DB2_FAMILY_ORGANIZATION"),
         ("AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED",
@@ -10044,6 +10144,52 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
  * code and nothing else. For operations whose only honest answer is whether
  * they completed -- any count they could return would describe something other
  * than the work they did. */
+static inline int aimee_db2_proposals_archive_expired_request_encode(uint8_t *output,
+                                                                     size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED, 0u, 0u,
+                                          output, capacity);
+}}
+
+static inline int aimee_db2_proposals_archive_expired_request_decode(const uint8_t *input,
+                                                                     size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_proposals_archive_expired_reply_encode(uint8_t *output,
+                                                                   size_t capacity,
+                                                                   uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len ||
+       capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED,
+                                     AIMEE_DB2_RESULT_OK, 0u, output, capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_proposals_archive_expired_reply_decode(const uint8_t *input,
+                                                                   size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
 static inline int aimee_db2_rel_types_ensure_seed_request_encode(uint8_t *output,
                                                                  size_t capacity)
 {{
@@ -13311,6 +13457,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_proposals_archive_expired_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -14887,6 +15037,30 @@ aimee_db2_rel_types_ensure_seed_call(aimee_db2_call_fn call, void *call_context,
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_proposals_archive_expired_call(aimee_db2_call_fn call, void *call_context,
+                                         uint64_t trace_id, uint64_t deadline_ns,
+                                         aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_proposals_archive_expired_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROPOSALS_ARCHIVE_EXPIRED,
+            AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_proposals_archive_expired_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_prospective_sweep_expired_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     uint32_t *expired_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -15387,15 +15561,16 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     rules_decay = catalog["operations"][60]
     curiosity_rescore_all = catalog["operations"][61]
     mining_seed_job_defaults = catalog["operations"][62]
-    rel_types_ensure_seed = catalog["operations"][63]
-    prospective_sweep_expired = catalog["operations"][64]
-    directive_sweep_expired = catalog["operations"][65]
-    mark_revisit_due = catalog["operations"][66]
-    ingest_queue_reset_running = catalog["operations"][67]
-    evidence_reembed_all = catalog["operations"][68]
-    curator_reembed_all = catalog["operations"][69]
-    synth_reenqueue_all = catalog["operations"][70]
-    curator_reenqueue_extract_all = catalog["operations"][71]
+    proposals_archive_expired = catalog["operations"][63]
+    rel_types_ensure_seed = catalog["operations"][64]
+    prospective_sweep_expired = catalog["operations"][65]
+    directive_sweep_expired = catalog["operations"][66]
+    mark_revisit_due = catalog["operations"][67]
+    ingest_queue_reset_running = catalog["operations"][68]
+    evidence_reembed_all = catalog["operations"][69]
+    curator_reembed_all = catalog["operations"][70]
+    synth_reenqueue_all = catalog["operations"][71]
+    curator_reenqueue_extract_all = catalog["operations"][72]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -15764,6 +15939,9 @@ const OperationMiningSeedJobDefaults uint32 = {mining_seed_job_defaults['id']}
 const EventRelTypesEnsureSeed = EventOrganization
 const StageRelTypesEnsureSeed = FamilyOrganization
 const OperationRelTypesEnsureSeed uint32 = {rel_types_ensure_seed['id']}
+const EventProposalsArchiveExpired = EventLearning
+const StageProposalsArchiveExpired = FamilyLearning
+const OperationProposalsArchiveExpired uint32 = {proposals_archive_expired['id']}
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = {prospective_sweep_expired['id']}
@@ -17927,6 +18105,49 @@ func EncodeRelTypesEnsureSeedReply() []byte {{
 func DecodeRelTypesEnsureSeedReply(reply []byte) error {{
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != EnvelopeHeaderLen {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeProposalsArchiveExpiredRequest emits the empty request envelope. The
+// states, the archive reason and the clock are policy and never travel.
+func EncodeProposalsArchiveExpiredRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationProposalsArchiveExpired, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeProposalsArchiveExpiredRequest validates the exact learning-family
+// envelope.
+func DecodeProposalsArchiveExpiredRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProposalsArchiveExpired ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeProposalsArchiveExpiredReply emits a bare acknowledgement. The backend
+// returns void and logs its failures, so this is always ok and promises only
+// that the sweep was attempted.
+func EncodeProposalsArchiveExpiredReply() []byte {{
+	header, err := EncodeReplyHeader(OperationProposalsArchiveExpired, ResultOK, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeProposalsArchiveExpiredReply validates the acknowledgement envelope.
+func DecodeProposalsArchiveExpiredReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationProposalsArchiveExpired ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != EnvelopeHeaderLen {{
 		return ErrMalformedEnvelope

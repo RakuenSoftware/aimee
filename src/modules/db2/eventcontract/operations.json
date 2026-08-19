@@ -1729,6 +1729,31 @@
       }
     },
     {
+      "family": "learning",
+      "id": 4,
+      "name": "proposals_archive_expired",
+      "wire_format": "db2-envelope-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposal state and its expiry are canonical relational DB2 records, not portable ANN state.",
+      "c_symbols": ["db2_learning_proposals_archive_expired"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"from_state": "pending", "to_state": "archived",
+                   "archive_reason": "expired", "clock": "database",
+                   "requires_expires_at": true, "reports_failure": false}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "payload": "none"
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",

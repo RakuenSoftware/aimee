@@ -13865,9 +13865,15 @@
           "line": 23
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposals_archive_expired operation replaces the sweep that archives learning proposals past their expiry. The states, the archive reason and the database clock are fixed policy. This backend returns void and logs its failures, so the boundary cannot report one either; the catalog records reports_failure as false rather than letting an always-ok acknowledgement imply a guarantee that is not there."
+      },
       "signature": "void db2_learning_proposals_archive_expired ( void )",
       "signature_sha256": "febb0df97afdf493f86f06e5558f65e9133b006915da6b0a797ee462025e0280",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposals_archive_expired"
     },
     {
@@ -26172,15 +26178,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7327d11dbb65f295731fe795dd584a50815e8bc79601e55f592bdfe995ceafff",
+  "fingerprint": "c96d1fe07aea9501bf7bd302b80d91d5bfc4877c390ab1acd2e40339b9d0f56e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 600,
+    "audit_pending": 599,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 358
+    "reviewed": 359
   }
 }

@@ -12,6 +12,7 @@
 #include "c/cross_repo_identity.h"
 #include "c/cross_repo_route.h"
 #include "c/artifacts.h"
+#include "c/db2_learning.h"
 #include "c/learning_synth_ops.h"
 #include "c/decision_log.h"
 #include "c/kb_payload.h"
@@ -330,6 +331,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .rules_decay = db2_rules_decay,
        .curiosity_rescore_all = db2_curiosity_rescore_all,
        .mining_seed_job_defaults = db2_mining_seed_job_defaults,
+       .proposals_archive_expired = db2_learning_proposals_archive_expired,
        .rel_types_ensure_seed = db2_rel_types_ensure_seed,
        .prospective_sweep_expired = db2_prospective_sweep_expired,
        /* Of the two identical sweeps, bind the one that reports failure:
@@ -380,6 +382,7 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
         invocation->stage_id != AIMEE_DB2_STAGE_RULES_DECAY &&
         invocation->stage_id != AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL &&
         invocation->stage_id != AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS &&
+        invocation->stage_id != AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED &&
         invocation->stage_id != AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED &&
         invocation->stage_id != AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED &&
@@ -1508,7 +1511,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_RULES_DECAY ||
        invocation->stage_id == AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL ||
-       invocation->stage_id == AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS)
+       invocation->stage_id == AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS ||
+       invocation->stage_id == AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED)
    {
       if (aimee_db2_rules_decay_request_decode(request_body, request_len) == 0)
       {
@@ -1569,6 +1573,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_mining_seed_job_defaults_reply_encode(response_body, response_capacity,
                                                              response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->proposals_archive_expired)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* This backend returns void and logs whatever goes wrong, so there is
+          * nothing here to turn into a failure: the acknowledgement is always
+          * ok and promises only that the sweep was attempted. The catalog
+          * records that as reports_failure false. Giving the wire a real answer
+          * means changing the backend signature, which is a separate change
+          * and should look like one rather than arriving inside a migration. */
+         backend->proposals_archive_expired();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_proposals_archive_expired_reply_encode(response_body, response_capacity,
+                                                              response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

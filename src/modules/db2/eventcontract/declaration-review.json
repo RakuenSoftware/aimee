@@ -1404,6 +1404,14 @@
       "reason": "Per-kind promotion, demotion, and expiry thresholds are a private input to the tier-cycle operations that apply them; exposing the lookup alone would let a caller act on thresholds DB2 had already superseded."
     },
     {
+      "symbol": "db2_learning_proposals_archive_expired",
+      "signature_sha256": "febb0df97afdf493f86f06e5558f65e9133b006915da6b0a797ee462025e0280",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposals_archive_expired operation replaces the sweep that archives learning proposals past their expiry. The states, the archive reason and the database clock are fixed policy. This backend returns void and logs its failures, so the boundary cannot report one either; the catalog records reports_failure as false rather than letting an always-ok acknowledgement imply a guarantee that is not there."
+    },
+    {
       "symbol": "db2_lease_end",
       "signature_sha256": "95d4dcf624e3c0ca7a478db19bc628afa3e18fc7a0343f966e58f2435ce6cefc",
       "disposition": "private-db2",

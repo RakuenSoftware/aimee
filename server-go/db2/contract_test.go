@@ -255,7 +255,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 72 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 73 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -318,15 +318,16 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[60].Name != "rules_decay" ||
 		baseline.Operations[61].Name != "curiosity_rescore_all" ||
 		baseline.Operations[62].Name != "mining_seed_job_defaults" ||
-		baseline.Operations[63].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[64].Name != "prospective_sweep_expired" ||
-		baseline.Operations[65].Name != "directive_sweep_expired" ||
-		baseline.Operations[66].Name != "mark_revisit_due" ||
-		baseline.Operations[67].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[68].Name != "evidence_reembed_all" ||
-		baseline.Operations[69].Name != "curator_reembed_all" ||
-		baseline.Operations[70].Name != "synth_reenqueue_all" ||
-		baseline.Operations[71].Name != "curator_reenqueue_extract_all" {
+		baseline.Operations[63].Name != "proposals_archive_expired" ||
+		baseline.Operations[64].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[65].Name != "prospective_sweep_expired" ||
+		baseline.Operations[66].Name != "directive_sweep_expired" ||
+		baseline.Operations[67].Name != "mark_revisit_due" ||
+		baseline.Operations[68].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[69].Name != "evidence_reembed_all" ||
+		baseline.Operations[70].Name != "curator_reembed_all" ||
+		baseline.Operations[71].Name != "synth_reenqueue_all" ||
+		baseline.Operations[72].Name != "curator_reenqueue_extract_all" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -527,7 +528,7 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[71]
+	operation := loadWireBaseline(t).Operations[72]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -569,7 +570,7 @@ func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
 
 func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	operation := baseline.Operations[70]
+	operation := baseline.Operations[71]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -610,7 +611,7 @@ func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestCuratorReembedAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[69]
+	operation := loadWireBaseline(t).Operations[70]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -651,7 +652,7 @@ func TestCuratorReembedAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestEvidenceReembedAllMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[68]
+	operation := loadWireBaseline(t).Operations[69]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -695,7 +696,7 @@ func TestEvidenceReembedAllMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestIngestQueueResetRunningMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[67]
+	operation := loadWireBaseline(t).Operations[68]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -739,7 +740,7 @@ func TestIngestQueueResetRunningMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestMarkRevisitDueMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[66]
+	operation := loadWireBaseline(t).Operations[67]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -780,7 +781,7 @@ func TestMarkRevisitDueMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestDirectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[65]
+	operation := loadWireBaseline(t).Operations[66]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -823,7 +824,7 @@ func TestDirectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
 }
 
 func TestProspectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
-	operation := loadWireBaseline(t).Operations[64]
+	operation := loadWireBaseline(t).Operations[65]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -868,8 +869,46 @@ func TestProspectiveSweepExpiredMatchesEverySharedCVector(t *testing.T) {
 	}
 }
 
-func TestRelTypesEnsureSeedMatchesEverySharedCVector(t *testing.T) {
+func TestProposalsArchiveExpiredMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[63]
+	if operation.Family != "learning" {
+		t.Fatalf("family = %q, want learning", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeProposalsArchiveExpiredRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeProposalsArchiveExpiredRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	if err := DecodeMiningSeedJobDefaultsRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("mining seed decoder accepted an archive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeProposalsArchiveExpiredRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	if len(operation.Reply.Positive) != 1 {
+		t.Fatalf("acknowledgement replies have exactly one positive form, got %d",
+			len(operation.Reply.Positive))
+	}
+	want := decodeHex(t, operation.Reply.Positive[0].Hex)
+	if got := EncodeProposalsArchiveExpiredReply(); string(got) != string(want) {
+		t.Fatalf("reply = %x, want %x", got, want)
+	}
+	if err := DecodeProposalsArchiveExpiredReply(want); err != nil {
+		t.Fatalf("positive reply: %v", err)
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := DecodeProposalsArchiveExpiredReply(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative reply %s: %v", vector.Mutation, err)
+		}
+	}
+}
+
+func TestRelTypesEnsureSeedMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[64]
 	if operation.Family != "organization" {
 		t.Fatalf("family = %q, want organization", operation.Family)
 	}

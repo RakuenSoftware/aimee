@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "b73becfa9ff1a9d007de824256464e103f089bd0cd38725436f5c8d22f32ed26"
+const ContractSHA256 = "3a3b123dce718f6e5320c2dafa13e93d38eb96aef7d4d3a9ec9e467f492a81aa"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -367,6 +367,9 @@ const OperationMiningSeedJobDefaults uint32 = 3
 const EventRelTypesEnsureSeed = EventOrganization
 const StageRelTypesEnsureSeed = FamilyOrganization
 const OperationRelTypesEnsureSeed uint32 = 1
+const EventProposalsArchiveExpired = EventLearning
+const StageProposalsArchiveExpired = FamilyLearning
+const OperationProposalsArchiveExpired uint32 = 4
 const EventProspectiveSweepExpired = EventMaintenance
 const StageProspectiveSweepExpired = FamilyMaintenance
 const OperationProspectiveSweepExpired uint32 = 1
@@ -2532,6 +2535,49 @@ func EncodeRelTypesEnsureSeedReply() []byte {
 func DecodeRelTypesEnsureSeedReply(reply []byte) error {
 	header, err := DecodeReplyHeader(reply)
 	if err != nil || header.Operation != OperationRelTypesEnsureSeed ||
+		header.Result != ResultOK || header.PayloadLen != 0 ||
+		len(reply) != EnvelopeHeaderLen {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeProposalsArchiveExpiredRequest emits the empty request envelope. The
+// states, the archive reason and the clock are policy and never travel.
+func EncodeProposalsArchiveExpiredRequest() []byte {
+	header, err := EncodeRequestHeader(OperationProposalsArchiveExpired, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeProposalsArchiveExpiredRequest validates the exact learning-family
+// envelope.
+func DecodeProposalsArchiveExpiredRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProposalsArchiveExpired ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeProposalsArchiveExpiredReply emits a bare acknowledgement. The backend
+// returns void and logs its failures, so this is always ok and promises only
+// that the sweep was attempted.
+func EncodeProposalsArchiveExpiredReply() []byte {
+	header, err := EncodeReplyHeader(OperationProposalsArchiveExpired, ResultOK, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeProposalsArchiveExpiredReply validates the acknowledgement envelope.
+func DecodeProposalsArchiveExpiredReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationProposalsArchiveExpired ||
 		header.Result != ResultOK || header.PayloadLen != 0 ||
 		len(reply) != EnvelopeHeaderLen {
 		return ErrMalformedEnvelope

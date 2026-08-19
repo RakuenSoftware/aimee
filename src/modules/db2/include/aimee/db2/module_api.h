@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "b73becfa9ff1a9d007de824256464e103f089bd0cd38725436f5c8d22f32ed26"
+#define AIMEE_DB2_CONTRACT_SHA256 "3a3b123dce718f6e5320c2dafa13e93d38eb96aef7d4d3a9ec9e467f492a81aa"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -568,6 +568,12 @@
 #define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_REQUEST_LEN       24u
 #define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_RESPONSE_LEN      24u
 #define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_ERROR_LEN         24u
+#define AIMEE_DB2_EVENT_PROPOSALS_ARCHIVE_EXPIRED            AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED            AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED        4u
+#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN      24u
+#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN     24u
+#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_ERROR_LEN        24u
 #define AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED                AIMEE_DB2_EVENT_ORGANIZATION
 #define AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED                AIMEE_DB2_FAMILY_ORGANIZATION
 #define AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED            1u
@@ -2988,6 +2994,52 @@ static inline int aimee_db2_prospective_sweep_expired_reply_decode(const uint8_t
  * code and nothing else. For operations whose only honest answer is whether
  * they completed -- any count they could return would describe something other
  * than the work they did. */
+static inline int aimee_db2_proposals_archive_expired_request_encode(uint8_t *output,
+                                                                     size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED, 0u, 0u,
+                                          output, capacity);
+}
+
+static inline int aimee_db2_proposals_archive_expired_request_decode(const uint8_t *input,
+                                                                     size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_proposals_archive_expired_reply_encode(uint8_t *output,
+                                                                   size_t capacity,
+                                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len ||
+       capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED,
+                                     AIMEE_DB2_RESULT_OK, 0u, output, capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_proposals_archive_expired_reply_decode(const uint8_t *input,
+                                                                   size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
 static inline int aimee_db2_rel_types_ensure_seed_request_encode(uint8_t *output,
                                                                  size_t capacity)
 {

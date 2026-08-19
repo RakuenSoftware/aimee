@@ -85,6 +85,7 @@ typedef struct
    int (*rules_decay)(void);
    int (*curiosity_rescore_all)(void);
    int (*mining_seed_job_defaults)(void);
+   void (*proposals_archive_expired)(void);
    int (*rel_types_ensure_seed)(void);
    int (*prospective_sweep_expired)(void);
    int (*directive_sweep_expired)(void);
