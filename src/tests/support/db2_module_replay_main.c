@@ -10,16 +10,18 @@ extern int aimee_db2_module_init(void);
 
 /* Test-only registration for cataloged families that have not reached the
  * atomic production activation gate. The exported DB2 source closure and
- * handler are otherwise identical to the packaged production process. */
+ * handler are otherwise identical to the packaged production process.
+ *
+ * One entry per family, because a stage is a family: every operation inside
+ * one arrives on the same stage and is told apart by its operation number. */
 static const aimee_module_stage_t stages[] = {
-    {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_STAGE_HEALTH},
-    {AIMEE_DB2_EVENT_LEVEL3_COUNT, AIMEE_DB2_STAGE_LEVEL3_COUNT},
-    {AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS, AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS},
-    {AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED, AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED},
-    {AIMEE_DB2_EVENT_RULES_DECAY, AIMEE_DB2_STAGE_RULES_DECAY},
-    {AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED, AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED},
-    {AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE,
-     AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE},
+    {AIMEE_DB2_EVENT_LIFECYCLE, AIMEE_DB2_FAMILY_LIFECYCLE},
+    {AIMEE_DB2_EVENT_MEMORY, AIMEE_DB2_FAMILY_MEMORY},
+    {AIMEE_DB2_EVENT_INDEX, AIMEE_DB2_FAMILY_INDEX},
+    {AIMEE_DB2_EVENT_LEARNING, AIMEE_DB2_FAMILY_LEARNING},
+    {AIMEE_DB2_EVENT_ORGANIZATION, AIMEE_DB2_FAMILY_ORGANIZATION},
+    {AIMEE_DB2_EVENT_CUSTODY, AIMEE_DB2_FAMILY_CUSTODY},
+    {AIMEE_DB2_EVENT_MAINTENANCE, AIMEE_DB2_FAMILY_MAINTENANCE},
 };
 
 int main(int argc, char **argv)

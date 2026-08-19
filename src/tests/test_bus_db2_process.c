@@ -109,13 +109,13 @@ int main(int argc, char **argv)
    char socket_path[512];
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
 
-   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH,
-                              AIMEE_DB2_EVENT_LEVEL3_COUNT,
-                              AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS,
-                              AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED,
-                              AIMEE_DB2_EVENT_RULES_DECAY,
-                              AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED,
-                              AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE};
+   /* One entry per family: every operation in a family shares its event kind,
+    * so listing operations here would repeat each kind and say nothing extra
+    * about what the process serves. */
+   const uint32_t served[] = {AIMEE_DB2_EVENT_LIFECYCLE,    AIMEE_DB2_EVENT_MEMORY,
+                              AIMEE_DB2_EVENT_INDEX,        AIMEE_DB2_EVENT_LEARNING,
+                              AIMEE_DB2_EVENT_ORGANIZATION, AIMEE_DB2_EVENT_CUSTODY,
+                              AIMEE_DB2_EVENT_MAINTENANCE};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
