@@ -408,6 +408,13 @@
 #define AIMEE_DB1_OP_EXECUTION_TRACE_GET               4u
 #define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_TOOL_CALLS   5u
 #define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_AFTER_ID     6u
+#define AIMEE_DB1_OP_WFE_BIND                          7u
+#define AIMEE_DB1_OP_WFE_BINDING_GET                   8u
+#define AIMEE_DB1_OP_WFE_UNBIND                        9u
+#define AIMEE_DB1_OP_WFE_LEASE_RENEW                   10u
+#define AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET              11u
+#define AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS        12u
+#define AIMEE_DB1_OP_WFE_LEASE_RECLAIM_STALE           13u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and

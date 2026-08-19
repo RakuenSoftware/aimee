@@ -14,6 +14,7 @@
 
 #include "db1_module_api.h"
 #include "execution_trace.h"
+#include "wfe_binding.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -169,6 +170,11 @@ aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint
    void *domain_rows = NULL;
    void *cells_owned = NULL;
    void *numeric_owned = NULL;
+   /* Text scalars are written by the domain and read after the switch
+      closes, so their storage cannot live in a case block. One
+      allocation holds all of an operation's values end to end, and one
+      free returns it. */
+   char *scalar_owned = NULL;
 
    switch (op)
    {
@@ -461,6 +467,188 @@ aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint
       listed = 1;
       break;
    }
+   case AIMEE_DB1_OP_WFE_BIND:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int produced = db1_wfe_bind(field[0], field[1], field[2]);
+      rc = 0;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_BINDING_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      scalar_owned = calloc(1u, DB1_WFE_WORK_ITEM_ID_LEN + DB1_WFE_STAGE_LEN);
+      if (!scalar_owned)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      char *scalar0 = scalar_owned;
+      char *scalar1 = scalar_owned + DB1_WFE_WORK_ITEM_ID_LEN;
+      rc = db1_wfe_binding_get(field[0], scalar0, (size_t)DB1_WFE_WORK_ITEM_ID_LEN, scalar1, (size_t)DB1_WFE_STAGE_LEN);
+      row_slots[0] = scalar0;
+      row_slots[1] = scalar1;
+      rows = row_slots;
+      row_count = 2u;
+      found = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_UNBIND:
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_unbind(field[0]);
+      break;
+   case AIMEE_DB1_OP_WFE_LEASE_RENEW:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_lease_renew(field[0], parsed1);
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      scalar_owned = calloc(1u, DB1_WFE_EXPIRY_LEN);
+      if (!scalar_owned)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      char *scalar0 = scalar_owned;
+      rc = db1_wfe_lease_expiry_get(field[0], scalar0, (size_t)DB1_WFE_EXPIRY_LEN);
+      row_slots[0] = scalar0;
+      rows = row_slots;
+      row_count = 1u;
+      found = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed0 <= 0 || parsed0 > 256)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char (*found)[DB1_WFE_WORK_ITEM_ID_LEN] = calloc((size_t)parsed0, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_wfe_lease_stale_work_items(found, parsed0);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed0)
+                                 ? (uint32_t)rc : (uint32_t)parsed0;
+         const char **cells = malloc((size_t)produced * 1u * sizeof *cells);
+         if (!cells)
+         {
+            free(cells);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            cells[row * 1u + 0u] = found[row];
+         }
+         rows = cells;
+         row_count = produced * 1u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_LEASE_RECLAIM_STALE:
+   {
+      if (count != 0u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int produced = db1_wfe_lease_reclaim_stale();
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
@@ -517,6 +705,7 @@ aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint
    }
    free(cells_owned);
    free(numeric_owned);
+   free(scalar_owned);
    free(domain_rows);
    free(text_owned);
    return AIMEE_MODULE_STATUS_OK;

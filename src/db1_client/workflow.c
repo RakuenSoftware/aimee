@@ -17,6 +17,7 @@
  * catalog permanently one reformat apart. */
 /* clang-format off */
 #include "execution_trace.h"
+#include "wfe_binding.h"
 
 #include "db1_module_api.h"
 
@@ -429,6 +430,116 @@ int db1_execution_trace_list_after_id(int64_t after_id, db1_execution_trace_mini
    }
    free(wire_scratch);
    return wire_rows;
+}
+
+int db1_wfe_bind(const char *session_id, const char *work_item_id, const char *enforce_stage)
+{
+   if (!session_id || !session_id[0] || !work_item_id || !work_item_id[0])
+      return -1;
+   const char *fields[] = {session_id, work_item_id, enforce_stage ? enforce_stage : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_BIND, fields, 3, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_wfe_binding_get(const char *session_id, char *wi_out, size_t wi_n, char *stage_out, size_t stage_n)
+{
+   if (!session_id || !session_id[0] || !wi_out || wi_n == 0 || !stage_out || stage_n == 0)
+      return -1;
+   const char *fields[] = {session_id};
+   char *const values[] = {wi_out, stage_out};
+   const size_t caps[] = {wi_n, stage_n};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_BINDING_GET, fields, 1, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
+   }
+   return 1;
+}
+
+int db1_wfe_unbind(const char *session_id)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   const char *fields[] = {session_id};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_UNBIND, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_lease_renew(const char *session_id, int ttl_secs)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", ttl_secs);
+   const char *fields[] = {session_id, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_LEASE_RENEW, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_lease_expiry_get(const char *session_id, char *out, size_t n)
+{
+   if (!session_id || !session_id[0] || !out || n == 0)
+      return -1;
+   const char *fields[] = {session_id};
+   char *const values[] = {out};
+   const size_t caps[] = {n};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
+   }
+   return 1;
+}
+
+int db1_wfe_lease_stale_work_items(char (*out)[DB1_WFE_WORK_ITEM_ID_LEN], int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 256)
+      max = 256;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
+   {
+      free(wire_values);
+      free(wire_caps);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 1u + 0u] = out[wire_row];
+      wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
+   {
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 1u);
+   return wire_rows;
+}
+
+int db1_wfe_lease_reclaim_stale()
+{
+   const char *const *fields = NULL;
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_LEASE_RECLAIM_STALE, fields, 0, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 /* clang-format on */

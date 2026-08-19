@@ -35,6 +35,7 @@
 #include "cognify_jobs.h"
 #include "ensemble.h"
 #include "execution_trace.h"
+#include "wfe_binding.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -965,6 +966,73 @@ static void test_execution_trace_rows_keep_their_shapes(void)
    printf("  PASS: execution trace rows keep their shapes\n");
 }
 
+/* The single-writer refusal is the point of this one. db1_wfe_bind answers -2
+   when a work item is already bound to a DIFFERENT session, and an integer
+   return is normally read as a status -- so without saying otherwise, that
+   refusal would arrive as -1 and a caller would be told the store broke rather
+   than that another session holds the item. */
+static void test_a_binding_refusal_is_not_a_broken_store(void)
+{
+   must(db1_wfe_bind("sess-one", "wi_bus_a", "advisory") == 0, "bound a work item to a session");
+   must(db1_wfe_bind("sess-one", "wi_bus_a", "hard") == 0, "re-binding the same session is fine");
+
+   must(db1_wfe_bind("sess-two", "wi_bus_a", "advisory") == -2,
+        "a second session is refused the same work item, and the refusal keeps its own value");
+   must(db1_wfe_bind("sess-two", "wi_bus_b", "advisory") == 0,
+        "and that session can still bind a free one");
+   must(db1_wfe_bind(NULL, "wi_bus_c", "off") == -1, "bad arguments still answer -1");
+
+   char wi[DB1_WFE_WORK_ITEM_ID_LEN] = "";
+   char stage[DB1_WFE_STAGE_LEN] = "";
+   must(db1_wfe_binding_get("sess-one", wi, sizeof wi, stage, sizeof stage) == 1,
+        "read the binding back");
+   must(strcmp(wi, "wi_bus_a") == 0, "the work item crossed");
+   /* enforce_stage is NOT changed on re-bind: the header calls it monotonic
+      per session row, so the "hard" above must not have replaced "advisory". */
+   must(strcmp(stage, "advisory") == 0, "and the re-bind left the enforce stage alone");
+   must(db1_wfe_binding_get("sess-none", wi, sizeof wi, stage, sizeof stage) == 0,
+        "an unbound session is absent rather than an error");
+
+   /* A negative ttl sets an expiry in the past, which is how the header says to
+      force staleness without waiting. */
+   must(db1_wfe_lease_renew("sess-one", -60) == 0, "forced the lease stale");
+   char expiry[DB1_WFE_EXPIRY_LEN] = "";
+   must(db1_wfe_lease_expiry_get("sess-one", expiry, sizeof expiry) == 1, "read the expiry");
+   must(expiry[0] != '\0', "which is set rather than empty");
+
+   /* ttl 0 CLEARS the lease, and the binding is still there. The answer is
+      therefore "found, and empty" -- which a read inferring found-ness from a
+      non-empty value would report as no binding at all. */
+   must(db1_wfe_lease_renew("sess-two", 0) == 0, "cleared the other session's lease");
+   char cleared[DB1_WFE_EXPIRY_LEN] = "x";
+   must(db1_wfe_lease_expiry_get("sess-two", cleared, sizeof cleared) == 1,
+        "a binding with no lease is still a binding");
+   must(cleared[0] == '\0', "and its expiry comes back empty");
+   must(db1_wfe_lease_expiry_get("sess-none", cleared, sizeof cleared) == 0,
+        "where an absent binding answers absent");
+
+   char stale[8][DB1_WFE_WORK_ITEM_ID_LEN];
+   memset(stale, 0, sizeof stale);
+   int n = db1_wfe_lease_stale_work_items(stale, 8);
+   must(n >= 1, "the lapsed binding is listed as stale");
+   int saw = 0;
+   for (int at = 0; at < n; at++)
+   {
+      if (strcmp(stale[at], "wi_bus_a") == 0)
+         saw = 1;
+   }
+   must(saw, "and it is the one whose lease we expired");
+
+   must(db1_wfe_lease_reclaim_stale() >= 1, "reclaiming returns how many it took");
+   must(db1_wfe_binding_get("sess-one", wi, sizeof wi, stage, sizeof stage) == 0,
+        "the reclaimed session is unbound");
+
+   must(db1_wfe_unbind("sess-two") == 0, "unbound the other session");
+   must(db1_wfe_unbind("sess-two") == 0, "and unbinding again is a no-op, not a failure");
+
+   printf("  PASS: a binding refusal is not a broken store\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1012,6 +1080,7 @@ int main(int argc, char **argv)
    test_guardrail_state_crosses_with_its_collections();
    test_an_ensemble_verdict_crosses_as_a_sentence();
    test_execution_trace_rows_keep_their_shapes();
+   test_a_binding_refusal_is_not_a_broken_store();
 
    stop_module();
    obs_bus_stop();

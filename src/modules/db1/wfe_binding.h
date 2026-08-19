@@ -6,6 +6,13 @@
 
 #include <stddef.h>
 
+/* The width work_item_id already has in wfe_store.h; named here because the
+   stale-list below hands back an array of them and a bare 80 says nothing
+   about what it is the length of. */
+#define DB1_WFE_WORK_ITEM_ID_LEN 80
+#define DB1_WFE_STAGE_LEN        64
+#define DB1_WFE_EXPIRY_LEN       32
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -45,7 +52,7 @@ extern "C"
    /* Fill `out` (each [80]) with the work-item ids of bindings whose lease has
     * lapsed (lease_expiry set AND < now). Returns the count written (<= max), or -1
     * on error. Detection only -- the caller decides what to do (warn/reclaim). */
-   int db1_wfe_lease_stale_work_items(char (*out)[80], int max);
+   int db1_wfe_lease_stale_work_items(char (*out)[DB1_WFE_WORK_ITEM_ID_LEN], int max);
 
    /* Reclaim (unbind) bindings whose lease has lapsed: delete the binding row and
     * record a "lease_reclaimed" lifecycle_event on the work-item, freeing it for a

@@ -290,7 +290,7 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
         entry.pop("_field_types", None)
         if not isinstance(entry, dict) or \
                 not set(entry) <= allowed | {"c_name", "c_params", "c_returns",
-                                            "c_member"} or \
+                                            "c_member", "negatives"} or \
                 not allowed <= set(entry):
             fail("keys", f"operations[{index}] keys differ from version 1")
         operation = entry
@@ -841,6 +841,25 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                 fail("c-returns",
                      f"{name} carries its return beside a read, so its reply declares "
                      f"exactly one text value: the buffer the caller passed")
+        if "negatives" in operation:
+            # "The number IS the answer, including when it is negative."
+            #
+            # An integer return is normally read as a status: the stage maps a
+            # negative to FAILED, because for a count or an id a negative means
+            # the store could not answer. db1_wfe_bind is not that -- it returns
+            # -2 to say the work item is already bound to a DIFFERENT session,
+            # which is the single-writer rule doing its job. Mapped as a status
+            # that refusal arrives as -1 and reads as an outage.
+            #
+            # Same distinction ensemble draws between a verdict and a broken
+            # store; ensemble had data to carry so it used a struct, and this
+            # has only the number.
+            if str(operation["negatives"]) != "data":
+                fail("negatives", f"{name} negatives is 'data' or absent")
+            if operation.get("c_returns") != "int64":
+                fail("negatives",
+                     f"{name} says its negatives are data, which is about an integer "
+                     f"return: say c_returns int64")
         if operation.get("c_returns") == "void":
             # Nothing comes back as a RETURN. Out-parameters are a different
             # question: db1_clarify_weakest_dim fills a buffer and answers
@@ -2814,6 +2833,12 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 tail.append("      rc = 0;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%.17g", '
                             "(double)produced);\n")  # a float widens losslessly
+            elif str(operation.get("negatives", "")) == "data":
+                # Declared: every value this returns is an answer, so the only
+                # failure left is the store not answering at all.
+                tail.append("      rc = 0;\n")
+                tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
+                            "(long long)produced);\n")
             else:
                 tail.append("      rc = (produced >= 0) ? 0 : -1;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
