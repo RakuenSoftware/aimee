@@ -298,6 +298,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .negation_tokens_update = db2_memory_negation_tokens_update,
        .get_content = db2_memory_get_content,
        .get_source_session = db2_memory_get_source_session,
+       .pick_first_temporal_ref = db2_memory_pick_first_temporal_ref,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1182,6 +1183,30 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_get_source_session_reply_encode(
                  found ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND,
                  found ? read_session : NULL, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t temporal_ref_memory_id = 0u;
+      if (aimee_db2_pick_first_temporal_ref_request_decode(request_body, request_len,
+                                                           &temporal_ref_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->pick_first_temporal_ref)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         char picked_ref[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX + 1];
+         picked_ref[0] = '\0';
+         int picked = backend->pick_first_temporal_ref((int64_t)temporal_ref_memory_id, picked_ref,
+                                                       (int)sizeof(picked_ref));
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         /* The backend reports a hit only for a non-empty key, so a hit with
+          * an empty buffer is a broken contract rather than a blank key. */
+         if (picked && picked_ref[0] == '\0')
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_pick_first_temporal_ref_reply_encode(
+                 picked ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_NOT_FOUND,
+                 picked ? picked_ref : NULL, response_body, response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "341ba6c93934cea53c78365c6bc308f2220505f8fa4317611d8f1e3ef08bddf6"
+const ContractSHA256 = "85170fac2a73f56832cfc7cabb42396baecf61cd5e9fbbe06a701656ce1846ec"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -310,6 +310,11 @@ const StageGetSourceSession = FamilyMemory
 const OperationGetSourceSession uint32 = 40
 const GetSourceSessionMemoryIDMax uint64 = 9223372036854775807
 const GetSourceSessionSessionMax = 127
+const EventPickFirstTemporalRef = EventMemory
+const StagePickFirstTemporalRef = FamilyMemory
+const OperationPickFirstTemporalRef uint32 = 41
+const PickFirstTemporalRefMemoryIDMax uint64 = 9223372036854775807
+const PickFirstTemporalRefKeyMax = 127
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1705,6 +1710,91 @@ func DecodeGetSourceSessionReply(reply []byte) (uint32, string, error) {
 		return 0, "", ErrMalformedEnvelope
 	}
 	return header.Result, sessionID, nil
+}
+
+// EncodePickFirstTemporalRefRequest emits the memory whose references are
+// ranked. The ordering is fixed inside the statement, so nothing steers it.
+func EncodePickFirstTemporalRefRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > PickFirstTemporalRefMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationPickFirstTemporalRef, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodePickFirstTemporalRefRequest validates the envelope and the memory.
+func DecodePickFirstTemporalRefRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPickFirstTemporalRef || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > PickFirstTemporalRefMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodePickFirstTemporalRefReply carries a non-empty reference key, or
+// reports that the memory has none.
+func EncodePickFirstTemporalRefReply(result uint32, refKey string) ([]byte, error) {
+	if result == ResultNotFound {
+		if refKey != "" {
+			return nil, ErrMalformedEnvelope
+		}
+		header, err := EncodeReplyHeader(OperationPickFirstTemporalRef, result, 0)
+		if err != nil {
+			return nil, ErrMalformedEnvelope
+		}
+		return header, nil
+	}
+	if result != ResultOK || len(refKey) == 0 ||
+		len(refKey) > PickFirstTemporalRefKeyMax || hasNUL(refKey) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 4 + len(refKey)
+	header, err := EncodeReplyHeader(OperationPickFirstTemporalRef, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(refKey)))
+	copy(payload[4:], refKey)
+	return reply, nil
+}
+
+// DecodePickFirstTemporalRefReply refuses an empty ok for the same reason.
+func DecodePickFirstTemporalRefReply(reply []byte) (uint32, string, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPickFirstTemporalRef {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 &&
+		len(reply) == int(EnvelopeHeaderLen) {
+		return header.Result, "", nil
+	}
+	if header.Result != ResultOK || header.PayloadLen < 5 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	keyLen := binary.LittleEndian.Uint32(payload)
+	if keyLen == 0 || keyLen > uint32(PickFirstTemporalRefKeyMax) ||
+		4+keyLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	refKey := string(payload[4 : 4+keyLen])
+	if hasNUL(refKey) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return header.Result, refKey, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

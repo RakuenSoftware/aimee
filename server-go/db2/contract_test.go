@@ -98,6 +98,7 @@ type wireBaseline struct {
 				UpdatedRows           uint32            `json:"updated_rows"`
 				Content               string            `json:"content"`
 				SessionIDReply        string            `json:"session_id"`
+				RefKey                string            `json:"ref_key"`
 				DeletedRows           uint32            `json:"deleted_rows"`
 				DemotedCount          uint32            `json:"demoted_count"`
 				AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
@@ -234,7 +235,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 50 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 51 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -283,7 +284,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[46].Name != "set_source_session" ||
 		baseline.Operations[47].Name != "negation_tokens_update" ||
 		baseline.Operations[48].Name != "get_content" ||
-		baseline.Operations[49].Name != "get_source_session" {
+		baseline.Operations[49].Name != "get_source_session" ||
+		baseline.Operations[50].Name != "pick_first_temporal_ref" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -480,6 +482,46 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestPickFirstTemporalRefMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[50]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodePickFirstTemporalRefRequest(operation.Request.MemoryID)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, err := DecodePickFirstTemporalRefRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID {
+		t.Fatalf("positive request = (%d, %v)", memoryID, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodePickFirstTemporalRefRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodePickFirstTemporalRefReply(vector.Result, vector.RefKey)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply %d = (%x, %v)", vector.Result, got, err)
+		}
+		result, refKey, err := DecodePickFirstTemporalRefReply(got)
+		if err != nil || result != vector.Result || refKey != vector.RefKey {
+			t.Fatalf("decode = (%d, %q, %v)", result, refKey, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, refKey, err := DecodePickFirstTemporalRefReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || refKey != "" {
+			t.Fatalf("negative reply %s = (%d, %q, %v)", vector.Mutation, result, refKey, err)
+		}
+	}
+	if _, err := EncodePickFirstTemporalRefReply(ResultOK, ""); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("empty ok encoded: %v", err)
+	}
+	if _, err := EncodePickFirstTemporalRefReply(ResultNotFound, "x"); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("not_found carried a key: %v", err)
 	}
 }
 

@@ -17492,9 +17492,15 @@
           "line": 670
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.pick_first_temporal_ref operation replaces the highest-ranked temporal reference lookup. The ordering is fixed policy inside the statement rather than a caller input, and a memory with no usable reference is reported as not_found since the backend succeeds only for a non-empty key."
+      },
       "signature": "int db2_memory_pick_first_temporal_ref ( int64_t memory_id , char * out , int out_len )",
       "signature_sha256": "b9b0e7e56a1300bb929cf94e524e05dcdeea6d18c4edf740a270a894c5f68b7c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_pick_first_temporal_ref"
     },
     {
@@ -25956,15 +25962,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b351099bf32c8bd168b97f42d41123769d21562342b8af65858c1fffb05caabf",
+  "fingerprint": "458612f1f1083474e82c5782edff186cb8e8961c110115c43463b202a6b8b18d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 636,
+    "audit_pending": 635,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 322
+    "reviewed": 323
   }
 }

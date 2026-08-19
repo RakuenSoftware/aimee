@@ -526,6 +526,15 @@ int main(int argc, char **argv)
                                             NULL) == AIMEE_MODULE_CALL_OK);
    assert(session_result == AIMEE_DB2_RESULT_NOT_FOUND && read_session[0] == '\0');
 
+   /* No temporal reference rows exist on a fresh schema, so the ranked pick
+    * has nothing to return and reports not_found. */
+   uint32_t ref_result = 99;
+   char read_ref[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX + 1];
+   assert(aimee_db2_pick_first_temporal_ref_call(call_client, &client, 9087, 0, 42u, &ref_result,
+                                                 read_ref, sizeof(read_ref), NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ref_result == AIMEE_DB2_RESULT_NOT_FOUND && read_ref[0] == '\0');
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

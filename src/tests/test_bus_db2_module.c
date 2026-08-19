@@ -85,6 +85,7 @@ typedef struct
    void (*negation_tokens_update)(int64_t memory_id, const char *tokens);
    int (*get_content)(int64_t memory_id, char *out, int out_len);
    int (*get_source_session)(int64_t memory_id, char *out, int out_len);
+   int (*pick_first_temporal_ref)(int64_t memory_id, char *out, int out_len);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -152,6 +153,7 @@ static int negation_tokens_calls;
 static char negation_tokens_last[2048];
 static int get_content_calls;
 static int get_source_session_calls;
+static int temporal_ref_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -950,6 +952,23 @@ static int get_source_session(int64_t memory_id, char *out, int out_len)
    return 0;
 }
 
+int db2_memory_pick_first_temporal_ref(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return 0;
+}
+
+static int pick_first_temporal_ref(int64_t memory_id, char *out, int out_len)
+{
+   temporal_ref_calls++;
+   if (memory_id != 42)
+      return 0;
+   snprintf(out, (size_t)out_len, "%s", "2026-08-19");
+   return 1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1289,6 +1308,7 @@ int main(void)
        .negation_tokens_update = negation_tokens_update,
        .get_content = get_content,
        .get_source_session = get_source_session,
+       .pick_first_temporal_ref = pick_first_temporal_ref,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1595,6 +1615,18 @@ int main(void)
                                             session_back, sizeof(session_back), NULL,
                                             NULL) == AIMEE_MODULE_CALL_OK);
    assert(session_result == AIMEE_DB2_RESULT_NOT_FOUND && session_back[0] == '\0');
+
+   uint32_t ref_result = 99u;
+   char ref_back[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX + 1];
+   assert(aimee_db2_pick_first_temporal_ref_call(call_client, &client, 7074, 0, 42u, &ref_result,
+                                                 ref_back, sizeof(ref_back), NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ref_result == AIMEE_DB2_RESULT_OK && strcmp(ref_back, "2026-08-19") == 0 &&
+          temporal_ref_calls == 1);
+   assert(aimee_db2_pick_first_temporal_ref_call(call_client, &client, 7075, 0, 43u, &ref_result,
+                                                 ref_back, sizeof(ref_back), NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ref_result == AIMEE_DB2_RESULT_NOT_FOUND && ref_back[0] == '\0');
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

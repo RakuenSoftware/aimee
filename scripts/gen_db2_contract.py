@@ -1828,9 +1828,44 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum_bytes": 127}):
                 fail("get-source-session-reply",
                      "reply must carry a non-empty bounded session at the set width")
+        elif key == ("memory", 41) and name == "pick_first_temporal_ref" and \
+                operation["wire_format"] == "db2-envelope-u64-string-reply-v1":
+            if operation["c_symbols"] != ["db2_memory_pick_first_temporal_ref"]:
+                fail("operation-c-symbols",
+                     "pick_first_temporal_ref C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok", "not_found"]:
+                fail("operation-results",
+                     "pick_first_temporal_ref must be able to report that no reference exists")
+            request = _keys(operation["request"], {"encoded_size", "field"},
+                            "pick_first_temporal_ref.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "pick_first_temporal_ref.request.field")
+            # The caller names the memory only. Which reference wins is decided
+            # by the statement's own ordering, so no ranking input crosses the
+            # bus and a caller cannot steer the answer.
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                      "maximum": 0x7fffffffffffffff}):
+                fail("pick-first-temporal-ref-request",
+                     "request must name one positive memory and carry no ranking input")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_min_ok", "encoded_size_max_ok", "encoded_size_error",
+                           "field"}, "pick_first_temporal_ref.reply")
+            field = _keys(reply["field"],
+                          {"name", "type", "minimum_bytes", "maximum_bytes"},
+                          "pick_first_temporal_ref.reply.field")
+            # Minimum one, like get_source_session: the backend succeeds only
+            # for a non-empty key, so an empty ok would be unreachable state.
+            if (reply["encoded_size_min_ok"] != ENVELOPE_HEADER_LEN + 5 or
+                    reply["encoded_size_max_ok"] != ENVELOPE_HEADER_LEN + 4 + 127 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "ref_key", "type": "utf8", "minimum_bytes": 1,
+                              "maximum_bytes": 127}):
+                fail("pick-first-temporal-ref-reply",
+                     "reply must carry a non-empty bounded reference key")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 50 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 51 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1844,9 +1879,10 @@ def validate_catalog(value: object) -> dict[str, object]:
             "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
             "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
             "workspace_tag_insert", "set_cognified_kind", "set_source_session",
-            "negation_tokens_update", "get_content", "get_source_session"]:
+            "negation_tokens_update", "get_content", "get_source_session",
+            "pick_first_temporal_ref"]:
         fail("unsupported-operation",
-             "the partial generator requires the fifty supported operations exactly once")
+             "the partial generator requires the fifty-one supported operations exactly once")
     return catalog
 
 
@@ -2020,6 +2056,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     negation_tokens_update = catalog["operations"][47]
     get_content = catalog["operations"][48]
     get_source_session = catalog["operations"][49]
+    pick_first_temporal_ref = catalog["operations"][50]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2324,6 +2361,17 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     get_source_session_missing = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(get_source_session["id"]), 1, b"",
+    )
+    temporal_ref_key = b"2026-08-19"
+    pick_first_temporal_ref_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(pick_first_temporal_ref["id"]), 0, _put_u64(42),
+    )
+    pick_first_temporal_ref_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(pick_first_temporal_ref["id"]), 0,
+        _put_u32(len(temporal_ref_key)) + temporal_ref_key,
+    )
+    pick_first_temporal_ref_missing = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(pick_first_temporal_ref["id"]), 1, b"",
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -4751,6 +4799,59 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (get_source_session_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": pick_first_temporal_ref["family"],
+            "id": pick_first_temporal_ref["id"],
+            "name": pick_first_temporal_ref["name"],
+            "request": {
+                "positive": pick_first_temporal_ref_request.hex(),
+                "memory_id": 42,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(pick_first_temporal_ref_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(pick_first_temporal_ref_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(pick_first_temporal_ref["id"]), 0, _put_u64(0)).hex()},
+                    {"mutation": "short", "hex": pick_first_temporal_ref_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (pick_first_temporal_ref_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "ref_key": temporal_ref_key.decode("ascii"),
+                     "hex": pick_first_temporal_ref_ok.hex()},
+                    {"result": 1, "ref_key": "",
+                     "hex": pick_first_temporal_ref_missing.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(pick_first_temporal_ref_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(pick_first_temporal_ref_ok, 12, 3).hex()},
+                    {"mutation": "missing_with_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(pick_first_temporal_ref["id"]), 1, _put_u32(0)).hex()},
+                    {"mutation": "empty_ok", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(pick_first_temporal_ref["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "key_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(pick_first_temporal_ref["id"]), 0,
+                               _put_u32(len(temporal_ref_key) + 1) +
+                               temporal_ref_key).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(pick_first_temporal_ref["id"]), 0,
+                               _put_u32(len(temporal_ref_key)) +
+                               temporal_ref_key[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": pick_first_temporal_ref_ok[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (pick_first_temporal_ref_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -4813,6 +4914,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     negation_tokens_update = catalog["operations"][47]
     get_content = catalog["operations"][48]
     get_source_session = catalog["operations"][49]
+    pick_first_temporal_ref = catalog["operations"][50]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -5524,6 +5626,22 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{get_source_session['request']['field']['maximum']}ull"),
         ("AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX",
          f"{get_source_session['reply']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_EVENT_PICK_FIRST_TEMPORAL_REF", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_PICK_FIRST_TEMPORAL_REF", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF",
+         f"{pick_first_temporal_ref['id']}u"),
+        ("AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN",
+         f"{pick_first_temporal_ref['request']['encoded_size']}u"),
+        ("AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MIN_LEN",
+         f"{pick_first_temporal_ref['reply']['encoded_size_min_ok']}u"),
+        ("AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MAX_LEN",
+         f"{pick_first_temporal_ref['reply']['encoded_size_max_ok']}u"),
+        ("AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN",
+         f"{pick_first_temporal_ref['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_MEMORY_ID_MAX",
+         f"{pick_first_temporal_ref['request']['field']['maximum']}ull"),
+        ("AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX",
+         f"{pick_first_temporal_ref['reply']['field']['maximum_bytes']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -7463,6 +7581,116 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_pick_first_temporal_ref_request_encode(uint64_t memory_id,
+                                                                  uint8_t *output,
+                                                                  size_t capacity)
+{{
+   if (!output || memory_id == 0u ||
+       memory_id > AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF, 0u, 8u,
+                                       output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}}
+
+static inline int aimee_db2_pick_first_temporal_ref_request_decode(const uint8_t *input,
+                                                                   size_t input_len,
+                                                                   uint64_t *memory_id)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_pick_first_temporal_ref_reply_encode(uint32_t result,
+                                                                 const char *ref_key,
+                                                                 uint8_t *output, size_t capacity,
+                                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+   if (result == AIMEE_DB2_RESULT_NOT_FOUND)
+   {{
+      if (ref_key != NULL || capacity < AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN ||
+          aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF, result, 0u,
+                                        output, capacity) != 0)
+         return -1;
+      *output_len = AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN;
+      return 0;
+   }}
+   if (result != AIMEE_DB2_RESULT_OK || !ref_key)
+      return -1;
+   size_t key_len = 0u;
+   while (key_len <= AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX && ref_key[key_len])
+      ++key_len;
+   uint32_t payload_len = (uint32_t)(4u + key_len);
+   if (key_len == 0u || key_len > AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX ||
+       capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF,
+                                     AIMEE_DB2_RESULT_OK, payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)key_len);
+   memcpy(payload + 4u, ref_key, key_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_pick_first_temporal_ref_reply_decode(const uint8_t *input,
+                                                                 size_t input_len,
+                                                                 uint32_t *result, char *ref_key,
+                                                                 size_t key_capacity)
+{{
+   if (result)
+      *result = 0u;
+   if (ref_key && key_capacity)
+      ref_key[0] = '\\0';
+   if (!result || !ref_key ||
+       key_capacity < (size_t)AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX + 1u)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_NOT_FOUND && header.payload_len == 0u &&
+       input_len == AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 5u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t key_len = aimee_db2_get_u32(payload);
+   if (key_len == 0u || key_len > AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX ||
+       (uint32_t)4u + key_len != header.payload_len)
+      return -1;
+   for (uint32_t index = 0u; index < key_len; ++index)
+      if (payload[4u + index] == 0u)
+         return -1;
+   memcpy(ref_key, payload + 4u, key_len);
+   ref_key[key_len] = '\\0';
+   *result = header.result;
    return 0;
 }}
 
@@ -9829,6 +10057,11 @@ extern "C"
        uint64_t memory_id, uint32_t *domain_result, char *session_id, size_t session_capacity,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_pick_first_temporal_ref_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, uint32_t *domain_result, char *ref_key, size_t key_capacity,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -11016,6 +11249,35 @@ aimee_db2_get_source_session_call(aimee_db2_call_fn call, void *call_context, ui
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_pick_first_temporal_ref_call(aimee_db2_call_fn call, void *call_context,
+                                       uint64_t trace_id, uint64_t deadline_ns, uint64_t memory_id,
+                                       uint32_t *domain_result, char *ref_key, size_t key_capacity,
+                                       aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !domain_result || !ref_key ||
+       key_capacity < (size_t)AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX + 1u)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *domain_result = 0u;
+   ref_key[0] = '\\0';
+   uint8_t request[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MAX_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_pick_first_temporal_ref_request_encode(memory_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PICK_FIRST_TEMPORAL_REF,
+            AIMEE_DB2_STAGE_PICK_FIRST_TEMPORAL_REF, trace_id, deadline_ns, request,
+            sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_pick_first_temporal_ref_reply_decode(response, response_len, domain_result,
+                                                      ref_key, key_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -11305,6 +11567,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     negation_tokens_update = catalog["operations"][47]
     get_content = catalog["operations"][48]
     get_source_session = catalog["operations"][49]
+    pick_first_temporal_ref = catalog["operations"][50]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -11616,6 +11879,11 @@ const StageGetSourceSession = FamilyMemory
 const OperationGetSourceSession uint32 = {get_source_session['id']}
 const GetSourceSessionMemoryIDMax uint64 = {get_source_session['request']['field']['maximum']}
 const GetSourceSessionSessionMax = {get_source_session['reply']['field']['maximum_bytes']}
+const EventPickFirstTemporalRef = EventMemory
+const StagePickFirstTemporalRef = FamilyMemory
+const OperationPickFirstTemporalRef uint32 = {pick_first_temporal_ref['id']}
+const PickFirstTemporalRefMemoryIDMax uint64 = {pick_first_temporal_ref['request']['field']['maximum']}
+const PickFirstTemporalRefKeyMax = {pick_first_temporal_ref['reply']['field']['maximum_bytes']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -13009,6 +13277,91 @@ func DecodeGetSourceSessionReply(reply []byte) (uint32, string, error) {{
 		return 0, "", ErrMalformedEnvelope
 	}}
 	return header.Result, sessionID, nil
+}}
+
+// EncodePickFirstTemporalRefRequest emits the memory whose references are
+// ranked. The ordering is fixed inside the statement, so nothing steers it.
+func EncodePickFirstTemporalRefRequest(memoryID uint64) ([]byte, error) {{
+	if memoryID == 0 || memoryID > PickFirstTemporalRefMemoryIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationPickFirstTemporalRef, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}}
+
+// DecodePickFirstTemporalRefRequest validates the envelope and the memory.
+func DecodePickFirstTemporalRefRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPickFirstTemporalRef || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > PickFirstTemporalRefMemoryIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return memoryID, nil
+}}
+
+// EncodePickFirstTemporalRefReply carries a non-empty reference key, or
+// reports that the memory has none.
+func EncodePickFirstTemporalRefReply(result uint32, refKey string) ([]byte, error) {{
+	if result == ResultNotFound {{
+		if refKey != "" {{
+			return nil, ErrMalformedEnvelope
+		}}
+		header, err := EncodeReplyHeader(OperationPickFirstTemporalRef, result, 0)
+		if err != nil {{
+			return nil, ErrMalformedEnvelope
+		}}
+		return header, nil
+	}}
+	if result != ResultOK || len(refKey) == 0 ||
+		len(refKey) > PickFirstTemporalRefKeyMax || hasNUL(refKey) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 4 + len(refKey)
+	header, err := EncodeReplyHeader(OperationPickFirstTemporalRef, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, uint32(len(refKey)))
+	copy(payload[4:], refKey)
+	return reply, nil
+}}
+
+// DecodePickFirstTemporalRefReply refuses an empty ok for the same reason.
+func DecodePickFirstTemporalRefReply(reply []byte) (uint32, string, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPickFirstTemporalRef {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	if header.Result == ResultNotFound && header.PayloadLen == 0 &&
+		len(reply) == int(EnvelopeHeaderLen) {{
+		return header.Result, "", nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen < 5 ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	keyLen := binary.LittleEndian.Uint32(payload)
+	if keyLen == 0 || keyLen > uint32(PickFirstTemporalRefKeyMax) ||
+		4+keyLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	refKey := string(payload[4 : 4+keyLen])
+	if hasNUL(refKey) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return header.Result, refKey, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

@@ -66,6 +66,9 @@ static int get_content_hit;
 static int get_content_calls;
 static int get_source_session_rc;
 static int get_source_session_calls;
+static int temporal_ref_hit;
+static int temporal_ref_calls;
+static char temporal_ref_value[160];
 static char get_source_session_value[160];
 static char get_content_value[2048];
 static char update_content_last[2048];
@@ -545,6 +548,24 @@ static int get_source_session(int64_t memory_id, char *out, int out_len)
       return get_source_session_rc;
    snprintf(out, (size_t)out_len, "%s", get_source_session_value);
    return 0;
+}
+
+int db2_memory_pick_first_temporal_ref(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return 0;
+}
+
+static int pick_first_temporal_ref(int64_t memory_id, char *out, int out_len)
+{
+   (void)memory_id;
+   temporal_ref_calls++;
+   if (!temporal_ref_hit)
+      return 0;
+   snprintf(out, (size_t)out_len, "%s", temporal_ref_value);
+   return 1;
 }
 
 int64_t db2_memory_count(void)
@@ -1234,6 +1255,9 @@ static void reset(void)
    get_content_calls = 0;
    get_source_session_rc = 0;
    get_source_session_calls = 0;
+   temporal_ref_hit = 1;
+   temporal_ref_calls = 0;
+   snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
    snprintf(get_content_value, sizeof(get_content_value), "%s", "stored text");
    update_content_last[0] = '\0';
@@ -2526,6 +2550,42 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_pick_first_temporal_ref_wire(void)
+{
+   uint8_t request[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_pick_first_temporal_ref_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_pick_first_temporal_ref_request_decode(request, sizeof(request), &memory_id) ==
+              0 &&
+          memory_id == 42);
+   assert(aimee_db2_pick_first_temporal_ref_request_encode(0u, request, sizeof(request)) == -1);
+   /* The request is exactly a memory: the ranking that decides which reference
+    * wins lives in the statement, so there is nothing here to steer it. */
+   assert(sizeof(request) == AIMEE_DB2_ENVELOPE_HEADER_LEN + 8u);
+
+   uint8_t reply[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MAX_LEN];
+   char ref_key[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX + 1];
+   uint32_t reply_len = 99, result = 99;
+   assert(aimee_db2_pick_first_temporal_ref_reply_encode(AIMEE_DB2_RESULT_OK, "2026-08-19", reply,
+                                                         sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_pick_first_temporal_ref_reply_decode(reply, reply_len, &result, ref_key,
+                                                         sizeof(ref_key)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && strcmp(ref_key, "2026-08-19") == 0);
+
+   assert(aimee_db2_pick_first_temporal_ref_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, NULL, reply,
+                                                         sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN);
+   assert(aimee_db2_pick_first_temporal_ref_reply_decode(reply, reply_len, &result, ref_key,
+                                                         sizeof(ref_key)) == 0);
+   assert(result == AIMEE_DB2_RESULT_NOT_FOUND && ref_key[0] == '\0');
+
+   /* No empty ok, for the same reason as get_source_session. */
+   assert(aimee_db2_pick_first_temporal_ref_reply_encode(AIMEE_DB2_RESULT_OK, "", reply,
+                                                         sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_pick_first_temporal_ref_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, "x", reply,
+                                                         sizeof(reply), &reply_len) == -1);
 }
 
 static void test_get_source_session_wire(void)
@@ -4466,6 +4526,47 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_pick_first_temporal_ref_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.pick_first_temporal_ref = pick_first_temporal_ref};
+   uint8_t request[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MAX_LEN];
+   char ref_key[AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX + 1];
+   uint32_t response_len = 99, result = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_PICK_FIRST_TEMPORAL_REF};
+   assert(aimee_db2_pick_first_temporal_ref_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(temporal_ref_calls == 1);
+   assert(aimee_db2_pick_first_temporal_ref_reply_decode(response, response_len, &result, ref_key,
+                                                         sizeof(ref_key)) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && strcmp(ref_key, "2026-08-19") == 0);
+
+   temporal_ref_hit = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(response_len == AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN);
+   assert(aimee_db2_pick_first_temporal_ref_reply_decode(response, response_len, &result, ref_key,
+                                                         sizeof(ref_key)) == 0);
+   assert(result == AIMEE_DB2_RESULT_NOT_FOUND);
+   temporal_ref_hit = 1;
+
+   /* A hit with an empty key is a broken backend contract, refused rather than
+    * encoded as an empty ok. */
+   temporal_ref_value[0] = '\0';
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response,
+                 AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_get_source_session_handler(void)
 {
    reset();
@@ -6019,6 +6120,7 @@ int main(void)
    test_negation_tokens_update_wire();
    test_get_content_wire();
    test_get_source_session_wire();
+   test_pick_first_temporal_ref_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6069,6 +6171,7 @@ int main(void)
    test_negation_tokens_update_handler();
    test_get_content_handler();
    test_get_source_session_handler();
+   test_pick_first_temporal_ref_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

@@ -1660,6 +1660,14 @@
       "reason": "The typed memory.negation_tokens_update operation replaces the extracted-token write, bounded to the extractor's own output width. The backend maps a null to an empty string and stores it, so an empty value is a request that clears the column rather than a malformed one."
     },
     {
+      "symbol": "db2_memory_pick_first_temporal_ref",
+      "signature_sha256": "b9b0e7e56a1300bb929cf94e524e05dcdeea6d18c4edf740a270a894c5f68b7c",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.pick_first_temporal_ref operation replaces the highest-ranked temporal reference lookup. The ordering is fixed policy inside the statement rather than a caller input, and a memory with no usable reference is reported as not_found since the backend succeeds only for a non-empty key."
+    },
+    {
       "symbol": "db2_memory_promotion_delete_l0",
       "signature_sha256": "912605e89f87fb0961d3e301d51dfbf71edd4ea9bec00ac6c3cfb73f1dc30938",
       "disposition": "wire-operation",
