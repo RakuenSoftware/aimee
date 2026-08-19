@@ -143,7 +143,20 @@ class CatalogTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             catalog = self.catalog(root)
+            # Reserve one, because the real catalog no longer has any: every
+            # family is served. A test that waited for the repo to supply the
+            # state it is testing stops testing anything the day the migration
+            # finishes -- which is the day this one broke.
             catalog["catalog_complete"] = True
+            # A fresh reserved family rather than deactivating a served one:
+            # every family now retires sources, and un-serving one of those
+            # trips retired-reserved before completeness is ever considered.
+            reserved = dict(catalog["families"][0])
+            reserved.update({"id": len(catalog["families"]) + 1, "name": "zz_reserved",
+                             "event_kind": 11776 + len(catalog["families"]) + 1,
+                             "active": False, "covers": "secrets", "sources": ["secrets"],
+                             "retired_sources": []})
+            catalog["families"].append(reserved)
             self.write(root, catalog)
             self.assertRule(root, "catalog-complete")
         finally:
@@ -239,15 +252,20 @@ class CatalogTests(unittest.TestCase):
         tmp = sandbox()
         try:
             root = Path(tmp.name)
+            # Put a source back in the daemon's link and un-retire it, rather
+            # than naming one that happens to still be there: every family is
+            # served now, so there is no longer such a source, and every earlier
+            # version of this test named one that later migrated -- first
+            # checkpoints.c, then wfe_store.c. The state under test is built
+            # here so it cannot expire again.
+            catalog = self.catalog(root)
+            family = next(f for f in catalog["families"] if f["retired_sources"])
+            retired = family["retired_sources"][0]
+            family["retired_sources"] = [s for s in family["retired_sources"] if s != retired]
+            self.write(root, catalog)
             makefile = root / contract.MAKEFILE
             text = makefile.read_text(encoding="utf-8")
-            # Any domain source the daemon still links will do; wfe_store is the
-            # one a reserved family claims, so it stays linked until that family
-            # can serve it. Naming a source that later migrates makes this test
-            # fail for the wrong reason -- which is what checkpoints.c did.
-            self.assertIn("modules/db1/wfe_store.c", text)
-            makefile.write_text(text.replace(" modules/db1/wfe_store.c", "", 1),
-                                encoding="utf-8")
+            self.assertNotIn(f"modules/db1/{retired}", text)
             self.assertRule(root, "retired-unclaimed")
         finally:
             tmp.cleanup()

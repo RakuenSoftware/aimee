@@ -125,6 +125,7 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/checkpoints.o \
                     $(OBJDIR)/modules/db1/execution_plans.o $(OBJDIR)/execution_plan_list.o \
                     $(OBJDIR)/modules/db1/roundtable_pipeline.o \
+                    $(OBJDIR)/wfe_store_lists.o \
                     $(OBJDIR)/modules/db1/remote_client_grant.o $(OBJDIR)/remote_client_claim.o \
                     $(OBJDIR)/modules/db1/web_page_cache.o \
                     $(OBJDIR)/modules/db1/fsnap.o \
@@ -2030,6 +2031,7 @@ $(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_pr
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
 	$(OBJDIR)/modules/db1/wfe_binding.o $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
+	$(OBJDIR)/wfe_store_lists.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                       $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
@@ -2185,6 +2187,7 @@ $(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
 $(TESTPREFIX)/unit-test-wfe-engine: $(OBJDIR)/tests/test_wfe_engine.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_engine.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
                                     $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
@@ -2196,6 +2199,7 @@ $(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                     $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
@@ -2336,6 +2340,7 @@ $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
@@ -2354,6 +2359,7 @@ $(TESTPREFIX)/unit-test-primary-cli-ingestor: $(OBJDIR)/tests/test_primary_cli_i
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
@@ -2368,6 +2374,7 @@ $(TESTPREFIX)/unit-test-wfe-block-resolve: $(OBJDIR)/tests/test_wfe_block_resolv
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
@@ -2383,6 +2390,7 @@ $(TESTPREFIX)/unit-test-wfe-advance-exec: $(OBJDIR)/tests/test_wfe_advance_exec.
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
@@ -2392,6 +2400,7 @@ $(TESTPREFIX)/unit-test-wfe-advance-exec: $(OBJDIR)/tests/test_wfe_advance_exec.
 # S2 session<->work-item binding (DB1-backed).
 $(TESTPREFIX)/unit-test-wfe-binding: $(OBJDIR)/tests/test_wfe_binding.o \
                                     $(OBJDIR)/modules/db1/wfe_binding.o $(OBJDIR)/modules/db1/wfe_store.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/db1/db1_init.o \
                                     $(OBJDIR)/modules/db1/db1_write.o $(OBJDIR)/modules/db1/db1_trigger.o \
                                     $(OBJDIR)/modules/db1/db1_cron_jobs.o $(OBJDIR)/modules/db1/model_catalog.o $(OBJDIR)/model_catalog_release.o \
@@ -2846,6 +2855,7 @@ $(TESTPREFIX)/unit-test-wfe-manager-flow: $(OBJDIR)/tests/test_wfe_manager_flow.
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
@@ -2858,6 +2868,7 @@ $(TESTPREFIX)/unit-test-wfe-custom: $(OBJDIR)/tests/test_wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
@@ -2869,6 +2880,7 @@ $(TESTPREFIX)/unit-test-wfe-safety: $(OBJDIR)/tests/test_wfe_safety.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
@@ -2884,6 +2896,7 @@ $(TESTPREFIX)/unit-test-wfe-delegate-seam: $(OBJDIR)/tests/test_wfe_delegate_sea
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
@@ -2897,6 +2910,7 @@ $(TESTPREFIX)/unit-test-wfe-scheduler: $(OBJDIR)/tests/test_wfe_scheduler.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_roundtable.o $(OBJDIR)/modules/workflows/wfe_approval.o \
@@ -2917,6 +2931,7 @@ $(TESTPREFIX)/unit-test-wfe-gate-reject: $(OBJDIR)/tests/test_wfe_gate_reject.o 
 $(TESTPREFIX)/unit-test-wfe-gate-apply: $(OBJDIR)/tests/test_wfe_gate_apply.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2924,6 +2939,7 @@ $(TESTPREFIX)/unit-test-wfe-gate-apply: $(OBJDIR)/tests/test_wfe_gate_apply.o \
 $(TESTPREFIX)/unit-test-wfe-submitter: $(OBJDIR)/tests/test_wfe_submitter.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2939,6 +2955,7 @@ $(TESTPREFIX)/unit-test-wfe-webapi: $(OBJDIR)/tests/test_wfe_webapi.o \
                                     $(OBJDIR)/server/server_workflow_api.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o \
@@ -2956,6 +2973,7 @@ $(TESTPREFIX)/unit-test-wfe-approval: $(OBJDIR)/tests/test_wfe_approval.o \
                                       $(OBJDIR)/modules/workflows/wfe_approval.o $(OBJDIR)/modules/workflows/wfe_engine.o \
                                       $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                       $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                      $(OBJDIR)/wfe_store_lists.o \
                                       $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                       $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                       $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
@@ -2967,6 +2985,7 @@ $(TESTPREFIX)/unit-test-wfe-roundtable: $(OBJDIR)/tests/test_wfe_roundtable.o \
                                         $(OBJDIR)/modules/workflows/wfe_verdict.o $(OBJDIR)/module_json_call.o $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/modules/workflows/wfe_engine.o \
                                         $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                         $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                        $(OBJDIR)/wfe_store_lists.o \
                                         $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                         $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                         $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/tests/support/log_stub.o \
@@ -2982,6 +3001,7 @@ $(TESTPREFIX)/unit-test-wfe-foreach: $(OBJDIR)/tests/test_wfe_foreach.o \
                                     $(OBJDIR)/tests/support/log_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
@@ -3006,6 +3026,7 @@ $(TESTPREFIX)/unit-test-wfe-foreach-spawn: $(OBJDIR)/tests/test_wfe_foreach_spaw
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
@@ -3030,6 +3051,7 @@ $(TESTPREFIX)/unit-test-wfe-autonomy: $(OBJDIR)/tests/test_wfe_autonomy.o \
                                       $(OBJDIR)/modules/workflows/wfe_roundtable.o $(OBJDIR)/modules/workflows/wfe_verdict.o $(OBJDIR)/module_json_call.o $(OBJDIR)/tests/support/module_bus_stub.o \
                                       $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/modules/db1/db1_init.o \
                                       $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/modules/db1/wfe_store.o \
+                                      $(OBJDIR)/wfe_store_lists.o \
                                       $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
                                       $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                       $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
@@ -4412,6 +4434,7 @@ $(TESTPREFIX)/unit-test-trigger-e2e: $(OBJDIR)/tests/test_trigger_e2e.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
                                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/wfe_store_lists.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
                                     $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/modules/workflows/wfe_roundtable.o $(OBJDIR)/modules/workflows/wfe_approval.o \
@@ -5160,6 +5183,7 @@ $(TESTPREFIX)/unit-test-db1-module-bus: \
                                        $(OBJDIR)/execution_plan_list.o \
                                        $(OBJDIR)/remote_client_claim.o \
                                        $(OBJDIR)/jti_replay_consume.o \
+                                       $(OBJDIR)/wfe_store_lists.o \
                                        $(OBS_BUS_LINK_OBJS) \
                                        $(OBJDIR)/core/event_bus/bus_client.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -5285,11 +5309,14 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/identity_stage.o \
                                        $(OBJDIR)/modules/db1/checkpoints_stage.o \
                                        $(OBJDIR)/modules/db1/jti_replay_stage.o \
+                                       $(OBJDIR)/modules/db1/lifecycle_stage.o \
                                        $(OBJDIR)/modules/db1/server_identity_jti.o \
-                                       $(OBJDIR)/modules/db1/server_management_jti.o \
+                                       $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/wfe_store_lists.o \
+                     $(OBJDIR)/modules/db1/server_management_jti.o \
                                        $(OBJDIR)/modules/db1/economizer_state.o \
                                        $(OBJDIR)/modules/db1/remote_client_grant.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o \
+                                       $(OBJDIR)/wfe_store_lists.o \
                                        $(OBJDIR)/dstr.o \
                                        $(OBJDIR)/modules/db1/token_audit.o \
                                        $(OBJDIR)/modules/db1/cost_fold.o \
@@ -6115,6 +6142,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
+                     $(OBJDIR)/modules/db1/wfe_store.o $(OBJDIR)/wfe_store_lists.o \
                      $(OBJDIR)/modules/db1/server_management_jti.o \
                      $(OBJDIR)/modules/db1/server_identity_jti.o \
                      $(OBJDIR)/modules/delegates/delegate_launch_args.o \

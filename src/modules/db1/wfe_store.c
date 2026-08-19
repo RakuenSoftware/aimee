@@ -6,6 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Internal now: the only caller is the outcome below. */
+static int db1_lifecycle_txn_begin(void);
+static int db1_lifecycle_txn_commit(void);
+static int db1_lifecycle_txn_rollback(void);
+
 /* General work-item insert (interactive + internal callers, e.g. the sweep path).
  * The PUBLIC autonomous intake (POST /v1/dev/submit) must NOT use this directly —
  * it goes through db1_work_item_submit_capped, which binds a submitter atomically
@@ -635,7 +640,7 @@ int db1_work_item_inc_override(const char *wi)
    return -1;
 }
 
-static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
+static int work_item_list_ordered(db1_work_item_t **out, const char *sql, int max)
 {
    if (out)
       *out = NULL;
@@ -645,6 +650,8 @@ static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
+   if (max <= 0)
+      return -1;
    int cap = 8, n = 0;
    db1_work_item_t *arr = malloc((size_t)cap * sizeof *arr);
    if (!arr)
@@ -652,7 +659,7 @@ static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
       sqlite3_finalize(st);
       return -1;
    }
-   while (sqlite3_step(st) == SQLITE_ROW)
+   while (n < max && sqlite3_step(st) == SQLITE_ROW)
    {
       if (n == cap)
       {
@@ -672,19 +679,19 @@ static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
    return n;
 }
 
-int db1_work_item_list(db1_work_item_t **out)
+int db1_work_item_list_bounded(db1_work_item_t **out, int max)
 {
-   return work_item_list_ordered(out,
-                                 "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC");
+   return work_item_list_ordered(
+       out, "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC", max);
 }
 
-int db1_work_item_list_lru(db1_work_item_t **out)
+int db1_work_item_list_lru_bounded(db1_work_item_t **out, int max)
 {
    /* Staleness-first (see wfe_store.h). id ASC tie-break keeps the order total
     * and deterministic for same-second updates (a fresh fan-out stamps every
     * child in one batch). */
-   return work_item_list_ordered(out, "SELECT " WI_COLS
-                                      " FROM lifecycle_work_item ORDER BY updated_at ASC, id ASC");
+   return work_item_list_ordered(
+       out, "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY updated_at ASC, id ASC", max);
 }
 
 int db1_lifecycle_event_add(const char *wi, const char *stage, const char *kind, const char *actor,
@@ -711,7 +718,7 @@ int db1_lifecycle_event_add(const char *wi, const char *stage, const char *kind,
    return rc == SQLITE_DONE ? 0 : -1;
 }
 
-int db1_lifecycle_event_list(const char *wi, db1_lifecycle_event_t **out)
+int db1_lifecycle_event_list_bounded(const char *wi, db1_lifecycle_event_t **out, int max)
 {
    if (out)
       *out = NULL;
@@ -732,7 +739,9 @@ int db1_lifecycle_event_list(const char *wi, db1_lifecycle_event_t **out)
       sqlite3_finalize(st);
       return -1;
    }
-   while (sqlite3_step(st) == SQLITE_ROW)
+   if (max <= 0)
+      return -1;
+   while (n < max && sqlite3_step(st) == SQLITE_ROW)
    {
       if (n == cap)
       {
@@ -819,15 +828,79 @@ int db1_stage_attempt_get(const char *wi, const char *stage)
 /* All three route through the db1 transaction gate (db1_internal.h): begin
  * holds the cross-thread mutex until the matching commit/rollback, so parallel
  * engine advances can't interleave transactions on the shared connection. */
-int db1_lifecycle_txn_begin(void)
+static int db1_lifecycle_txn_begin(void)
 {
    return db1_txn_begin(db1_conn(), "BEGIN IMMEDIATE");
 }
-int db1_lifecycle_txn_commit(void)
+static int db1_lifecycle_txn_commit(void)
 {
    return db1_txn_end(db1_conn(), "COMMIT");
 }
-int db1_lifecycle_txn_rollback(void)
+static int db1_lifecycle_txn_rollback(void)
 {
    return db1_txn_end(db1_conn(), "ROLLBACK");
+}
+
+int db1_work_item_record_outcome(const db1_work_item_outcome_t *o)
+{
+   if (!o || !o->work_item_id[0])
+      return -1;
+   if (o->disposition != DB1_WORK_ITEM_OUTCOME_PAUSE &&
+       o->disposition != DB1_WORK_ITEM_OUTCOME_TERMINAL &&
+       o->disposition != DB1_WORK_ITEM_OUTCOME_ADVANCE)
+      return -1;
+
+   if (db1_lifecycle_txn_begin() != 0)
+      return -1;
+
+   /* Every state write is checked and any failure abandons the whole outcome.
+      The audit writes are not: an event that fails to append is a missing line
+      in a log, where a state write that fails is a work item nobody can
+      explain -- the same split the engine drew when these were its own calls. */
+#define OUTCOME_CK(call)                                                                           \
+   do                                                                                              \
+   {                                                                                               \
+      if ((call) != 0)                                                                             \
+         goto fail;                                                                                \
+   } while (0)
+
+   if (o->cost_usd > 0)
+      OUTCOME_CK(db1_work_item_add_cost(o->work_item_id, o->cost_usd));
+
+   if (o->disposition == DB1_WORK_ITEM_OUTCOME_TERMINAL)
+   {
+      OUTCOME_CK(db1_work_item_set_terminal(o->work_item_id, o->state));
+      if (o->abandon_children)
+         (void)db1_work_item_abandon_children(o->work_item_id); /* no-op for a leaf slice */
+   }
+   else if (o->disposition == DB1_WORK_ITEM_OUTCOME_PAUSE)
+   {
+      OUTCOME_CK(db1_work_item_set_pause(o->work_item_id, o->pause_reason, o->pause_stage));
+   }
+   else
+   {
+      OUTCOME_CK(db1_work_item_set_stage(o->work_item_id, o->next_stage, o->event_hash));
+      if (o->pr_ref[0])
+         OUTCOME_CK(db1_work_item_set_pr_ref(o->work_item_id, o->pr_ref));
+   }
+
+   db1_lifecycle_event_add(o->work_item_id, o->node_id, o->event_kind, "engine", o->event_detail,
+                           o->event_hash, o->cost_usd);
+
+   if (o->disposition == DB1_WORK_ITEM_OUTCOME_ADVANCE && o->park_reason[0])
+   {
+      /* The step advanced and its own cost crossed the cap, so it parks before
+         the next stage and a human resumes with --budget-bump. */
+      OUTCOME_CK(db1_work_item_set_pause(o->work_item_id, o->park_reason, o->next_stage));
+      db1_lifecycle_event_add(o->work_item_id, o->next_stage, "pause", "engine", o->park_reason, "",
+                              0);
+   }
+
+   db1_lifecycle_txn_commit();
+   return 0;
+
+fail:
+   db1_lifecycle_txn_rollback();
+   return -1;
+#undef OUTCOME_CK
 }

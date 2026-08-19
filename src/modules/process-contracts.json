@@ -724,6 +724,11 @@
           "id": 15,
           "name": "db1-jti-replay",
           "event_kind": 11791
+        },
+        {
+          "id": 16,
+          "name": "db1-lifecycle",
+          "event_kind": 11792
         }
       ]
     }

@@ -230,6 +230,40 @@ int main(void)
       assert(strcmp(wi.pause_reason, "pending_human") == 0);
    }
 
+   /* --- on_max: human, but AUTONOMOUS -> abandoned rather than parked ---
+    *
+    * The same workflow and the same exhausted cap as above; only the mode
+    * differs. An autonomous run has no operator to satisfy a pending_human
+    * wait, so parking would leave it 'active' forever -- the reaper never reaps
+    * a human wait -- and the run would sit there as a zombie. This is the one
+    * cap branch nothing covered, and it is the one that writes a terminal AND
+    * abandons children, so a mistake here is two writes wrong, not one. */
+   {
+      write_workflow("minihuman", MINI_HUMAN);
+      wfe_reset_block_executors();
+      wfe_register_stub_executors();
+      wfe_register_block_executor(WFE_BLK_GATE_ROUNDTABLE, exec_loop);
+      char id[80] = "";
+      char err[256] = "";
+      assert(wfe_work_item_create("minihuman", "r_auto", "pa.md", "autonomous", id, err,
+                                  sizeof err) == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "abandoned") == 0);
+
+      /* the audit line says why, so an operator finding a dead run can tell an
+         exhausted loop from an operator abandoning it by hand */
+      db1_lifecycle_event_t *evs = NULL;
+      int ne = db1_lifecycle_event_list(id, &evs);
+      int saw = 0;
+      for (int i = 0; i < ne; i++)
+         if (strcmp(evs[i].kind, "terminal") == 0 && strstr(evs[i].detail, "max_iters"))
+            saw = 1;
+      assert(saw);
+      free(evs);
+   }
+
    printf("ok\n");
    return 0;
 }

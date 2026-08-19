@@ -518,6 +518,47 @@
 #define AIMEE_DB1_OP_IDENTITY_JTI_CONSUME   1u
 #define AIMEE_DB1_OP_MANAGEMENT_JTI_CONSUME 2u
 
+/* Family 16: work-item state and its audit log. Split from workflow because
+ * wfe_engine.c wraps sixteen of these writes in two transactions it opens and
+ * commits across separate calls, which is a redesign of that engine's write
+ * path rather than a wire question. */
+
+#define AIMEE_DB1_EVENT_LIFECYCLE 11792u
+#define AIMEE_DB1_STAGE_LIFECYCLE 16u
+
+#define AIMEE_DB1_OP_WORK_ITEM_CREATE                    1u
+#define AIMEE_DB1_OP_WORK_ITEM_GET                       2u
+#define AIMEE_DB1_OP_WORK_ITEM_ID_BY_PROPOSAL            3u
+#define AIMEE_DB1_OP_WORK_ITEM_ID_BY_PR_REF              4u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_STAGE                 5u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_PR_REF                6u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_WORKTREE              7u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_SUBMITTER             8u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_PARENT                9u
+#define AIMEE_DB1_OP_WORK_ITEM_ABANDON_CHILDREN          10u
+#define AIMEE_DB1_OP_WORK_ITEM_CHILD_COUNTS              11u
+#define AIMEE_DB1_OP_WORK_ITEM_COUNT_ACTIVE_BY_SUBMITTER 12u
+#define AIMEE_DB1_OP_WORK_ITEM_COUNT_RECENT_BY_SUBMITTER 13u
+#define AIMEE_DB1_OP_WORK_ITEM_SUBMIT_CAPPED             14u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_TERMINAL              15u
+#define AIMEE_DB1_OP_WORK_ITEM_GATE_APPLY                16u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_PAUSE                 17u
+#define AIMEE_DB1_OP_WORK_ITEM_CLEAR_PAUSE               18u
+#define AIMEE_DB1_OP_WORK_ITEM_CLEAR_PAUSE_IF            19u
+#define AIMEE_DB1_OP_WORK_ITEM_ADD_COST                  20u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_COST_CAP              21u
+#define AIMEE_DB1_OP_WORK_ITEM_INC_OVERRIDE              22u
+#define AIMEE_DB1_OP_WORK_ITEM_DELETE                    23u
+#define AIMEE_DB1_OP_WORK_ITEM_REAP_STALE_PARKS          24u
+#define AIMEE_DB1_OP_WORK_ITEM_LIST                      25u
+#define AIMEE_DB1_OP_WORK_ITEM_LIST_LRU                  26u
+#define AIMEE_DB1_OP_LIFECYCLE_EVENT_ADD                 27u
+#define AIMEE_DB1_OP_LIFECYCLE_EVENT_LIST                28u
+#define AIMEE_DB1_OP_STAGE_ATTEMPT_INC                   29u
+#define AIMEE_DB1_OP_STAGE_ATTEMPT_RESET                 30u
+#define AIMEE_DB1_OP_STAGE_ATTEMPT_GET                   31u
+#define AIMEE_DB1_OP_WORK_ITEM_RECORD_OUTCOME            32u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry
