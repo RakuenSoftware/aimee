@@ -549,7 +549,20 @@ cJSON *cli_argspec_build(const char *method, const cJSON *spec, int argc, char *
    cJSON_AddStringToObject(req, "method", method);
    cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
 
+   /* `max_positionals` refuses an invocation that carries MORE positionals than
+    * the method accepts. delegate.log takes none at all and says so, pointing
+    * the operator at `aimee jobs logs <job_id>` instead of quietly ignoring the
+    * id they typed.
+    *
+    * This is an ARITY rule, not a field rule, which is why it sits on the spec
+    * rather than on a field. It crosses neither half of the line: no field's
+    * presence depends on another field, and no branch decides which fields
+    * exist -- there are none to decide. */
    int missing = 0;
+   const cJSON *maxpos = cJSON_GetObjectItemCaseSensitive(spec, "max_positionals");
+   if (cJSON_IsNumber(maxpos) && opts.pos_count > (int)maxpos->valuedouble)
+      missing = 1;
+
    for (const cJSON *f = fields ? fields->child : NULL; f && !missing; f = f->next)
       if (add_field(req, f, &opts, joined, argc, argv) != 0)
          missing = 1;

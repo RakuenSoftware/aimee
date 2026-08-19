@@ -14,12 +14,12 @@
  * NOT here, and never: anything reading the client's own disk or environment.
  * That is the thin client's own job, not knowledge of what the server can do.
  *
- * WHY THE REST ARE NOT HERE YET. 125 of the 181 CLI-reachable methods are
- * served (36 no-argument, 89 specs) -- 91% of the set that CAN be served. Every
- * one of the remaining 56 has a reason, and the reasons are of three kinds:
+ * WHY THE REST ARE NOT HERE YET. 126 of the 181 CLI-reachable methods are
+ * served (36 no-argument, 90 specs) -- 91% of the set that CAN be served. Every
+ * one of the remaining 55 has a reason, and the reasons are of three kinds:
  *
  *   43  NEVER serveable -- the client's own state
- *    8  a field-SET branch: which fields exist depends on the input
+ *    7  a field-SET branch: which fields exist depends on the input
  *    5  a transformation of a value, or an argv grammar of its own
  *
  * THE 43 ARE THE POINT, not a shortfall. They read getcwd(),
@@ -49,7 +49,6 @@
  *   - delegate.status sends job_ids (array) or job_id (scalar) by count.
  *   - trigger.fire needs --source AND (--task OR --proposal).
  *   - pipeline.start splits --questions on "||".
- *   - delegate.log refuses ANY positional -- a rule about the invocation.
  *   - catalog.show splits "provider:model" on a colon, truncating at 64 bytes.
  *   - the memory.user_capture family joins the positionals from index 1,
  *     prefixes the key, and refuses one over 512 characters.
@@ -59,6 +58,28 @@
  *
  * Encoding string surgery would make a spec a program transmitted over the
  * wire, which is the property that makes the served form safe to trust.
+ *
+ * TWO THAT WERE FILED WRONG, because "the generator could not read it" is not
+ * the same reason as "the line forbids it", and this list conflated them:
+ *
+ *   - delegate.log was listed here as a rule about the invocation. It is one,
+ *     and the line does not forbid it: an ARITY constraint makes no field's
+ *     presence depend on another field and lets no branch decide which fields
+ *     exist. It is now served, with `max_positionals`.
+ *
+ *   - get_help is still not served, but not on principle either. It is pure
+ *     argv with no local state and no branch; it just wears the MCP tool-call
+ *     envelope (method "help.get", a constant `tool`, a nested `arguments`,
+ *     and no protocol_version). Serving it needs four mechanisms -- method
+ *     override, envelope suppression, an unconditional constant, nested
+ *     placement -- for ONE method, because the other four MCP-shaped methods
+ *     are out for reasons of their own: git.verify, git.cli, index.ast_grep and
+ *     index.blast_radius read $AIMEE_SESSION_ID or the cwd, and tool.call
+ *     parses key=value pairs and raw JSON out of argv. Of those four
+ *     mechanisms, `envelope: none` is the one worth refusing: every served spec
+ *     currently produces a properly enveloped request, and an escape hatch used
+ *     exactly once is a poor trade for that guarantee. This is a COST decision
+ *     and should be revisited if a second method ever wants the same shape.
  *
  * ADDING A METHOD: write the spec, add samples INCLUDING the awkward input for
  * whatever convention it uses, and let test_cli_argspec decide -- it compares
@@ -107,6 +128,19 @@
  * was introduced and the check confirmed to FAIL on it, because a check that
  * has never failed is decoration.
  */
+
+/* No fields at all, and a refusal if anything positional is typed: `aimee
+   delegate log 42` means the operator wanted a JOB log, and silently dropping
+   the 42 would show them the wrong thing. It cannot go in the no-argument list
+   for exactly that reason -- that list accepts whatever it is given.
+
+   bool_flags is deliberately absent even though --json exists: the marshaller
+   passes NULL, so --json consumes the following token as its value, and a spec
+   that declared it a boolean would leave that token as a positional and refuse
+   an invocation the compiled path accepts. */
+{"delegate.log",
+ "{\"usage\":\"usage: aimee delegate log [--json]; for a background job log, "
+ "use `aimee jobs logs <job_id>`\",\"max_positionals\":0}"},
 
 {"session.presence",
  "{\"fields\":[{\"json\":\"owner\",\"from\":\"flag\",\"flag\":\"owner\"}]}"},

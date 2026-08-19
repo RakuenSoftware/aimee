@@ -96,6 +96,20 @@ static const sample_t SAMPLES[] = {
     {"memory.embed", {"5", "--version", "", NULL}},
     {"memory.embed", {"--all", "5", "--version", "v2", NULL}},
 
+    /* delegate.log -- an ARITY rule, so the samples that matter are the ones
+       that must be REFUSED. The test treats both sides refusing as agreement
+       and flags a one-sided refusal, which is exactly the assertion wanted
+       here. `--json x` must be ACCEPTED: the marshaller passes NULL bool flags,
+       so x is the flag's value and never becomes a positional. */
+    {"delegate.log", {NULL}},
+    {"delegate.log", {"--json", NULL}},
+    {"delegate.log", {"--json", "x", NULL}},
+    {"delegate.log", {"42", NULL}},
+    {"delegate.log", {"a", "b", NULL}},
+    {"delegate.log", {"", NULL}},
+    {"delegate.log", {"--", NULL}},
+    {"delegate.log", {"-x", NULL}},
+
     /* session.presence — one optional flag, empty dropped. */
     {"session.presence", {NULL}},
     {"session.presence", {"--owner", "ada", NULL}},

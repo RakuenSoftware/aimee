@@ -48,9 +48,17 @@
  * how delegate.backend_exec takes its command. `alt_flag` is a second spelling
  * of the same flag: memory.get accepts --as-of and --as_of.
  *
- * All three are rules about ONE field's own value and its own flags, which is
- * the line this vocabulary holds -- no field's presence may depend on another
- * field, and no branch may decide which fields exist.
+ * `max_positionals` sits on the SPEC, not on a field: it refuses an invocation
+ * carrying more positionals than the method accepts. delegate.log takes none,
+ * and says so rather than dropping the id an operator typed. An arity rule is
+ * not a field rule, but it crosses neither half of the line either -- no
+ * field's presence depends on another field, and no branch decides which fields
+ * exist.
+ *
+ * All of these are rules about ONE field's own value and its own flags, or
+ * about the invocation's shape, which is the line this vocabulary holds: no
+ * field's presence may depend on another field, and no branch may decide which
+ * fields exist.
  *
  * What it deliberately CANNOT express: reading the client's filesystem or
  * environment, composing prompts, or cross-field rules like "either --task or
