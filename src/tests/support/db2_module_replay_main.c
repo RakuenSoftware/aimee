@@ -14,6 +14,7 @@ extern int aimee_db2_module_init(void);
 static const aimee_module_stage_t stages[] = {
     {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_STAGE_HEALTH},
     {AIMEE_DB2_EVENT_LEVEL3_COUNT, AIMEE_DB2_STAGE_LEVEL3_COUNT},
+    {AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS, AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS},
 };
 
 int main(int argc, char **argv)

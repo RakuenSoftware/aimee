@@ -109,20 +109,21 @@ int main(int argc, char **argv)
    char socket_path[512];
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
 
-   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT};
+   const uint32_t served[] = {AIMEE_DB2_EVENT_HEALTH, AIMEE_DB2_EVENT_LEVEL3_COUNT,
+                              AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = module_executable,
         .serve = served,
-        .serve_count = 2},
+        .serve_count = (uint32_t)(sizeof(served) / sizeof(served[0]))},
        {.principal_class = 1,
         .principal_ref = CALLER_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = caller_executable,
         .request = served,
-        .request_count = 2},
+        .request_count = (uint32_t)(sizeof(served) / sizeof(served[0]))},
    };
    bus_host_config_t host_config = {.max_slots = 4,
                                     .slot_size = 256,
@@ -544,6 +545,22 @@ int main(int argc, char **argv)
                                                &corpus_count, corpus_stamp, sizeof(corpus_stamp),
                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(corpus_result == AIMEE_DB2_RESULT_OK && corpus_count == 0 && corpus_stamp[0] == '\0');
+
+   /* The index family reaching the real process for the first time. An empty
+    * schema has no orphaned edges to prune, no edges to renormalise and no
+    * current projects, so all three answer zero -- and zero is the success
+    * these operations report, not an absent result. */
+   uint32_t index_pruned = 99, index_normalized = 99, projects = 99;
+   assert(aimee_db2_entity_edge_prune_orphans_call(call_client, &client, 9089, 0, &index_pruned,
+                                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(index_pruned == 0);
+   assert(aimee_db2_entity_edge_normalize_weights_call(call_client, &client, 9090, 0,
+                                                       &index_normalized, NULL,
+                                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(index_normalized == 0);
+   assert(aimee_db2_project_count_call(call_client, &client, 9091, 0, &projects, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(projects == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

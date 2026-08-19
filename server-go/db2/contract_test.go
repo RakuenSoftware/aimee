@@ -94,6 +94,7 @@ type wireBaseline struct {
 				DeletedCount          uint32            `json:"deleted_count"`
 				PrunedCount           uint32            `json:"pruned_count"`
 				NormalizedCount       uint32            `json:"normalized_count"`
+				ProjectCount          uint32            `json:"project_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
@@ -239,7 +240,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 54 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 55 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -292,7 +293,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[50].Name != "pick_first_temporal_ref" ||
 		baseline.Operations[51].Name != "count_and_max_updated" ||
 		baseline.Operations[52].Name != "entity_edge_prune_orphans" ||
-		baseline.Operations[53].Name != "entity_edge_normalize_weights" {
+		baseline.Operations[53].Name != "entity_edge_normalize_weights" ||
+		baseline.Operations[54].Name != "project_count" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -488,6 +490,48 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		demoted, err := DecodeDemoteIDReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
+		}
+	}
+}
+
+func TestProjectCountMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[54]
+	if operation.Family != "index" {
+		t.Fatalf("family = %q, want index", operation.Family)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeProjectCountRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeProjectCountRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	// Same family and stage as the two edge operations, different number.
+	if err := DecodeEntityEdgePruneOrphansRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("prune decoder accepted a project_count request: %v", err)
+	}
+	if err := DecodeEntityEdgeNormalizeWeightsRequest(wantRequest); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("normalize decoder accepted a project_count request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeProjectCountRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeProjectCountReply(vector.ProjectCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		projects, err := DecodeProjectCountReply(got)
+		if err != nil || projects != vector.ProjectCount {
+			t.Fatalf("decode = (%d, %v)", projects, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		projects, err := DecodeProjectCountReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || projects != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, projects, err)
 		}
 	}
 }

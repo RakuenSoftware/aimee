@@ -124,6 +124,14 @@
       "reason": "Parsing DB2-owned profile JSON is private operation logic; the future learning.calibration_threshold reply returns only the validated bounded threshold selected from the same scoped profile read."
     },
     {
+      "symbol": "db2_code_index_project_count",
+      "signature_sha256": "2882e616e963fc51e85fae88e49fe4f00b32ab1949de4fbfe50ec88b60ec93ca",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.project_count operation replaces the current-project tally used by the doctor surface. Only projects in the current lifecycle state are counted and that state is fixed policy, so a caller cannot include detached projects in the number."
+    },
+    {
       "symbol": "db2_conn",
       "signature_sha256": "4a33cfbffa38498794f2c49735e95cd914ce3cbf42a4772d2bf4f66f980d8899",
       "disposition": "private-db2",

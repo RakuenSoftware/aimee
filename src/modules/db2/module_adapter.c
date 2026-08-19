@@ -5,6 +5,7 @@
 #include "c/db2.h"
 #include "c/db2_internal.h"
 #include "c/db2_pool.h"
+#include "c/code_index.h"
 #include "c/entity_edges.h"
 #include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
@@ -303,6 +304,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .count_and_max_updated = db2_memory_count_and_max_updated,
        .entity_edge_prune_orphans = db2_entity_edge_prune_orphans,
        .entity_edge_normalize_weights = db2_entity_edge_normalize_weights,
+       .project_count = db2_code_index_project_count,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -331,7 +333,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        (invocation->stage_id != AIMEE_DB2_STAGE_HEALTH &&
         invocation->stage_id != AIMEE_DB2_STAGE_LEVEL3_COUNT &&
         invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS &&
-        invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS))
+        invocation->stage_id != AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS &&
+        invocation->stage_id != AIMEE_DB2_STAGE_PROJECT_COUNT))
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
@@ -1250,7 +1253,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    }
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS ||
-       invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS)
+       invocation->stage_id == AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS ||
+       invocation->stage_id == AIMEE_DB2_STAGE_PROJECT_COUNT)
    {
       if (aimee_db2_entity_edge_prune_orphans_request_decode(request_body, request_len) == 0)
       {
@@ -1286,6 +1290,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_entity_edge_normalize_weights_reply_encode(
                  (uint32_t)normalized, response_body, response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_project_count_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_PROJECT_COUNT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->project_count)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The backend reports both an empty index and a failed statement as
+          * zero, so this count cannot distinguish them -- the same limitation
+          * the memory counts carry. */
+         int projects = backend->project_count();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (projects < 0 || (uint32_t)projects > AIMEE_DB2_PROJECT_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_project_count_reply_encode((uint32_t)projects, response_body,
+                                                  response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

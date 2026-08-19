@@ -75,6 +75,8 @@ static int edge_prune_value;
 static int edge_prune_calls;
 static int edge_normalize_value;
 static int edge_normalize_calls;
+static int project_count_value;
+static int project_count_calls;
 static char corpus_stat_stamp[64];
 static char temporal_ref_value[160];
 static char get_source_session_value[160];
@@ -615,6 +617,17 @@ static int entity_edge_normalize_weights(void)
 {
    edge_normalize_calls++;
    return edge_normalize_value;
+}
+
+int db2_code_index_project_count(void)
+{
+   return 0;
+}
+
+static int project_count(void)
+{
+   project_count_calls++;
+   return project_count_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1313,6 +1326,8 @@ static void reset(void)
    edge_prune_calls = 0;
    edge_normalize_value = 3;
    edge_normalize_calls = 0;
+   project_count_value = 4;
+   project_count_calls = 0;
    snprintf(corpus_stat_stamp, sizeof(corpus_stat_stamp), "%s", "2026-08-19 09:00:00");
    snprintf(temporal_ref_value, sizeof(temporal_ref_value), "%s", "2026-08-19");
    snprintf(get_source_session_value, sizeof(get_source_session_value), "%s", "sess-1");
@@ -2607,6 +2622,32 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_project_count_wire(void)
+{
+   uint8_t request[AIMEE_DB2_PROJECT_COUNT_REQUEST_LEN] = {0};
+   assert(aimee_db2_project_count_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_project_count_request_decode(request, sizeof(request)) == 0);
+   /* Third index operation: distinct number, same family. The two before it
+    * must reject this request and it must reject theirs. */
+   assert(aimee_db2_entity_edge_prune_orphans_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_entity_edge_normalize_weights_request_decode(request, sizeof(request)) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_project_count_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_PROJECT_COUNT_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, projects = 99;
+   assert(aimee_db2_project_count_reply_encode(4, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_project_count_reply_decode(reply, reply_len, &projects) == 0 && projects == 4);
+   assert(aimee_db2_project_count_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_project_count_reply_decode(reply, reply_len, &projects) == 0 && projects == 0);
+   assert(aimee_db2_project_count_reply_encode(AIMEE_DB2_PROJECT_COUNT_MAX + 1u, reply,
+                                               sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_project_count_reply_encode(4, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_project_count_reply_encode(4, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_project_count_reply_decode(reply, reply_len, &projects) == -1 && projects == 0);
 }
 
 static void test_entity_edge_normalize_weights_wire(void)
@@ -4709,6 +4750,41 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_project_count_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.project_count = project_count};
+   uint8_t request[AIMEE_DB2_PROJECT_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PROJECT_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 99, projects = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_PROJECT_COUNT};
+   assert(aimee_db2_project_count_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(project_count_calls == 1);
+   assert(aimee_db2_project_count_reply_decode(response, response_len, &projects) == 0 &&
+          projects == 4);
+
+   /* Zero is an index with no current projects, and also a failed statement:
+    * the backend collapses them and the wire cannot separate what it is not
+    * told apart. Pinned so the limitation stays visible. */
+   project_count_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_project_count_reply_decode(response, response_len, &projects) == 0 &&
+          projects == 0);
+   project_count_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   project_count_value = 4;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_entity_edge_normalize_weights_handler(void)
 {
    reset();
@@ -6443,6 +6519,7 @@ int main(void)
    test_count_and_max_updated_wire();
    test_entity_edge_prune_orphans_wire();
    test_entity_edge_normalize_weights_wire();
+   test_project_count_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -6497,6 +6574,7 @@ int main(void)
    test_count_and_max_updated_handler();
    test_entity_edge_prune_orphans_handler();
    test_entity_edge_normalize_weights_handler();
+   test_project_count_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
