@@ -31,6 +31,24 @@
  * families pass their arguments through verbatim this way -- one shape,
  * ten-odd methods, and no interpretation of what the words mean. */
 #define SRC_ARGV_ARRAY "argv_array"
+/* One RAW argv word, before flag parsing. `aimee memory delete --x` therefore
+ * sends id from "--x", because the marshaller reads argv[0] and not a parsed
+ * positional.
+ *
+ * I refused to describe this once, arguing the counting argument that admitted
+ * empty:"drop" and number_lenient "does not apply to a sample of one". Rarity
+ * was the wrong reason. The principle actually being held is DESCRIBE, do not
+ * reform: whether these three methods should read a parsed positional instead
+ * is a real question and a change to the CLI, not to a file whose job is to say
+ * what the CLI does. Refusing to describe it did not fix it -- it only left the
+ * client compiling in what the server could have told it. */
+#define SRC_ARGV_INDEX "argv_index"
+/* EVERY occurrence of one flag, as an array of its values. `aimee cron add ...
+ * --skill a --skill b` sends "skills": ["a","b"], and the field is omitted
+ * entirely when the flag never appears. Still a rule about one field and its
+ * own flag: no other field is consulted, and no branch decides which fields
+ * exist. */
+#define SRC_REPEATED_FLAG "repeated_flag"
 
 /* Whether a field present-but-empty is sent or dropped. Absent means "drop".
  *
@@ -68,6 +86,16 @@
  * so the same reasoning admits it -- one field, its own flag, no branch. The
  * literal travels in `value`. */
 #define TYPE_CONST_IF_SET "const_if_set"
+/* One field, two flags, three states: --surprise sends true, --no-surprise
+ * sends false, neither sends nothing. `flag` carries the true spelling and
+ * `false_flag` the false one, with the true one winning if both are given --
+ * which is what the `else if` in the marshaller means.
+ *
+ * Still one field consulting nothing but its own flags. The line this
+ * vocabulary holds is that no field's presence may depend on ANOTHER field, and
+ * no branch may decide which fields exist; a field with two of its own spellings
+ * crosses neither. */
+#define TYPE_TRISTATE_FLAG "tristate_flag"
 
 /* Two numeric conventions, and "number" is the RARE one: 53 sites parse with
  * atoi()/cli_args_get_int(), so "12x" becomes 12 and "abc" becomes 0, while 3
@@ -90,7 +118,8 @@ static int known_source(const char *from)
 {
    return from && (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
                    !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
-                   !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY));
+                   !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY) ||
+                   !strcmp(from, SRC_ARGV_INDEX) || !strcmp(from, SRC_REPEATED_FLAG));
 }
 
 static int known_empty(const char *e)
@@ -105,7 +134,7 @@ static int known_type(const char *type)
    return !type || !strcmp(type, TYPE_STRING) || !strcmp(type, TYPE_NUMBER) ||
           !strcmp(type, TYPE_NUMBER_LAX) || !strcmp(type, TYPE_BOOL) ||
           !strcmp(type, TYPE_BOOL_INVERTED) || !strcmp(type, TYPE_CONST_IF_SET) ||
-          !strcmp(type, TYPE_TRUE_IF_SET);
+          !strcmp(type, TYPE_TRISTATE_FLAG) || !strcmp(type, TYPE_TRUE_IF_SET);
 }
 
 int cli_argspec_supported(const cJSON *spec)
@@ -140,8 +169,14 @@ int cli_argspec_supported(const cJSON *spec)
       {
          /* A constant field with no constant says nothing. */
          const char *ty = field_str(f, "type");
-         if (ty && !strcmp(ty, TYPE_CONST_IF_SET) && !field_str(f, "value"))
+         if (ty && !strcmp(ty, TYPE_TRISTATE_FLAG) && !field_str(f, "false_flag"))
             return 0;
+         if (ty && !strcmp(ty, TYPE_CONST_IF_SET))
+         {
+            const cJSON *lv = cJSON_GetObjectItemCaseSensitive(f, "value");
+            if (!lv || !(cJSON_IsString(lv) || cJSON_IsBool(lv)))
+               return 0; /* a constant field with no usable constant */
+         }
       }
       /* A source must carry what it reads from, or the row means nothing. */
       if ((!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL_FLAG) ||
@@ -203,13 +238,34 @@ static char *join_argv(int argc, char **argv)
 
 /* The value a field reads, or NULL when it is absent. `joined` is the lazily
  * built argv join, owned by the caller. */
-static const char *field_value(const cJSON *field, const cli_args_t *opts, const char *joined)
+static const char *field_value(const cJSON *field, const cli_args_t *opts, const char *joined,
+                               int argc, char **argv)
 {
    const char *from = field_str(field, "from");
    const char *flag = field_str(field, "flag");
 
    if (!strcmp(from, SRC_ARGV_JOINED))
       return joined && joined[0] ? joined : NULL;
+
+   if (!strcmp(from, SRC_ARGV_INDEX))
+   {
+      const cJSON *ai = cJSON_GetObjectItemCaseSensitive(field, "index");
+      int aidx = cJSON_IsNumber(ai) ? (int)ai->valuedouble : 0;
+      /* Same empty-guard question as a positional, and both answers are in
+       * use: memory.delete guards on `argc > 0` alone and so sends id from an
+       * empty word, while provider.set also tests argv[0][0] and drops it. */
+      /* Some raw-argv reads refuse a word that looks like a flag:
+       * mcp.recheck tests `argv[0][0] != '-'`. Per-field, and about this
+       * field's own value, so it travels with the field. */
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "skip_if_dash")) && argc > aidx &&
+          argv[aidx] && argv[aidx][0] == '-')
+         return NULL;
+      const char *ae = field_str(field, "empty");
+      int argv_emit_empty = ae && !strcmp(ae, EMPTY_EMIT);
+      if (argc <= aidx || !argv[aidx])
+         return NULL;
+      return (argv_emit_empty || argv[aidx][0]) ? argv[aidx] : NULL;
+   }
 
    if (!strcmp(from, SRC_FLAG))
       return cli_args_get(opts, flag);
@@ -253,6 +309,30 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
    int required = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "required"));
 
    const char *from = field_str(field, "from");
+   if (from && !strcmp(from, SRC_REPEATED_FLAG))
+   {
+      const char *want = field_str(field, "flag");
+      cJSON *arr = cJSON_CreateArray();
+      if (!arr)
+         return -1;
+      for (int i = 0; i < opts->flag_count; i++)
+      {
+         const char *raw = opts->flags[i].raw;
+         const char *eq = raw ? strchr(raw, '=') : NULL;
+         size_t rlen = eq ? (size_t)(eq - raw) : (raw ? strlen(raw) : 0);
+         if (raw && want && rlen == strlen(want) && memcmp(raw, want, rlen) == 0 &&
+             opts->flags[i].value && opts->flags[i].value[0])
+            cJSON_AddItemToArray(arr, cJSON_CreateString(opts->flags[i].value));
+      }
+      /* Omitted rather than empty when the flag never appeared: an empty array
+       * and an absent field are different requests. */
+      if (cJSON_GetArraySize(arr) > 0)
+         cJSON_AddItemToObject(req, json_name, arr);
+      else
+         cJSON_Delete(arr);
+      return 0;
+   }
+
    if (from && !strcmp(from, SRC_ARGV_ARRAY))
    {
       cJSON *arr = cJSON_CreateArray();
@@ -264,13 +344,32 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       return 0;
    }
 
+   if (type && !strcmp(type, TYPE_TRISTATE_FLAG))
+   {
+      const char *ff = field_str(field, "false_flag");
+      if (cli_args_get(opts, field_str(field, "flag")))
+         cJSON_AddTrueToObject(req, json_name);
+      else if (ff && cli_args_get(opts, ff))
+         cJSON_AddFalseToObject(req, json_name);
+      return 0;
+   }
+
    if (type && !strcmp(type, TYPE_CONST_IF_SET))
    {
-      const char *lit = field_str(field, "value");
-      if (!lit)
+      /* The constant may be a STRING or a BOOLEAN: --review sends
+       * "status": "ambiguous", --no-scan sends "scan": false. Same rule, and
+       * splitting it into two types would only make a caller pick between
+       * them by the shape of the literal they already wrote. */
+      const cJSON *lit = cJSON_GetObjectItemCaseSensitive(field, "value");
+      if (!lit || !(cJSON_IsString(lit) || cJSON_IsBool(lit)))
          return -1;
       if (cli_args_get(opts, field_str(field, "flag")))
-         cJSON_AddStringToObject(req, json_name, lit);
+      {
+         if (cJSON_IsString(lit))
+            cJSON_AddStringToObject(req, json_name, lit->valuestring);
+         else
+            cJSON_AddBoolToObject(req, json_name, cJSON_IsTrue(lit));
+      }
       return 0;
    }
 
@@ -297,7 +396,7 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
     * program. Seven marshallers do `int n = ...; if (n > 0) Add(n);`. */
    int omit_nonpositive =
        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "omit_if_nonpositive"));
-   const char *value = field_value(field, opts, joined);
+   const char *value = field_value(field, opts, joined, argc, argv);
    /* `default` reproduces cli_args_get_int(opts, name, def): the field is
     * emitted even when the flag is absent, carrying the default. Absent means
     * "omit when absent", which is what every other field does. */

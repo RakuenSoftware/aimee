@@ -343,3 +343,40 @@
 {"session.get",
  "{\"fields\":[{\"json\":\"session_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"session\"}]}"},
 
+/* Raw argv, read before flag parsing. Described, not endorsed -- see
+   headers/cli_argspec.h on argv_index. */
+
+{"memory.delete",
+ "{\"fields\":[{\"json\":\"id\",\"from\":\"argv_index\",\"index\":0,\"type\":\"number_lenient\",\"empty\":\"emit\"}]}"},
+
+{"provider.set",
+ "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0}]}"},
+
+/* argv_array PLUS top-level fields: the route reads both. */
+
+{"workspace.add",
+ "{\"bool_flags\":[\"no-scan\"],\"fields\":[{\"json\":\"args\",\"from\":\"argv_array\"},{\"json\":\"root\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"provider\",\"from\":\"flag\",\"flag\":\"provider\",\"empty\":\"emit\"},{\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\",\"empty\":\"emit\"},{\"json\":\"head\",\"from\":\"flag\",\"flag\":\"head\",\"empty\":\"emit\"},{\"json\":\"scan\",\"from\":\"flag\",\"flag\":\"no-scan\",\"type\":\"const_if_set\",\"value\":false}]}"},
+
+/* Repeated --skill flags collect into an array. */
+
+{"cron.add",
+ "{\"bool_flags\":[\"only-if-changed\",\"first-run-silent\",\"pre-wake-gate\",\"disabled\"],\"usage\":\"usage: aimee cron add <id> --schedule S [--mode llm|script|hybrid] [--script CMD] [--prompt TEXT]\",\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"id\",\"required\":true},{\"json\":\"schedule\",\"from\":\"flag\",\"flag\":\"schedule\",\"required\":true},{\"json\":\"mode\",\"from\":\"flag\",\"flag\":\"mode\"},{\"json\":\"script\",\"from\":\"flag\",\"flag\":\"script\"},{\"json\":\"prompt\",\"from\":\"flag\",\"flag\":\"prompt\"},{\"json\":\"workdir\",\"from\":\"flag\",\"flag\":\"workdir\"},{\"json\":\"deliver_target\",\"from\":\"flag\",\"flag\":\"target\"},{\"json\":\"context_from\",\"from\":\"flag\",\"flag\":\"context-from\"},{\"json\":\"when_context_contains\",\"from\":\"flag\",\"flag\":\"when-context-contains\"},{\"json\":\"deliver_only_if_changed\",\"from\":\"flag\",\"flag\":\"only-if-changed\",\"type\":\"const_if_set\",\"value\":true},{\"json\":\"deliver_first_run_silent\",\"from\":\"flag\",\"flag\":\"first-run-silent\",\"type\":\"const_if_set\",\"value\":true},{\"json\":\"pre_wake_gate\",\"from\":\"flag\",\"flag\":\"pre-wake-gate\",\"type\":\"const_if_set\",\"value\":true},{\"json\":\"enabled\",\"from\":\"flag\",\"flag\":\"disabled\",\"type\":\"const_if_set\",\"value\":false},{\"json\":\"skills\",\"from\":\"repeated_flag\",\"flag\":\"skill\"}]}"},
+
+/* Raw argv that refuses a flag-looking word. */
+
+{"mcp.recheck",
+ "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0,\"skip_if_dash\":true}]}"},
+
+/* Reachable only since the served consult moved above marshal_request's
+   custom-body block; before that a spec for these could never be reached. */
+
+{"toolset.show",
+ "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0,\"required\":true,\"empty\":\"emit\"}]}"},
+
+{"toolset.resolve",
+ "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0,\"required\":true,\"empty\":\"emit\"}]}"},
+
+/* One field, two flags, three states. */
+
+{"dogfood.tag",
+ "{\"bool_flags\":[\"surprise\",\"no-surprise\"],\"fields\":[{\"json\":\"record_id\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"outcome\",\"from\":\"flag\",\"flag\":\"outcome\",\"empty\":\"emit\"},{\"json\":\"notes\",\"from\":\"flag\",\"flag\":\"notes\",\"empty\":\"emit\"},{\"json\":\"richness\",\"from\":\"flag\",\"flag\":\"richness\",\"type\":\"number_lenient\"},{\"json\":\"surprise\",\"from\":\"flag\",\"flag\":\"surprise\",\"false_flag\":\"no-surprise\",\"type\":\"tristate_flag\"}]}"},

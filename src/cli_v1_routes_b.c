@@ -1568,7 +1568,27 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    /* Cleared on entry so a previous command's flag cannot suppress this one's message. */
    g_marshal_reported = 0;
-   /* Custom-body cases (handled before the tables). */
+
+   /* What the SERVER says the body is, BEFORE anything this build compiled in --
+    * including the custom bodies below.
+    *
+    * This consult used to sit under them, which made a served spec for
+    * init.run, kb.grant.* or toolset.show/resolve dead code: the compiled body
+    * answered first and the server could never override it. That contradicts
+    * the property the whole exercise rests on -- a served row wins, which is
+    * what lets the server change a command without a new client. It held for
+    * every other method and silently did not for these.
+    *
+    * Safe at the top: cli_argspec_try_served returns 0 unless a spec exists AND
+    * this build can interpret it, so anything unserved falls through to exactly
+    * the code that ran before. */
+   {
+      cJSON *served = NULL;
+      if (cli_argspec_try_served(method, argc, argv, &served))
+         return served;
+   }
+
+   /* Custom-body cases (handled before the compiled tables). */
    if (strcmp(method, "init.run") == 0)
    {
       (void)argc;
@@ -1680,15 +1700,6 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
     * preferring its own list here would reintroduce exactly that. */
    if (cli_v1_manifest_method_takes_no_args(method))
       return marshal_no_args(method);
-
-   /* And what the server says the ARGUMENTS are, before this build's own
-    * marshallers — see cli_argspec_try_served for why that is both the point
-    * and safe. */
-   {
-      cJSON *served = NULL;
-      if (cli_argspec_try_served(method, argc, argv, &served))
-         return served;
-   }
 
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
