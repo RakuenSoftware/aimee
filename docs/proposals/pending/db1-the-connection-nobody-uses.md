@@ -1,7 +1,7 @@
 # Proposal: the DB1 connection the daemon opens and never uses
 
-- **State:** OPEN, and newly true. Every DB1 family is served, no source the
-  daemon links calls `db1_conn()`, and the daemon still opens the database.
+- **State:** RESOLVED. The daemon opens no database. Only the module does, plus
+  the path-based maintenance tools that operate on the file rather than on rows.
 
 ## What is true now
 
@@ -46,7 +46,46 @@ Three things ride on `db1_init` besides the handle:
   objects directly. That is the right thing for them to keep doing; this is
   about the production binaries only.
 
-## What is worth doing
+## What it turned out to be
+
+Fewer sites than the count suggested, and one thing the count hid.
+
+Of the ~48 `db1_init` calls, most were in `cmd_*.c` files that ship in no
+binary at all -- compiled by `cmd-srcs-compile-check` and linked by nothing.
+Fourteen were real, and a source-by-source sweep of every shipped binary's link
+line found two more that a by-eye reading had missed: `cmd_identity.c` and
+`cmd_session_lifecycle.c` both compile into server objects despite their names.
+Reading the link line rather than the directory is what caught them.
+
+The guards themselves were the interesting part. Every one asked "did db1_init
+succeed", which since the migration answers nothing: opening a local SQLite file
+says only that a file exists, not that the store will answer. They ask
+`db1_store_ready()` now -- whether the module is attached -- which is the
+question they were always trying to ask.
+
+Two things were wrong in ways the count would never have shown:
+
+- **The server's DB tuning was going to the wrong process.**
+  `db1_apply_server_pragmas` sets cache_size, mmap_size and wal_autocheckpoint,
+  and the server was applying them to the connection it no longer read or wrote
+  through. The module applies them now, being the process that runs the queries.
+
+- **A forked child was about to use the bus.**
+  `platform_hooks_background_cleanup` double-forked and reopened DB1 in the
+  child, because a SQLite connection does not survive `fork()`. Since sessions
+  migrated, the child's work is bus calls instead -- and an inherited bus client
+  is a socket with a mutex and possibly a request in flight, which a forked
+  child can neither use nor repair. It runs synchronously now, as Windows
+  always has.
+
+And one regression this change introduced and the tests then caught: the
+server's readiness endpoints reported DB1 state from `db1_is_initialized()`,
+which became permanently false the moment the server stopped opening the
+database. `/v1/server/health` would have reported the store unavailable forever
+while every request through it worked. Nothing asserted it, so the suite now
+does -- verified by inverting `db1_store_ready` and watching the check fail.
+
+## What was worth doing
 
 Delete the daemon's `db1_init` call, and then each CLI one, checking per command
 that what remains either goes over the bus or is path-based. The end state is

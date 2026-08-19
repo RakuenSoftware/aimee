@@ -66,30 +66,19 @@ void platform_hooks_background_reindex(char idx_names[][128], char idx_roots[][M
 
 void platform_hooks_background_cleanup(void)
 {
-   /* Double-fork: same pattern — intermediate exits immediately, worker
-    * runs under init so no zombie is left in the caller. */
-   pid_t pid = fork();
-   if (pid < 0)
-      return;
-   if (pid > 0)
-   {
-      waitpid(pid, NULL, 0);
-      return;
-   }
-
-   pid_t worker = fork();
-   if (worker < 0)
-      _exit(1);
-   if (worker > 0)
-      _exit(0);
-
-   /* prune_stale_sessions only needs DB1 directly; all DB2 work goes
-    * through kb_client which auto-spawns aimee-kb.  DB1 connections
-    * are not fork-safe so reopen here. */
-   if (db1_init(config_db1_path()) == 0)
-   {
+   /* Synchronous, and no longer forked.
+    *
+    * This used to double-fork so session startup was not held up by cleanup,
+    * and reopened DB1 in the child because a SQLite connection does not
+    * survive fork(). Neither half of that survives the store becoming a
+    * module: there is no connection to reopen, and the bus client the child
+    * would inherit is a socket with a mutex and possibly a request in flight
+    * -- state a forked child cannot use and cannot repair.
+    *
+    * What it replaced the local scan with is a handful of IPC round trips, so
+    * the reason to get off the calling thread is much weaker than the reason
+    * not to use a bus client across a fork. Windows has always run this
+    * synchronously for the same practical reason. */
+   if (db1_store_ready())
       prune_stale_sessions();
-      db1_shutdown();
-   }
-   _exit(0);
 }

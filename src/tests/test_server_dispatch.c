@@ -261,6 +261,16 @@ void compute_pool_shutdown(compute_pool_t *pool)
    (void)pool;
 }
 
+/* db1_store_ready() asks the module bus whether the DB1 store is attached, and
+ * this test deliberately links neither -- the point of it is dispatch, not
+ * storage. Answering "not ready" is the honest stub: the handlers that consult
+ * it then take their storage-unavailable path, which is a branch worth
+ * exercising here anyway. */
+int db1_store_ready(void)
+{
+   return 0;
+}
+
 /* On-demand delegate execution (server_delegate_ondemand.c) is not linked here;
  * server.c calls these at init/shutdown. No-op stubs. */
 void delegate_ondemand_set_ceiling(int ceiling)

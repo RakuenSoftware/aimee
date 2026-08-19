@@ -19,6 +19,12 @@ extern "C"
    /* Open DB1 at the given path. Applies schema. Returns 0 on success. */
    int db1_init(const char *path);
 
+   /* Whether the DB1 store can be reached from this process. Callers that used
+    * to guard on db1_init succeeding want this instead: since the families
+    * moved behind the module, a local file opening says nothing about whether
+    * the store will answer. */
+   int db1_store_ready(void);
+
    /* Close DB1. Safe to call if not initialized, or more than once. */
    void db1_shutdown(void);
 
@@ -26,7 +32,8 @@ extern "C"
    int db1_is_initialized(void);
 
    /* Apply aimee-server-mode pragmas (larger cache, mmap, wal_autocheckpoint).
-    * Called once after db1_init in the server process. No-op if db1 is not
+    * Called once after db1_init by the process that RUNS the queries, which
+    * since the migration is the module rather than the server. No-op if db1 is not
     * initialized. */
    void db1_apply_server_pragmas(void);
 

@@ -515,6 +515,13 @@ check_output "no-arg path remains local help" 'Server is started automatically' 
 RESP=$(srv_req '{"method":"server.health"}') || true
 check_output "server.health status" '"status":"ok"' echo "$RESP"
 check_output "server.health uptime" '"uptime"' echo "$RESP"
+# The DB1 state is the server's answer to "can I reach the store", and since
+# the store became a module that is a question about the module being
+# attached rather than about a file this process opened. Asserted because
+# nothing else here would notice it answering "unavailable" forever: every
+# other check in this suite goes through a handler that would simply fail,
+# and "status":"ok" above stays ok either way.
+check_output "server.health reports the DB1 store reachable" '"state":"ok"' echo "$RESP"
 
 # The /v1 HTTP surface is the only transport now (the NDJSON RPC socket was
 # removed). Confirm the local /v1 UDS is bound and an allowlisted read returns a
