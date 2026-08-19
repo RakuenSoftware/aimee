@@ -13,7 +13,8 @@
   "db_schema",
   "diagnostics",
   "maintenance",
-  "module_adapter"
+  "module_adapter",
+  "secrets"
  ],
  "coupled_sources": [
   {
@@ -285,17 +286,16 @@
    "id": 13,
    "name": "identity",
    "event_kind": 11789,
-   "active": false,
-   "doc": "secrets and the replay stores behind token consumption.",
+   "active": true,
+   "doc": "the appliance's first-user remote-client grant: the enrollment bearer, the certificate it binds to, and the tier that grant carries.",
    "client_doc": "",
-   "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant",
+   "covers": "remote_client_grant",
    "sources": [
-    "remote_client_grant",
-    "secrets",
-    "server_identity_jti",
-    "server_management_jti"
+    "remote_client_grant"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "remote_client_grant.c"
+   ]
   },
   {
    "id": 14,
@@ -307,6 +307,20 @@
    "covers": "wfe_store",
    "sources": [
     "wfe_store"
+   ],
+   "retired_sources": []
+  },
+  {
+   "id": 15,
+   "name": "jti_replay",
+   "event_kind": 11791,
+   "active": false,
+   "doc": "single-use JTI replay windows for the identity and management token paths. Reserved: these entry points are not named db1_, which the catalog requires, and each has a _consume_for_test twin that a production wire has no place for.",
+   "client_doc": "",
+   "covers": "server_identity_jti, server_management_jti",
+   "sources": [
+    "server_identity_jti",
+    "server_management_jti"
    ],
    "retired_sources": []
   }
@@ -21276,6 +21290,199 @@
      }
     ],
     "max_bytes": 32
+   }
+  },
+  {
+   "family": "identity",
+   "id": 1,
+   "name": "remote_client_claim",
+   "c_name": "db1_remote_client_claim_row",
+   "c_params": [
+    "principal",
+    "new_bearer_sha256",
+    "now",
+    "out"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "principal",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "new_bearer_sha256",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "now",
+      "type": "int64",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_remote_client_claim_row_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "result",
+      "type": "int"
+     },
+     {
+      "name": "grant",
+      "type": "struct",
+      "fields": [
+       {
+        "name": "principal",
+        "type": "text"
+       },
+       {
+        "name": "bearer_sha256",
+        "type": "text"
+       },
+       {
+        "name": "cert_serial",
+        "type": "text"
+       },
+       {
+        "name": "tier",
+        "type": "int"
+       }
+      ]
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "identity",
+   "id": 2,
+   "name": "remote_client_abandon",
+   "c_name": "db1_remote_client_abandon",
+   "c_params": [
+    "bearer_sha256"
+   ],
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "bearer_sha256",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "identity",
+   "id": 3,
+   "name": "remote_client_bind",
+   "c_name": "db1_remote_client_bind",
+   "c_params": [
+    "bearer_sha256",
+    "cert_serial",
+    "now"
+   ],
+   "c_returns": "int64",
+   "negatives": "data",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "bearer_sha256",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "cert_serial",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "now",
+      "type": "int64",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "bound",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "identity",
+   "id": 4,
+   "name": "remote_client_tier",
+   "c_name": "db1_remote_client_tier",
+   "c_params": [
+    "cert_serial",
+    "principal",
+    "principal_cap"
+   ],
+   "c_returns": "rc",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "cert_serial",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "principal",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 512
    }
   }
  ]

@@ -485,6 +485,17 @@
 #define AIMEE_DB1_OP_ROUNDTABLE_GATE_UPDATE              24u
 #define AIMEE_DB1_OP_ROUNDTABLE_GATE_AGE_EXCEEDS_HOURS   25u
 
+/* Family 13: the appliance's first-user remote-client grant: the enrollment
+ * bearer, the certificate it binds to, and the tier that grant carries. */
+
+#define AIMEE_DB1_EVENT_IDENTITY 11789u
+#define AIMEE_DB1_STAGE_IDENTITY 13u
+
+#define AIMEE_DB1_OP_REMOTE_CLIENT_CLAIM   1u
+#define AIMEE_DB1_OP_REMOTE_CLIENT_ABANDON 2u
+#define AIMEE_DB1_OP_REMOTE_CLIENT_BIND    3u
+#define AIMEE_DB1_OP_REMOTE_CLIENT_TIER    4u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

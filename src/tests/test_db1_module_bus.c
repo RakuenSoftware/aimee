@@ -40,6 +40,7 @@
 #include "roadmap_runtime.h"
 #include "execution_plans.h"
 #include "roundtable_pipeline.h"
+#include "remote_client_grant.h"
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
@@ -79,6 +80,7 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
     AIMEE_DB1_EVENT_GUARDRAIL_STATE,  AIMEE_DB1_EVENT_ENSEMBLE,
     AIMEE_DB1_EVENT_WORKFLOW,         AIMEE_DB1_EVENT_ROUNDTABLE,
+    AIMEE_DB1_EVENT_IDENTITY,
 };
 
 static pid_t g_module = -1;
@@ -1379,6 +1381,60 @@ static void test_a_roundtable_run_round_trips_and_swaps_once(void)
    printf("  PASS: a roundtable run round trips and swaps once\n");
 }
 
+/* A claim answers what the record is AND how the caller got it. Those are one
+   decision -- created it, re-entered its own, or refused because somebody else
+   owns the appliance's first-user slot -- and a reply carrying only the record
+   cannot tell the second from the third. Getting that wrong hands the first
+   user's slot to whoever asks next. */
+static void test_a_first_user_claim_says_how_it_went(void)
+{
+   /* The claim validates its inputs: a webuser principal, and a bearer that is
+      exactly 64 lowercase hex characters. */
+   /* Serials are hex: the domain validates them, so "serial-1" is not one. */
+   const char *alice_bearer = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+                              "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+   const char *mallory_bearer = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+                                "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+   db1_remote_client_grant_t grant;
+   memset(&grant, 0, sizeof grant);
+   must(db1_remote_client_claim("webuser:alice", alice_bearer, 1000, &grant) ==
+            DB1_REMOTE_CLIENT_CLAIM_NEW,
+        "the first principal claims the slot");
+   must(strcmp(grant.principal, "webuser:alice") == 0, "and the grant names it");
+
+   memset(&grant, 0, sizeof grant);
+   must(db1_remote_client_claim("webuser:alice", alice_bearer, 1001, &grant) ==
+            DB1_REMOTE_CLIENT_CLAIM_UNBOUND,
+        "re-entry by the same principal finds its own unbound record");
+
+   memset(&grant, 0, sizeof grant);
+   must(db1_remote_client_claim("webuser:mallory", mallory_bearer, 1002, &grant) ==
+            DB1_REMOTE_CLIENT_CLAIM_OWNED_BY_OTHER,
+        "and a second principal is refused, which is the whole point of the slot");
+
+   must(db1_remote_client_bind(alice_bearer, "abc123", 1003) == 1, "bound the bearer to a cert");
+   must(db1_remote_client_bind(alice_bearer, "abc123", 1004) == 1,
+        "binding it again is idempotent");
+   must(db1_remote_client_bind(alice_bearer, "def456", 1005) == -2,
+        "a second certificate is refused with its own value, not with -1");
+   must(db1_remote_client_bind(mallory_bearer, "aaa999", 1006) == 0,
+        "and a bearer that is not an enrollment is zero rather than an error");
+
+   char principal[DB1_REMOTE_CLIENT_PRINCIPAL_MAX + 1] = "";
+   int tier = db1_remote_client_tier("abc123", principal, sizeof principal);
+   must(tier >= 0, "the bound certificate resolves to a tier");
+   must(strcmp(principal, "webuser:alice") == 0, "and to the principal that owns it");
+   must(db1_remote_client_tier("fff000", principal, sizeof principal) == 0,
+        "an unknown certificate has no grant");
+
+   memset(&grant, 0, sizeof grant);
+   must(db1_remote_client_claim("webuser:alice", alice_bearer, 1007, &grant) ==
+            DB1_REMOTE_CLIENT_CLAIM_BOUND,
+        "and once bound, re-entry says so rather than repeating unbound");
+
+   printf("  PASS: a first-user claim says how it went\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -1431,6 +1487,7 @@ int main(int argc, char **argv)
    test_the_roadmap_selector_keeps_all_three_answers();
    test_a_plan_carries_its_steps_and_their_dependencies();
    test_a_roundtable_run_round_trips_and_swaps_once();
+   test_a_first_user_claim_says_how_it_went();
 
    stop_module();
    obs_bus_stop();

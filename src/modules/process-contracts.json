@@ -709,6 +709,11 @@
           "id": 12,
           "name": "db1-roundtable",
           "event_kind": 11788
+        },
+        {
+          "id": 13,
+          "name": "db1-identity",
+          "event_kind": 11789
         }
       ]
     }

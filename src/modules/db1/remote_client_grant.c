@@ -57,9 +57,9 @@ static void copy_grant(sqlite3_stmt *q, db1_remote_client_grant_t *out)
    out->tier = tier && strcmp(tier, "full") == 0 ? 2 : tier && strcmp(tier, "data") == 0 ? 1 : 0;
 }
 
-db1_remote_client_claim_result_t db1_remote_client_claim(const char *principal,
-                                                         const char *new_bearer_sha256, int64_t now,
-                                                         db1_remote_client_grant_t *out)
+static db1_remote_client_claim_result_t claim_locked(const char *principal,
+                                                     const char *new_bearer_sha256, int64_t now,
+                                                     db1_remote_client_grant_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
@@ -265,4 +265,14 @@ int db1_remote_client_tier(const char *cert_serial, char *principal, size_t prin
    int result = strcmp(tier, "full") == 0 ? 2 : strcmp(tier, "data") == 0 ? 1 : 0;
    sqlite3_finalize(q);
    return result;
+}
+
+int db1_remote_client_claim_row(const char *principal, const char *new_bearer_sha256, int64_t now,
+                                db1_remote_client_claim_row_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->result = (int)claim_locked(principal, new_bearer_sha256, now, &out->grant);
+   return 0;
 }

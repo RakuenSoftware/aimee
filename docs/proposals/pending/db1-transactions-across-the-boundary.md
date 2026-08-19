@@ -1,13 +1,22 @@
 # Proposal: what happens to a transaction that spans several calls
 
-- **State:** OPEN — this is the blocker for the workflow family, and it is not
-  a wire shape. Migrating as declared would compile, pass, and quietly drop
-  atomicity.
+- **State:** OPEN, and narrower than it was written. This blocks ONE source,
+  wfe_store.c, which now has a reserved family of its own ('lifecycle'). The
+  other six sources it was written as blocking are migrated and served.
 
-Five DB1 families have migrated by preserving each function's contract exactly,
-so a mistake showed up as a link error or a failing assertion. The workflow
-family is the first where every signature fits the wire and the migration would
+Five DB1 families had migrated by preserving each function's contract exactly,
+so a mistake showed up as a link error or a failing assertion. This was written
+as the first case where every signature fits the wire and the migration would
 still be wrong.
+
+That is true of wfe_store. It was not true of the family: this document said the
+transaction reached db1_plan_step_set_status_output and therefore tied
+execution_plans in, and that function does not appear in wfe_engine.c at all.
+Every write inside both critical sections -- lifecycle_event_add,
+stage_attempt_inc, work_item_abandon_children, _add_cost, _set_pause,
+_set_pr_ref, _set_stage, _set_terminal -- is defined in wfe_store.c and nowhere
+else. Checking that took one grep; asserting it cost six sources several months
+of being described as blocked.
 
 ## The shape
 
@@ -70,14 +79,30 @@ Three DB1 sources also live under `src/server/` rather than
 and server_mgmt_audit.c. They are compiled into DB1_SRCS from there, which
 means the "one family claims every source" rule has never seen them.
 
-## What is not blocked by this
+## What was not blocked by this, and is now served
 
-The workflow family's other friction is ordinary and already solved or nearly
-so: three lists where the callee allocates the array (the shape landed with
-sessions and runtime), and one cJSON input on
-`db1_execution_plan_create`, which the delegate_learning precedent answers --
-the caller serialises and the module parses, because the tree is walked into
-rows rather than stored as one.
+All six: execution_trace, wfe_binding, pipelines, roadmap_runtime,
+execution_plans and roundtable_pipeline. The friction was ordinary, and the
+predictions here were right about it -- the allocated-array lists needed nothing
+new, and `db1_execution_plan_create` took the delegate_learning answer, with the
+caller serialising and the module parsing.
 
-Both were written and reverted rather than committed unused. They are small,
-and they are worth having when there is a family to prove them against.
+Four things did need the wire to say something new, and none of them was a
+transaction:
+
+- `negatives: data`, so db1_wfe_bind's -2 (single-writer refusal) is an answer
+  rather than a status mapped to FAILED.
+- `null_when_empty`, so db1_roundtable_run_list's NULL filter still means
+  "every non-terminal run" instead of "state equals the empty string".
+- nested repeats, so a plan's 32 steps could each carry their own dependency
+  array.
+- c_returns int64 on six execution_plans writes that answer how many rows they
+  changed, plus one already-served function with the same shape.
+
+## What is actually left
+
+wfe_store.c alone: 34 functions, sixteen of whose writes ride two transactions
+that wfe_engine.c opens and commits across separate calls. The three ways out
+below still stand, and the first is still the right one -- with the correction
+that making each critical section a single operation is a change to
+wfe_engine.c and wfe_store.c only, not to the six sources listed above.

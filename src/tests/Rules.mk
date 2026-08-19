@@ -124,6 +124,7 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/roadmap_runtime.o \
                     $(OBJDIR)/modules/db1/execution_plans.o $(OBJDIR)/execution_plan_list.o \
                     $(OBJDIR)/modules/db1/roundtable_pipeline.o \
+                    $(OBJDIR)/modules/db1/remote_client_grant.o $(OBJDIR)/remote_client_claim.o \
                     $(OBJDIR)/modules/db1/web_page_cache.o \
                     $(OBJDIR)/modules/db1/fsnap.o \
                     $(OBJDIR)/modules/db1/decisions.o \
@@ -5156,6 +5157,7 @@ $(TESTPREFIX)/unit-test-db1-module-bus: \
                                        $(OBJDIR)/model_catalog_release.o \
                                        $(OBJDIR)/ensemble_view.o \
                                        $(OBJDIR)/execution_plan_list.o \
+                                       $(OBJDIR)/remote_client_claim.o \
                                        $(OBS_BUS_LINK_OBJS) \
                                        $(OBJDIR)/core/event_bus/bus_client.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -5278,6 +5280,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/execution_plans.o \
                                        $(OBJDIR)/modules/db1/roundtable_pipeline.o \
                                        $(OBJDIR)/modules/db1/roundtable_stage.o \
+                                       $(OBJDIR)/modules/db1/identity_stage.o \
+                                       $(OBJDIR)/modules/db1/remote_client_grant.o \
                                        $(OBJDIR)/modules/db1/wfe_store.o \
                                        $(OBJDIR)/dstr.o \
                                        $(OBJDIR)/modules/db1/token_audit.o \
