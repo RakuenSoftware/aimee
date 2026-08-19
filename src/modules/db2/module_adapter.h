@@ -84,6 +84,7 @@ typedef struct
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);
+   int (*curator_reembed_all)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

@@ -97,6 +97,7 @@ typedef struct
    int (*mark_revisit_due)(void);
    int (*ingest_queue_reset_running)(void);
    int (*evidence_reembed_all)(void);
+   int (*curator_reembed_all)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -176,6 +177,7 @@ static int directive_sweep_calls;
 static int mark_revisit_calls;
 static int queue_reset_calls;
 static int evidence_reembed_calls;
+static int curator_reembed_calls;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -1118,6 +1120,17 @@ static int evidence_reembed_all(void)
    return 11;
 }
 
+int db2_curator_reembed_all(void)
+{
+   return 0;
+}
+
+static int curator_reembed_all(void)
+{
+   curator_reembed_calls++;
+   return 12;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1378,7 +1391,8 @@ int main(void)
                               AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED,
                               AIMEE_DB2_EVENT_MARK_REVISIT_DUE,
                               AIMEE_DB2_EVENT_INGEST_QUEUE_RESET_RUNNING,
-                              AIMEE_DB2_EVENT_EVIDENCE_REEMBED_ALL};
+                              AIMEE_DB2_EVENT_EVIDENCE_REEMBED_ALL,
+                              AIMEE_DB2_EVENT_CURATOR_REEMBED_ALL};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = MODULE_REF,
@@ -1424,6 +1438,7 @@ int main(void)
        {AIMEE_DB2_EVENT_MARK_REVISIT_DUE, AIMEE_DB2_STAGE_MARK_REVISIT_DUE},
        {AIMEE_DB2_EVENT_INGEST_QUEUE_RESET_RUNNING, AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING},
        {AIMEE_DB2_EVENT_EVIDENCE_REEMBED_ALL, AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL},
+       {AIMEE_DB2_EVENT_CURATOR_REEMBED_ALL, AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL},
    };
    static const aimee_db2_module_backend_t backend = {
        .is_initialized = is_initialized,
@@ -1494,6 +1509,7 @@ int main(void)
        .mark_revisit_due = mark_revisit_due,
        .ingest_queue_reset_running = ingest_queue_reset_running,
        .evidence_reembed_all = evidence_reembed_all,
+       .curator_reembed_all = curator_reembed_all,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1875,6 +1891,11 @@ int main(void)
    assert(aimee_db2_evidence_reembed_all_call(call_client, &client, 7086, 0, &evidence_rows, NULL,
                                               NULL) == AIMEE_MODULE_CALL_OK);
    assert(evidence_rows == 11 && evidence_reembed_calls == 1);
+
+   uint32_t demoted_artifacts = 99u;
+   assert(aimee_db2_curator_reembed_all_call(call_client, &client, 7087, 0, &demoted_artifacts,
+                                             NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(demoted_artifacts == 12 && curator_reembed_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -632,6 +632,13 @@ int main(int argc, char **argv)
                                               NULL) == AIMEE_MODULE_CALL_OK);
    assert(evidence_rows == 0);
 
+   /* No artifact has ever been committed on a fresh schema, so the six
+    * re-derivable kinds have nothing to demote. */
+   uint32_t demoted_artifacts = 99;
+   assert(aimee_db2_curator_reembed_all_call(call_client, &client, 9103, 0, &demoted_artifacts,
+                                             NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(demoted_artifacts == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

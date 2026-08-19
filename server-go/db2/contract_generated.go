@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "9da41a907c2a244da59deede3797b67b718f4497d126790e596a318ef70622a5"
+const ContractSHA256 = "2431ba6566d693b20e90dcf5c61ea13ab5bcd5caad4e79a8d03c26d2cfd4b3f1"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -361,6 +361,10 @@ const EventEvidenceReembedAll = EventMaintenance
 const StageEvidenceReembedAll = FamilyMaintenance
 const OperationEvidenceReembedAll uint32 = 5
 const EvidenceReembedAllMax uint32 = 2147483647
+const EventCuratorReembedAll = EventMaintenance
+const StageCuratorReembedAll = FamilyMaintenance
+const OperationCuratorReembedAll uint32 = 6
+const CuratorReembedAllMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -2404,6 +2408,55 @@ func DecodeEvidenceReembedAllReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return requeuedRows, nil
+}
+
+// EncodeCuratorReembedAllRequest emits the empty request envelope. The states
+// and the re-derivable kind list are policy and never travel.
+func EncodeCuratorReembedAllRequest() []byte {
+	header, err := EncodeRequestHeader(OperationCuratorReembedAll, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeCuratorReembedAllRequest validates the exact maintenance-family
+// envelope.
+func DecodeCuratorReembedAllRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCuratorReembedAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeCuratorReembedAllReply emits one bounded u32 demoted artifact count.
+func EncodeCuratorReembedAllReply(demotedArtifacts uint32) ([]byte, error) {
+	if demotedArtifacts > CuratorReembedAllMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationCuratorReembedAll, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], demotedArtifacts)
+	return reply, nil
+}
+
+// DecodeCuratorReembedAllReply validates the operation and bounded count.
+func DecodeCuratorReembedAllReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCuratorReembedAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	demotedArtifacts := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if demotedArtifacts > CuratorReembedAllMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return demotedArtifacts, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

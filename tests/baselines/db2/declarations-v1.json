@@ -6125,9 +6125,15 @@
           "line": 173
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.curator_reembed_all operation replaces the reset that returns committed artifacts to the proposed state after a curator version change. The kind list is the reason the policy is fixed rather than travelling: only those six kinds are re-derivable, and a caller able to send the list could demote artifacts that nothing will ever propose again, stranding them outside the committed set for good."
+      },
       "signature": "int db2_curator_reembed_all ( void )",
       "signature_sha256": "c76883d0c1d8edb11e85298b827e8802ae045ec73150b7ca99598ca130123adb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_curator_reembed_all"
     },
     {
@@ -26106,15 +26112,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9a84657faeb0a723aa1dcf198b53fcb2f3e9e7fa8807979a5df9aa75db203ca7",
+  "fingerprint": "37a7fd2634d861538b1520294f83c1ac36862201b561e0a7acdd07c15a80eaf1",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 611,
+    "audit_pending": 610,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 347
+    "reviewed": 348
   }
 }

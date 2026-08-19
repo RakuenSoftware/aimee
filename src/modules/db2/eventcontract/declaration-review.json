@@ -156,6 +156,14 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_curator_reembed_all",
+      "signature_sha256": "c76883d0c1d8edb11e85298b827e8802ae045ec73150b7ca99598ca130123adb",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.curator_reembed_all operation replaces the reset that returns committed artifacts to the proposed state after a curator version change. The kind list is the reason the policy is fixed rather than travelling: only those six kinds are re-derivable, and a caller able to send the list could demote artifacts that nothing will ever propose again, stranding them outside the committed set for good."
+    },
+    {
       "symbol": "db2_decision_log_mark_revisit_due",
       "signature_sha256": "68c8c667165a80c21272f9393f008b4d1d813ebe7422b09699cdd71df6e249ab",
       "disposition": "wire-operation",

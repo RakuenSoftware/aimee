@@ -245,7 +245,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "directive_sweep_expired",
                                                                 "mark_revisit_due",
                                                                 "ingest_queue_reset_running",
-                                                                "evidence_reembed_all") else
+                                                                "evidence_reembed_all",
+                                                                "curator_reembed_all") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -2214,9 +2215,41 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 0x7fffffff}):
                 fail("evidence-reembed-all-reply",
                      "reply must contain one bounded u32 requeued row count")
+        elif key == ("maintenance", 6) and name == "curator_reembed_all" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            # Only these six artifact kinds are re-derivable. A caller able to
+            # send the list could demote artifacts that nothing will ever
+            # propose again, stranding them outside the committed set for good.
+            if operation["c_symbols"] != ["db2_curator_reembed_all"]:
+                fail("operation-c-symbols",
+                     "curator_reembed_all C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "curator_reembed_all results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "curator_reembed_all.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"from_state": "committed",
+                                          "to_state": "proposed",
+                                          "kinds": ["doc_summary", "synthesis",
+                                                    "open_question", "claim", "entity",
+                                                    "code_unit"]}):
+                fail("curator-reembed-all-request",
+                     "request must carry no payload and fix the states and the kind list")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "curator_reembed_all.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "curator_reembed_all.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "demoted_artifacts", "type": "u32", "minimum": 0,
+                              "maximum": 0x7fffffff}):
+                fail("curator-reembed-all-reply",
+                     "reply must contain one bounded u32 demoted artifact count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 62 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 63 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -2235,9 +2268,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
             "purge_hidden_pollution", "requeue_drifted", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
-            "evidence_reembed_all"]:
+            "evidence_reembed_all", "curator_reembed_all"]:
         fail("unsupported-operation",
-             "the partial generator requires the sixty-two supported operations exactly once")
+             "the partial generator requires the sixty-three supported operations exactly once")
     return catalog
 
 
@@ -2423,6 +2456,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     mark_revisit_due = catalog["operations"][59]
     ingest_queue_reset_running = catalog["operations"][60]
     evidence_reembed_all = catalog["operations"][61]
+    curator_reembed_all = catalog["operations"][62]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -2837,6 +2871,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     evidence_reembed_all_none = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(evidence_reembed_all["id"]), 0, _put_u32(0),
+    )
+    curator_reembed_all_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(curator_reembed_all["id"]), 0, b"",
+    )
+    curator_reembed_all_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(curator_reembed_all["id"]), 0, _put_u32(12),
+    )
+    curator_reembed_all_none = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(curator_reembed_all["id"]), 0, _put_u32(0),
     )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
@@ -5743,6 +5786,43 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (evidence_reembed_all_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": curator_reembed_all["family"],
+            "id": curator_reembed_all["id"],
+            "name": curator_reembed_all["name"],
+            "request": {
+                "positive": curator_reembed_all_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(curator_reembed_all_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(curator_reembed_all_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": curator_reembed_all_request[:-1].hex()},
+                    {"mutation": "long", "hex":
+                     (curator_reembed_all_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "demoted_artifacts": 12,
+                     "hex": curator_reembed_all_ok.hex()},
+                    {"result": 0, "demoted_artifacts": 0,
+                     "hex": curator_reembed_all_none.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(curator_reembed_all_ok, 8, 9).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(curator_reembed_all_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(curator_reembed_all["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (curator_reembed_all_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": curator_reembed_all_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (curator_reembed_all_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -5817,6 +5897,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     mark_revisit_due = catalog["operations"][59]
     ingest_queue_reset_running = catalog["operations"][60]
     evidence_reembed_all = catalog["operations"][61]
+    curator_reembed_all = catalog["operations"][62]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -6678,6 +6759,17 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{evidence_reembed_all['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_EVIDENCE_REEMBED_ALL_MAX",
          f"{evidence_reembed_all['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_CURATOR_REEMBED_ALL", "AIMEE_DB2_EVENT_MAINTENANCE"),
+        ("AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL", "AIMEE_DB2_FAMILY_MAINTENANCE"),
+        ("AIMEE_DB2_OPERATION_CURATOR_REEMBED_ALL", f"{curator_reembed_all['id']}u"),
+        ("AIMEE_DB2_CURATOR_REEMBED_ALL_REQUEST_LEN",
+         f"{curator_reembed_all['request']['encoded_size']}u"),
+        ("AIMEE_DB2_CURATOR_REEMBED_ALL_RESPONSE_LEN",
+         f"{curator_reembed_all['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_CURATOR_REEMBED_ALL_ERROR_LEN",
+         f"{curator_reembed_all['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_CURATOR_REEMBED_ALL_MAX",
+         f"{curator_reembed_all['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -8617,6 +8709,60 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    if (decoded > AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX)
       return -1;
    *deleted_count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_curator_reembed_all_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CURATOR_REEMBED_ALL, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_curator_reembed_all_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_CURATOR_REEMBED_ALL_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_CURATOR_REEMBED_ALL &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_curator_reembed_all_reply_encode(uint32_t demoted_artifacts,
+                                                             uint8_t *output, size_t capacity,
+                                                             uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || demoted_artifacts > AIMEE_DB2_CURATOR_REEMBED_ALL_MAX ||
+       capacity < AIMEE_DB2_CURATOR_REEMBED_ALL_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CURATOR_REEMBED_ALL,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, demoted_artifacts);
+   *output_len = AIMEE_DB2_CURATOR_REEMBED_ALL_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_curator_reembed_all_reply_decode(const uint8_t *input,
+                                                             size_t input_len,
+                                                             uint32_t *demoted_artifacts)
+{{
+   if (demoted_artifacts)
+      *demoted_artifacts = 0u;
+   if (!demoted_artifacts)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CURATOR_REEMBED_ALL ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_CURATOR_REEMBED_ALL_MAX)
+      return -1;
+   *demoted_artifacts = decoded;
    return 0;
 }}
 
@@ -11793,6 +11939,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *requeued_rows, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_curator_reembed_all_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *demoted_artifacts, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -13287,6 +13437,31 @@ aimee_db2_evidence_reembed_all_call(aimee_db2_call_fn call, void *call_context, 
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_curator_reembed_all_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint32_t *demoted_artifacts,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !demoted_artifacts)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *demoted_artifacts = 0u;
+   uint8_t request[AIMEE_DB2_CURATOR_REEMBED_ALL_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_CURATOR_REEMBED_ALL_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_curator_reembed_all_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CURATOR_REEMBED_ALL, AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_curator_reembed_all_reply_decode(response, response_len, demoted_artifacts) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -13588,6 +13763,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     mark_revisit_due = catalog["operations"][59]
     ingest_queue_reset_running = catalog["operations"][60]
     evidence_reembed_all = catalog["operations"][61]
+    curator_reembed_all = catalog["operations"][62]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -13950,6 +14126,10 @@ const EventEvidenceReembedAll = EventMaintenance
 const StageEvidenceReembedAll = FamilyMaintenance
 const OperationEvidenceReembedAll uint32 = {evidence_reembed_all['id']}
 const EvidenceReembedAllMax uint32 = {evidence_reembed_all['reply']['field']['maximum']}
+const EventCuratorReembedAll = EventMaintenance
+const StageCuratorReembedAll = FamilyMaintenance
+const OperationCuratorReembedAll uint32 = {curator_reembed_all['id']}
+const CuratorReembedAllMax uint32 = {curator_reembed_all['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -15991,6 +16171,55 @@ func DecodeEvidenceReembedAllReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return requeuedRows, nil
+}}
+
+// EncodeCuratorReembedAllRequest emits the empty request envelope. The states
+// and the re-derivable kind list are policy and never travel.
+func EncodeCuratorReembedAllRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationCuratorReembedAll, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeCuratorReembedAllRequest validates the exact maintenance-family
+// envelope.
+func DecodeCuratorReembedAllRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCuratorReembedAll ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeCuratorReembedAllReply emits one bounded u32 demoted artifact count.
+func EncodeCuratorReembedAllReply(demotedArtifacts uint32) ([]byte, error) {{
+	if demotedArtifacts > CuratorReembedAllMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationCuratorReembedAll, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], demotedArtifacts)
+	return reply, nil
+}}
+
+// DecodeCuratorReembedAllReply validates the operation and bounded count.
+func DecodeCuratorReembedAllReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCuratorReembedAll ||
+		header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	demotedArtifacts := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if demotedArtifacts > CuratorReembedAllMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return demotedArtifacts, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.
