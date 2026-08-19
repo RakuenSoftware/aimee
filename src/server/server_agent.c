@@ -586,6 +586,7 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * that fallback — the webchat agent selector defaults its selection to this. */
    const agent_t *primary = agent_default_primary(&cfg);
    cJSON_AddStringToObject(resp, "default_agent", primary ? primary->name : "");
+   cJSON_AddStringToObject(resp, "default_delegate", cfg.default_delegate);
    /* Whether at least one configured agent is enabled AND routable as a delegate
     * right now. Lets a caller (e.g. the client-setup sub-agent-ban gate) decide
     * with ONE round-trip whether redirecting sub-agents to `aimee delegate` is
@@ -700,8 +701,8 @@ int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   static const char *bool_flags[] = {"tools",   "tools-enabled", "no-tools",
-                                      "default", "disabled",      NULL};
+   static const char *bool_flags[] = {
+       "tools", "tools-enabled", "no-tools", "default", "delegate-default", "disabled", NULL};
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 3)
@@ -929,6 +930,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (opt_has(&opts, "default") || cfg.agent_count == 1 || !cfg.default_agent[0])
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
+   if (opt_has(&opts, "delegate-default"))
+      snprintf(cfg.default_delegate, sizeof(cfg.default_delegate), "%s", ag->name);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -945,7 +948,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   static const char *bool_flags[] = {"default", "no-probe", "no-tools", "no-fallback", NULL};
+   static const char *bool_flags[] = {"default",  "delegate-default", "no-probe",
+                                      "no-tools", "no-fallback",      NULL};
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    opt_parsed_t opts;
@@ -1047,6 +1051,8 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       server_agent_set_exec_roles_csv(ag, exec_roles_arg);
    if (opt_has(&opts, "default") || cfg.agent_count == 1 || !cfg.default_agent[0])
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
+   if (opt_has(&opts, "delegate-default"))
+      snprintf(cfg.default_delegate, sizeof(cfg.default_delegate), "%s", ag->name);
    if (!opt_has(&opts, "no-fallback"))
       server_agent_ensure_fallback(&cfg, ag->name);
 
@@ -1102,6 +1108,8 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (strcmp(cfg.default_agent, removed) == 0)
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s",
                cfg.agent_count > 0 ? cfg.agents[0].name : "");
+   if (strcmp(cfg.default_delegate, removed) == 0)
+      cfg.default_delegate[0] = '\0';
 
    /* Removing the last delegate legitimately empties the registry, which the
     * deletion guard would otherwise refuse. */
@@ -1252,7 +1260,8 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * record). Backs the Web GUI's per-agent Edit modal. Args are CLI-style:
  *   set <name> [--model M] [--endpoint E] [--provider P] [--cost-tier N]
  *       [--max-turns N] [--max-parallel N] [--context-window N] [--tools on|off]
- *       [--roles csv] [--personas csv] [--enabled true|false] [--key K] [--default]
+ *       [--roles csv] [--personas csv] [--enabled true|false] [--key K]
+ *       [--default] [--delegate-default]
  * A flag that is absent leaves that field untouched. */
 int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1262,12 +1271,10 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (argc < 1 || !argv[0][0])
       return server_send_error(conn, "model.set requires name", NULL);
    /* Value --flags are present iff opt_get returns non-NULL — that presence check
-    * is what makes the patch surgical. `--default` is the one BOOL flag: when
-    * given it promotes this agent to the global primary (default_agent), the same
-    * effect `agent add --default` has, but without resetting the record — the only
-    * way to make an already-registered agent (e.g. a cli-oauth subscription
-    * agent) the primary. */
-   static const char *bool_flags[] = {"default", NULL};
+    * is what makes the patch surgical. The two BOOL flags select independent
+    * preferences: --default promotes the user-facing primary, while
+    * --delegate-default selects the preferred unpinned worker. */
+   static const char *bool_flags[] = {"default", "delegate-default", NULL};
    opt_parsed_t opts;
    opt_parse(argc - 1, argv + 1, bool_flags, &opts);
 
@@ -1403,6 +1410,8 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (opt_has(&opts, "default"))
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
+   if (opt_has(&opts, "delegate-default"))
+      snprintf(cfg.default_delegate, sizeof(cfg.default_delegate), "%s", ag->name);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);

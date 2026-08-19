@@ -520,7 +520,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "call_tool {arguments,name} req:arguments,name\n"                                               \
    "clarify {answer,command,description,session_id} req:command\n"                                 \
    "dashboard_metrics {} req:\n"                                                                   \
-   "delegate {branch,cwd,persona,prompt,role,tools} req:persona,prompt,role\n"                     \
+   "delegate {branch,cwd,handoff_json,persona,prompt,role,scope,tools,via} "                       \
+   "req:persona,prompt,role\n"                                                                     \
    "delegate_reply {content,delegation_id} req:content,delegation_id\n"                            \
    "delegate_status {job_id} req:job_id\n"                                                         \
    "describe_tool {name} req:name\n"                                                               \
@@ -542,7 +543,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
-   "{command,file_path,file_paths,judge,line_end,line_start,max_results,node,paths,project,"       \
+   "{command,fallback,file_path,file_paths,include_code,judge,line_end,line_start,max_results,"    \
+   "node,paths,project,"                                                                           \
    "queries,query,scope,spans,symbol,symbols} "                                                    \
    "req:command\n"                                                                                 \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
@@ -895,6 +897,13 @@ static int schema_has_property(cJSON *tool, const char *name)
    return cJSON_GetObjectItemCaseSensitive(properties, name) != NULL;
 }
 
+static cJSON *schema_property(cJSON *tool, const char *name)
+{
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+   cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   return cJSON_GetObjectItemCaseSensitive(properties, name);
+}
+
 static int schema_requires(cJSON *tool, const char *name)
 {
    cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
@@ -1057,6 +1066,29 @@ static void test_agent_code_intelligence_contracts(void)
    assert(callers != NULL);
    assert(schema_has_property(callers, "project"));
    assert(schema_has_property(callers, "scope"));
+
+   /* Batch span reads used to advertise only `spans: array`, leaving clients to
+    * guess that its elements were strings. The handler expects structured
+    * ranges, so the plausible guess returned [] and forced a duplicate shell
+    * read. Pin the item schema on both the flat tool and collapsed index family. */
+   cJSON *span = tools_get(flat, "code_span_get");
+   cJSON *index = tools_get(collapsed, "index");
+   assert(span != NULL && index != NULL);
+   cJSON *span_arrays[] = {schema_property(span, "spans"), schema_property(index, "spans")};
+   for (size_t i = 0; i < sizeof(span_arrays) / sizeof(span_arrays[0]); i++)
+   {
+      cJSON *items = cJSON_GetObjectItemCaseSensitive(span_arrays[i], "items");
+      cJSON *item_type = cJSON_GetObjectItemCaseSensitive(items, "type");
+      cJSON *properties = cJSON_GetObjectItemCaseSensitive(items, "properties");
+      cJSON *required = cJSON_GetObjectItemCaseSensitive(items, "required");
+      assert(cJSON_IsString(item_type) && strcmp(item_type->valuestring, "object") == 0);
+      assert(cJSON_GetObjectItemCaseSensitive(properties, "file_path") != NULL);
+      assert(cJSON_GetObjectItemCaseSensitive(properties, "line_start") != NULL);
+      assert(cJSON_GetObjectItemCaseSensitive(properties, "line_end") != NULL);
+      cJSON *first_required = cJSON_GetArrayItem(required, 0);
+      assert(cJSON_IsString(first_required));
+      assert(strcmp(first_required->valuestring, "file_path") == 0);
+   }
 
    cJSON *args = cJSON_Parse("{\"cwd\":\"/work/aimee\"}");
    /* cwd is resolved to a stable identity at the server dispatch boundary;

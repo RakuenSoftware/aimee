@@ -1,4 +1,5 @@
-/* The delegate tool must let its caller ask for tools.
+/* The delegate tool must expose the same routing and lifecycle controls as the
+ * CLI without making callers restate server-owned defaults.
  *
  * `mcp__aimee__delegate` advertised exactly {role, prompt, branch, cwd, persona}
  * -- no way to say "this one needs a filesystem" -- while the CLI had `--tools`
@@ -83,6 +84,21 @@ int main(void)
    const cJSON *type = cJSON_GetObjectItemCaseSensitive(tools, "type");
    assert(cJSON_IsString(type) && strcmp(type->valuestring, "boolean") == 0);
 
+   const cJSON *via = cJSON_GetObjectItemCaseSensitive(props, "via");
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(via, "type")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(via, "type")), "string") ==
+          0);
+
+   const cJSON *scope = cJSON_GetObjectItemCaseSensitive(props, "scope");
+   const cJSON *scope_enum = cJSON_GetObjectItemCaseSensitive(scope, "enum");
+   assert(cJSON_IsArray(scope_enum) && cJSON_GetArraySize(scope_enum) == 2);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(scope_enum, 0)), "bounded") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(scope_enum, 1)), "whole_task") == 0);
+
+   const cJSON *handoff = cJSON_GetObjectItemCaseSensitive(props, "handoff_json");
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(handoff, "type")),
+                 "boolean") == 0);
+
    /* Optional: omitting it must leave the role's own default in charge, which
     * is what makes a `code` delegate work without the caller knowing to ask. */
    const cJSON *req = cJSON_GetObjectItemCaseSensitive(schema, "required");
@@ -90,6 +106,9 @@ int main(void)
    cJSON_ArrayForEach(item, req)
    {
       assert(!(cJSON_IsString(item) && strcmp(item->valuestring, "tools") == 0));
+      assert(!(cJSON_IsString(item) && strcmp(item->valuestring, "via") == 0));
+      assert(!(cJSON_IsString(item) && strcmp(item->valuestring, "scope") == 0));
+      assert(!(cJSON_IsString(item) && strcmp(item->valuestring, "handoff_json") == 0));
    }
 
    printf("ok\n");

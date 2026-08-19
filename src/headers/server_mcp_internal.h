@@ -1,7 +1,33 @@
 #ifndef SERVER_MCP_INTERNAL_H
 #define SERVER_MCP_INTERNAL_H
 #include "server.h"
+#include <stdio.h>
+#include <string.h>
 /* Cross-TU decls split from server_mcp.c. */
+
+/* Compatibility parser for clients that serialize a structured span array item
+ * as the CLI spelling `path:start-end`. Pure and header-local so the batch shape
+ * can be regression-tested without linking the entire MCP dispatch table. */
+static inline int server_mcp_span_shorthand_parse(const char *text, char *path, size_t path_cap,
+                                                  int *line_start, int *line_end)
+{
+   if (!text || !path || path_cap == 0 || !line_start || !line_end)
+      return 0;
+   const char *colon = strrchr(text, ':');
+   long long start = 0, end = 0;
+   char tail = '\0';
+   if (!colon || colon == text || sscanf(colon + 1, "%lld-%lld%c", &start, &end, &tail) != 2 ||
+       start <= 0 || end < start)
+      return 0;
+   size_t path_len = (size_t)(colon - text);
+   if (path_len >= path_cap)
+      return 0;
+   memcpy(path, text, path_len);
+   path[path_len] = '\0';
+   *line_start = (int)start;
+   *line_end = (int)end;
+   return 1;
+}
 
 /* Idempotently register an MCP session in the server_sessions registry (tagged
  * client_type "mcp"), so an MCP serve session -- which is pure tool calls and

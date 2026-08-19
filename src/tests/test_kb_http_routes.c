@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "command_registry.h"
 #include "cJSON.h"
 #include "kb_http.h"
 #include "kb_route_acl.h"
@@ -2111,6 +2112,23 @@ static void test_capabilities(void)
    assert(status == 200);
    assert(strstr(buf, "capabilities") != NULL);
    assert(strstr(buf, "memory") != NULL);
+   cJSON *root = cJSON_Parse(buf);
+   cJSON *surfaces = cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces");
+   assert(cJSON_IsObject(surfaces));
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only")));
+   cJSON_Delete(root);
+
+   aimee_command_registry_reset();
+   assert(aimee_agent_surface_register("kb_future", AIMEE_SURFACE_MCP, "kb-future") == 0);
+   status = kb_http_route("GET", "/v1/capabilities", NULL, NULL, buf, sizeof(buf));
+   assert(status == 200);
+   root = cJSON_Parse(buf);
+   surfaces = cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces");
+   cJSON *mcp_only = cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only");
+   assert(cJSON_GetArraySize(mcp_only) == 1);
+   assert(strcmp(cJSON_GetArrayItem(mcp_only, 0)->valuestring, "kb_future") == 0);
+   cJSON_Delete(root);
+   aimee_command_registry_reset();
 }
 
 /* ── db2_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +

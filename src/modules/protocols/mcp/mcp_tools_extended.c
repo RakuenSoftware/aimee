@@ -30,13 +30,14 @@ static cJSON *ext_tool(cJSON *tools, const char *name, const char *desc)
    return t;
 }
 
-static void ext_prop(cJSON *tool, const char *key, const char *type, const char *desc)
+static cJSON *ext_prop(cJSON *tool, const char *key, const char *type, const char *desc)
 {
    cJSON *s = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
    cJSON *props = cJSON_GetObjectItemCaseSensitive(s, "properties");
    cJSON *p = cJSON_AddObjectToObject(props, key);
    cJSON_AddStringToObject(p, "type", type);
    cJSON_AddStringToObject(p, "description", desc);
+   return p;
 }
 
 static void ext_require(cJSON *tool, const char *key)
@@ -102,11 +103,23 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "line_start", "integer", "First line to read (1-based; default 1).");
    ext_prop(t, "line_end", "integer",
             "Last line to read (1-based, inclusive; default line_start).");
-   ext_prop(t, "spans", "array",
-            "Read several ranges in ONE call: [{\"file_path\":..., \"line_start\":..., "
-            "\"line_end\":...}, ...]. Prefer this whenever you want more than one range -- a "
-            "round trip costs far more than the extra range. Replaces file_path/line_start/"
-            "line_end when present; returns one span object per entry, in order.");
+   cJSON *spans =
+       ext_prop(t, "spans", "array",
+                "Read several ranges in ONE call: [{\"file_path\":..., \"line_start\":..., "
+                "\"line_end\":...}, ...]. Prefer this whenever you want more than one range -- a "
+                "round trip costs far more than the extra range. Replaces file_path/line_start/"
+                "line_end when present; returns one span object per entry, in order.");
+   cJSON *span_item = cJSON_AddObjectToObject(spans, "items");
+   cJSON_AddStringToObject(span_item, "type", "object");
+   cJSON *span_props = cJSON_AddObjectToObject(span_item, "properties");
+   cJSON *span_path = cJSON_AddObjectToObject(span_props, "file_path");
+   cJSON_AddStringToObject(span_path, "type", "string");
+   cJSON *span_start = cJSON_AddObjectToObject(span_props, "line_start");
+   cJSON_AddStringToObject(span_start, "type", "integer");
+   cJSON *span_end = cJSON_AddObjectToObject(span_props, "line_end");
+   cJSON_AddStringToObject(span_end, "type", "integer");
+   cJSON *span_required = cJSON_AddArrayToObject(span_item, "required");
+   cJSON_AddItemToArray(span_required, cJSON_CreateString("file_path"));
    ext_require(t, "project");
 
    t = ext_tool(tools, "index_blast_radius",
@@ -145,6 +158,9 @@ void mcp_add_extended_tools(cJSON *tools)
             "one {query, result} per entry, in order.");
    ext_prop(t, "symbol", "string", "Seed symbol, if you already have one (optional).");
    ext_prop(t, "project", "string", "Project to search. Required; this call never broadens scope.");
+   ext_prop(t, "fallback", "boolean",
+            "Automatically fall back to hybrid retrieval on abstention (default true).");
+   ext_prop(t, "include_code", "boolean", "Attach bounded source windows (default true).");
 
    t = ext_tool(tools, "index_graph_hubs",
                 "Rank a project's most-connected symbols by degree centrality over the code "

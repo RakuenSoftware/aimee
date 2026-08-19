@@ -168,6 +168,37 @@ static void test_guard_enforcement(void)
    printf("enforcement OK\n");
 }
 
+static void test_required_discovery_activation(void)
+{
+   snprintf(g_home, sizeof(g_home), "%s/aimee_discovery_test_%d", platform_tmpdir(), (int)getpid());
+   mkdir(g_home, 0700);
+   char reason[1024];
+
+   unsetenv("AIMEE_HOOK_TRANSPORT");
+   assert(attn_discovery_gate("Bash", "ls", "legacy", reason, sizeof(reason)) == 0);
+
+   setenv("AIMEE_HOOK_TRANSPORT", "cli", 1);
+   setenv("AIMEE_CLI_PATH", "/opt/aimee/bin/aimee", 1);
+   assert(attn_discovery_gate("Bash", "ls -la", "cli-session", reason, sizeof(reason)) == 2);
+   assert(strstr(reason, "/opt/aimee/bin/aimee index investigate") != NULL);
+   assert(attn_discovery_gate("Bash", "/opt/aimee/bin/aimee index investigate \"fix cache\"",
+                              "cli-session", reason, sizeof(reason)) == 0);
+   assert(attn_discovery_gate("Read", NULL, "cli-session", reason, sizeof(reason)) == 0);
+
+   setenv("AIMEE_HOOK_TRANSPORT", "mcp", 1);
+   assert(attn_discovery_gate("Read", NULL, "mcp-session", reason, sizeof(reason)) == 2);
+   assert(attn_discovery_gate("mcp__aimee__index", "investigate", "mcp-session", reason,
+                              sizeof(reason)) == 0);
+   assert(attn_discovery_gate("Grep", NULL, "mcp-session", reason, sizeof(reason)) == 0);
+
+   unsetenv("AIMEE_HOOK_TRANSPORT");
+   unsetenv("AIMEE_CLI_PATH");
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_home);
+   system(cmd);
+   printf("required discovery OK\n");
+}
+
 /* The session-scratch carve-out. Real directories, because the decision is no
  * longer purely lexical: it resolves the scratch root and the target's deepest
  * existing ancestor through symlinks and requires physical containment. Every
@@ -700,6 +731,7 @@ int main(void)
    test_weight();
    test_score();
    test_guard_enforcement();
+   test_required_discovery_activation();
    test_session_isolation_decision();
    test_isolation_enforcement();
    test_external_memory_decision();

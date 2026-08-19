@@ -191,6 +191,7 @@ static int g_last_request_tool_loop_cap = -999;
 static int64_t g_last_request_tool_loop_deadline = -999;
 static int g_last_agent_tool_loop_cap = -999;
 static int g_last_write_enforce = -999;
+static agent_scope_t g_last_route_scope = AGENT_SCOPE_UNSET;
 static int g_budget_acquire_calls = 0;
 static int g_budget_release_calls = 0;
 static int g_budget_last_grant = 0;
@@ -640,6 +641,7 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                                       const agent_route_policy_t *sys_cfg, unsigned required_caps,
                                       int min_context, agent_scope_t scope)
 {
+   g_last_route_scope = scope;
    agent_t *ag = agent_route_with_caps(cfg, role, sys_cfg, required_caps, min_context);
    if (ag && scope != AGENT_SCOPE_UNSET && ag->max_scope != AGENT_SCOPE_UNSET &&
        ag->max_scope < scope)
@@ -1055,6 +1057,7 @@ static void reset_last_response(void)
    g_agent_run_calls = 0;
    g_agent_tool_run_calls = 0, g_config_tools_enabled = 1;
    g_last_write_enforce = -999;
+   g_last_route_scope = AGENT_SCOPE_UNSET;
    g_agent_seen_compute_override = -999;
    g_agent_seen_budget_release_calls = -999;
    g_last_agent_prompt[0] = '\0';
@@ -2065,6 +2068,51 @@ static int delegate_current_job(db1_agent_job_t *out_job)
    return db1_agent_job_get(jid->valueint, out_job);
 }
 
+static void test_direct_delegate_scope_defaults_bounded_and_rejects_invalid(void)
+{
+   reset_last_response();
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   g_agent_response = "bounded delegate completed";
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "execute");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "run the default delegate scope test");
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   assert(g_last_route_scope == AGENT_SCOPE_BOUNDED);
+   db1_agent_job_t job;
+   assert(delegate_current_job(&job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
+   cJSON_Delete(req);
+
+   reset_last_response();
+   req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "execute");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "run the invalid delegate scope test");
+   cJSON_AddStringToObject(req, "scope", "unbounded");
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   assert(g_agent_calls == 0);
+   assert(delegate_current_job(&job) == 0);
+   assert(strstr(job.result, "scope must be 'bounded' or 'whole_task'") != NULL);
+   db1_agent_job_free(&job);
+   cJSON_Delete(req);
+
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_direct_delegate_scope_defaults_bounded_and_rejects_invalid\n");
+}
+
 /* test_server_compute_handoff.inc: direct-delegate handoff / tools / max-turns
  * tests split out of test_server_compute.c to keep that .c under the 2000-line
  * hard limit. Included (same translation unit) after the impl includes so the
@@ -2490,6 +2538,7 @@ static void test_a_defined_role_without_tools_is_not_given_them(void)
    cJSON_AddStringToObject(req, "role", "code");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the defined role tools test prompt");
+   cJSON_AddFalseToObject(req, "handoff_json"); /* this case isolates permission routing */
    assert(handle_delegate(ctx, conn, req) == 0);
    assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
    g_submitted_fn(g_submitted_arg);
@@ -2540,6 +2589,7 @@ static void test_a_scoped_repo_write_does_not_cover_an_unnamed_workspace(void)
    cJSON_AddStringToObject(req, "role", "code");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the scoped repo_write test prompt");
+   cJSON_AddFalseToObject(req, "handoff_json"); /* this case isolates scoped permissions */
    /* No cwd, which is the other half of the rule: with a scoped grant and
       nothing naming the target, there is no way to show it is in scope, so the
       delegate is read-only. "Probably fine" is not a permission. */
@@ -3266,6 +3316,10 @@ static void test_delegate_shell_and_file_roots_agree(void)
    assert(strcmp(g_file_write_root, sibling) == 0);
    assert_delegate_roots_agree("bg write delegate in its own worktree");
    assert(strcmp(g_shell_root_during_run, parent) != 0);
+   /* No handoff_json flag was supplied. Write-role evidence is a server-owned
+    * default, so the delegate still receives (and, for this intentionally plain
+    * response, enters repair for) the structured handoff contract. */
+   assert(strstr(g_last_agent_prompt, "delegate_result_v1") != NULL);
    /* And the delegate was TOLD where it is, by name -- it does not have to infer
     * its own location from whether a command happens to work. */
    assert(strstr(g_last_root_notice, sibling) != NULL);
@@ -3930,6 +3984,7 @@ int main(void)
    test_delegate_launch_creates_coord_job();
    test_delegate_launch_repairs_paths_from_request_cwd();
    test_delegate_launch_relays_the_modules_refusal();
+   test_direct_delegate_scope_defaults_bounded_and_rejects_invalid();
    test_direct_delegate_handoff_json_response();
    test_direct_delegate_handoff_repair_attempt();
    test_direct_delegate_handoff_repair_failure_is_error();

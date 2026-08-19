@@ -464,6 +464,14 @@ static void test_agent_route(void)
    cfg.agents[1].cost_tier = 2;
    cfg.agents[1].enabled = 1;
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   /* A delegate preference is independent from the primary default and may
+    * intentionally choose a dearer local/default worker. */
+   strcpy(cfg.default_delegate, "expensive");
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
+   cfg.agents[1].enabled = 0;
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   cfg.agents[1].enabled = 1;
+   cfg.default_delegate[0] = '\0';
    cfg.agents[1].cost_tier = 0;
    /* Equal eligible peers are both used despite an explicit primary default. */
    agent_t *first = agent_route(&cfg, "summarize");
@@ -987,7 +995,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    {
       FILE *f = fopen(agent_config_path(), "w");
       assert(f != NULL);
-      fputs("{\"agents\":[{\"name\":\"codex-cli\",\"roles\":[\"code\"],"
+      fputs("{\"default_delegate\":\"codex-cli\",\"agents\":[{\"name\":\"codex-cli\",\"roles\":["
+            "\"code\"],"
             "\"backend\":\"cli-stdio\",\"cli_kind\":\"codex\",\"cli_cmd\":\"codex\","
             "\"cli_idle_timeout_ms\":1234,\"session_reuse\":true},"
             "{\"name\":\"claude\",\"provider\":\"claude\",\"roles\":[\"code\"],"
@@ -1013,6 +1022,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    agent_config_t loaded;
    assert(agent_load_config(&loaded) == 0);
    assert(loaded.agent_count == 6);
+   assert(strcmp(loaded.default_delegate, "codex-cli") == 0);
    assert(strcmp(loaded.agents[0].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[0].cli_kind, "codex") == 0);
    assert(strcmp(loaded.agents[0].cli_cmd, "codex") == 0);
@@ -1060,6 +1070,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    agent_config_t reloaded;
    assert(agent_load_config(&reloaded) == 0);
    assert(reloaded.agent_count == 6);
+   assert(strcmp(reloaded.default_delegate, "codex-cli") == 0);
    assert(strcmp(reloaded.agents[0].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[0].cli_kind, "codex") == 0);
    assert(strcmp(reloaded.agents[0].cli_cmd, "codex") == 0);
