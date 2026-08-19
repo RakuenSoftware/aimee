@@ -23,6 +23,9 @@
  * ordinary graph reads succeeded. Use the same interactive read budget. */
 #define KB_CLIENT_CODE_CONTEXT_TIMEOUT_MS KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS
 
+_Static_assert(KB_CLIENT_CODE_CONTEXT_TIMEOUT_MS >= KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS,
+               "code context composes more work than a graph read");
+
 char *kb_client_code_context(const char *query, const char *symbol, const char *project,
                              int *status_out)
 {
