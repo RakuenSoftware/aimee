@@ -2245,6 +2245,43 @@ int db2_task_get_subtasks(int64_t parent_id, aimee_task_t *out, int max)
    return 0;
 }
 
+int db2_typed_fact_recall(const char *subject, const char *relation_filter, typed_fact_t *out,
+                          int max)
+{
+   (void)subject;
+   (void)relation_filter;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int memory_lint_run(memory_lint_issue_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out, int max)
+{
+   (void)outcome;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_decision_log_list_scoped(const char *subject, const char *status, int limit,
+                                 db2_decision_log_row_t *out, int max)
+{
+   (void)subject;
+   (void)status;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

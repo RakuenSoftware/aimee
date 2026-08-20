@@ -16,6 +16,9 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "decision_log.h"
+#include "memory_lint.h"
+#include "typed_facts.h"
 #include "memory_briefing.h"
 
 typedef struct
@@ -337,6 +340,10 @@ typedef struct
    int (*anti_pattern_check)(const char *file_path, const char *command, anti_pattern_t *out, int max);
    int (*task_list)(const char *state, const char *session_id, int limit, aimee_task_t *out, int max);
    int (*task_subtasks)(int64_t parent_task, aimee_task_t *out, int max);
+   int (*typed_fact_recall)(const char *subject, const char *relation_filter, typed_fact_t *out, int max);
+   int (*memory_lint)(memory_lint_issue_t *out, int max);
+   int (*decision_log_list)(const char *outcome, int limit, db2_decision_log_row_t *out, int max);
+   int (*decision_log_list_scoped)(const char *subject, const char *status, int limit, db2_decision_log_row_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

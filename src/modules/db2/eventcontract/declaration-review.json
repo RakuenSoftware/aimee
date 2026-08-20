@@ -708,6 +708,22 @@
       "reason": "The same shape as the gap-type predicate beside it: a pure comparison against a fixed state list, no statement, no state read. Shared as a definition rather than as a call, for the same reason -- a caller with a different idea of the valid states stores rows the sweeps skip."
     },
     {
+      "symbol": "db2_decision_log_list",
+      "signature_sha256": "6e52cdcaf44c1fda26b984af3145ac502ff5cf788e0eb309847004636ad5961f",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.decision_log_list operation lists logged decisions by outcome, newest first. An empty outcome drops the condition rather than matching decisions whose outcome is unset, so the one filter a caller might most want -- decisions with no outcome yet -- is the one it cannot express here. Superseded decisions are listed like any other; the identifier that supersedes them comes back but nothing filters on it."
+    },
+    {
+      "symbol": "db2_decision_log_list_scoped",
+      "signature_sha256": "9febd4355aa9045cce31fad922e5c6bddabb60b4052d19ac408b53a9cc560e91",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.decision_log_list_scoped operation lists decisions by subject and status. Each filter is dropped when empty, so sending neither lists every decision -- which is also what maintenance.decision_log_list does with an empty outcome, by a different route. This one breaks ties on the identifier where that one does not, so its order is stable and that one's is not when two decisions share a creation stamp."
+    },
+    {
       "symbol": "db2_decision_log_mark_revisit_due",
       "signature_sha256": "68c8c667165a80c21272f9393f008b4d1d813ebe7422b09699cdd71df6e249ab",
       "disposition": "wire-operation",
@@ -3924,6 +3940,14 @@
       "reason": "The typed learning.trace_mining_record operation replaces the watermark write. Each call appends a row stamped with DB2's own clock rather than updating one, so it is declared unsafe to replay: a second call does not restore the state the first found, it adds to it. The stamp is DB2's and never crosses."
     },
     {
+      "symbol": "db2_typed_fact_recall",
+      "signature_sha256": "60884e86931f3444721dde59bb6e219540c23a20310de4c066271b5d277d0004",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.typed_fact_recall operation recalls the facts asserted about a subject. Only active facts are returned, so a retracted one is absent rather than marked. An empty relation is not an empty result: it drops the condition, and it also changes the order -- by relation then identifier when unfiltered, by identifier alone when filtered -- so the two forms are not the same query narrowed."
+    },
+    {
       "symbol": "db2_vault_control_startup_end",
       "signature_sha256": "28e24701717ad0945c03443d15f4e761d821892a941a526cfe19c14947a73476",
       "disposition": "private-db2",
@@ -3970,6 +3994,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "This reads a process configuration flag and issues no statement: it reports whether DB2 was started ephemeral. On the bus it would let one process ask another about its startup configuration, which is not a fact DB2 owns on the caller's behalf. A caller that needs it is asking about its own runtime and should read its own configuration."
+    },
+    {
+      "symbol": "memory_lint_run",
+      "signature_sha256": "caff5c88ace0ea5c51d9e6cb92a96fa579fd25b7d47e48c6ef233a1ca5e46b0a",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.memory_lint operation reports what is wrong with the memory store. Three checks -- orphans, concept gaps, stale references -- fill one list in that order and each stops at the bound, so a full list does not mean those are the worst problems, it means the later checks never ran. The issue type is the only thing saying which check produced a row."
     },
     {
       "symbol": "pgvec_code_delete_project",

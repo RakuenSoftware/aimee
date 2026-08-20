@@ -6789,9 +6789,15 @@
           "line": 83
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.decision_log_list operation lists logged decisions by outcome, newest first. An empty outcome drops the condition rather than matching decisions whose outcome is unset, so the one filter a caller might most want -- decisions with no outcome yet -- is the one it cannot express here. Superseded decisions are listed like any other; the identifier that supersedes them comes back but nothing filters on it."
+      },
       "signature": "int db2_decision_log_list ( const char * outcome , int limit , db2_decision_log_row_t * out , int max )",
       "signature_sha256": "6e52cdcaf44c1fda26b984af3145ac502ff5cf788e0eb309847004636ad5961f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_list"
     },
     {
@@ -6805,9 +6811,15 @@
           "line": 87
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.decision_log_list_scoped operation lists decisions by subject and status. Each filter is dropped when empty, so sending neither lists every decision -- which is also what maintenance.decision_log_list does with an empty outcome, by a different route. This one breaks ties on the identifier where that one does not, so its order is stable and that one's is not when two decisions share a creation stamp."
+      },
       "signature": "int db2_decision_log_list_scoped ( const char * subject , const char * status , int limit , db2_decision_log_row_t * out , int max )",
       "signature_sha256": "9febd4355aa9045cce31fad922e5c6bddabb60b4052d19ac408b53a9cc560e91",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_list_scoped"
     },
     {
@@ -23705,9 +23717,15 @@
           "line": 66
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.typed_fact_recall operation recalls the facts asserted about a subject. Only active facts are returned, so a retracted one is absent rather than marked. An empty relation is not an empty result: it drops the condition, and it also changes the order -- by relation then identifier when unfiltered, by identifier alone when filtered -- so the two forms are not the same query narrowed."
+      },
       "signature": "int db2_typed_fact_recall ( const char * subject , const char * relation_filter , typed_fact_t * out , int max )",
       "signature_sha256": "60884e86931f3444721dde59bb6e219540c23a20310de4c066271b5d277d0004",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_typed_fact_recall"
     },
     {
@@ -25523,9 +25541,15 @@
           "line": 28
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.memory_lint operation reports what is wrong with the memory store. Three checks -- orphans, concept gaps, stale references -- fill one list in that order and each stops at the bound, so a full list does not mean those are the worst problems, it means the later checks never ran. The issue type is the only thing saying which check produced a row."
+      },
       "signature": "int memory_lint_run ( memory_lint_issue_t * out , int max )",
       "signature_sha256": "caff5c88ace0ea5c51d9e6cb92a96fa579fd25b7d47e48c6ef233a1ca5e46b0a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "memory_lint_run"
     },
     {
@@ -27366,15 +27390,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "29acbfdeea2bf454b5335736af4b299843d8abfe779709a1383dafc0c38a5076",
+  "fingerprint": "f3abef16a14693ac6a42515ff8d69d36276d84440c228734998f6f1700b7597a",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 402,
+    "audit_pending": 398,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 557
+    "reviewed": 561
   }
 }

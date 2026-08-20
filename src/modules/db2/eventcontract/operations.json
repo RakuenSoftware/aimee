@@ -5203,6 +5203,109 @@
       }
     },
     {
+      "family": "memory",
+      "id": 81,
+      "name": "typed_fact_recall",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_typed_fact_recall"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only active facts are recalled, and an empty relation drops that condition and changes the order"
+        },
+        "fields": [
+          {
+            "name": "fact_subject",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "relation_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "fact_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "fact_confidence",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "subject",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "subject_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "fact_relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "object",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "object_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "fact_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "asserted_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 39
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -13391,6 +13494,320 @@
               "type": "utf8",
               "minimum_bytes": 0,
               "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 35,
+      "name": "memory_lint",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "memory_lint_run"
+      ],
+      "request": {
+        "policy": {
+          "reads": "three checks fill one list in a fixed order, so a full list means the later checks were never reached"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "lint_memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "issue_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "issue_message",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 36,
+      "name": "decision_log_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_decision_log_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty outcome drops the condition, so it lists every decision rather than the ones with no outcome"
+        },
+        "fields": [
+          {
+            "name": "outcome_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "decision_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "decision_task_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "supersedes_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "linked_policy_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "options",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "chosen",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "rationale",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "assumptions",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "outcome",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "decision_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "decision_status",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 23
+            },
+            {
+              "name": "revisit_when",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "decision_subject",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "decision_author",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 37,
+      "name": "decision_log_list_scoped",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_decision_log_list_scoped"
+      ],
+      "request": {
+        "policy": {
+          "reads": "each empty filter drops its condition, and the identifier breaks ties that the creation stamp leaves"
+        },
+        "fields": [
+          {
+            "name": "decision_subject_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "status_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 23
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "decision_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "decision_task_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "supersedes_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "linked_policy_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "options",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "chosen",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "rationale",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "assumptions",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "outcome",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "decision_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "decision_status",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 23
+            },
+            {
+              "name": "revisit_when",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "decision_subject",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "decision_author",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
             }
           ]
         },

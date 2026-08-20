@@ -13009,6 +13009,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_task_get_subtasks",
         "policy": {"reads": 200},
     },
+    "typed_fact_recall": {
+        "key": ("memory", 81),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_typed_fact_recall",
+        "policy": {"reads": 200},
+    },
+    "memory_lint": {
+        "key": ("maintenance", 35),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "memory_lint_run",
+        "policy": {"reads": 200},
+    },
+    "decision_log_list": {
+        "key": ("maintenance", 36),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_list",
+        "policy": {"reads": 200},
+    },
+    "decision_log_list_scoped": {
+        "key": ("maintenance", 37),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_list_scoped",
+        "policy": {"reads": 200},
+    },
 }
 
 

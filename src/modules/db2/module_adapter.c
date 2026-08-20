@@ -3,6 +3,8 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/memory_lint.h"
+#include "c/typed_facts.h"
 #include "c/canonical_index.h"
 #include "c/corpus_jobs.h"
 #include "c/memory_briefing.h"
@@ -920,6 +922,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .anti_pattern_check = db2_anti_pattern_check,
        .task_list = db2_task_list,
        .task_subtasks = db2_task_get_subtasks,
+       .typed_fact_recall = db2_typed_fact_recall,
+       .memory_lint = memory_lint_run,
+       .decision_log_list = db2_decision_log_list,
+       .decision_log_list_scoped = db2_decision_log_list_scoped,
    };
    return &backend;
 }
@@ -2711,6 +2717,70 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_relations_supporting_reply_encode(rows, count, response_body,
                                                             response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char fact_subject[AIMEE_DB2_TYPED_FACT_RECALL_FACT_SUBJECT_MAX + 1] = "";
+         char relation_filter[AIMEE_DB2_TYPED_FACT_RECALL_RELATION_FILTER_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_typed_fact_recall_request_decode(request_body, request_len, fact_subject,
+                                                        sizeof(fact_subject), relation_filter,
+                                                        sizeof(relation_filter), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TYPED_FACT_RECALL_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->typed_fact_recall)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_typed_fact_recall_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_TYPED_FACT_RECALL_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               typed_fact_t *found = malloc(sizeof(*found) * AIMEE_DB2_TYPED_FACT_RECALL_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written =
+                   backend->typed_fact_recall(fact_subject, relation_filter, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].fact_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].fact_confidence =
+                      found[index].confidence < 0 ? 0u : (uint32_t)found[index].confidence;
+                  snprintf(rows[index].subject, sizeof(rows[index].subject), "%s",
+                           found[index].subject);
+                  snprintf(rows[index].subject_kind, sizeof(rows[index].subject_kind), "%s",
+                           found[index].subject_kind);
+                  snprintf(rows[index].fact_relation, sizeof(rows[index].fact_relation), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].object, sizeof(rows[index].object), "%s",
+                           found[index].object);
+                  snprintf(rows[index].object_kind, sizeof(rows[index].object_kind), "%s",
+                           found[index].object_kind);
+                  snprintf(rows[index].fact_source, sizeof(rows[index].fact_source), "%s",
+                           found[index].source);
+                  snprintf(rows[index].asserted_at, sizeof(rows[index].asserted_at), "%s",
+                           found[index].asserted_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_typed_fact_recall_reply_encode(rows, count, response_body,
+                                                         response_capacity, response_len) != 0)
             {
                free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
@@ -7526,6 +7596,208 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_directive_by_lexical_reply_encode(rows, count, response_body,
                                                             response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_memory_lint_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_LINT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_lint)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_lint_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_LINT_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_lint_issue_t *found = malloc(sizeof(*found) * AIMEE_DB2_MEMORY_LINT_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->memory_lint(found, AIMEE_DB2_MEMORY_LINT_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].lint_memory_id =
+                      found[index].memory_id < 0 ? 0u : (uint64_t)found[index].memory_id;
+                  snprintf(rows[index].issue_type, sizeof(rows[index].issue_type), "%s",
+                           found[index].type);
+                  snprintf(rows[index].memory_key, sizeof(rows[index].memory_key), "%s",
+                           found[index].key);
+                  snprintf(rows[index].issue_message, sizeof(rows[index].issue_message), "%s",
+                           found[index].message);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_lint_reply_encode(rows, count, response_body, response_capacity,
+                                                   response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char outcome_filter[AIMEE_DB2_DECISION_LOG_LIST_OUTCOME_FILTER_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_decision_log_list_request_decode(request_body, request_len, outcome_filter,
+                                                        sizeof(outcome_filter), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DECISION_LOG_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->decision_log_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_decision_log_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_decision_log_row_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->decision_log_list(outcome_filter, (int)limit, found,
+                                                        AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].decision_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].decision_task_id =
+                      found[index].task_id < 0 ? 0u : (uint64_t)found[index].task_id;
+                  rows[index].supersedes_id =
+                      found[index].supersedes_id < 0 ? 0u : (uint64_t)found[index].supersedes_id;
+                  rows[index].linked_policy_id = found[index].linked_policy_id < 0
+                                                     ? 0u
+                                                     : (uint64_t)found[index].linked_policy_id;
+                  snprintf(rows[index].options, sizeof(rows[index].options), "%s",
+                           found[index].options);
+                  snprintf(rows[index].chosen, sizeof(rows[index].chosen), "%s",
+                           found[index].chosen);
+                  snprintf(rows[index].rationale, sizeof(rows[index].rationale), "%s",
+                           found[index].rationale);
+                  snprintf(rows[index].assumptions, sizeof(rows[index].assumptions), "%s",
+                           found[index].assumptions);
+                  snprintf(rows[index].outcome, sizeof(rows[index].outcome), "%s",
+                           found[index].outcome);
+                  snprintf(rows[index].decision_created_at, sizeof(rows[index].decision_created_at),
+                           "%s", found[index].created_at);
+                  snprintf(rows[index].decision_status, sizeof(rows[index].decision_status), "%s",
+                           found[index].status);
+                  snprintf(rows[index].revisit_when, sizeof(rows[index].revisit_when), "%s",
+                           found[index].revisit_when);
+                  snprintf(rows[index].decision_subject, sizeof(rows[index].decision_subject), "%s",
+                           found[index].subject);
+                  snprintf(rows[index].decision_author, sizeof(rows[index].decision_author), "%s",
+                           found[index].author);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_decision_log_list_reply_encode(rows, count, response_body,
+                                                         response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char decision_subject_filter
+             [AIMEE_DB2_DECISION_LOG_LIST_SCOPED_DECISION_SUBJECT_FILTER_MAX + 1] = "";
+         char status_filter[AIMEE_DB2_DECISION_LOG_LIST_SCOPED_STATUS_FILTER_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_decision_log_list_scoped_request_decode(
+                 request_body, request_len, decision_subject_filter,
+                 sizeof(decision_subject_filter), status_filter, sizeof(status_filter),
+                 &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DECISION_LOG_LIST_SCOPED_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->decision_log_list_scoped)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_decision_log_list_scoped_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_decision_log_row_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->decision_log_list_scoped(
+                   decision_subject_filter, status_filter, (int)limit, found,
+                   AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].decision_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].decision_task_id =
+                      found[index].task_id < 0 ? 0u : (uint64_t)found[index].task_id;
+                  rows[index].supersedes_id =
+                      found[index].supersedes_id < 0 ? 0u : (uint64_t)found[index].supersedes_id;
+                  rows[index].linked_policy_id = found[index].linked_policy_id < 0
+                                                     ? 0u
+                                                     : (uint64_t)found[index].linked_policy_id;
+                  snprintf(rows[index].options, sizeof(rows[index].options), "%s",
+                           found[index].options);
+                  snprintf(rows[index].chosen, sizeof(rows[index].chosen), "%s",
+                           found[index].chosen);
+                  snprintf(rows[index].rationale, sizeof(rows[index].rationale), "%s",
+                           found[index].rationale);
+                  snprintf(rows[index].assumptions, sizeof(rows[index].assumptions), "%s",
+                           found[index].assumptions);
+                  snprintf(rows[index].outcome, sizeof(rows[index].outcome), "%s",
+                           found[index].outcome);
+                  snprintf(rows[index].decision_created_at, sizeof(rows[index].decision_created_at),
+                           "%s", found[index].created_at);
+                  snprintf(rows[index].decision_status, sizeof(rows[index].decision_status), "%s",
+                           found[index].status);
+                  snprintf(rows[index].revisit_when, sizeof(rows[index].revisit_when), "%s",
+                           found[index].revisit_when);
+                  snprintf(rows[index].decision_subject, sizeof(rows[index].decision_subject), "%s",
+                           found[index].subject);
+                  snprintf(rows[index].decision_author, sizeof(rows[index].decision_author), "%s",
+                           found[index].author);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_decision_log_list_scoped_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
             {
                free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;

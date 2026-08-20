@@ -2220,6 +2220,45 @@ int main(int argc, char **argv)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(task_subtasks_count == 0);
 
+   /* The typed-fact, lint and decision-log listings, against empty tables.
+    * Each is replayed with its filters empty, because an empty filter here
+    * drops a condition rather than matching an empty value -- and in
+    * typed_fact_recall it changes the ordering as well.
+    */
+   static aimee_db2_typed_fact_recall_row_t
+       typed_fact_recall_rows[AIMEE_DB2_TYPED_FACT_RECALL_MAX_ROWS];
+   uint32_t typed_fact_recall_count = 99;
+   assert(aimee_db2_typed_fact_recall_call(
+              call_client, &client, 9331, 0, "replay-subject", "", 8u, typed_fact_recall_rows,
+              AIMEE_DB2_TYPED_FACT_RECALL_MAX_ROWS, &typed_fact_recall_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(typed_fact_recall_count == 0);
+
+   static aimee_db2_memory_lint_row_t memory_lint_rows[AIMEE_DB2_MEMORY_LINT_MAX_ROWS];
+   uint32_t memory_lint_count = 99;
+   assert(aimee_db2_memory_lint_call(call_client, &client, 9332, 0, memory_lint_rows,
+                                     AIMEE_DB2_MEMORY_LINT_MAX_ROWS, &memory_lint_count, NULL,
+                                     NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_lint_count == 0);
+
+   static aimee_db2_decision_log_list_row_t
+       decision_log_list_rows[AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS];
+   uint32_t decision_log_list_count = 99;
+   assert(aimee_db2_decision_log_list_call(
+              call_client, &client, 9333, 0, "", 8u, decision_log_list_rows,
+              AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS, &decision_log_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decision_log_list_count == 0);
+
+   static aimee_db2_decision_log_list_scoped_row_t
+       decision_log_list_scoped_rows[AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS];
+   uint32_t decision_log_list_scoped_count = 99;
+   assert(aimee_db2_decision_log_list_scoped_call(
+              call_client, &client, 9334, 0, "", "", 8u, decision_log_list_scoped_rows,
+              AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS, &decision_log_list_scoped_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decision_log_list_scoped_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "095d4a7f474fbdad6ef63fe9bd4fe4a9b1c70d921a2cf2c396f1a4eb0b499d90"
+const ContractSHA256 = "bb2d4614574b1c6e7da4165b19a9e3b33b1094293e50ffc47c7a23be50c86e96"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1493,6 +1493,75 @@ func DecodeRelationsSupportingRequest(request []byte) (string, uint32, error) {
 		return "", 0, ErrMalformedEnvelope
 	}
 	return entityToken, limit, nil
+}
+
+const EventTypedFactRecall = EventMemory
+const StageTypedFactRecall = FamilyMemory
+const OperationTypedFactRecall uint32 = 81
+const TypedFactRecallFactSubjectMin = 1
+const TypedFactRecallFactSubjectMax = 511
+const TypedFactRecallRelationFilterMin = 0
+const TypedFactRecallRelationFilterMax = 127
+const TypedFactRecallLimitMin uint32 = 0
+const TypedFactRecallLimitMax uint32 = 256
+
+// EncodeTypedFactRecallRequest writes the schema typed_fact_recall declares, in order.
+func EncodeTypedFactRecallRequest(factSubject string, relationFilter string, limit uint32) ([]byte, error) {
+	if len(factSubject) < TypedFactRecallFactSubjectMin || len(factSubject) > TypedFactRecallFactSubjectMax || hasNUL(factSubject) ||
+		len(relationFilter) < TypedFactRecallRelationFilterMin || len(relationFilter) > TypedFactRecallRelationFilterMax || hasNUL(relationFilter) ||
+		limit < TypedFactRecallLimitMin || limit > TypedFactRecallLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, factSubject, TypedFactRecallFactSubjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, relationFilter, TypedFactRecallRelationFilterMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationTypedFactRecall, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTypedFactRecallRequest reads it back, checking each field against its own bound.
+func DecodeTypedFactRecallRequest(request []byte) (string, string, uint32, error) {
+	var factSubject string
+	var relationFilter string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTypedFactRecall || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if factSubject, err = takeRowText(payload, &cursor, TypedFactRecallFactSubjectMax); err != nil ||
+		len(factSubject) < TypedFactRecallFactSubjectMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if relationFilter, err = takeRowText(payload, &cursor, TypedFactRecallRelationFilterMax); err != nil ||
+		len(relationFilter) < TypedFactRecallRelationFilterMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < TypedFactRecallLimitMin || limit > TypedFactRecallLimitMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return factSubject, relationFilter, limit, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -8651,6 +8720,164 @@ func DecodeDirectiveByLexicalRequest(request []byte) (string, uint32, error) {
 		return "", 0, ErrMalformedEnvelope
 	}
 	return matchClause, limit, nil
+}
+
+const EventMemoryLint = EventMaintenance
+const StageMemoryLint = FamilyMaintenance
+const OperationMemoryLint uint32 = 35
+
+
+// EncodeMemoryLintRequest writes the schema memory_lint declares, in order.
+func EncodeMemoryLintRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationMemoryLint, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryLintRequest reads it back, checking each field against its own bound.
+func DecodeMemoryLintRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryLint || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventDecisionLogList = EventMaintenance
+const StageDecisionLogList = FamilyMaintenance
+const OperationDecisionLogList uint32 = 36
+const DecisionLogListOutcomeFilterMin = 0
+const DecisionLogListOutcomeFilterMax = 31
+const DecisionLogListLimitMin uint32 = 0
+const DecisionLogListLimitMax uint32 = 256
+
+// EncodeDecisionLogListRequest writes the schema decision_log_list declares, in order.
+func EncodeDecisionLogListRequest(outcomeFilter string, limit uint32) ([]byte, error) {
+	if len(outcomeFilter) < DecisionLogListOutcomeFilterMin || len(outcomeFilter) > DecisionLogListOutcomeFilterMax || hasNUL(outcomeFilter) ||
+		limit < DecisionLogListLimitMin || limit > DecisionLogListLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, outcomeFilter, DecisionLogListOutcomeFilterMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDecisionLogList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogListRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogListRequest(request []byte) (string, uint32, error) {
+	var outcomeFilter string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if outcomeFilter, err = takeRowText(payload, &cursor, DecisionLogListOutcomeFilterMax); err != nil ||
+		len(outcomeFilter) < DecisionLogListOutcomeFilterMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < DecisionLogListLimitMin || limit > DecisionLogListLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return outcomeFilter, limit, nil
+}
+
+const EventDecisionLogListScoped = EventMaintenance
+const StageDecisionLogListScoped = FamilyMaintenance
+const OperationDecisionLogListScoped uint32 = 37
+const DecisionLogListScopedDecisionSubjectFilterMin = 0
+const DecisionLogListScopedDecisionSubjectFilterMax = 255
+const DecisionLogListScopedStatusFilterMin = 0
+const DecisionLogListScopedStatusFilterMax = 23
+const DecisionLogListScopedLimitMin uint32 = 0
+const DecisionLogListScopedLimitMax uint32 = 256
+
+// EncodeDecisionLogListScopedRequest writes the schema decision_log_list_scoped declares, in order.
+func EncodeDecisionLogListScopedRequest(decisionSubjectFilter string, statusFilter string, limit uint32) ([]byte, error) {
+	if len(decisionSubjectFilter) < DecisionLogListScopedDecisionSubjectFilterMin || len(decisionSubjectFilter) > DecisionLogListScopedDecisionSubjectFilterMax || hasNUL(decisionSubjectFilter) ||
+		len(statusFilter) < DecisionLogListScopedStatusFilterMin || len(statusFilter) > DecisionLogListScopedStatusFilterMax || hasNUL(statusFilter) ||
+		limit < DecisionLogListScopedLimitMin || limit > DecisionLogListScopedLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionSubjectFilter, DecisionLogListScopedDecisionSubjectFilterMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, statusFilter, DecisionLogListScopedStatusFilterMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDecisionLogListScoped, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogListScopedRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogListScopedRequest(request []byte) (string, string, uint32, error) {
+	var decisionSubjectFilter string
+	var statusFilter string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogListScoped || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionSubjectFilter, err = takeRowText(payload, &cursor, DecisionLogListScopedDecisionSubjectFilterMax); err != nil ||
+		len(decisionSubjectFilter) < DecisionLogListScopedDecisionSubjectFilterMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if statusFilter, err = takeRowText(payload, &cursor, DecisionLogListScopedStatusFilterMax); err != nil ||
+		len(statusFilter) < DecisionLogListScopedStatusFilterMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < DecisionLogListScopedLimitMin || limit > DecisionLogListScopedLimitMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return decisionSubjectFilter, statusFilter, limit, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex
