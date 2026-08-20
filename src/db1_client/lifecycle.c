@@ -16,6 +16,7 @@
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
+#include "wfe_engine_store.h"
 #include "wfe_store.h"
 
 #include "db1_module_api.h"
@@ -796,6 +797,121 @@ int db1_work_item_record_outcome(const db1_work_item_outcome_t *outcome)
    snprintf(arg9, sizeof arg9, "%.17g", (double)outcome->cost_usd);
    const char *fields[] = {outcome->work_item_id, outcome->node_id, arg2, outcome->state, outcome->pause_reason, outcome->pause_stage, outcome->next_stage, outcome->pr_ref, arg8, arg9, outcome->event_kind, outcome->event_detail, outcome->event_hash, outcome->park_reason};
    return write_result(call_stage(AIMEE_DB1_OP_WORK_ITEM_RECORD_OUTCOME, fields, 14, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_children_list(const char *parent_id, char (*out_ids)[DB1_WFE_ID_LEN], int max)
+{
+   if (!parent_id || !parent_id[0] || !out_ids || max <= 0)
+      return -1;
+   if (max > 512)
+      max = 512;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {parent_id, arg1};
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
+   {
+      free(wire_values);
+      free(wire_caps);
+      return -1;
+   }
+   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 1u + 0u] = out_ids[wire_row];
+      wire_caps[wire_row * 1u + 0u] = sizeof out_ids[wire_row];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_CHILDREN_LIST, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
+   {
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 1u);
+   return wire_rows;
+}
+
+int db1_wfe_active_root_count()
+{
+   const char *const *fields = NULL;
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_ACTIVE_ROOT_COUNT, fields, 0, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_wfe_work_item_id_by_git_proposal(const char *repo, const char *proposal_path, const char *suffix, char *out, size_t n)
+{
+   if (!repo || !repo[0] || !proposal_path || !proposal_path[0] || !suffix || !suffix[0] || !out || n == 0)
+      return -1;
+   const char *fields[] = {repo, proposal_path, suffix};
+   char *const values[] = {out};
+   const size_t caps[] = {n};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_WORK_ITEM_ID_BY_GIT_PROPOSAL, fields, 3, values, caps, 1, NULL);
+   return read_result(wire_status, out);
+}
+
+int db1_wfe_executed_turn_count(const char *work_item_id)
+{
+   if (!work_item_id || !work_item_id[0])
+      return -1;
+   const char *fields[] = {work_item_id};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_EXECUTED_TURN_COUNT, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_wfe_stage_loop_count(const char *work_item_id, const char *stage)
+{
+   if (!work_item_id || !work_item_id[0])
+      return -1;
+   const char *fields[] = {work_item_id, stage ? stage : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_STAGE_LOOP_COUNT, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_wfe_runner_failures_since_progress(const char *work_item_id, const char *stage)
+{
+   if (!work_item_id || !work_item_id[0])
+      return -1;
+   const char *fields[] = {work_item_id, stage ? stage : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_RUNNER_FAILURES_SINCE_PROGRESS, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_wfe_capacity_waits_since_progress(const char *work_item_id, const char *stage)
+{
+   if (!work_item_id || !work_item_id[0])
+      return -1;
+   const char *fields[] = {work_item_id, stage ? stage : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_CAPACITY_WAITS_SINCE_PROGRESS, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 /* clang-format on */

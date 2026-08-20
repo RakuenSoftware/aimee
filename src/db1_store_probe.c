@@ -35,7 +35,7 @@
 
 /* A window nothing can fall into, so the probe reads an index and returns zero
  * rather than counting rows on a busy store. */
-#define PROBE_SINCE "9999-12-31T23:59:59Z"
+#define PROBE_SINCE    "9999-12-31T23:59:59Z"
 #define PROBE_CACHE_NS 1000000000LL /* 1s */
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;

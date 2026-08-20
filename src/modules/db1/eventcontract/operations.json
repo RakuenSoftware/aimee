@@ -338,11 +338,13 @@
    "active": true,
    "doc": "work-item state and its audit log. Split from workflow because wfe_engine.c wraps sixteen of these writes in two transactions it opens and commits across separate calls, which is a redesign of that engine's write path rather than a wire question.",
    "client_doc": "",
-   "covers": "wfe_store",
+   "covers": "wfe_engine_store, wfe_store",
    "sources": [
+    "wfe_engine_store",
     "wfe_store"
    ],
    "retired_sources": [
+    "wfe_engine_store.c",
     "wfe_store.c"
    ]
   },
@@ -23748,6 +23750,304 @@
    "reply": {
     "fields": [],
     "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 33,
+   "name": "wfe_children_list",
+   "c_name": "db1_wfe_children_list",
+   "c_params": [
+    "parent_id",
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "parent_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 512,
+     "column": {
+      "kind": "text",
+      "width": "DB1_WFE_ID_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 34,
+   "name": "wfe_active_root_count",
+   "c_name": "db1_wfe_active_root_count",
+   "c_params": [],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "active_roots",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 35,
+   "name": "wfe_work_item_id_by_git_proposal",
+   "c_name": "db1_wfe_work_item_id_by_git_proposal",
+   "c_params": [
+    "repo",
+    "proposal_path",
+    "suffix",
+    "out",
+    "n"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "repo",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "proposal_path",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "suffix",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 36,
+   "name": "wfe_executed_turn_count",
+   "c_name": "db1_wfe_executed_turn_count",
+   "c_params": [
+    "work_item_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "turns",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 37,
+   "name": "wfe_stage_loop_count",
+   "c_name": "db1_wfe_stage_loop_count",
+   "c_params": [
+    "work_item_id",
+    "stage"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "loops",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 38,
+   "name": "wfe_runner_failures_since_progress",
+   "c_name": "db1_wfe_runner_failures_since_progress",
+   "c_params": [
+    "work_item_id",
+    "stage"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "failures",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 39,
+   "name": "wfe_capacity_waits_since_progress",
+   "c_name": "db1_wfe_capacity_waits_since_progress",
+   "c_params": [
+    "work_item_id",
+    "stage"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "waits",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
    }
   },
   {

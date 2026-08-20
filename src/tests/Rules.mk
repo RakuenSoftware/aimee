@@ -5232,7 +5232,12 @@ unit-test-db1-module-bus: $(TESTPREFIX)/unit-test-db1-module-bus $(OBJDIR)/aimee
 # all -- as this rule stood -- the binary was built once and never again, so
 # every later run of the fixture tested a stale module and reported PASS for
 # code that was not in it.
+# The module's schema is an input to the module, and leaving it out meant a
+# schema change rebuilt the daemon and not the process that actually applies it:
+# the store came up on the old tables and the only symptom was a column that was
+# not there.
 DB1_MODULE_INPUTS = $(wildcard modules/db1/*.c) $(wildcard modules/db1/*.h) \
+                    $(wildcard modules/db1/*.sql) \
                     modules/db1/module.yaml \
                     modules/db1/eventcontract/operations.json \
                     vendor/cJSON.c \
@@ -5323,6 +5328,7 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/checkpoints_stage.o \
                                        $(OBJDIR)/modules/db1/jti_replay_stage.o \
                                        $(OBJDIR)/modules/db1/lifecycle_stage.o \
+                                       $(OBJDIR)/modules/db1/wfe_engine_store.o \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_stage.o \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_cache.o \
                                        $(OBJDIR)/modules/db1/mgmt_nonce_stage.o \

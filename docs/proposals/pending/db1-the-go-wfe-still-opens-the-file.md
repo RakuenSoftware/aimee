@@ -80,11 +80,33 @@ store single and makes the execution engine a client of it. The second follows
 the grain of "the service that owns a domain owns its state", and would mean
 this branch migrated two families into the wrong module.
 
-That is a call about how the appliance is meant to be shaped, not a detail of
-either implementation, and it should be made deliberately rather than by
-whichever port somebody starts first. Everything measured above holds either
-way: today the file has two owners with two schema authorities, and it is not
-corrupting anything.
+**The first, on the codebase's own precedent.** `server-go/db1/client.go`
+already exists for exactly this shape: a Go module that needs DB1 state and
+reaches it over the bus rather than through the file. It carries two methods
+today, `LoadState` and `SaveState`, because the economizer's keyed blob was the
+first Go client DB1 had. That is the pattern this repo already chose for Go
+modules needing DB1 state, and the WFE is the next one, not an exception to it.
+DB1 is the state service; modules are its clients; a module that opens the state
+service's file instead of calling it is the anomaly regardless of which language
+it is written in.
+
+The second direction would also undo deliberate work: `lifecycle` and
+`delegation` were migrated into DB1 on this branch precisely so the daemon's
+API routes could read work items through the module rather than through a
+handle of their own. Splitting them back out to make the WFE self-sufficient
+trades one shared file for one shared domain across two stores, which is the
+same problem with an extra hop.
+
+So: grow `server-go/db1/client.go` to cover lifecycle and delegation, and move
+`internal/db1/store.go` onto it. The contract those methods are written against
+is settled -- 19 families, 425 operations -- which is what makes this a port
+rather than a design. The 18 transactions are the work: each becomes one
+operation, the way `db1_work_item_record_outcome` did, and that is a redesign of
+the Go engine's write path rather than a translation of it. That is why it is
+the next project and not the tail of this one.
+
+Everything measured above holds either way: today the file has two owners with
+two schema authorities, and it is not corrupting anything.
 
 ## What closing it costs
 

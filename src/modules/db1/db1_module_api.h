@@ -561,6 +561,13 @@
 #define AIMEE_DB1_OP_STAGE_ATTEMPT_RESET                 30u
 #define AIMEE_DB1_OP_STAGE_ATTEMPT_GET                   31u
 #define AIMEE_DB1_OP_WORK_ITEM_RECORD_OUTCOME            32u
+#define AIMEE_DB1_OP_WFE_CHILDREN_LIST                   33u
+#define AIMEE_DB1_OP_WFE_ACTIVE_ROOT_COUNT               34u
+#define AIMEE_DB1_OP_WFE_WORK_ITEM_ID_BY_GIT_PROPOSAL    35u
+#define AIMEE_DB1_OP_WFE_EXECUTED_TURN_COUNT             36u
+#define AIMEE_DB1_OP_WFE_STAGE_LOOP_COUNT                37u
+#define AIMEE_DB1_OP_WFE_RUNNER_FAILURES_SINCE_PROGRESS  38u
+#define AIMEE_DB1_OP_WFE_CAPACITY_WAITS_SINCE_PROGRESS   39u
 
 /* Family 17: the management-JWKS cache row: the envelope the server verified,
  * when it is valid for, and the digests that pin it. Digests cross as hex

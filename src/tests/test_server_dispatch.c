@@ -271,6 +271,16 @@ int db1_store_ready(void)
    return 0;
 }
 
+/* db1_store_probe() is the same question asked by calling the store rather than
+ * by reading the bus registry -- server.health uses it so that a module which
+ * died is noticed in a second instead of in the ~37s the heartbeat reaper takes.
+ * It needs the sessions client and the bus, and this test links neither, for the
+ * reason above. Same honest answer: not reachable. */
+int db1_store_probe(void)
+{
+   return 0;
+}
+
 /* On-demand delegate execution (server_delegate_ondemand.c) is not linked here;
  * server.c calls these at init/shutdown. No-op stubs. */
 void delegate_ondemand_set_ceiling(int ceiling)

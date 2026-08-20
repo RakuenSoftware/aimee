@@ -80,6 +80,18 @@ static void db1_run_migrations(sqlite3 *db)
         * run; set to the parent's work_item_id for a slice child, so the parent's
         * foreach gate can aggregate its children's terminal states. */
        "ALTER TABLE lifecycle_work_item ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''",
+       /* The workflow engine's own columns. The Go WFE created these against
+        * this same file with its own ALTER ladder, which is how a store could
+        * end up with a different column ORDER depending on which process
+        * opened it first. Declared here so the module's schema is the one that
+        * decides, and so a store the module built has them before anything
+        * else asks. Errors are ignored above, so re-running these on a store
+        * the Go side already migrated is a no-op rather than a failure. */
+       "ALTER TABLE lifecycle_work_item ADD COLUMN source_path TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reserved_cost_usd REAL NOT NULL DEFAULT 0",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_state TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_owner TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_lease_until TEXT NOT NULL DEFAULT ''",
        /* Rename the multi-agent "workflow session" store to "ensemble" so it no
         * longer collides with the workflow ENGINE. Runs before the canonical
         * schema SQL: on a legacy DB the RENAME preserves every row and the

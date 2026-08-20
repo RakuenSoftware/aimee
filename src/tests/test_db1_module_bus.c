@@ -33,6 +33,7 @@
 #include <aimee/audit/obs_bus.h>
 
 #include "cognify_jobs.h"
+#include "wfe_engine_store.h"
 #include "ensemble.h"
 #include "execution_trace.h"
 #include "wfe_binding.h"
@@ -87,6 +88,11 @@ static const unsigned served[] = {
     AIMEE_DB1_EVENT_IDENTITY,         AIMEE_DB1_EVENT_CHECKPOINTS,
     AIMEE_DB1_EVENT_JTI_REPLAY,       AIMEE_DB1_EVENT_MGMT_JWKS,
     AIMEE_DB1_EVENT_MGMT_NONCE,       AIMEE_DB1_EVENT_PKI,
+    /* Lifecycle was absent from this list until the engine's own reads were
+     * declared, so every work-item operation in the catalog was unserved here
+     * and the suite still reported that the module serves what the daemon asks
+     * of it. It served eighteen families of nineteen. */
+    AIMEE_DB1_EVENT_LIFECYCLE,
 };
 
 static pid_t g_module = -1;
@@ -1392,6 +1398,76 @@ static void test_a_roundtable_run_round_trips_and_swaps_once(void)
    owns the appliance's first-user slot -- and a reply carrying only the record
    cannot tell the second from the third. Getting that wrong hands the first
    user's slot to whoever asks next. */
+/* The workflow engine's own reads, which used to be SQL inside a second process
+   holding this same file open. Each one is a count or a list taken over rows the
+   engine does not own, so the thing worth proving is not that a number crossed
+   the wire -- earlier cases prove that -- but that the PREDICATES survived the
+   move: roots only, kinds filtered, and "since progress" actually resetting when
+   the run makes progress. A count that is merely plausible is the failure mode
+   here, because every one of these drives a give-up threshold. */
+static void test_the_engine_reads_keep_their_predicates(void)
+{
+   must(db1_work_item_create("wi-root", "repo/a", "git:refs/heads/topic", "build", "1", "plan",
+                             "autonomous") == 0,
+        "create a root run");
+   must(db1_work_item_create("wi-child", "repo/a", "slice/1", "build", "1", "plan",
+                             "autonomous") == 0,
+        "create a second run");
+   must(db1_work_item_set_parent("wi-child", "wi-root") == 0, "make it a child");
+
+   /* Children are listed by parent, ids only, in insertion order. */
+   char kids[8][DB1_WFE_ID_LEN];
+   int n = db1_wfe_children_list("wi-root", kids, 8);
+   must(n == 1, "one child came back");
+   must(strcmp(kids[0], "wi-child") == 0, "and it is the right one");
+   must(db1_wfe_children_list("wi-child", kids, 8) == 0, "a leaf has no children");
+
+   /* The admission cap counts roots. A child must not count against it, which is
+      the whole reason this is not COUNT(*) over active rows. */
+   int roots = db1_wfe_active_root_count();
+   must(roots == 1, "the child did not count as a root");
+
+   /* A git proposal is found by its full path or by the tail the caller kept. */
+   char found[DB1_WFE_ID_LEN];
+   must(db1_wfe_work_item_id_by_git_proposal("repo/a", "git:refs/heads/topic", "refs/heads/topic",
+                                             found, sizeof found) == 1,
+        "found by exact proposal path");
+   must(strcmp(found, "wi-root") == 0, "and it is the root, not the child");
+   must(db1_wfe_work_item_id_by_git_proposal("repo/a", "nope", "refs/heads/topic", found,
+                                             sizeof found) == 1,
+        "found by the suffix alone");
+   must(db1_wfe_work_item_id_by_git_proposal("repo/b", "nope", "no/such/ref", found,
+                                             sizeof found) == 0,
+        "and a miss is a miss, not an error");
+
+   /* Turns count advance and loop, and nothing else: a pause must not spend the
+      run's turn budget. */
+   must(db1_lifecycle_event_add("wi-root", "plan", "create", "t", "", "", 0) == 0, "create event");
+   must(db1_lifecycle_event_add("wi-root", "plan", "advance", "t", "", "", 0) == 0, "advance");
+   must(db1_lifecycle_event_add("wi-root", "plan", "loop", "t", "", "", 0) == 0, "loop");
+   must(db1_lifecycle_event_add("wi-root", "plan", "pause", "t", "stuck", "", 0) == 0, "pause");
+   must(db1_wfe_executed_turn_count("wi-root") == 2, "the pause did not count as a turn");
+   must(db1_wfe_stage_loop_count("wi-root", "plan") == 2, "advance and loop both entered plan");
+
+   /* "Since progress" is measured from the newest advance/loop/create. The pause
+      above is older than nothing, so it counts; a later advance must reset it. */
+   must(db1_wfe_runner_failures_since_progress("wi-root", "plan") == 1, "one failure so far");
+   must(db1_wfe_capacity_waits_since_progress("wi-root", "plan") == 0, "and no capacity wait");
+   must(db1_lifecycle_event_add("wi-root", "plan", "pause", "t", "capacity_backpressure:pool", "",
+                                0) == 0,
+        "a capacity wait");
+   must(db1_wfe_capacity_waits_since_progress("wi-root", "plan") == 1, "counted as a wait");
+   must(db1_wfe_runner_failures_since_progress("wi-root", "plan") == 1,
+        "and NOT as a runner failure -- waiting for a runner is not a stage that will not pass");
+   must(db1_lifecycle_event_add("wi-root", "plan", "advance", "t", "", "", 0) == 0, "progress");
+   must(db1_wfe_runner_failures_since_progress("wi-root", "plan") == 0,
+        "progress reset the failure count");
+   must(db1_wfe_capacity_waits_since_progress("wi-root", "plan") == 0,
+        "and the capacity count with it");
+
+   printf("  PASS: the engine reads keep their predicates\n");
+}
+
 static void test_a_first_user_claim_says_how_it_went(void)
 {
    /* The claim validates its inputs: a webuser principal, and a bearer that is
@@ -1719,6 +1795,7 @@ int main(int argc, char **argv)
    test_the_roadmap_selector_keeps_all_three_answers();
    test_a_plan_carries_its_steps_and_their_dependencies();
    test_a_roundtable_run_round_trips_and_swaps_once();
+   test_the_engine_reads_keep_their_predicates();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();

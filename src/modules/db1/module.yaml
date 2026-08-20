@@ -93,6 +93,7 @@
     "src/modules/db1/webchat_claude_sessions.c",
     "src/modules/db1/webchat_live.c",
     "src/modules/db1/wfe_binding.c",
+    "src/modules/db1/wfe_engine_store.c",
     "src/modules/db1/wfe_store.c",
     "src/modules/db1/windows.c",
     "src/modules/db1/wm.c",
@@ -165,6 +166,7 @@
     "src/modules/db1/webchat_claude_sessions.h",
     "src/modules/db1/webchat_live.h",
     "src/modules/db1/wfe_binding.h",
+    "src/modules/db1/wfe_engine_store.h",
     "src/modules/db1/wfe_store.h",
     "src/modules/db1/wm.h",
     "src/modules/db1/working_profile_local.h"
