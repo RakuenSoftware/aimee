@@ -952,6 +952,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The harness builds the workflow control module, which is Go. The runner
+      # image happens to ship a toolchain, but the harness SKIPS its workflow
+      # section when it cannot find one -- so relying on the image would mean
+      # the whole /v1/workflow surface silently stops being covered the day
+      # that changes, with the job still green. Pin it instead.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
       - name: Install dependencies
         run: |
           # Same transient-apt-mirror workaround the sibling jobs carry.
