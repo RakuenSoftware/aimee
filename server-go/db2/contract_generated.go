@@ -514,6 +514,734 @@ type MemoryRow struct {
 	ProvenanceCategory string
 }
 
+const EventRecordExists = EventMemory
+const StageRecordExists = FamilyMemory
+const OperationRecordExists uint32 = 63
+const RecordExistsIdentifierMax uint64 = 9223372036854775807
+const RecordExistsMax uint32 = 1
+
+// EncodeRecordExistsRequest carries one positive identifier.
+func EncodeRecordExistsRequest(recordID uint64) ([]byte, error) {
+	if recordID == 0 || recordID > RecordExistsIdentifierMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationRecordExists, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], recordID)
+	return request, nil
+}
+
+// DecodeRecordExistsRequest validates the identifier against its bound.
+func DecodeRecordExistsRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRecordExists || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > RecordExistsIdentifierMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeRecordExistsReply emits the Boolean.
+func EncodeRecordExistsReply(exists uint32) ([]byte, error) {
+	if exists > RecordExistsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationRecordExists, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeRecordExistsReply rejects any value outside the Boolean's bound.
+func DecodeRecordExistsReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationRecordExists || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > RecordExistsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventEntityObservationCount = EventIndex
+const StageEntityObservationCount = FamilyIndex
+const OperationEntityObservationCount uint32 = 12
+const EntityObservationCountArgumentMin = 1
+const EntityObservationCountArgumentMax = 255
+const EntityObservationCountMax uint32 = 2147483647
+
+// EncodeEntityObservationCountRequest carries one non-empty bounded string.
+func EncodeEntityObservationCountRequest(entityID string) ([]byte, error) {
+	if len(entityID) < EntityObservationCountArgumentMin || len(entityID) > EntityObservationCountArgumentMax ||
+		hasNUL(entityID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entityID, EntityObservationCountArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityObservationCount, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityObservationCountRequest rejects an empty argument as well as an oversized one.
+func DecodeEntityObservationCountRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityObservationCount || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	entityID, err := takeRowText(payload, &cursor, EntityObservationCountArgumentMax)
+	if err != nil || cursor != len(payload) || len(entityID) < EntityObservationCountArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return entityID, nil
+}
+
+// EncodeEntityObservationCountReply emits the bounded answer.
+func EncodeEntityObservationCountReply(count uint32) ([]byte, error) {
+	if count > EntityObservationCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEntityObservationCount, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeEntityObservationCountReply rejects any answer outside its bound.
+func DecodeEntityObservationCountReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEntityObservationCount || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > EntityObservationCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventTraceMiningRecord = EventLearning
+const StageTraceMiningRecord = FamilyLearning
+const OperationTraceMiningRecord uint32 = 8
+const TraceMiningRecordIdentifierMax uint64 = 9223372036854775807
+
+// EncodeTraceMiningRecordRequest carries one positive identifier.
+func EncodeTraceMiningRecordRequest(lastTraceID uint64) ([]byte, error) {
+	if lastTraceID == 0 || lastTraceID > TraceMiningRecordIdentifierMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationTraceMiningRecord, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], lastTraceID)
+	return request, nil
+}
+
+// DecodeTraceMiningRecordRequest validates the identifier against its bound.
+func DecodeTraceMiningRecordRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTraceMiningRecord || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > TraceMiningRecordIdentifierMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeTraceMiningRecordReply acknowledges the write without a payload.
+func EncodeTraceMiningRecordReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationTraceMiningRecord, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeTraceMiningRecordReply requires the exact empty acknowledgement.
+func DecodeTraceMiningRecordReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTraceMiningRecord || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventAntiPatternExistsExact = EventLearning
+const StageAntiPatternExistsExact = FamilyLearning
+const OperationAntiPatternExistsExact uint32 = 9
+const AntiPatternExistsExactArgumentMin = 1
+const AntiPatternExistsExactArgumentMax = 511
+const AntiPatternExistsExactMax uint32 = 1
+
+// EncodeAntiPatternExistsExactRequest carries one non-empty bounded string.
+func EncodeAntiPatternExistsExactRequest(pattern string) ([]byte, error) {
+	if len(pattern) < AntiPatternExistsExactArgumentMin || len(pattern) > AntiPatternExistsExactArgumentMax ||
+		hasNUL(pattern) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, pattern, AntiPatternExistsExactArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAntiPatternExistsExact, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAntiPatternExistsExactRequest rejects an empty argument as well as an oversized one.
+func DecodeAntiPatternExistsExactRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternExistsExact || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	pattern, err := takeRowText(payload, &cursor, AntiPatternExistsExactArgumentMax)
+	if err != nil || cursor != len(payload) || len(pattern) < AntiPatternExistsExactArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return pattern, nil
+}
+
+// EncodeAntiPatternExistsExactReply emits the bounded answer.
+func EncodeAntiPatternExistsExactReply(exists uint32) ([]byte, error) {
+	if exists > AntiPatternExistsExactMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationAntiPatternExistsExact, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeAntiPatternExistsExactReply rejects any answer outside its bound.
+func DecodeAntiPatternExistsExactReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAntiPatternExistsExact || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > AntiPatternExistsExactMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventAntiPatternExistsBySourceRef = EventLearning
+const StageAntiPatternExistsBySourceRef = FamilyLearning
+const OperationAntiPatternExistsBySourceRef uint32 = 10
+const AntiPatternExistsBySourceRefArgumentMin = 1
+const AntiPatternExistsBySourceRefArgumentMax = 511
+const AntiPatternExistsBySourceRefMax uint32 = 1
+
+// EncodeAntiPatternExistsBySourceRefRequest carries one non-empty bounded string.
+func EncodeAntiPatternExistsBySourceRefRequest(sourceRef string) ([]byte, error) {
+	if len(sourceRef) < AntiPatternExistsBySourceRefArgumentMin || len(sourceRef) > AntiPatternExistsBySourceRefArgumentMax ||
+		hasNUL(sourceRef) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, sourceRef, AntiPatternExistsBySourceRefArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAntiPatternExistsBySourceRef, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAntiPatternExistsBySourceRefRequest rejects an empty argument as well as an oversized one.
+func DecodeAntiPatternExistsBySourceRefRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternExistsBySourceRef || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	sourceRef, err := takeRowText(payload, &cursor, AntiPatternExistsBySourceRefArgumentMax)
+	if err != nil || cursor != len(payload) || len(sourceRef) < AntiPatternExistsBySourceRefArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return sourceRef, nil
+}
+
+// EncodeAntiPatternExistsBySourceRefReply emits the bounded answer.
+func EncodeAntiPatternExistsBySourceRefReply(exists uint32) ([]byte, error) {
+	if exists > AntiPatternExistsBySourceRefMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationAntiPatternExistsBySourceRef, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeAntiPatternExistsBySourceRefReply rejects any answer outside its bound.
+func DecodeAntiPatternExistsBySourceRefReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAntiPatternExistsBySourceRef || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > AntiPatternExistsBySourceRefMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventArtifactCitationCount = EventLearning
+const StageArtifactCitationCount = FamilyLearning
+const OperationArtifactCitationCount uint32 = 11
+const ArtifactCitationCountArgumentMin = 1
+const ArtifactCitationCountArgumentMax = 127
+const ArtifactCitationCountMax uint32 = 2147483647
+
+// EncodeArtifactCitationCountRequest carries one non-empty bounded string.
+func EncodeArtifactCitationCountRequest(artifactID string) ([]byte, error) {
+	if len(artifactID) < ArtifactCitationCountArgumentMin || len(artifactID) > ArtifactCitationCountArgumentMax ||
+		hasNUL(artifactID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, ArtifactCitationCountArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactCitationCount, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactCitationCountRequest rejects an empty argument as well as an oversized one.
+func DecodeArtifactCitationCountRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactCitationCount || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	artifactID, err := takeRowText(payload, &cursor, ArtifactCitationCountArgumentMax)
+	if err != nil || cursor != len(payload) || len(artifactID) < ArtifactCitationCountArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return artifactID, nil
+}
+
+// EncodeArtifactCitationCountReply emits the bounded answer.
+func EncodeArtifactCitationCountReply(count uint32) ([]byte, error) {
+	if count > ArtifactCitationCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationArtifactCitationCount, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeArtifactCitationCountReply rejects any answer outside its bound.
+func DecodeArtifactCitationCountReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationArtifactCitationCount || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > ArtifactCitationCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventCommitsInLast7Days = EventLearning
+const StageCommitsInLast7Days = FamilyLearning
+const OperationCommitsInLast7Days uint32 = 12
+const CommitsInLast7DaysArgumentMin = 1
+const CommitsInLast7DaysArgumentMax = 127
+const CommitsInLast7DaysMax uint32 = 2147483647
+
+// EncodeCommitsInLast7DaysRequest carries one non-empty bounded string.
+func EncodeCommitsInLast7DaysRequest(sink string) ([]byte, error) {
+	if len(sink) < CommitsInLast7DaysArgumentMin || len(sink) > CommitsInLast7DaysArgumentMax ||
+		hasNUL(sink) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, sink, CommitsInLast7DaysArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCommitsInLast7Days, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCommitsInLast7DaysRequest rejects an empty argument as well as an oversized one.
+func DecodeCommitsInLast7DaysRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCommitsInLast7Days || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	sink, err := takeRowText(payload, &cursor, CommitsInLast7DaysArgumentMax)
+	if err != nil || cursor != len(payload) || len(sink) < CommitsInLast7DaysArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return sink, nil
+}
+
+// EncodeCommitsInLast7DaysReply emits the bounded answer.
+func EncodeCommitsInLast7DaysReply(count uint32) ([]byte, error) {
+	if count > CommitsInLast7DaysMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationCommitsInLast7Days, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeCommitsInLast7DaysReply rejects any answer outside its bound.
+func DecodeCommitsInLast7DaysReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationCommitsInLast7Days || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > CommitsInLast7DaysMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventFidelityAttributionCount = EventLearning
+const StageFidelityAttributionCount = FamilyLearning
+const OperationFidelityAttributionCount uint32 = 13
+const FidelityAttributionCountArgumentMin = 1
+const FidelityAttributionCountArgumentMax = 127
+const FidelityAttributionCountMax uint32 = 2147483647
+
+// EncodeFidelityAttributionCountRequest carries one non-empty bounded string.
+func EncodeFidelityAttributionCountRequest(turnID string) ([]byte, error) {
+	if len(turnID) < FidelityAttributionCountArgumentMin || len(turnID) > FidelityAttributionCountArgumentMax ||
+		hasNUL(turnID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, turnID, FidelityAttributionCountArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationFidelityAttributionCount, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeFidelityAttributionCountRequest rejects an empty argument as well as an oversized one.
+func DecodeFidelityAttributionCountRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFidelityAttributionCount || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	turnID, err := takeRowText(payload, &cursor, FidelityAttributionCountArgumentMax)
+	if err != nil || cursor != len(payload) || len(turnID) < FidelityAttributionCountArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return turnID, nil
+}
+
+// EncodeFidelityAttributionCountReply emits the bounded answer.
+func EncodeFidelityAttributionCountReply(count uint32) ([]byte, error) {
+	if count > FidelityAttributionCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationFidelityAttributionCount, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeFidelityAttributionCountReply rejects any answer outside its bound.
+func DecodeFidelityAttributionCountReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationFidelityAttributionCount || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > FidelityAttributionCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventDocumentExists = EventOrganization
+const StageDocumentExists = FamilyOrganization
+const OperationDocumentExists uint32 = 6
+const DocumentExistsIdentifierMax uint64 = 9223372036854775807
+const DocumentExistsMax uint32 = 1
+
+// EncodeDocumentExistsRequest carries one positive identifier.
+func EncodeDocumentExistsRequest(documentID uint64) ([]byte, error) {
+	if documentID == 0 || documentID > DocumentExistsIdentifierMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDocumentExists, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], documentID)
+	return request, nil
+}
+
+// DecodeDocumentExistsRequest validates the identifier against its bound.
+func DecodeDocumentExistsRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocumentExists || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if value == 0 || value > DocumentExistsIdentifierMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+// EncodeDocumentExistsReply emits the Boolean.
+func EncodeDocumentExistsReply(exists uint32) ([]byte, error) {
+	if exists > DocumentExistsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDocumentExists, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeDocumentExistsReply rejects any value outside the Boolean's bound.
+func DecodeDocumentExistsReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDocumentExists || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > DocumentExistsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventBlobReferenced = EventOrganization
+const StageBlobReferenced = FamilyOrganization
+const OperationBlobReferenced uint32 = 7
+const BlobReferencedArgumentMin = 1
+const BlobReferencedArgumentMax = 255
+const BlobReferencedMax uint32 = 1
+
+// EncodeBlobReferencedRequest carries one non-empty bounded string.
+func EncodeBlobReferencedRequest(blobRef string) ([]byte, error) {
+	if len(blobRef) < BlobReferencedArgumentMin || len(blobRef) > BlobReferencedArgumentMax ||
+		hasNUL(blobRef) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, blobRef, BlobReferencedArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationBlobReferenced, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBlobReferencedRequest rejects an empty argument as well as an oversized one.
+func DecodeBlobReferencedRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBlobReferenced || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	blobRef, err := takeRowText(payload, &cursor, BlobReferencedArgumentMax)
+	if err != nil || cursor != len(payload) || len(blobRef) < BlobReferencedArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return blobRef, nil
+}
+
+// EncodeBlobReferencedReply emits the bounded answer.
+func EncodeBlobReferencedReply(referenced uint32) ([]byte, error) {
+	if referenced > BlobReferencedMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationBlobReferenced, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], referenced)
+	return reply, nil
+}
+
+// DecodeBlobReferencedReply rejects any answer outside its bound.
+func DecodeBlobReferencedReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationBlobReferenced || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > BlobReferencedMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventAsyncPendingCount = EventMaintenance
+const StageAsyncPendingCount = FamilyMaintenance
+const OperationAsyncPendingCount uint32 = 11
+const AsyncPendingCountArgumentMin = 1
+const AsyncPendingCountArgumentMax = 63
+const AsyncPendingCountMax uint32 = 2147483647
+
+// EncodeAsyncPendingCountRequest carries one non-empty bounded string.
+func EncodeAsyncPendingCountRequest(kind string) ([]byte, error) {
+	if len(kind) < AsyncPendingCountArgumentMin || len(kind) > AsyncPendingCountArgumentMax ||
+		hasNUL(kind) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, kind, AsyncPendingCountArgumentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAsyncPendingCount, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAsyncPendingCountRequest rejects an empty argument as well as an oversized one.
+func DecodeAsyncPendingCountRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAsyncPendingCount || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	kind, err := takeRowText(payload, &cursor, AsyncPendingCountArgumentMax)
+	if err != nil || cursor != len(payload) || len(kind) < AsyncPendingCountArgumentMin {
+		return "", ErrMalformedEnvelope
+	}
+	return kind, nil
+}
+
+// EncodeAsyncPendingCountReply emits the bounded answer.
+func EncodeAsyncPendingCountReply(count uint32) ([]byte, error) {
+	if count > AsyncPendingCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationAsyncPendingCount, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeAsyncPendingCountReply rejects any answer outside its bound.
+func DecodeAsyncPendingCountReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationAsyncPendingCount || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > AsyncPendingCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
 const EventEntityEdgePruneOrphans = EventIndex
 const StageEntityEdgePruneOrphans = FamilyIndex
 const OperationEntityEdgePruneOrphans uint32 = 1
@@ -4417,734 +5145,6 @@ func DecodeLoadEvalCorpusReply(reply []byte) (string, []uint64, error) {
 		memoryIDs[index] = id
 	}
 	return label, memoryIDs, nil
-}
-
-const EventRecordExists = EventMemory
-const StageRecordExists = FamilyMemory
-const OperationRecordExists uint32 = 63
-const RecordExistsIdentifierMax uint64 = 9223372036854775807
-const RecordExistsMax uint32 = 1
-
-// EncodeRecordExistsRequest carries one positive identifier.
-func EncodeRecordExistsRequest(recordID uint64) ([]byte, error) {
-	if recordID == 0 || recordID > RecordExistsIdentifierMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeRequestHeader(OperationRecordExists, 0, 8)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	request := append(header, make([]byte, 8)...)
-	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], recordID)
-	return request, nil
-}
-
-// DecodeRecordExistsRequest validates the identifier against its bound.
-func DecodeRecordExistsRequest(request []byte) (uint64, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationRecordExists || header.Flags != 0 ||
-		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
-	if value == 0 || value > RecordExistsIdentifierMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-// EncodeRecordExistsReply emits the Boolean.
-func EncodeRecordExistsReply(exists uint32) ([]byte, error) {
-	if exists > RecordExistsMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationRecordExists, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
-	return reply, nil
-}
-
-// DecodeRecordExistsReply rejects any value outside the Boolean's bound.
-func DecodeRecordExistsReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationRecordExists || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > RecordExistsMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventTraceMiningRecord = EventLearning
-const StageTraceMiningRecord = FamilyLearning
-const OperationTraceMiningRecord uint32 = 8
-const TraceMiningRecordIdentifierMax uint64 = 9223372036854775807
-
-// EncodeTraceMiningRecordRequest carries one positive identifier.
-func EncodeTraceMiningRecordRequest(lastTraceID uint64) ([]byte, error) {
-	if lastTraceID == 0 || lastTraceID > TraceMiningRecordIdentifierMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeRequestHeader(OperationTraceMiningRecord, 0, 8)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	request := append(header, make([]byte, 8)...)
-	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], lastTraceID)
-	return request, nil
-}
-
-// DecodeTraceMiningRecordRequest validates the identifier against its bound.
-func DecodeTraceMiningRecordRequest(request []byte) (uint64, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationTraceMiningRecord || header.Flags != 0 ||
-		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
-	if value == 0 || value > TraceMiningRecordIdentifierMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-// EncodeTraceMiningRecordReply acknowledges the write without a payload.
-func EncodeTraceMiningRecordReply() ([]byte, error) {
-	header, err := EncodeReplyHeader(OperationTraceMiningRecord, ResultOK, 0)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return header, nil
-}
-
-// DecodeTraceMiningRecordReply requires the exact empty acknowledgement.
-func DecodeTraceMiningRecordReply(reply []byte) error {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationTraceMiningRecord || header.Result != ResultOK ||
-		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
-		return ErrMalformedEnvelope
-	}
-	return nil
-}
-
-const EventDocumentExists = EventOrganization
-const StageDocumentExists = FamilyOrganization
-const OperationDocumentExists uint32 = 6
-const DocumentExistsIdentifierMax uint64 = 9223372036854775807
-const DocumentExistsMax uint32 = 1
-
-// EncodeDocumentExistsRequest carries one positive identifier.
-func EncodeDocumentExistsRequest(documentID uint64) ([]byte, error) {
-	if documentID == 0 || documentID > DocumentExistsIdentifierMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeRequestHeader(OperationDocumentExists, 0, 8)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	request := append(header, make([]byte, 8)...)
-	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], documentID)
-	return request, nil
-}
-
-// DecodeDocumentExistsRequest validates the identifier against its bound.
-func DecodeDocumentExistsRequest(request []byte) (uint64, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationDocumentExists || header.Flags != 0 ||
-		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
-	if value == 0 || value > DocumentExistsIdentifierMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-// EncodeDocumentExistsReply emits the Boolean.
-func EncodeDocumentExistsReply(exists uint32) ([]byte, error) {
-	if exists > DocumentExistsMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationDocumentExists, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
-	return reply, nil
-}
-
-// DecodeDocumentExistsReply rejects any value outside the Boolean's bound.
-func DecodeDocumentExistsReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationDocumentExists || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > DocumentExistsMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventAntiPatternExistsExact = EventLearning
-const StageAntiPatternExistsExact = FamilyLearning
-const OperationAntiPatternExistsExact uint32 = 9
-const AntiPatternExistsExactArgumentMin = 1
-const AntiPatternExistsExactArgumentMax = 511
-const AntiPatternExistsExactMax uint32 = 1
-
-// EncodeAntiPatternExistsExactRequest carries one non-empty bounded string.
-func EncodeAntiPatternExistsExactRequest(pattern string) ([]byte, error) {
-	if len(pattern) < AntiPatternExistsExactArgumentMin || len(pattern) > AntiPatternExistsExactArgumentMax ||
-		hasNUL(pattern) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, pattern, AntiPatternExistsExactArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationAntiPatternExistsExact, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeAntiPatternExistsExactRequest rejects an empty argument as well as an oversized one.
-func DecodeAntiPatternExistsExactRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationAntiPatternExistsExact || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	pattern, err := takeRowText(payload, &cursor, AntiPatternExistsExactArgumentMax)
-	if err != nil || cursor != len(payload) || len(pattern) < AntiPatternExistsExactArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return pattern, nil
-}
-
-// EncodeAntiPatternExistsExactReply emits the bounded answer.
-func EncodeAntiPatternExistsExactReply(exists uint32) ([]byte, error) {
-	if exists > AntiPatternExistsExactMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationAntiPatternExistsExact, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
-	return reply, nil
-}
-
-// DecodeAntiPatternExistsExactReply rejects any answer outside its bound.
-func DecodeAntiPatternExistsExactReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationAntiPatternExistsExact || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > AntiPatternExistsExactMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventAntiPatternExistsBySourceRef = EventLearning
-const StageAntiPatternExistsBySourceRef = FamilyLearning
-const OperationAntiPatternExistsBySourceRef uint32 = 10
-const AntiPatternExistsBySourceRefArgumentMin = 1
-const AntiPatternExistsBySourceRefArgumentMax = 511
-const AntiPatternExistsBySourceRefMax uint32 = 1
-
-// EncodeAntiPatternExistsBySourceRefRequest carries one non-empty bounded string.
-func EncodeAntiPatternExistsBySourceRefRequest(sourceRef string) ([]byte, error) {
-	if len(sourceRef) < AntiPatternExistsBySourceRefArgumentMin || len(sourceRef) > AntiPatternExistsBySourceRefArgumentMax ||
-		hasNUL(sourceRef) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, sourceRef, AntiPatternExistsBySourceRefArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationAntiPatternExistsBySourceRef, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeAntiPatternExistsBySourceRefRequest rejects an empty argument as well as an oversized one.
-func DecodeAntiPatternExistsBySourceRefRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationAntiPatternExistsBySourceRef || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	sourceRef, err := takeRowText(payload, &cursor, AntiPatternExistsBySourceRefArgumentMax)
-	if err != nil || cursor != len(payload) || len(sourceRef) < AntiPatternExistsBySourceRefArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return sourceRef, nil
-}
-
-// EncodeAntiPatternExistsBySourceRefReply emits the bounded answer.
-func EncodeAntiPatternExistsBySourceRefReply(exists uint32) ([]byte, error) {
-	if exists > AntiPatternExistsBySourceRefMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationAntiPatternExistsBySourceRef, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
-	return reply, nil
-}
-
-// DecodeAntiPatternExistsBySourceRefReply rejects any answer outside its bound.
-func DecodeAntiPatternExistsBySourceRefReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationAntiPatternExistsBySourceRef || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > AntiPatternExistsBySourceRefMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventArtifactCitationCount = EventLearning
-const StageArtifactCitationCount = FamilyLearning
-const OperationArtifactCitationCount uint32 = 11
-const ArtifactCitationCountArgumentMin = 1
-const ArtifactCitationCountArgumentMax = 127
-const ArtifactCitationCountMax uint32 = 2147483647
-
-// EncodeArtifactCitationCountRequest carries one non-empty bounded string.
-func EncodeArtifactCitationCountRequest(artifactID string) ([]byte, error) {
-	if len(artifactID) < ArtifactCitationCountArgumentMin || len(artifactID) > ArtifactCitationCountArgumentMax ||
-		hasNUL(artifactID) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, artifactID, ArtifactCitationCountArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationArtifactCitationCount, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeArtifactCitationCountRequest rejects an empty argument as well as an oversized one.
-func DecodeArtifactCitationCountRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationArtifactCitationCount || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	artifactID, err := takeRowText(payload, &cursor, ArtifactCitationCountArgumentMax)
-	if err != nil || cursor != len(payload) || len(artifactID) < ArtifactCitationCountArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return artifactID, nil
-}
-
-// EncodeArtifactCitationCountReply emits the bounded answer.
-func EncodeArtifactCitationCountReply(count uint32) ([]byte, error) {
-	if count > ArtifactCitationCountMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationArtifactCitationCount, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
-	return reply, nil
-}
-
-// DecodeArtifactCitationCountReply rejects any answer outside its bound.
-func DecodeArtifactCitationCountReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationArtifactCitationCount || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > ArtifactCitationCountMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventCommitsInLast7Days = EventLearning
-const StageCommitsInLast7Days = FamilyLearning
-const OperationCommitsInLast7Days uint32 = 12
-const CommitsInLast7DaysArgumentMin = 1
-const CommitsInLast7DaysArgumentMax = 127
-const CommitsInLast7DaysMax uint32 = 2147483647
-
-// EncodeCommitsInLast7DaysRequest carries one non-empty bounded string.
-func EncodeCommitsInLast7DaysRequest(sink string) ([]byte, error) {
-	if len(sink) < CommitsInLast7DaysArgumentMin || len(sink) > CommitsInLast7DaysArgumentMax ||
-		hasNUL(sink) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, sink, CommitsInLast7DaysArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationCommitsInLast7Days, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeCommitsInLast7DaysRequest rejects an empty argument as well as an oversized one.
-func DecodeCommitsInLast7DaysRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationCommitsInLast7Days || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	sink, err := takeRowText(payload, &cursor, CommitsInLast7DaysArgumentMax)
-	if err != nil || cursor != len(payload) || len(sink) < CommitsInLast7DaysArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return sink, nil
-}
-
-// EncodeCommitsInLast7DaysReply emits the bounded answer.
-func EncodeCommitsInLast7DaysReply(count uint32) ([]byte, error) {
-	if count > CommitsInLast7DaysMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationCommitsInLast7Days, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
-	return reply, nil
-}
-
-// DecodeCommitsInLast7DaysReply rejects any answer outside its bound.
-func DecodeCommitsInLast7DaysReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationCommitsInLast7Days || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > CommitsInLast7DaysMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventEntityObservationCount = EventIndex
-const StageEntityObservationCount = FamilyIndex
-const OperationEntityObservationCount uint32 = 12
-const EntityObservationCountArgumentMin = 1
-const EntityObservationCountArgumentMax = 255
-const EntityObservationCountMax uint32 = 2147483647
-
-// EncodeEntityObservationCountRequest carries one non-empty bounded string.
-func EncodeEntityObservationCountRequest(entityID string) ([]byte, error) {
-	if len(entityID) < EntityObservationCountArgumentMin || len(entityID) > EntityObservationCountArgumentMax ||
-		hasNUL(entityID) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, entityID, EntityObservationCountArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationEntityObservationCount, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeEntityObservationCountRequest rejects an empty argument as well as an oversized one.
-func DecodeEntityObservationCountRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationEntityObservationCount || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	entityID, err := takeRowText(payload, &cursor, EntityObservationCountArgumentMax)
-	if err != nil || cursor != len(payload) || len(entityID) < EntityObservationCountArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return entityID, nil
-}
-
-// EncodeEntityObservationCountReply emits the bounded answer.
-func EncodeEntityObservationCountReply(count uint32) ([]byte, error) {
-	if count > EntityObservationCountMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationEntityObservationCount, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
-	return reply, nil
-}
-
-// DecodeEntityObservationCountReply rejects any answer outside its bound.
-func DecodeEntityObservationCountReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationEntityObservationCount || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > EntityObservationCountMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventFidelityAttributionCount = EventLearning
-const StageFidelityAttributionCount = FamilyLearning
-const OperationFidelityAttributionCount uint32 = 13
-const FidelityAttributionCountArgumentMin = 1
-const FidelityAttributionCountArgumentMax = 127
-const FidelityAttributionCountMax uint32 = 2147483647
-
-// EncodeFidelityAttributionCountRequest carries one non-empty bounded string.
-func EncodeFidelityAttributionCountRequest(turnID string) ([]byte, error) {
-	if len(turnID) < FidelityAttributionCountArgumentMin || len(turnID) > FidelityAttributionCountArgumentMax ||
-		hasNUL(turnID) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, turnID, FidelityAttributionCountArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationFidelityAttributionCount, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeFidelityAttributionCountRequest rejects an empty argument as well as an oversized one.
-func DecodeFidelityAttributionCountRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationFidelityAttributionCount || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	turnID, err := takeRowText(payload, &cursor, FidelityAttributionCountArgumentMax)
-	if err != nil || cursor != len(payload) || len(turnID) < FidelityAttributionCountArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return turnID, nil
-}
-
-// EncodeFidelityAttributionCountReply emits the bounded answer.
-func EncodeFidelityAttributionCountReply(count uint32) ([]byte, error) {
-	if count > FidelityAttributionCountMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationFidelityAttributionCount, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
-	return reply, nil
-}
-
-// DecodeFidelityAttributionCountReply rejects any answer outside its bound.
-func DecodeFidelityAttributionCountReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationFidelityAttributionCount || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > FidelityAttributionCountMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventBlobReferenced = EventOrganization
-const StageBlobReferenced = FamilyOrganization
-const OperationBlobReferenced uint32 = 7
-const BlobReferencedArgumentMin = 1
-const BlobReferencedArgumentMax = 255
-const BlobReferencedMax uint32 = 1
-
-// EncodeBlobReferencedRequest carries one non-empty bounded string.
-func EncodeBlobReferencedRequest(blobRef string) ([]byte, error) {
-	if len(blobRef) < BlobReferencedArgumentMin || len(blobRef) > BlobReferencedArgumentMax ||
-		hasNUL(blobRef) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, blobRef, BlobReferencedArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationBlobReferenced, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeBlobReferencedRequest rejects an empty argument as well as an oversized one.
-func DecodeBlobReferencedRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationBlobReferenced || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	blobRef, err := takeRowText(payload, &cursor, BlobReferencedArgumentMax)
-	if err != nil || cursor != len(payload) || len(blobRef) < BlobReferencedArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return blobRef, nil
-}
-
-// EncodeBlobReferencedReply emits the bounded answer.
-func EncodeBlobReferencedReply(referenced uint32) ([]byte, error) {
-	if referenced > BlobReferencedMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationBlobReferenced, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], referenced)
-	return reply, nil
-}
-
-// DecodeBlobReferencedReply rejects any answer outside its bound.
-func DecodeBlobReferencedReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationBlobReferenced || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > BlobReferencedMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
-}
-
-const EventAsyncPendingCount = EventMaintenance
-const StageAsyncPendingCount = FamilyMaintenance
-const OperationAsyncPendingCount uint32 = 11
-const AsyncPendingCountArgumentMin = 1
-const AsyncPendingCountArgumentMax = 63
-const AsyncPendingCountMax uint32 = 2147483647
-
-// EncodeAsyncPendingCountRequest carries one non-empty bounded string.
-func EncodeAsyncPendingCountRequest(kind string) ([]byte, error) {
-	if len(kind) < AsyncPendingCountArgumentMin || len(kind) > AsyncPendingCountArgumentMax ||
-		hasNUL(kind) {
-		return nil, ErrMalformedEnvelope
-	}
-	var payload []byte
-	if err := putRowText(&payload, kind, AsyncPendingCountArgumentMax); err != nil {
-		return nil, err
-	}
-	header, err := EncodeRequestHeader(OperationAsyncPendingCount, 0, uint32(len(payload)))
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	return append(header, payload...), nil
-}
-
-// DecodeAsyncPendingCountRequest rejects an empty argument as well as an oversized one.
-func DecodeAsyncPendingCountRequest(request []byte) (string, error) {
-	header, err := DecodeRequestHeader(request)
-	if err != nil || header.Operation != OperationAsyncPendingCount || header.Flags != 0 ||
-		header.PayloadLen < 5 ||
-		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
-	}
-	payload := request[EnvelopeHeaderLen:]
-	cursor := 0
-	kind, err := takeRowText(payload, &cursor, AsyncPendingCountArgumentMax)
-	if err != nil || cursor != len(payload) || len(kind) < AsyncPendingCountArgumentMin {
-		return "", ErrMalformedEnvelope
-	}
-	return kind, nil
-}
-
-// EncodeAsyncPendingCountReply emits the bounded answer.
-func EncodeAsyncPendingCountReply(count uint32) ([]byte, error) {
-	if count > AsyncPendingCountMax {
-		return nil, ErrMalformedEnvelope
-	}
-	header, err := EncodeReplyHeader(OperationAsyncPendingCount, ResultOK, 4)
-	if err != nil {
-		return nil, ErrMalformedEnvelope
-	}
-	reply := append(header, make([]byte, 4)...)
-	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
-	return reply, nil
-}
-
-// DecodeAsyncPendingCountReply rejects any answer outside its bound.
-func DecodeAsyncPendingCountReply(reply []byte) (uint32, error) {
-	header, err := DecodeReplyHeader(reply)
-	if err != nil || header.Operation != OperationAsyncPendingCount || header.Result != ResultOK ||
-		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
-		return 0, ErrMalformedEnvelope
-	}
-	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
-	if value > AsyncPendingCountMax {
-		return 0, ErrMalformedEnvelope
-	}
-	return value, nil
 }
 
 // EncodeEntityEdgePruneOrphansRequest emits the empty request envelope. The
