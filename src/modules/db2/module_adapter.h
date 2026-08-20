@@ -16,6 +16,11 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "memory_query.h"
+#include "memory_health.h"
+#include "memory_promotion.h"
+#include "memory_scope_query.h"
+#include "lifecycle.h"
 #include "decision_log.h"
 #include "memory_lint.h"
 #include "typed_facts.h"
@@ -344,6 +349,14 @@ typedef struct
    int (*memory_lint)(memory_lint_issue_t *out, int max);
    int (*decision_log_list)(const char *outcome, int limit, db2_decision_log_row_t *out, int max);
    int (*decision_log_list_scoped)(const char *subject, const char *status, int limit, db2_decision_log_row_t *out, int max);
+   int (*global_constraints)(db2_memory_kv_row_t *rows, int max);
+   int (*kv_section)(db2_memory_section_t section, db2_memory_kv_row_t *rows, int max);
+   int (*memories_by_key)(const char *key, db2_memory_id_content_row_t *out, int max);
+   int (*session_memories)(const char *session_id, int limit, db2_memory_id_content_row_t *out, int max);
+   int (*memory_candidates)(db2_memory_cand_filter_t filter, db2_memory_cand_row_t *rows, int max);
+   int (*recall_section)(db2_memory_recall_section_t section, db2_memory_cand_row_t *rows, int max);
+   int (*l2_cross_key_pairs)(int max_pairs, db2_memory_pair_row_t *out, int max);
+   int (*l2_fact_decision_pairs)(int max_pairs, db2_memory_pair_row_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

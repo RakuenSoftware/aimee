@@ -3020,6 +3020,22 @@
       "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
     },
     {
+      "symbol": "db2_memory_l2_cross_key_pairs",
+      "signature_sha256": "6f0721f230e908692ff419c4f8975a5a71ee7939125c7b569fa4c18181325dfb",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.l2_cross_key_pairs operation finds L2 memories that mention each other's key prefix. It joins the tier against itself and compares with a substring match, so the work is quadratic in how many L2 memories exist and no index helps. The key prefix is taken up to the first underscore, so a key without one is compared whole and a short prefix matches widely."
+    },
+    {
+      "symbol": "db2_memory_l2_fact_vs_decision_pairs",
+      "signature_sha256": "0e814b3759eb1dc88286b2a2697eee514d3cc7f30205c3fe7b4bf34dae383881",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.l2_fact_decision_pairs operation finds facts and decisions that mention each other. Like memory.l2_cross_key_pairs it is a self-join with a substring comparison, so its cost is the product of the two sets and no index helps -- but the two draw from different tiers, so a fact and a decision at the same tier are never paired. Both sides need a confidence above a half."
+    },
+    {
       "symbol": "db2_memory_lifecycle_sweep_expired",
       "signature_sha256": "a376eab483cc4e760da1f31e68d1358cb1d233584830b790ef1a162eefd4fa4b",
       "disposition": "wire-operation",
@@ -3050,6 +3066,46 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.list_rows operation replaces the tier and kind listing. It is the only read here whose statement is assembled: the tier and kind clauses appear only when their value is non-empty, so an empty value is no filter on that column rather than a match against the empty string, and this is four statements sharing one name. Its LIMIT was interpolated from an unbounded caller integer and is a bounded field on the wire. Identifiers cross and the scope travels, as for the other scoped reads."
+    },
+    {
+      "symbol": "db2_memory_list_by_key",
+      "signature_sha256": "fd0e4589b229b43e524024d09eea5b0fea9eae11de11ee0712e424c77c06af84",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.memories_by_key operation lists the memories stored under a key. A key is not unique, so several memories may share one, and nothing orders the result -- which of them survives the row bound is whatever the database returned first. No tier or lifecycle condition applies, so an archived memory is listed beside a live one."
+    },
+    {
+      "symbol": "db2_memory_list_candidates",
+      "signature_sha256": "bad089aef3912fed04a3d7fabec2376dac8b84ff391c5b663b642d3715ca8288",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.memory_candidates operation loads the memories a scorer will rank. The filter picks one of two tier sets and neither contains the other -- the primary set excludes L0 and the fallback excludes L3 and L5 -- so falling back is not widening the search, it is looking somewhere else. The ordering leads with the identifier, so confidence and use count only break ties."
+    },
+    {
+      "symbol": "db2_memory_list_global_constraints",
+      "signature_sha256": "d0330bb0ba2539e391bf02246ee149d06917fea27836c4773f3f269f806e4656",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.global_constraints operation lists the preferences and policies that constrain everything. It leads its ordering with the memory identifier, so the newest constraint comes first and confidence only breaks ties -- a recent low-confidence preference outranks a long-standing high-confidence one. L0 is excluded, so a constraint still in the scratch tier does not constrain anything."
+    },
+    {
+      "symbol": "db2_memory_list_kv_section",
+      "signature_sha256": "c26d34b99dae0d6ea6cde2d9e1dec0aa07d8e61c7c8aee054d2bf209122a07b5",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.kv_section operation fetches one of five fixed context sections. The section is a number selecting a statement, not a filter, so the five differ in tier, kind and order in ways the reply cannot show -- and a caller has to know which number means which section. The bound admits one to five, so a mistaken number is refused at the boundary rather than reading nothing inside."
+    },
+    {
+      "symbol": "db2_memory_list_recall_section",
+      "signature_sha256": "97549e7b79d2634498bc4a267acacb27958c44628a9d0f5cfe7aea27b6b3349d",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.recall_section operation fetches one of four fixed recall sections. Its backend fills the same struct memory.memory_candidates does and leaves confidence and use count at zero, because none of these statements selects them; the wire row omits both rather than carrying two fields that are always zero and would read as data. Archived and superseded memories are excluded, which the candidate loader does not do."
     },
     {
       "symbol": "db2_memory_list_retryable_index_failures",
@@ -3354,6 +3410,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.search_facts_patterns_by_keyword operation replaces the keyword search. Which tiers and kinds count as a fact or a pattern is DB2 policy and stays behind the handler. Its statement did not select the identifier, so every row came back with id zero: a caller serialising the row published a zero identifier and resolved no headline. The identifier is selected now, which is also what makes the operation expressible as an identifier list. Scope and reply shape follow the other scoped searches."
+    },
+    {
+      "symbol": "db2_memory_session_id_content_list",
+      "signature_sha256": "0502f33ceb13c0552c5b57663f939802719fd1908710d5dd4c84947ff8c4f6ac",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.session_memories operation lists the memories a session wrote, oldest first. That order means the limit keeps the beginning of a session and discards its end, which is the opposite of what most listings here do and of what a caller asking for recent context would expect. Every tier is included."
     },
     {
       "symbol": "db2_memory_session_l0_list",

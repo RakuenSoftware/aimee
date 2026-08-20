@@ -2259,6 +2259,82 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(decision_log_list_scoped_count == 0);
 
+   /* The memory-row listings, against a store with no memories in it. The
+    * two section operations take a number selecting one of several fixed
+    * statements rather than a filter, so their bounds are what refuse a
+    * mistaken number at the boundary rather than reading nothing inside.
+    */
+   static aimee_db2_global_constraints_row_t
+       global_constraints_rows[AIMEE_DB2_GLOBAL_CONSTRAINTS_MAX_ROWS];
+   uint32_t global_constraints_count = 99;
+   assert(aimee_db2_global_constraints_call(call_client, &client, 9341, 0, global_constraints_rows,
+                                            AIMEE_DB2_GLOBAL_CONSTRAINTS_MAX_ROWS,
+                                            &global_constraints_count, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(global_constraints_count == 0);
+
+   static aimee_db2_kv_section_row_t kv_section_rows[AIMEE_DB2_KV_SECTION_MAX_ROWS];
+   uint32_t kv_section_count = 99;
+   assert(aimee_db2_kv_section_call(call_client, &client, 9342, 0, 3u, kv_section_rows,
+                                    AIMEE_DB2_KV_SECTION_MAX_ROWS, &kv_section_count, NULL,
+                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kv_section_count == 0);
+
+   static aimee_db2_memories_by_key_row_t memories_by_key_rows[AIMEE_DB2_MEMORIES_BY_KEY_MAX_ROWS];
+   uint32_t memories_by_key_count = 99;
+   assert(aimee_db2_memories_by_key_call(call_client, &client, 9343, 0, "replay-key",
+                                         memories_by_key_rows, AIMEE_DB2_MEMORIES_BY_KEY_MAX_ROWS,
+                                         &memories_by_key_count, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memories_by_key_count == 0);
+
+   static aimee_db2_session_memories_row_t
+       session_memories_rows[AIMEE_DB2_SESSION_MEMORIES_MAX_ROWS];
+   uint32_t session_memories_count = 99;
+   assert(aimee_db2_session_memories_call(
+              call_client, &client, 9344, 0, "replay-session", 8u, session_memories_rows,
+              AIMEE_DB2_SESSION_MEMORIES_MAX_ROWS, &session_memories_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(session_memories_count == 0);
+
+   static aimee_db2_memory_candidates_row_t
+       memory_candidates_rows[AIMEE_DB2_MEMORY_CANDIDATES_MAX_ROWS];
+   uint32_t memory_candidates_count = 99;
+   assert(aimee_db2_memory_candidates_call(
+              call_client, &client, 9345, 0, 1u, memory_candidates_rows,
+              AIMEE_DB2_MEMORY_CANDIDATES_MAX_ROWS, &memory_candidates_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_candidates_count == 0);
+
+   static aimee_db2_recall_section_row_t recall_section_rows[AIMEE_DB2_RECALL_SECTION_MAX_ROWS];
+   uint32_t recall_section_count = 99;
+   assert(aimee_db2_recall_section_call(call_client, &client, 9346, 0, 1u, recall_section_rows,
+                                        AIMEE_DB2_RECALL_SECTION_MAX_ROWS, &recall_section_count,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(recall_section_count == 0);
+
+   static aimee_db2_l2_cross_key_pairs_row_t
+       l2_cross_key_pairs_rows[AIMEE_DB2_L2_CROSS_KEY_PAIRS_MAX_ROWS];
+   uint32_t l2_cross_key_pairs_count = 99;
+   assert(aimee_db2_l2_cross_key_pairs_call(
+              call_client, &client, 9347, 0, 8u, l2_cross_key_pairs_rows,
+              AIMEE_DB2_L2_CROSS_KEY_PAIRS_MAX_ROWS, &l2_cross_key_pairs_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(l2_cross_key_pairs_count == 0);
+
+   static aimee_db2_l2_fact_decision_pairs_row_t
+       l2_fact_decision_pairs_rows[AIMEE_DB2_L2_FACT_DECISION_PAIRS_MAX_ROWS];
+   uint32_t l2_fact_decision_pairs_count = 99;
+   assert(aimee_db2_l2_fact_decision_pairs_call(
+              call_client, &client, 9348, 0, 8u, l2_fact_decision_pairs_rows,
+              AIMEE_DB2_L2_FACT_DECISION_PAIRS_MAX_ROWS, &l2_fact_decision_pairs_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(l2_fact_decision_pairs_count == 0);
+
+   assert(aimee_db2_kv_section_call(call_client, &client, 9350, 0, 6u, kv_section_rows,
+                                    AIMEE_DB2_KV_SECTION_MAX_ROWS, &kv_section_count, NULL,
+                                    NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

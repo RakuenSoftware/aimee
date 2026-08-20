@@ -63,7 +63,7 @@ class BoundaryTests(unittest.TestCase):
         result = checker.check(REPO_ROOT)
         self.assertEqual(result["source_files"], 282)
         self.assertEqual(result["consumer_files"], 305)
-        self.assertEqual(result["include_directives"], 994)
+        self.assertEqual(result["include_directives"], 996)
 
     def test_inventory_is_deterministic_sorted_and_classified(self) -> None:
         tmp = self.repo()

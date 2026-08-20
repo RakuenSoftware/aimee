@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906",
+  "source_revision": "0fb5712a68a4c53b262bf4c85a699737e935bc79",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
@@ -9,7 +9,7 @@
     "consumer_files": 305,
     "production_consumers": 151,
     "test_consumers": 154,
-    "include_directives": 994,
+    "include_directives": 996,
     "outbound_dependency_rows": 164,
     "outbound_include_directives": 164
   },
@@ -4781,6 +4781,14 @@
         {
           "header": "modules/db2/c/code_projection.h",
           "count": 1
+        },
+        {
+          "header": "modules/db2/c/entity_edges.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/entity_nodes.h",
+          "count": 1
         }
       ]
     },
@@ -7261,5 +7269,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "9f2530cbaf454536776b4d2ba2e67abe1f393083d0336779a26b6f5355ec2c00"
+  "fingerprint": "22f8a3057c97893187d03e2a431d81d114907f993d7847da6527b29eb153b019"
 }

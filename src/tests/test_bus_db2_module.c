@@ -992,7 +992,8 @@ static int prune_contradictions(int days)
 
 /* The counter struct is DB2-private, so the production symbol takes void * here
  * the way db2_dim_change_reset does; these tests drive their own backend. */
-int db2_memory_health_query_counters(int promote_use_count, double promote_confidence, void *out)
+int db2_memory_health_query_counters(int promote_use_count, double promote_confidence,
+                                     db2_memory_health_query_counters_t *out)
 {
    (void)promote_use_count;
    (void)promote_confidence;
@@ -1000,7 +1001,7 @@ int db2_memory_health_query_counters(int promote_use_count, double promote_confi
    return -1;
 }
 
-int db2_memory_find_facts_like(const char *term, int limit, void *out, int max)
+int db2_memory_find_facts_like(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -1011,7 +1012,7 @@ int db2_memory_find_facts_like(const char *term, int limit, void *out, int max)
 
 /* Three arguments, not four: this one binds the caller's buffer size as its
  * own LIMIT rather than taking a separate one. */
-int db2_memory_list_session_scope_priority_like(const char *pattern, void *out, int max)
+int db2_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max)
 {
    (void)pattern;
    (void)out;
@@ -1019,7 +1020,7 @@ int db2_memory_list_session_scope_priority_like(const char *pattern, void *out, 
    return 0;
 }
 
-int db2_memory_negation_fts_search(const char *term, int limit, void *out, int max)
+int db2_memory_negation_fts_search(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -1029,7 +1030,7 @@ int db2_memory_negation_fts_search(const char *term, int limit, void *out, int m
 }
 
 int db2_memory_session_neighbors_before(const char *session_id, int64_t anchor_id, int limit,
-                                        void *out, int max)
+                                        memory_t *out, int max)
 {
    (void)session_id;
    (void)anchor_id;
@@ -1040,7 +1041,7 @@ int db2_memory_session_neighbors_before(const char *session_id, int64_t anchor_i
 }
 
 int db2_memory_session_neighbors_after(const char *session_id, int64_t anchor_id, int limit,
-                                       void *out, int max)
+                                       memory_t *out, int max)
 {
    (void)session_id;
    (void)anchor_id;
@@ -1050,14 +1051,14 @@ int db2_memory_session_neighbors_after(const char *session_id, int64_t anchor_id
    return 0;
 }
 
-int db2_memory_get(int64_t memory_id, void *out)
+int db2_memory_get(int64_t memory_id, memory_t *out)
 {
    (void)memory_id;
    (void)out;
    return -1;
 }
 
-int db2_memory_get_by_unit_id(int64_t unit_id, void *out)
+int db2_memory_get_by_unit_id(int64_t unit_id, memory_t *out)
 {
    (void)unit_id;
    (void)out;
@@ -1066,7 +1067,7 @@ int db2_memory_get_by_unit_id(int64_t unit_id, void *out)
 
 /* Three arguments: the keyword search and the history both bind the caller's
  * buffer size rather than taking a separate limit. */
-int db2_memory_search_facts_patterns_by_keyword(const char *keyword, void *out, int max)
+int db2_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *out, int max)
 {
    (void)keyword;
    (void)out;
@@ -1074,7 +1075,7 @@ int db2_memory_search_facts_patterns_by_keyword(const char *keyword, void *out, 
    return 0;
 }
 
-int db2_memory_fact_history(const char *normalized_key, void *out, int max)
+int db2_memory_fact_history(const char *normalized_key, memory_t *out, int max)
 {
    (void)normalized_key;
    (void)out;
@@ -1082,7 +1083,7 @@ int db2_memory_fact_history(const char *normalized_key, void *out, int max)
    return 0;
 }
 
-int db2_memory_list(const char *tier, const char *kind, int hide_archived, int limit, void *out,
+int db2_memory_list(const char *tier, const char *kind, int hide_archived, int limit, memory_t *out,
                     int max)
 {
    (void)tier;
@@ -1094,7 +1095,7 @@ int db2_memory_list(const char *tier, const char *kind, int hide_archived, int l
    return 0;
 }
 
-int db2_memory_aggregate(const char *entity_seed, const char *keyword, void *out, int max,
+int db2_memory_aggregate(const char *entity_seed, const char *keyword, memory_t *out, int max,
                          int *truncated_out)
 {
    (void)entity_seed;
@@ -1106,7 +1107,7 @@ int db2_memory_aggregate(const char *entity_seed, const char *keyword, void *out
    return 0;
 }
 
-int db2_memory_load_eval_corpus(void *out, int max, char *label_out, size_t label_len)
+int db2_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len)
 {
    (void)out;
    (void)max;
@@ -2282,6 +2283,73 @@ int db2_decision_log_list_scoped(const char *subject, const char *status, int li
    return 0;
 }
 
+int db2_memory_list_global_constraints(db2_memory_kv_row_t *rows, int max)
+{
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_kv_section(db2_memory_section_t section, db2_memory_kv_row_t *rows, int max)
+{
+   (void)section;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_by_key(const char *key, db2_memory_id_content_row_t *out, int max)
+{
+   (void)key;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_session_id_content_list(const char *session_id, int limit,
+                                       db2_memory_id_content_row_t *out, int max)
+{
+   (void)session_id;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_row_t *rows,
+                               int max)
+{
+   (void)filter;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memory_cand_row_t *rows,
+                                   int max)
+{
+   (void)section;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_l2_cross_key_pairs(int max_pairs, db2_memory_pair_row_t *out, int max)
+{
+   (void)max_pairs;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_l2_fact_vs_decision_pairs(int max_pairs, db2_memory_pair_row_t *out, int max)
+{
+   (void)max_pairs;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
@@ -2324,7 +2392,7 @@ int db2_trace_mining_record(int64_t last_trace_id)
    return 0;
 }
 
-int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int max)
+int db2_memory_collect_alias_matches(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -2333,7 +2401,7 @@ int db2_memory_collect_alias_matches(const char *term, int limit, void *out, int
    return 0;
 }
 
-int db2_memory_collect_entity_matches(const char *term, int limit, void *out, int max)
+int db2_memory_collect_entity_matches(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -2342,7 +2410,7 @@ int db2_memory_collect_entity_matches(const char *term, int limit, void *out, in
    return 0;
 }
 
-int db2_memory_collect_event_frame_matches(const char *term, int limit, void *out, int max)
+int db2_memory_collect_event_frame_matches(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -2351,7 +2419,7 @@ int db2_memory_collect_event_frame_matches(const char *term, int limit, void *ou
    return 0;
 }
 
-int db2_memory_collect_relation_token_matches(const char *term, int limit, void *out, int max)
+int db2_memory_collect_relation_token_matches(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -2360,7 +2428,7 @@ int db2_memory_collect_relation_token_matches(const char *term, int limit, void 
    return 0;
 }
 
-int db2_memory_collect_summary_matches(const char *term, int limit, void *out, int max)
+int db2_memory_collect_summary_matches(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -2369,7 +2437,7 @@ int db2_memory_collect_summary_matches(const char *term, int limit, void *out, i
    return 0;
 }
 
-int db2_memory_collect_temporal_matches(const char *term, int limit, void *out, int max)
+int db2_memory_collect_temporal_matches(const char *term, int limit, memory_t *out, int max)
 {
    (void)term;
    (void)limit;
@@ -2380,14 +2448,14 @@ int db2_memory_collect_temporal_matches(const char *term, int limit, void *out, 
 
 /* memory_t and the scope context are host types too. The adapter's scoped
  * identifier readers reach these; the tests below drive the backend directly. */
-int db2_memory_top_l2_facts(void *out, int max)
+int db2_memory_top_l2_facts(memory_t *out, int max)
 {
    (void)out;
    (void)max;
    return 0;
 }
 
-int db2_memory_list_session_scope_priority(void *out, int max)
+int db2_memory_list_session_scope_priority(memory_t *out, int max)
 {
    (void)out;
    (void)max;
@@ -2405,14 +2473,14 @@ void db2_memory_scope_context_clear(void)
 {
 }
 
-void db2_memory_scope_context_get(void *out)
+void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
 {
    (void)out;
 }
 
 /* memory_stats_t is a host type, so the production symbol takes void * here the
  * way db2_dim_change_reset does; these tests drive their own backend. */
-int db2_memory_stats_counts(void *out)
+int db2_memory_stats_counts(memory_stats_t *out)
 {
    (void)out;
    return -1;
@@ -2428,7 +2496,8 @@ int db2_memory_promotion_delete_l0(void)
    return 0;
 }
 
-int db2_memory_promotion_list_kinds_in_tier(const char *tier, void *out, int max)
+int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promotion_kind_t *out,
+                                            int max)
 {
    (void)tier;
    (void)out;
@@ -2450,7 +2519,7 @@ int db2_memory_promotion_delete_stale_l1(const char *kind, const char *days_neg)
    return 0;
 }
 
-int db2_kind_lifecycle_load(const char *kind, void *out)
+int db2_kind_lifecycle_load(const char *kind, kind_lifecycle_t *out)
 {
    (void)kind;
    (void)out;
@@ -3415,7 +3484,7 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
    return 0;
 }
 
-int db2_dim_change_reset(int target_dim, int force, int dry_run, void *out)
+int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_plan_t *out)
 {
    (void)target_dim;
    (void)force;

@@ -186,6 +186,43 @@ each provider belongs on once DB2 is its own process. Embedding in particular
 is a question about where model inference runs, not about DB2. Recorded here so
 that these six are not migrated as though they were ordinary reads and writes.
 
+## One test declares its own copies of six DB2 row types and stubs them untyped
+
+`src/tests/test_kb_http_routes.c` defines `test_term_hit_t`,
+`test_project_info_t`, `test_definition_t`, `test_code_search_hit_t`,
+`test_caller_hit_t` and `test_blast_radius_t`, each a copy of the real row, and
+stubs the DB2 and canonical-index functions that fill them with `void *`:
+
+    int canonical_index_find(const char *identifier, void *out, int max)
+    {
+       ...
+       test_term_hit_t *hits = (test_term_hit_t *)out;
+
+Two declarations of one function with different parameter types is a constraint
+violation, and it is invisible while only one of them is in scope -- which is
+the same defect that let the hosted bus test hand the DB2 handler a backend
+struct shorter than the type the handler reads. Twenty-five stubs in this file
+are divergent that way.
+
+Every one of the six copies is byte-for-byte its original today, so nothing is
+wrong at runtime. What is wrong is that nothing keeps them in step: the copy of
+`term_hit_t` would not have noticed `line_end` being added to the original, and
+a field added tomorrow lands the same way.
+
+It is left alone here because untangling it is not a DB2 change. The file also
+declares its own `memory_t` with three of the real struct's thirty-five fields
+-- a deliberate stand-in rather than a copy -- and its own
+`db2_bandit_arm_stats_t`, so including the real headers means deciding what
+those two stubs should write, which is a question about this test rather than
+about the boundary.
+
+Everything of this shape inside DB2 has been repaired: the module contract
+test, the hosted bus test and the graph test now use the declared types, and
+`scripts` has no remaining divergence. A scan for the pattern lives in the
+session notes rather than the tree, because it is a one-off check rather than a
+gate: the compiler enforces it wherever both declarations are in scope, which
+is now everywhere DB2's own tests are concerned.
+
 ## Operation ids are unique per family, and the envelope does not say the family
 
 Every operation carries an id that is unique within its family, so

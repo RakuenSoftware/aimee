@@ -44,6 +44,9 @@ WIRE_REPLY_MAX = (1 << 20) - ENVELOPE_HEADER_LEN
 # At or below this a generated client declares its response buffer; past it the
 # buffer is allocated, because a caller's stack is not the right place for it.
 STACK_REPLY_MAX = 16384
+# Wrappers per generated client file. The repository refuses a source past 2500
+# lines, and a wrapper is about twenty; this leaves room for the longest ones.
+CLIENT_WRAPPERS_PER_FILE = 40
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 # The rolling health-window aggregate, in the order the reviewed struct declares
 # it. Wire order is part of the contract, so it lives here rather than being
@@ -13031,6 +13034,54 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "key": ("maintenance", 37),
         "format": "db2-envelope-generic-v1",
         "symbol": "db2_decision_log_list_scoped",
+        "policy": {"reads": 200},
+    },
+    "global_constraints": {
+        "key": ("memory", 82),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_global_constraints",
+        "policy": {"reads": 200},
+    },
+    "kv_section": {
+        "key": ("memory", 83),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_kv_section",
+        "policy": {"reads": 200},
+    },
+    "memories_by_key": {
+        "key": ("memory", 84),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_by_key",
+        "policy": {"reads": 200},
+    },
+    "session_memories": {
+        "key": ("memory", 85),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_session_id_content_list",
+        "policy": {"reads": 200},
+    },
+    "memory_candidates": {
+        "key": ("memory", 86),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_candidates",
+        "policy": {"reads": 200},
+    },
+    "recall_section": {
+        "key": ("memory", 87),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_recall_section",
+        "policy": {"reads": 200},
+    },
+    "l2_cross_key_pairs": {
+        "key": ("memory", 88),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_l2_cross_key_pairs",
+        "policy": {"reads": 200},
+    },
+    "l2_fact_decision_pairs": {
+        "key": ("memory", 89),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_l2_fact_vs_decision_pairs",
         "policy": {"reads": 200},
     },
 }
@@ -31920,10 +31971,20 @@ def _client_sources(root: Path, catalog: dict[str, object],
     # repository-relative path here formatted the client to the compiled-in
     # defaults whenever the cwd was elsewhere, which the drift check then
     # reported against a tree nobody had touched.
-    return [(CLIENT_SOURCE_DIR / f"generated_{family}.c",
-             _clang_formatted(root / CLIENT_SOURCE_DIR / f"generated_{family}.c",
-                              "\n\n".join([prologue] + blocks) + "\n").encode("utf-8"))
-            for family, blocks in grouped.items()]
+    sources = []
+    for family, family_blocks in grouped.items():
+        # A family with nothing in it still gets one part, so the wildcard sees
+        # a fixed set of files.
+        parts = [family_blocks[index:index + CLIENT_WRAPPERS_PER_FILE]
+                 for index in range(0, len(family_blocks), CLIENT_WRAPPERS_PER_FILE)] or [[]]
+        for number, part in enumerate(parts, start=1):
+            suffix = "" if number == 1 else f"_{number}"
+            name = f"generated_{family}{suffix}.c"
+            sources.append((
+                CLIENT_SOURCE_DIR / name,
+                _clang_formatted(root / CLIENT_SOURCE_DIR / name,
+                                 "\n\n".join([prologue] + part) + "\n").encode("utf-8")))
+    return sources
 
 
 def run(root: Path, write: bool) -> None:

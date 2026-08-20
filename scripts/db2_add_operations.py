@@ -160,7 +160,10 @@ def apply_catalog(batch: list[dict[str, object]]) -> None:
                 fail("the catalog does not end where expected")
             text = text.replace(tail, "    },\n" + entry + "\n  ]\n}\n")
         else:
-            anchor = f'      "name": "{following}",\n'
+            # The newline in front makes this a whole line: a field named
+            # after an operation is indented further, and without the leading
+            # newline the deeper line still contains this one as a substring.
+            anchor = f'\n      "name": "{following}",\n'
             if text.count(anchor) != 1:
                 fail(f"cannot place {operation['name']} before {following}")
             start = text.rindex("    {\n", 0, text.index(anchor))
@@ -436,6 +439,20 @@ def apply_includes(batch: list[dict[str, object]]) -> None:
                 break
         else:
             fail(f"no header in src/modules/db2/c declares {symbol}")
+
+    # The vtable in the adapter's header names the row types those same
+    # headers declare, so it needs them too -- by a path relative to itself.
+    header_text = ADAPTER_HEADER.read_text(encoding="utf-8")
+    header_missing = sorted(
+        include.replace('#include "c/', '#include "') for include in wanted
+        if include.replace('#include "c/', '#include "') not in header_text)
+    if header_missing:
+        header_anchor = '#include "entity_edges.h"\n'
+        if header_text.count(header_anchor) != 1:
+            fail("the adapter header's include block does not start where expected")
+        ADAPTER_HEADER.write_text(
+            header_text.replace(header_anchor, header_anchor + "".join(
+                f"{include}\n" for include in header_missing)), encoding="utf-8")
 
     missing = sorted(include for include in wanted if include not in source)
     if not missing:

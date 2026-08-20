@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "bb2d4614574b1c6e7da4165b19a9e3b33b1094293e50ffc47c7a23be50c86e96"
+const ContractSHA256 = "f5a59229eb728481fb321c4743e1ca6005562f874d6aa2763cfe3ba1638c0031"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1562,6 +1562,373 @@ func DecodeTypedFactRecallRequest(request []byte) (string, string, uint32, error
 		return "", "", 0, ErrMalformedEnvelope
 	}
 	return factSubject, relationFilter, limit, nil
+}
+
+const EventGlobalConstraints = EventMemory
+const StageGlobalConstraints = FamilyMemory
+const OperationGlobalConstraints uint32 = 82
+
+
+// EncodeGlobalConstraintsRequest writes the schema global_constraints declares, in order.
+func EncodeGlobalConstraintsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationGlobalConstraints, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeGlobalConstraintsRequest reads it back, checking each field against its own bound.
+func DecodeGlobalConstraintsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationGlobalConstraints || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventKvSection = EventMemory
+const StageKvSection = FamilyMemory
+const OperationKvSection uint32 = 83
+const KvSectionKvSectionMin uint32 = 1
+const KvSectionKvSectionMax uint32 = 5
+
+// EncodeKvSectionRequest writes the schema kv_section declares, in order.
+func EncodeKvSectionRequest(kvSection uint32) ([]byte, error) {
+	if kvSection < KvSectionKvSectionMin || kvSection > KvSectionKvSectionMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var kvSectionBytes [4]byte
+	binary.LittleEndian.PutUint32(kvSectionBytes[:], kvSection)
+	payload = append(payload, kvSectionBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKvSection, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKvSectionRequest reads it back, checking each field against its own bound.
+func DecodeKvSectionRequest(request []byte) (uint32, error) {
+	var kvSection uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKvSection || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	kvSection = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if kvSection < KvSectionKvSectionMin || kvSection > KvSectionKvSectionMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return kvSection, nil
+}
+
+const EventMemoriesByKey = EventMemory
+const StageMemoriesByKey = FamilyMemory
+const OperationMemoriesByKey uint32 = 84
+const MemoriesByKeyMemoryKeyExactMin = 1
+const MemoriesByKeyMemoryKeyExactMax = 511
+
+// EncodeMemoriesByKeyRequest writes the schema memories_by_key declares, in order.
+func EncodeMemoriesByKeyRequest(memoryKeyExact string) ([]byte, error) {
+	if len(memoryKeyExact) < MemoriesByKeyMemoryKeyExactMin || len(memoryKeyExact) > MemoriesByKeyMemoryKeyExactMax || hasNUL(memoryKeyExact) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, memoryKeyExact, MemoriesByKeyMemoryKeyExactMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoriesByKey, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoriesByKeyRequest reads it back, checking each field against its own bound.
+func DecodeMemoriesByKeyRequest(request []byte) (string, error) {
+	var memoryKeyExact string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoriesByKey || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if memoryKeyExact, err = takeRowText(payload, &cursor, MemoriesByKeyMemoryKeyExactMax); err != nil ||
+		len(memoryKeyExact) < MemoriesByKeyMemoryKeyExactMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return memoryKeyExact, nil
+}
+
+const EventSessionMemories = EventMemory
+const StageSessionMemories = FamilyMemory
+const OperationSessionMemories uint32 = 85
+const SessionMemoriesMemorySessionIDMin = 1
+const SessionMemoriesMemorySessionIDMax = 127
+const SessionMemoriesLimitMin uint32 = 1
+const SessionMemoriesLimitMax uint32 = 200
+
+// EncodeSessionMemoriesRequest writes the schema session_memories declares, in order.
+func EncodeSessionMemoriesRequest(memorySessionID string, limit uint32) ([]byte, error) {
+	if len(memorySessionID) < SessionMemoriesMemorySessionIDMin || len(memorySessionID) > SessionMemoriesMemorySessionIDMax || hasNUL(memorySessionID) ||
+		limit < SessionMemoriesLimitMin || limit > SessionMemoriesLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, memorySessionID, SessionMemoriesMemorySessionIDMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationSessionMemories, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeSessionMemoriesRequest reads it back, checking each field against its own bound.
+func DecodeSessionMemoriesRequest(request []byte) (string, uint32, error) {
+	var memorySessionID string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSessionMemories || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if memorySessionID, err = takeRowText(payload, &cursor, SessionMemoriesMemorySessionIDMax); err != nil ||
+		len(memorySessionID) < SessionMemoriesMemorySessionIDMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < SessionMemoriesLimitMin || limit > SessionMemoriesLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return memorySessionID, limit, nil
+}
+
+const EventMemoryCandidates = EventMemory
+const StageMemoryCandidates = FamilyMemory
+const OperationMemoryCandidates uint32 = 86
+const MemoryCandidatesCandidateFilterMin uint32 = 1
+const MemoryCandidatesCandidateFilterMax uint32 = 2
+
+// EncodeMemoryCandidatesRequest writes the schema memory_candidates declares, in order.
+func EncodeMemoryCandidatesRequest(candidateFilter uint32) ([]byte, error) {
+	if candidateFilter < MemoryCandidatesCandidateFilterMin || candidateFilter > MemoryCandidatesCandidateFilterMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var candidateFilterBytes [4]byte
+	binary.LittleEndian.PutUint32(candidateFilterBytes[:], candidateFilter)
+	payload = append(payload, candidateFilterBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryCandidates, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryCandidatesRequest reads it back, checking each field against its own bound.
+func DecodeMemoryCandidatesRequest(request []byte) (uint32, error) {
+	var candidateFilter uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryCandidates || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	candidateFilter = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if candidateFilter < MemoryCandidatesCandidateFilterMin || candidateFilter > MemoryCandidatesCandidateFilterMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return candidateFilter, nil
+}
+
+const EventRecallSection = EventMemory
+const StageRecallSection = FamilyMemory
+const OperationRecallSection uint32 = 87
+const RecallSectionRecallSectionMin uint32 = 1
+const RecallSectionRecallSectionMax uint32 = 4
+
+// EncodeRecallSectionRequest writes the schema recall_section declares, in order.
+func EncodeRecallSectionRequest(recallSection uint32) ([]byte, error) {
+	if recallSection < RecallSectionRecallSectionMin || recallSection > RecallSectionRecallSectionMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var recallSectionBytes [4]byte
+	binary.LittleEndian.PutUint32(recallSectionBytes[:], recallSection)
+	payload = append(payload, recallSectionBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRecallSection, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRecallSectionRequest reads it back, checking each field against its own bound.
+func DecodeRecallSectionRequest(request []byte) (uint32, error) {
+	var recallSection uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRecallSection || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	recallSection = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if recallSection < RecallSectionRecallSectionMin || recallSection > RecallSectionRecallSectionMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return recallSection, nil
+}
+
+const EventL2CrossKeyPairs = EventMemory
+const StageL2CrossKeyPairs = FamilyMemory
+const OperationL2CrossKeyPairs uint32 = 88
+const L2CrossKeyPairsMaxPairsMin uint32 = 1
+const L2CrossKeyPairsMaxPairsMax uint32 = 200
+
+// EncodeL2CrossKeyPairsRequest writes the schema l2_cross_key_pairs declares, in order.
+func EncodeL2CrossKeyPairsRequest(maxPairs uint32) ([]byte, error) {
+	if maxPairs < L2CrossKeyPairsMaxPairsMin || maxPairs > L2CrossKeyPairsMaxPairsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var maxPairsBytes [4]byte
+	binary.LittleEndian.PutUint32(maxPairsBytes[:], maxPairs)
+	payload = append(payload, maxPairsBytes[:]...)
+	header, err := EncodeRequestHeader(OperationL2CrossKeyPairs, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeL2CrossKeyPairsRequest reads it back, checking each field against its own bound.
+func DecodeL2CrossKeyPairsRequest(request []byte) (uint32, error) {
+	var maxPairs uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationL2CrossKeyPairs || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	maxPairs = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if maxPairs < L2CrossKeyPairsMaxPairsMin || maxPairs > L2CrossKeyPairsMaxPairsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return maxPairs, nil
+}
+
+const EventL2FactDecisionPairs = EventMemory
+const StageL2FactDecisionPairs = FamilyMemory
+const OperationL2FactDecisionPairs uint32 = 89
+const L2FactDecisionPairsMaxPairsMin uint32 = 1
+const L2FactDecisionPairsMaxPairsMax uint32 = 200
+
+// EncodeL2FactDecisionPairsRequest writes the schema l2_fact_decision_pairs declares, in order.
+func EncodeL2FactDecisionPairsRequest(maxPairs uint32) ([]byte, error) {
+	if maxPairs < L2FactDecisionPairsMaxPairsMin || maxPairs > L2FactDecisionPairsMaxPairsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var maxPairsBytes [4]byte
+	binary.LittleEndian.PutUint32(maxPairsBytes[:], maxPairs)
+	payload = append(payload, maxPairsBytes[:]...)
+	header, err := EncodeRequestHeader(OperationL2FactDecisionPairs, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeL2FactDecisionPairsRequest reads it back, checking each field against its own bound.
+func DecodeL2FactDecisionPairsRequest(request []byte) (uint32, error) {
+	var maxPairs uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationL2FactDecisionPairs || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	maxPairs = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if maxPairs < L2FactDecisionPairsMaxPairsMin || maxPairs > L2FactDecisionPairsMaxPairsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return maxPairs, nil
 }
 
 const EventEntityObservationCount = EventIndex

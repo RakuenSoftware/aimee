@@ -4,6 +4,12 @@
  * without a live Postgres. */
 #include "kb_service_graph.h"
 #include "modules/db2/c/code_projection.h"
+/* The stubs below fill these row types; including their headers is what
+ * lets the compiler check the stubs against the declarations they satisfy. */
+#include "aimee.h"
+#include "memory.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/entity_nodes.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -107,14 +113,14 @@ struct cJSON *jo_ok(void)
 {
    return 0;
 }
-int db2_entity_edge_explain_by_entity(const char *e, void *out, int n)
+int db2_entity_edge_explain_by_entity(const char *e, db2_entity_edge_explain_t *out, int n)
 {
    (void)e;
    (void)out;
    (void)n;
    return 0;
 }
-int db2_entity_node_get(const char *e, void *out)
+int db2_entity_node_get(const char *e, db2_entity_node_t *out)
 {
    (void)e;
    (void)out;

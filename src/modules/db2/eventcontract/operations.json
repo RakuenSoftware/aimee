@@ -5306,6 +5306,469 @@
       }
     },
     {
+      "family": "memory",
+      "id": 82,
+      "name": "global_constraints",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_global_constraints"
+      ],
+      "request": {
+        "policy": {
+          "reads": "preferences and policies above L0, newest first, so the constraint a caller sees first is the most recently written"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
+      "family": "memory",
+      "id": 83,
+      "name": "kv_section",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_kv_section"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the section number selects one of five fixed statements, so a number outside that range reads nothing rather than failing"
+        },
+        "fields": [
+          {
+            "name": "kv_section",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 5
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
+      "family": "memory",
+      "id": 84,
+      "name": "memories_by_key",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_by_key"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the key is matched exactly and nothing orders the result, so which memories survive the bound is arbitrary"
+        },
+        "fields": [
+          {
+            "name": "memory_key_exact",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_row_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
+      "family": "memory",
+      "id": 85,
+      "name": "session_memories",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_session_id_content_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "oldest first, so the limit keeps the beginning of a session rather than its most recent memories"
+        },
+        "fields": [
+          {
+            "name": "memory_session_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 200
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_row_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
+      "family": "memory",
+      "id": 86,
+      "name": "memory_candidates",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_candidates"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the filter selects one of two tier sets, and neither is a superset of the other"
+        },
+        "fields": [
+          {
+            "name": "candidate_filter",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_row_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "use_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "memory_confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4607182418800017408
+            },
+            {
+              "name": "memory_tier",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 3
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "memory_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
+      "family": "memory",
+      "id": 87,
+      "name": "recall_section",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_recall_section"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the section number selects one of four fixed statements, and none of them reads confidence or use count"
+        },
+        "fields": [
+          {
+            "name": "recall_section",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_row_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_tier",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 3
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "memory_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
+      "family": "memory",
+      "id": 88,
+      "name": "l2_cross_key_pairs",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_l2_cross_key_pairs"
+      ],
+      "request": {
+        "policy": {
+          "reads": "every L2 memory is joined against every other and compared with a substring match, so the cost is quadratic in the tier"
+        },
+        "fields": [
+          {
+            "name": "max_pairs",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 200
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id_a",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_id_b",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "content_a",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "content_b",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
+      "family": "memory",
+      "id": 89,
+      "name": "l2_fact_decision_pairs",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_l2_fact_vs_decision_pairs"
+      ],
+      "request": {
+        "policy": {
+          "reads": "facts are joined against decisions across different tiers and compared with a substring match, so the cost is the product of the two sets"
+        },
+        "fields": [
+          {
+            "name": "max_pairs",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 200
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id_a",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_id_b",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "content_a",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "content_b",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 200
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

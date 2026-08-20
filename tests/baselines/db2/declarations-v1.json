@@ -17800,9 +17800,15 @@
           "line": 598
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.l2_cross_key_pairs operation finds L2 memories that mention each other's key prefix. It joins the tier against itself and compares with a substring match, so the work is quadratic in how many L2 memories exist and no index helps. The key prefix is taken up to the first underscore, so a key without one is compared whole and a short prefix matches widely."
+      },
       "signature": "int db2_memory_l2_cross_key_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
       "signature_sha256": "6f0721f230e908692ff419c4f8975a5a71ee7939125c7b569fa4c18181325dfb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_l2_cross_key_pairs"
     },
     {
@@ -17815,9 +17821,15 @@
           "line": 603
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.l2_fact_decision_pairs operation finds facts and decisions that mention each other. Like memory.l2_cross_key_pairs it is a self-join with a substring comparison, so its cost is the product of the two sets and no index helps -- but the two draw from different tiers, so a fact and a decision at the same tier are never paired. Both sides need a confidence above a half."
+      },
       "signature": "int db2_memory_l2_fact_vs_decision_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
       "signature_sha256": "0e814b3759eb1dc88286b2a2697eee514d3cc7f30205c3fe7b4bf34dae383881",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_l2_fact_vs_decision_pairs"
     },
     {
@@ -18113,9 +18125,15 @@
           "line": 172
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.memories_by_key operation lists the memories stored under a key. A key is not unique, so several memories may share one, and nothing orders the result -- which of them survives the row bound is whatever the database returned first. No tier or lifecycle condition applies, so an archived memory is listed beside a live one."
+      },
       "signature": "int db2_memory_list_by_key ( const char * key , db2_memory_id_content_row_t * out , int max )",
       "signature_sha256": "fd0e4589b229b43e524024d09eea5b0fea9eae11de11ee0712e424c77c06af84",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_by_key"
     },
     {
@@ -18129,9 +18147,15 @@
           "line": 497
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.memory_candidates operation loads the memories a scorer will rank. The filter picks one of two tier sets and neither contains the other -- the primary set excludes L0 and the fallback excludes L3 and L5 -- so falling back is not widening the search, it is looking somewhere else. The ordering leads with the identifier, so confidence and use count only break ties."
+      },
       "signature": "int db2_memory_list_candidates ( db2_memory_cand_filter_t filter , db2_memory_cand_row_t * rows , int max )",
       "signature_sha256": "bad089aef3912fed04a3d7fabec2376dac8b84ff391c5b663b642d3715ca8288",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_candidates"
     },
     {
@@ -18174,9 +18198,15 @@
           "line": 403
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.global_constraints operation lists the preferences and policies that constrain everything. It leads its ordering with the memory identifier, so the newest constraint comes first and confidence only breaks ties -- a recent low-confidence preference outranks a long-standing high-confidence one. L0 is excluded, so a constraint still in the scratch tier does not constrain anything."
+      },
       "signature": "int db2_memory_list_global_constraints ( db2_memory_kv_row_t * rows , int max )",
       "signature_sha256": "d0330bb0ba2539e391bf02246ee149d06917fea27836c4773f3f269f806e4656",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_global_constraints"
     },
     {
@@ -18234,9 +18264,15 @@
           "line": 388
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.kv_section operation fetches one of five fixed context sections. The section is a number selecting a statement, not a filter, so the five differ in tier, kind and order in ways the reply cannot show -- and a caller has to know which number means which section. The bound admits one to five, so a mistaken number is refused at the boundary rather than reading nothing inside."
+      },
       "signature": "int db2_memory_list_kv_section ( db2_memory_section_t section , db2_memory_kv_row_t * rows , int max )",
       "signature_sha256": "c26d34b99dae0d6ea6cde2d9e1dec0aa07d8e61c7c8aee054d2bf209122a07b5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_kv_section"
     },
     {
@@ -18281,9 +18317,15 @@
           "line": 549
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.recall_section operation fetches one of four fixed recall sections. Its backend fills the same struct memory.memory_candidates does and leaves confidence and use count at zero, because none of these statements selects them; the wire row omits both rather than carrying two fields that are always zero and would read as data. Archived and superseded memories are excluded, which the candidate loader does not do."
+      },
       "signature": "int db2_memory_list_recall_section ( db2_memory_recall_section_t section , db2_memory_cand_row_t * rows , int max )",
       "signature_sha256": "97549e7b79d2634498bc4a267acacb27958c44628a9d0f5cfe7aea27b6b3349d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_recall_section"
     },
     {
@@ -19496,9 +19538,15 @@
           "line": 188
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.session_memories operation lists the memories a session wrote, oldest first. That order means the limit keeps the beginning of a session and discards its end, which is the opposite of what most listings here do and of what a caller asking for recent context would expect. Every tier is included."
+      },
       "signature": "int db2_memory_session_id_content_list ( const char * session_id , int limit , db2_memory_id_content_row_t * out , int max )",
       "signature_sha256": "0502f33ceb13c0552c5b57663f939802719fd1908710d5dd4c84947ff8c4f6ac",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_session_id_content_list"
     },
     {
@@ -27390,15 +27438,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f3abef16a14693ac6a42515ff8d69d36276d84440c228734998f6f1700b7597a",
+  "fingerprint": "80ab4759ab79828156bf466da5d1865783f3e45c4a80d6f7c14778654f1f010f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 398,
+    "audit_pending": 390,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 561
+    "reviewed": 569
   }
 }
