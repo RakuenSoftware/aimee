@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"log"
 	"strings"
 	"time"
 
@@ -45,6 +46,7 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 				PlanGroup(context.Context, []delegatecontract.GroupPlanSeat) ([]string, error)
 			})
 			if !ok {
+				log.Print("delegates: group plan requested but this executor cannot plan groups")
 				return nil, bus.ModuleStatusInternal
 			}
 			decoder := json.NewDecoder(bytes.NewReader(request))
@@ -72,6 +74,16 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 			models, err := planner.PlanGroup(ctx, decoded.Seats)
 			if err != nil {
 				if !delegatecontract.IsCapacityBackpressure(err) && !delegatecontract.IsCapacityDeadline(err) {
+					// Say why. PlanGroup's errors are specific -- "delegate model
+					// %q is not an enabled CLI agent", "no eligible healthy backend
+					// for seat %d" -- and dropping them left the bus to report
+					// "stage 22 failed with status 5: no detail" while the panel
+					// above reported "no usable findings". Two layers of silence
+					// over an error that already named the seat and the reason.
+					// The capacity branch below has always carried its diagnostic;
+					// this branch now records its own rather than discarding it.
+					log.Printf("delegates: group plan failed for %d seat(s): %s",
+						len(decoded.Seats), delegatecontract.SafeDiagnostic(err.Error()))
 					return nil, bus.ModuleStatusInternal
 				}
 				response, marshalErr := json.Marshal(delegatecontract.GroupPlanResult{
@@ -84,6 +96,8 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 				return response, bus.ModuleStatusOK
 			}
 			if len(models) != len(decoded.Seats) {
+				log.Printf("delegates: group plan returned %d model(s) for %d seat(s)",
+					len(models), len(decoded.Seats))
 				return nil, bus.ModuleStatusInternal
 			}
 			for _, model := range models {
