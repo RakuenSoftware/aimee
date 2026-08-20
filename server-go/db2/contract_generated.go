@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "7f65494a02382fa22dab251132efce9316508c44ad4b936dbfec759f6eef2a7e"
+const ContractSHA256 = "79550a805d3a96df8e2abc7b8bb80774c80ec8a826c8e80720a2eb6f6bad9cf3"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -987,6 +987,269 @@ func DecodeBriefingActiveEntitiesRequest(request []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return limit, nil
+}
+
+const EventProspectiveList = EventMemory
+const StageProspectiveList = FamilyMemory
+const OperationProspectiveList uint32 = 72
+const ProspectiveListStateFilterMin = 0
+const ProspectiveListStateFilterMax = 15
+const ProspectiveListLimitMin uint32 = 1
+const ProspectiveListLimitMax uint32 = 256
+
+// EncodeProspectiveListRequest writes the schema prospective_list declares, in order.
+func EncodeProspectiveListRequest(stateFilter string, limit uint32) ([]byte, error) {
+	if len(stateFilter) < ProspectiveListStateFilterMin || len(stateFilter) > ProspectiveListStateFilterMax || hasNUL(stateFilter) ||
+		limit < ProspectiveListLimitMin || limit > ProspectiveListLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, stateFilter, ProspectiveListStateFilterMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProspectiveList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveListRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveListRequest(request []byte) (string, uint32, error) {
+	var stateFilter string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if stateFilter, err = takeRowText(payload, &cursor, ProspectiveListStateFilterMax); err != nil ||
+		len(stateFilter) < ProspectiveListStateFilterMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < ProspectiveListLimitMin || limit > ProspectiveListLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return stateFilter, limit, nil
+}
+
+const EventProspectiveListArmed = EventMemory
+const StageProspectiveListArmed = FamilyMemory
+const OperationProspectiveListArmed uint32 = 73
+
+
+// EncodeProspectiveListArmedRequest writes the schema prospective_list_armed declares, in order.
+func EncodeProspectiveListArmedRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationProspectiveListArmed, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveListArmedRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveListArmedRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveListArmed || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventProspectiveByEntity = EventMemory
+const StageProspectiveByEntity = FamilyMemory
+const OperationProspectiveByEntity uint32 = 74
+const ProspectiveByEntityEntityLoweredMin = 1
+const ProspectiveByEntityEntityLoweredMax = 127
+const ProspectiveByEntityLimitMin uint32 = 1
+const ProspectiveByEntityLimitMax uint32 = 256
+
+// EncodeProspectiveByEntityRequest writes the schema prospective_by_entity declares, in order.
+func EncodeProspectiveByEntityRequest(entityLowered string, limit uint32) ([]byte, error) {
+	if len(entityLowered) < ProspectiveByEntityEntityLoweredMin || len(entityLowered) > ProspectiveByEntityEntityLoweredMax || hasNUL(entityLowered) ||
+		limit < ProspectiveByEntityLimitMin || limit > ProspectiveByEntityLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entityLowered, ProspectiveByEntityEntityLoweredMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProspectiveByEntity, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveByEntityRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveByEntityRequest(request []byte) (string, uint32, error) {
+	var entityLowered string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveByEntity || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entityLowered, err = takeRowText(payload, &cursor, ProspectiveByEntityEntityLoweredMax); err != nil ||
+		len(entityLowered) < ProspectiveByEntityEntityLoweredMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < ProspectiveByEntityLimitMin || limit > ProspectiveByEntityLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entityLowered, limit, nil
+}
+
+const EventProspectiveByFile = EventMemory
+const StageProspectiveByFile = FamilyMemory
+const OperationProspectiveByFile uint32 = 75
+const ProspectiveByFileFileAnchorMin = 1
+const ProspectiveByFileFileAnchorMax = 127
+const ProspectiveByFileLimitMin uint32 = 1
+const ProspectiveByFileLimitMax uint32 = 256
+
+// EncodeProspectiveByFileRequest writes the schema prospective_by_file declares, in order.
+func EncodeProspectiveByFileRequest(fileAnchor string, limit uint32) ([]byte, error) {
+	if len(fileAnchor) < ProspectiveByFileFileAnchorMin || len(fileAnchor) > ProspectiveByFileFileAnchorMax || hasNUL(fileAnchor) ||
+		limit < ProspectiveByFileLimitMin || limit > ProspectiveByFileLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, fileAnchor, ProspectiveByFileFileAnchorMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProspectiveByFile, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveByFileRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveByFileRequest(request []byte) (string, uint32, error) {
+	var fileAnchor string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveByFile || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if fileAnchor, err = takeRowText(payload, &cursor, ProspectiveByFileFileAnchorMax); err != nil ||
+		len(fileAnchor) < ProspectiveByFileFileAnchorMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < ProspectiveByFileLimitMin || limit > ProspectiveByFileLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return fileAnchor, limit, nil
+}
+
+const EventProspectiveByTriggerTerms = EventMemory
+const StageProspectiveByTriggerTerms = FamilyMemory
+const OperationProspectiveByTriggerTerms uint32 = 76
+const ProspectiveByTriggerTermsTurnTextMin = 1
+const ProspectiveByTriggerTermsTurnTextMax = 1023
+const ProspectiveByTriggerTermsLimitMin uint32 = 1
+const ProspectiveByTriggerTermsLimitMax uint32 = 256
+
+// EncodeProspectiveByTriggerTermsRequest writes the schema prospective_by_trigger_terms declares, in order.
+func EncodeProspectiveByTriggerTermsRequest(turnText string, limit uint32) ([]byte, error) {
+	if len(turnText) < ProspectiveByTriggerTermsTurnTextMin || len(turnText) > ProspectiveByTriggerTermsTurnTextMax || hasNUL(turnText) ||
+		limit < ProspectiveByTriggerTermsLimitMin || limit > ProspectiveByTriggerTermsLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, turnText, ProspectiveByTriggerTermsTurnTextMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProspectiveByTriggerTerms, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveByTriggerTermsRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveByTriggerTermsRequest(request []byte) (string, uint32, error) {
+	var turnText string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveByTriggerTerms || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if turnText, err = takeRowText(payload, &cursor, ProspectiveByTriggerTermsTurnTextMax); err != nil ||
+		len(turnText) < ProspectiveByTriggerTermsTurnTextMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < ProspectiveByTriggerTermsLimitMin || limit > ProspectiveByTriggerTermsLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return turnText, limit, nil
 }
 
 const EventEntityObservationCount = EventIndex

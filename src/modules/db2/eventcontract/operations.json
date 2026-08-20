@@ -4169,6 +4169,598 @@
       }
     },
     {
+      "family": "memory",
+      "id": 72,
+      "name": "prospective_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories, their triggers and their anchors are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty state lists every prospective memory rather than none, newest first"
+        },
+        "fields": [
+          {
+            "name": "state_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "prospective_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "trigger_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "action_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "anchor_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "anchor_file",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "recurrence",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "valid_until",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_session",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "trigger_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "last_triggered_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 73,
+      "name": "prospective_list_armed",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories, their triggers and their anchors are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_list_armed"
+      ],
+      "request": {
+        "policy": {
+          "reads": "every armed prospective memory, with no limit in the statement, so the wire's row bound is what stops the read"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "prospective_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "trigger_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "action_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "anchor_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "anchor_file",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "recurrence",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "valid_until",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_session",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "trigger_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "last_triggered_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 74,
+      "name": "prospective_by_entity",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories, their triggers and their anchors are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_list_by_entity"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only armed memories match, and the entity is compared lowered, so the caller has to lower it too"
+        },
+        "fields": [
+          {
+            "name": "entity_lowered",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "prospective_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "trigger_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "action_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "anchor_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "anchor_file",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "recurrence",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "valid_until",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_session",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "trigger_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "last_triggered_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 75,
+      "name": "prospective_by_file",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories, their triggers and their anchors are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_list_by_file"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only armed memories match, and the file is compared exactly, unlike the entity beside it"
+        },
+        "fields": [
+          {
+            "name": "file_anchor",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "prospective_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "trigger_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "action_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "anchor_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "anchor_file",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "recurrence",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "valid_until",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_session",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "trigger_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "last_triggered_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 76,
+      "name": "prospective_by_trigger_terms",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories, their triggers and their anchors are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_list_by_trigger_terms"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the turn's words become a full-text query, so what matches depends on the English stemmer rather than on the words as written"
+        },
+        "fields": [
+          {
+            "name": "turn_text",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "prospective_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "trigger_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "action_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "anchor_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "anchor_file",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "recurrence",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "valid_until",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_session",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "trigger_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "last_triggered_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

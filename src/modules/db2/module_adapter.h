@@ -304,6 +304,11 @@ typedef struct
    int (*entity_edge_bump_utility)(const char *entity, double utility_delta);
    int (*bandit_decision_close)(const char *decision_id, double reward);
    int (*entity_neighbors_weighted)(const char *entity, db2_entity_edge_weighted_neighbor_t *out, int max, int limit_sql, int utility_scoring_enabled);
+   int (*prospective_list)(const char *state, memory_prospective_t *out, int max);
+   int (*prospective_list_armed)(memory_prospective_t *out, int max);
+   int (*prospective_by_entity)(const char *entity_lowered, memory_prospective_t *out, int max);
+   int (*prospective_by_file)(const char *file_anchor, memory_prospective_t *out, int max);
+   int (*prospective_by_trigger_terms)(const char *turn_text, memory_prospective_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

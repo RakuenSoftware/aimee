@@ -100,6 +100,18 @@ def check(batch: list[dict[str, object]]) -> None:
                      "its own")
             typed[name] = kind
 
+    # A field's bound constant is named for the operation and the field, with
+    # nothing to say which half of the operation it belongs to, so a request
+    # field and a reply row field of the same name collide in the header.
+    for operation in batch:
+        request_names = {str(field["name"]) for field in operation["request"]}
+        reply = operation["reply"]
+        reply_fields = reply["row"]["fields"] if "row" in reply else reply["fields"]
+        shared = request_names & {str(field["name"]) for field in reply_fields}
+        if shared:
+            fail(f"{operation['name']} names {sorted(shared)} in both its request and its reply; "
+                 "their bound constants would collide, so one of them needs its own name")
+
 
 def catalog_entry(operation: dict[str, object]) -> str:
     body = {

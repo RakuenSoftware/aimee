@@ -2275,6 +2275,45 @@ int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weigh
    return 0;
 }
 
+int db2_prospective_list(const char *state, memory_prospective_t *out, int max)
+{
+   (void)state;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_prospective_list_armed(memory_prospective_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_prospective_list_by_entity(const char *entity_lc, memory_prospective_t *out, int max)
+{
+   (void)entity_lc;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_prospective_list_by_file(const char *file, memory_prospective_t *out, int max)
+{
+   (void)file;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_prospective_list_by_trigger_terms(const char *turn_text, memory_prospective_t *out, int max)
+{
+   (void)turn_text;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -21165,9 +21165,15 @@
           "line": 36
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_list operation lists prospective memories in a state. An empty state is not an empty result: it drops the condition and lists every one of them, which is a different query rather than a wider one. The order is newest first with the identifier breaking ties, so a caller paging by limit alone re-reads the same head each time."
+      },
       "signature": "int db2_prospective_list ( const char * state , memory_prospective_t * out , int max )",
       "signature_sha256": "d5baff5272d0a803f59245a58cc184fac3622bea35b106d86eada39ef1ed95e1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_list"
     },
     {
@@ -21180,9 +21186,15 @@
           "line": 65
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_list_armed operation lists every armed prospective memory. Its statement carries no limit at all, unlike the four listings beside it, so the wire's row bound is the only thing that stops the read and a caller cannot tell a list cut there from one that ended."
+      },
       "signature": "int db2_prospective_list_armed ( memory_prospective_t * out , int max )",
       "signature_sha256": "9b960a89ee2b1f3a79effc1217653ec88bf5007abd5306aff771fcc7c66e9858",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_list_armed"
     },
     {
@@ -21195,9 +21207,15 @@
           "line": 53
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_by_entity operation finds the armed prospective memories anchored to an entity. The comparison lowers the stored anchor and not the argument, so a caller that sends a name as written matches nothing -- the field is named for what it expects. Only armed memories match, so one already triggered is invisible here whatever its anchor."
+      },
       "signature": "int db2_prospective_list_by_entity ( const char * entity_lc , memory_prospective_t * out , int max )",
       "signature_sha256": "f5fb61cb9b123e427af899ec25d41b192fede419a7ec135f78c7b06b555d5839",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_list_by_entity"
     },
     {
@@ -21210,9 +21228,15 @@
           "line": 56
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_by_file operation finds the armed prospective memories anchored to a file. The path is compared exactly, where the entity listing beside it compares a lowered anchor, so the two differ in a way neither name nor reply shows. Only armed memories match."
+      },
       "signature": "int db2_prospective_list_by_file ( const char * file , memory_prospective_t * out , int max )",
       "signature_sha256": "b2643d3d7bc482276ef0c41990872c683cdefe4272ba6cb9b763f8c21cee0492",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_list_by_file"
     },
     {
@@ -21225,9 +21249,15 @@
           "line": 60
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_by_trigger_terms operation finds the armed prospective memories whose trigger text matches a turn. The turn becomes a full-text query and the trigger is stemmed as English, so matching is about word stems rather than the words as written, and a trigger in another language matches differently than its author would expect."
+      },
       "signature": "int db2_prospective_list_by_trigger_terms ( const char * turn_text , memory_prospective_t * out , int max )",
       "signature_sha256": "8d0d8baf6c6fbfc5746e71d47764ec34a0a2224816c53c6e790a889913338ad1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_list_by_trigger_terms"
     },
     {
@@ -27162,15 +27192,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "2d5742a827b9e1546a32b10f8ca9271a4235f35fa396672b17bc7208b7fb4786",
+  "fingerprint": "575e64bdbad9c5cf41a83252cb97d07ab88a982856aa8018c3ae085fe216a46d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 436,
+    "audit_pending": 431,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 523
+    "reviewed": 528
   }
 }

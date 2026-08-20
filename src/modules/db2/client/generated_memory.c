@@ -2018,3 +2018,216 @@ aimee_module_call_result_t aimee_db2_briefing_active_entities_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_prospective_list_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *state_filter, uint32_t limit, aimee_db2_prospective_list_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROSPECTIVE_LIST_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_PROSPECTIVE_LIST_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_PROSPECTIVE_LIST_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_prospective_list_request_encode(state_filter, limit, request, sizeof(request),
+                                                 &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROSPECTIVE_LIST, AIMEE_DB2_STAGE_PROSPECTIVE_LIST,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_prospective_list_reply_decode(response, response_len, rows, capacity, count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_prospective_list_armed_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    aimee_db2_prospective_list_armed_row_t *rows, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROSPECTIVE_LIST_ARMED_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_PROSPECTIVE_LIST_ARMED_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_PROSPECTIVE_LIST_ARMED_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_prospective_list_armed_request_encode(request, sizeof(request), &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROSPECTIVE_LIST_ARMED,
+            AIMEE_DB2_STAGE_PROSPECTIVE_LIST_ARMED, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_prospective_list_armed_reply_decode(response, response_len, rows, capacity,
+                                                     count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_prospective_by_entity_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *entity_lowered, uint32_t limit, aimee_db2_prospective_by_entity_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROSPECTIVE_BY_ENTITY_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_PROSPECTIVE_BY_ENTITY_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_PROSPECTIVE_BY_ENTITY_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_prospective_by_entity_request_encode(entity_lowered, limit, request,
+                                                      sizeof(request), &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROSPECTIVE_BY_ENTITY,
+            AIMEE_DB2_STAGE_PROSPECTIVE_BY_ENTITY, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_prospective_by_entity_reply_decode(response, response_len, rows, capacity,
+                                                    count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_prospective_by_file_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *file_anchor, uint32_t limit, aimee_db2_prospective_by_file_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROSPECTIVE_BY_FILE_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_PROSPECTIVE_BY_FILE_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_PROSPECTIVE_BY_FILE_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_prospective_by_file_request_encode(file_anchor, limit, request, sizeof(request),
+                                                    &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROSPECTIVE_BY_FILE, AIMEE_DB2_STAGE_PROSPECTIVE_BY_FILE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_prospective_by_file_reply_decode(response, response_len, rows, capacity, count) !=
+       0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_prospective_by_trigger_terms_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *turn_text, uint32_t limit, aimee_db2_prospective_by_trigger_terms_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_prospective_by_trigger_terms_request_encode(turn_text, limit, request,
+                                                             sizeof(request), &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROSPECTIVE_BY_TRIGGER_TERMS,
+            AIMEE_DB2_STAGE_PROSPECTIVE_BY_TRIGGER_TERMS, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_prospective_by_trigger_terms_reply_decode(response, response_len, rows, capacity,
+                                                           count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}

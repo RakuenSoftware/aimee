@@ -1906,6 +1906,57 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(weighted_count == 0);
 
+   /* The five prospective-memory listings, against a table with none in it.
+    * Their row is the widest replayed so far -- thirteen fields, two of them
+    * over half a kilobyte -- so the reply buffer is allocated on both sides
+    * rather than declared, which is what these calls exercise even empty. */
+   static aimee_db2_prospective_list_row_t prospective_rows[AIMEE_DB2_PROSPECTIVE_LIST_MAX_ROWS];
+   uint32_t prospective_count = 99;
+   assert(aimee_db2_prospective_list_call(call_client, &client, 9290, 0, "armed", 8u,
+                                          prospective_rows, AIMEE_DB2_PROSPECTIVE_LIST_MAX_ROWS,
+                                          &prospective_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(prospective_count == 0);
+   /* An empty state drops the condition rather than matching nothing, which is
+    * a different query and not a narrower one. */
+   prospective_count = 99;
+   assert(aimee_db2_prospective_list_call(call_client, &client, 9291, 0, "", 8u, prospective_rows,
+                                          AIMEE_DB2_PROSPECTIVE_LIST_MAX_ROWS, &prospective_count,
+                                          NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(prospective_count == 0);
+
+   static aimee_db2_prospective_list_armed_row_t
+       armed_rows[AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS];
+   uint32_t armed_count = 99;
+   assert(aimee_db2_prospective_list_armed_call(call_client, &client, 9292, 0, armed_rows,
+                                                AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS,
+                                                &armed_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(armed_count == 0);
+
+   static aimee_db2_prospective_by_entity_row_t
+       by_entity_rows[AIMEE_DB2_PROSPECTIVE_BY_ENTITY_MAX_ROWS];
+   uint32_t by_entity_count = 99;
+   assert(aimee_db2_prospective_by_entity_call(
+              call_client, &client, 9293, 0, "replay-entity", 8u, by_entity_rows,
+              AIMEE_DB2_PROSPECTIVE_BY_ENTITY_MAX_ROWS, &by_entity_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(by_entity_count == 0);
+
+   static aimee_db2_prospective_by_file_row_t by_file_rows[AIMEE_DB2_PROSPECTIVE_BY_FILE_MAX_ROWS];
+   uint32_t by_file_count = 99;
+   assert(aimee_db2_prospective_by_file_call(call_client, &client, 9294, 0, "src/replay.c", 8u,
+                                             by_file_rows, AIMEE_DB2_PROSPECTIVE_BY_FILE_MAX_ROWS,
+                                             &by_file_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(by_file_count == 0);
+
+   static aimee_db2_prospective_by_trigger_terms_row_t
+       by_trigger_rows[AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_MAX_ROWS];
+   uint32_t by_trigger_count = 99;
+   assert(aimee_db2_prospective_by_trigger_terms_call(
+              call_client, &client, 9295, 0, "replay", 8u, by_trigger_rows,
+              AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_MAX_ROWS, &by_trigger_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(by_trigger_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -12809,6 +12809,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_entity_edge_neighbors_weighted",
         "policy": {"reads": 200},
     },
+    "prospective_list": {
+        "key": ("memory", 72),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_list",
+        "policy": {"reads": 200},
+    },
+    "prospective_list_armed": {
+        "key": ("memory", 73),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_list_armed",
+        "policy": {"reads": 200},
+    },
+    "prospective_by_entity": {
+        "key": ("memory", 74),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_list_by_entity",
+        "policy": {"reads": 200},
+    },
+    "prospective_by_file": {
+        "key": ("memory", 75),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_list_by_file",
+        "policy": {"reads": 200},
+    },
+    "prospective_by_trigger_terms": {
+        "key": ("memory", 76),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_list_by_trigger_terms",
+        "policy": {"reads": 200},
+    },
 }
 
 

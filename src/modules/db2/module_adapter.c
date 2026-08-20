@@ -886,6 +886,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_edge_bump_utility = db2_entity_edge_bump_utility,
        .bandit_decision_close = db2_bandit_decision_close,
        .entity_neighbors_weighted = db2_entity_edge_neighbors_weighted,
+       .prospective_list = db2_prospective_list,
+       .prospective_list_armed = db2_prospective_list_armed,
+       .prospective_by_entity = db2_prospective_list_by_entity,
+       .prospective_by_file = db2_prospective_list_by_file,
+       .prospective_by_trigger_terms = db2_prospective_list_by_trigger_terms,
    };
    return &backend;
 }
@@ -2066,6 +2071,349 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             }
             if (aimee_db2_briefing_active_entities_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char state_filter[AIMEE_DB2_PROSPECTIVE_LIST_STATE_FILTER_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_prospective_list_request_decode(request_body, request_len, state_filter,
+                                                       sizeof(state_filter), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_prospective_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_PROSPECTIVE_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_prospective_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_LIST_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->prospective_list(state_filter, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].trigger_count =
+                      found[index].trigger_count < 0 ? 0u : (uint32_t)found[index].trigger_count;
+                  snprintf(rows[index].trigger_text, sizeof(rows[index].trigger_text), "%s",
+                           found[index].trigger_text);
+                  snprintf(rows[index].action_text, sizeof(rows[index].action_text), "%s",
+                           found[index].action_text);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].recurrence, sizeof(rows[index].recurrence), "%s",
+                           found[index].recurrence);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_triggered_at, sizeof(rows[index].last_triggered_at),
+                           "%s", found[index].last_triggered_at);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_list_reply_encode(rows, count, response_body,
+                                                        response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_prospective_list_armed_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_LIST_ARMED_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_list_armed)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_prospective_list_armed_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_prospective_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->prospective_list_armed(
+                   found, AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].trigger_count =
+                      found[index].trigger_count < 0 ? 0u : (uint32_t)found[index].trigger_count;
+                  snprintf(rows[index].trigger_text, sizeof(rows[index].trigger_text), "%s",
+                           found[index].trigger_text);
+                  snprintf(rows[index].action_text, sizeof(rows[index].action_text), "%s",
+                           found[index].action_text);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].recurrence, sizeof(rows[index].recurrence), "%s",
+                           found[index].recurrence);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_triggered_at, sizeof(rows[index].last_triggered_at),
+                           "%s", found[index].last_triggered_at);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_list_armed_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char entity_lowered[AIMEE_DB2_PROSPECTIVE_BY_ENTITY_ENTITY_LOWERED_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_prospective_by_entity_request_decode(
+                 request_body, request_len, entity_lowered, sizeof(entity_lowered), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_BY_ENTITY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_by_entity)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_prospective_by_entity_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_PROSPECTIVE_BY_ENTITY_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_prospective_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_BY_ENTITY_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->prospective_by_entity(entity_lowered, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].trigger_count =
+                      found[index].trigger_count < 0 ? 0u : (uint32_t)found[index].trigger_count;
+                  snprintf(rows[index].trigger_text, sizeof(rows[index].trigger_text), "%s",
+                           found[index].trigger_text);
+                  snprintf(rows[index].action_text, sizeof(rows[index].action_text), "%s",
+                           found[index].action_text);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].recurrence, sizeof(rows[index].recurrence), "%s",
+                           found[index].recurrence);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_triggered_at, sizeof(rows[index].last_triggered_at),
+                           "%s", found[index].last_triggered_at);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_by_entity_reply_encode(rows, count, response_body,
+                                                             response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char file_anchor[AIMEE_DB2_PROSPECTIVE_BY_FILE_FILE_ANCHOR_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_prospective_by_file_request_decode(request_body, request_len, file_anchor,
+                                                          sizeof(file_anchor), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_BY_FILE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_by_file)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_prospective_by_file_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_PROSPECTIVE_BY_FILE_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_prospective_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_BY_FILE_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->prospective_by_file(file_anchor, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].trigger_count =
+                      found[index].trigger_count < 0 ? 0u : (uint32_t)found[index].trigger_count;
+                  snprintf(rows[index].trigger_text, sizeof(rows[index].trigger_text), "%s",
+                           found[index].trigger_text);
+                  snprintf(rows[index].action_text, sizeof(rows[index].action_text), "%s",
+                           found[index].action_text);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].recurrence, sizeof(rows[index].recurrence), "%s",
+                           found[index].recurrence);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_triggered_at, sizeof(rows[index].last_triggered_at),
+                           "%s", found[index].last_triggered_at);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_by_file_reply_encode(rows, count, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char turn_text[AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_TURN_TEXT_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_prospective_by_trigger_terms_request_decode(
+                 request_body, request_len, turn_text, sizeof(turn_text), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_by_trigger_terms)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_prospective_by_trigger_terms_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_prospective_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->prospective_by_trigger_terms(turn_text, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].trigger_count =
+                      found[index].trigger_count < 0 ? 0u : (uint32_t)found[index].trigger_count;
+                  snprintf(rows[index].trigger_text, sizeof(rows[index].trigger_text), "%s",
+                           found[index].trigger_text);
+                  snprintf(rows[index].action_text, sizeof(rows[index].action_text), "%s",
+                           found[index].action_text);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].recurrence, sizeof(rows[index].recurrence), "%s",
+                           found[index].recurrence);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_triggered_at, sizeof(rows[index].last_triggered_at),
+                           "%s", found[index].last_triggered_at);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_by_trigger_terms_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
             {
                free(rows);
