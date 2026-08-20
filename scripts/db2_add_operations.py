@@ -281,6 +281,10 @@ def handler_block(operation: dict[str, object]) -> str:
     upper = name.upper()
     member = str(operation["vtable"]).split("(*")[1].split(")")[0]
     request_declarations, request_arguments = _c_locals(operation, operation["request"], "")
+    # A request with no fields decodes from the envelope alone, so there is
+    # nothing to declare and nothing to pass after the buffer.
+    request_arguments = f", {request_arguments}" if request_arguments else ""
+    request_declarations = f"{request_declarations}\n" if request_declarations else ""
 
     reply = operation["reply"]
     if "row" in reply:
@@ -310,8 +314,7 @@ def handler_block(operation: dict[str, object]) -> str:
     extra = operation.get("handler_extra", "")
     extra = f"\n{extra}" if extra else ""
     return f"""      {{
-{request_declarations}
-         if (aimee_db2_{name}_request_decode(request_body, request_len, {request_arguments}) == 0)
+{request_declarations}         if (aimee_db2_{name}_request_decode(request_body, request_len{request_arguments}) == 0)
          {{
             if (response_capacity < AIMEE_DB2_{upper}_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;

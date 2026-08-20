@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "9283bfdcd01c9431b8d6ef0f244ee4938af4d767edfef2e714561202267ddc89"
+const ContractSHA256 = "2b33a7ec2815871c2ba03e7ef27f9282e9e9b7f6871a7b45a54eff4a6106de74"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -940,6 +940,53 @@ func DecodeUnitIdsForMemoryRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return memoryID, nil
+}
+
+const EventBriefingActiveEntities = EventMemory
+const StageBriefingActiveEntities = FamilyMemory
+const OperationBriefingActiveEntities uint32 = 71
+const BriefingActiveEntitiesLimitMin uint32 = 1
+const BriefingActiveEntitiesLimitMax uint32 = 64
+
+// EncodeBriefingActiveEntitiesRequest writes the schema briefing_active_entities declares, in order.
+func EncodeBriefingActiveEntitiesRequest(limit uint32) ([]byte, error) {
+	if limit < BriefingActiveEntitiesLimitMin || limit > BriefingActiveEntitiesLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationBriefingActiveEntities, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBriefingActiveEntitiesRequest reads it back, checking each field against its own bound.
+func DecodeBriefingActiveEntitiesRequest(request []byte) (uint32, error) {
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBriefingActiveEntities || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < BriefingActiveEntitiesLimitMin || limit > BriefingActiveEntitiesLimitMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return limit, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -2328,6 +2375,123 @@ func DecodeCodeSearchExcludingProjectRequest(request []byte) (string, string, ui
 		return "", "", 0, ErrMalformedEnvelope
 	}
 	return query, excludedProject, enrich, nil
+}
+
+const EventProjectLastScan = EventIndex
+const StageProjectLastScan = FamilyIndex
+const OperationProjectLastScan uint32 = 38
+
+
+// EncodeProjectLastScanRequest writes the schema project_last_scan declares, in order.
+func EncodeProjectLastScanRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationProjectLastScan, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectLastScanRequest reads it back, checking each field against its own bound.
+func DecodeProjectLastScanRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectLastScan || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventEntityWalkStepTyped = EventIndex
+const StageEntityWalkStepTyped = FamilyIndex
+const OperationEntityWalkStepTyped uint32 = 39
+const EntityWalkStepTypedNodeMin = 1
+const EntityWalkStepTypedNodeMax = 127
+
+// EncodeEntityWalkStepTypedRequest writes the schema entity_walk_step_typed declares, in order.
+func EncodeEntityWalkStepTypedRequest(node string) ([]byte, error) {
+	if len(node) < EntityWalkStepTypedNodeMin || len(node) > EntityWalkStepTypedNodeMax || hasNUL(node) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, node, EntityWalkStepTypedNodeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityWalkStepTyped, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityWalkStepTypedRequest reads it back, checking each field against its own bound.
+func DecodeEntityWalkStepTypedRequest(request []byte) (string, error) {
+	var node string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityWalkStepTyped || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if node, err = takeRowText(payload, &cursor, EntityWalkStepTypedNodeMax); err != nil ||
+		len(node) < EntityWalkStepTypedNodeMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return node, nil
+}
+
+const EventProjectionGenerationsList = EventIndex
+const StageProjectionGenerationsList = FamilyIndex
+const OperationProjectionGenerationsList uint32 = 40
+const ProjectionGenerationsListProjectMin = 1
+const ProjectionGenerationsListProjectMax = 127
+
+// EncodeProjectionGenerationsListRequest writes the schema projection_generations_list declares, in order.
+func EncodeProjectionGenerationsListRequest(project string) ([]byte, error) {
+	if len(project) < ProjectionGenerationsListProjectMin || len(project) > ProjectionGenerationsListProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, ProjectionGenerationsListProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProjectionGenerationsList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectionGenerationsListRequest reads it back, checking each field against its own bound.
+func DecodeProjectionGenerationsListRequest(request []byte) (string, error) {
+	var project string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectionGenerationsList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, ProjectionGenerationsListProjectMax); err != nil ||
+		len(project) < ProjectionGenerationsListProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return project, nil
 }
 
 const EventTraceMiningRecord = EventLearning
@@ -4187,6 +4351,37 @@ func DecodeCuratorInvalidateDocRequest(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return project, filePath, nil
+}
+
+const EventBanditDecisionPoints = EventLearning
+const StageBanditDecisionPoints = FamilyLearning
+const OperationBanditDecisionPoints uint32 = 41
+
+
+// EncodeBanditDecisionPointsRequest writes the schema bandit_decision_points declares, in order.
+func EncodeBanditDecisionPointsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationBanditDecisionPoints, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditDecisionPointsRequest reads it back, checking each field against its own bound.
+func DecodeBanditDecisionPointsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditDecisionPoints || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 const EventDocumentExists = EventOrganization
@@ -6453,6 +6648,68 @@ func DecodeRetryableIndexFailuresRequest(request []byte) (uint32, uint32, error)
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return maxAttempts, limit, nil
+}
+
+const EventActiveEmbedderVersion = EventMaintenance
+const StageActiveEmbedderVersion = FamilyMaintenance
+const OperationActiveEmbedderVersion uint32 = 29
+
+
+// EncodeActiveEmbedderVersionRequest writes the schema active_embedder_version declares, in order.
+func EncodeActiveEmbedderVersionRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationActiveEmbedderVersion, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeActiveEmbedderVersionRequest reads it back, checking each field against its own bound.
+func DecodeActiveEmbedderVersionRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationActiveEmbedderVersion || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventCorpusPipelineStageCounts = EventMaintenance
+const StageCorpusPipelineStageCounts = FamilyMaintenance
+const OperationCorpusPipelineStageCounts uint32 = 30
+
+
+// EncodeCorpusPipelineStageCountsRequest writes the schema corpus_pipeline_stage_counts declares, in order.
+func EncodeCorpusPipelineStageCountsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationCorpusPipelineStageCounts, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCorpusPipelineStageCountsRequest reads it back, checking each field against its own bound.
+func DecodeCorpusPipelineStageCountsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCorpusPipelineStageCounts || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

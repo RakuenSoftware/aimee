@@ -86,6 +86,18 @@ def main() -> int:
             f"{go_local(str(field['name']))} != operation.Request.{go_name(str(field['name']))}"
             for field in fields)
         blanks = ", ".join("_" for _ in fields)
+        # An operation with no request fields decodes for the error alone:
+        # there is nothing to bind on the left of the assignment and nothing to
+        # compare afterwards.
+        decode_line = (f"\t{results}, err := Decode{go_name(name)}Request(request)\n"
+                       f"\tif err != nil || {comparisons} {{"
+                       if fields else
+                       f"\tif err := Decode{go_name(name)}Request(request); err != nil {{")
+        negative_line = (f"\t\tif {blanks}, err := Decode{go_name(name)}Request("
+                         f"decodeHex(t, vector.Hex)); err == nil {{"
+                         if fields else
+                         f"\t\tif err := Decode{go_name(name)}Request("
+                         f"decodeHex(t, vector.Hex)); err == nil {{")
         cases.append(f'''{GENERATED_MARK}
 func Test{go_name(name)}MatchesEverySharedCVector(t *testing.T) {{
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "{name}")]
@@ -94,12 +106,11 @@ func Test{go_name(name)}MatchesEverySharedCVector(t *testing.T) {{
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {{
 		t.Fatalf("request encode: %v %x", err, request)
 	}}
-	{results}, err := Decode{go_name(name)}Request(request)
-	if err != nil || {comparisons} {{
+{decode_line}
 		t.Fatalf("request decode: %v", err)
 	}}
 	for _, vector := range operation.Request.Negative {{
-		if {blanks}, err := Decode{go_name(name)}Request(decodeHex(t, vector.Hex)); err == nil {{
+{negative_line}
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}}
 	}}

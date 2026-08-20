@@ -1806,6 +1806,71 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(excluded_count == 0);
 
+   /* The first operations whose request carries nothing at all. Their answers
+    * depend on no argument, so the payload is empty and the envelope is the
+    * whole request -- which is worth replaying precisely because there is no
+    * field left to get wrong. */
+   char last_scan[AIMEE_DB2_PROJECT_LAST_SCAN_LAST_SCAN_MAX + 1] = "unset";
+   assert(aimee_db2_project_last_scan_call(call_client, &client, 9278, 0, last_scan,
+                                           sizeof(last_scan), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(last_scan[0] == '\0');
+
+   /* A round trip rather than a fresh-schema blank: set_active_embedder_version
+    * wrote this earlier in the run, so reading it back proves one operation
+    * wrote the row and another read it, both across the bus. */
+   char embedder_version[AIMEE_DB2_ACTIVE_EMBEDDER_VERSION_EMBEDDER_VERSION_MAX + 1] = "unset";
+   assert(aimee_db2_active_embedder_version_call(call_client, &client, 9279, 0, embedder_version,
+                                                 sizeof(embedder_version), NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(strcmp(embedder_version, "replay-version") == 0);
+
+   /* An empty array, not an empty string: the buffer is filled in before the
+    * statement is prepared, so this is also what a failed read returns. */
+   static char decision_points[AIMEE_DB2_BANDIT_DECISION_POINTS_DECISION_POINTS_MAX + 1];
+   decision_points[0] = 'x';
+   assert(aimee_db2_bandit_decision_points_call(call_client, &client, 9280, 0, decision_points,
+                                                sizeof(decision_points), NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(strcmp(decision_points, "[]") == 0);
+
+   static aimee_db2_corpus_pipeline_stage_counts_row_t
+       stage_rows[AIMEE_DB2_CORPUS_PIPELINE_STAGE_COUNTS_MAX_ROWS];
+   uint32_t stage_count = 99;
+   assert(aimee_db2_corpus_pipeline_stage_counts_call(
+              call_client, &client, 9281, 0, stage_rows,
+              AIMEE_DB2_CORPUS_PIPELINE_STAGE_COUNTS_MAX_ROWS, &stage_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* No job exists, and a stage with no jobs is absent rather than zero, so
+    * the whole reply is absent rather than a row of zeros per stage. */
+   assert(stage_count == 0);
+
+   static aimee_db2_briefing_active_entities_row_t
+       briefing_rows[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS];
+   uint32_t briefing_count = 99;
+   assert(aimee_db2_briefing_active_entities_call(call_client, &client, 9282, 0, 8u, briefing_rows,
+                                                  AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS,
+                                                  &briefing_count, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(briefing_count == 0);
+
+   static aimee_db2_entity_walk_step_typed_row_t
+       walk_rows[AIMEE_DB2_ENTITY_WALK_STEP_TYPED_MAX_ROWS];
+   uint32_t typed_walk_count = 99;
+   assert(aimee_db2_entity_walk_step_typed_call(
+              call_client, &client, 9283, 0, "replay-entity", walk_rows,
+              AIMEE_DB2_ENTITY_WALK_STEP_TYPED_MAX_ROWS, &typed_walk_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(typed_walk_count == 0);
+
+   static aimee_db2_projection_generations_list_row_t
+       generation_rows[AIMEE_DB2_PROJECTION_GENERATIONS_LIST_MAX_ROWS];
+   uint32_t generation_rows_count = 99;
+   assert(aimee_db2_projection_generations_list_call(
+              call_client, &client, 9284, 0, "demo", generation_rows,
+              AIMEE_DB2_PROJECTION_GENERATIONS_LIST_MAX_ROWS, &generation_rows_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(generation_rows_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

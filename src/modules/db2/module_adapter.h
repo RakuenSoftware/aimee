@@ -13,7 +13,10 @@
 #include "aimee.h"
 #include "memory.h"
 
+#include "code_projection.h"
+#include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "memory_briefing.h"
 
 typedef struct
 {
@@ -291,6 +294,13 @@ typedef struct
    int (*file_definitions)(const char *project, const char *file_path, definition_t *out, int max);
    int (*code_search)(const char *query, const char *project, code_search_hit_t *out, int max, int enrich);
    int (*code_search_excluding_project)(const char *query, const char *excluded_project, code_search_hit_t *out, int max, int enrich);
+   int (*project_last_scan)(char *out, size_t capacity);
+   int (*active_embedder_version)(char *out, size_t capacity);
+   int (*bandit_decision_points)(char *out, size_t capacity);
+   int (*corpus_pipeline_stage_counts)(db2_corpus_pipeline_stage_count_t *out, int max);
+   int (*briefing_active_entities)(db2_memory_briefing_entity_t *out, int max);
+   int (*entity_walk_step_typed)(const char *node, db2_entity_edge_typed_t *out, int max);
+   int (*projection_generations_list)(const char *project, code_projection_generation_row_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

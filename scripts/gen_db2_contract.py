@@ -12743,6 +12743,48 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "policy": {"reads": 200},
         "forwards": ('canonical_index_code_search_excluding_project',),
     },
+    "project_last_scan": {
+        "key": ("index", 38),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_project_last_scan",
+        "policy": {"reads": 200},
+    },
+    "active_embedder_version": {
+        "key": ("maintenance", 29),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_get_active_embedder_version",
+        "policy": {"reads": 200},
+    },
+    "bandit_decision_points": {
+        "key": ("learning", 41),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_decision_points_list",
+        "policy": {"reads": 200},
+    },
+    "corpus_pipeline_stage_counts": {
+        "key": ("maintenance", 30),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_corpus_pipeline_stage_counts",
+        "policy": {"reads": 200},
+    },
+    "briefing_active_entities": {
+        "key": ("memory", 71),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_briefing_list_active_entities",
+        "policy": {"reads": 200},
+    },
+    "entity_walk_step_typed": {
+        "key": ("index", 39),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_walk_step_typed",
+        "policy": {"reads": 200},
+    },
+    "projection_generations_list": {
+        "key": ("index", 40),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_generations_list",
+        "policy": {"reads": 200},
+    },
 }
 
 
@@ -12764,7 +12806,7 @@ def _check_derived(operation: dict[str, object], name: str, key: tuple[str, int]
         # A described format: the schema is the contract, so the gate checks the
         # schema is sound and that the sizes it implies are the ones declared.
         request = _keys(operation["request"], {"policy", "fields"}, f"{name}.request")
-        request_fields = _generic_fields(request, f"{name}.request")
+        request_fields = _generic_fields(request, f"{name}.request", allow_empty=True)
         policy = request["policy"]
         wanted = row["policy"]
         if not isinstance(policy, dict) or set(policy) != set(wanted):
@@ -12973,7 +13015,7 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
         if wire == "db2-envelope-generic-v1":
             # The wrapper takes the request schema's fields and hands back the
             # reply's, so its signature is the schema rather than a shape.
-            request_fields = _generic_fields(operation["request"], f"{name}.request")
+            request_fields = _generic_fields(operation["request"], f"{name}.request", allow_empty=True)
             arguments = _generic_c_parameters(operation, request_fields, writing=False)
             reply_row = operation["reply"].get("row")
             if reply_row is not None:
@@ -12990,15 +13032,19 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
                 decode = f"aimee_db2_{name}_reply_decode(response, response_len, {names})"
                 guard = "!call"
                 prelude = ""
+            # An operation with no arguments has nothing between the call's
+            # fixed prefix and its outputs, and nothing to hand the encoder.
+            arguments = f"{arguments}, " if arguments else ""
             encode_names = ", ".join(str(field["name"]) for field in request_fields)
+            encode_names = f"{encode_names}, " if encode_names else ""
             declarations.append(f"""   aimee_module_call_result_t aimee_db2_{name}_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-       {arguments}, {outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context);
+       {arguments}{outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 """)
             definitions.append(f"""aimee_module_call_result_t aimee_db2_{name}_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    {arguments}, {outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    {arguments}{outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context)
 {{
 {prelude}   if ({guard})
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -13007,7 +13053,7 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
    uint8_t response[AIMEE_DB2_{upper}_RESPONSE_MAX_LEN];
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_{name}_request_encode({encode_names}, request, sizeof(request),
+   if (aimee_db2_{name}_request_encode({encode_names}request, sizeof(request),
                                        &request_len) != 0)
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
    aimee_module_call_result_t transport =
@@ -13840,13 +13886,20 @@ func Decode{name}Reply(reply []byte) (uint32, error) {{
 
 
 
-def _generic_fields(section: dict[str, object], where: str) -> list[dict[str, object]]:
+def _generic_fields(section: dict[str, object], where: str,
+                    allow_empty: bool = False) -> list[dict[str, object]]:
     """Check a field list and return it.
 
     Every field carries its own bounds, because a bound that lives anywhere but
     beside the field it constrains is a bound someone will forget to update.
+
+    `allow_empty` is for a request: an operation whose answer depends on
+    nothing the caller says has no fields, and its payload is empty. A reply
+    still needs a field or a row, because a reply that says nothing is not one.
     """
     fields = section.get("fields")
+    if allow_empty and isinstance(fields, list) and not fields:
+        return []
     if not isinstance(fields, list) or not fields:
         fail("generic-fields", f"{where} must carry at least one field")
     for index, field in enumerate(fields):
@@ -13950,7 +14003,7 @@ def _generic_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
     upper = str(operation["name"]).upper()
     family = str(operation["family"]).upper()
     request, reply = operation["request"], operation["reply"]
-    request_fields = _generic_fields(request, f"{operation['name']}.request")
+    request_fields = _generic_fields(request, f"{operation['name']}.request", allow_empty=True)
     rows = [
         (f"AIMEE_DB2_EVENT_{upper}", f"AIMEE_DB2_EVENT_{family}"),
         (f"AIMEE_DB2_STAGE_{upper}", f"AIMEE_DB2_FAMILY_{family}"),
@@ -14115,13 +14168,15 @@ def _generic_codecs(operation: dict[str, object]) -> str:
     """The four codecs for one db2-envelope-generic-v1 operation."""
     lower = str(operation["name"])
     upper = lower.upper()
-    request_fields = _generic_fields(operation["request"], f"{lower}.request")
+    request_fields = _generic_fields(operation["request"], f"{lower}.request", allow_empty=True)
     (lengths, checks), writes = _generic_c_encode_body(operation, request_fields, "")
     request_guard = " || ".join(f"!{field['name']}" for field in request_fields
                                 if field["type"] == "utf8")
     request_guard = f"{request_guard} || " if request_guard else ""
 
     decode_params = _generic_c_parameters(operation, request_fields, writing=True)
+    decode_params = f",\n                                                   {decode_params}" \
+        if decode_params else ""
     decode_clear = "\n".join(
         f"""   if ({field['name']} && {field['name']}_capacity)
       {field['name']}[0] = '\\0';""" if field["type"] == "utf8"
@@ -14134,23 +14189,37 @@ def _generic_codecs(operation: dict[str, object]) -> str:
         if field["type"] == "utf8" else f"!{field['name']}"
         for field in request_fields)
     decode_steps = _generic_c_decode_body(operation, request_fields, "*", capacities=True)
+    decode_clear_block = f"{decode_clear}\n" if decode_clear else ""
+    decode_guard_block = f"   if ({decode_guard})\n      return -1;\n" if decode_guard else ""
+    decode_step_block = f"{decode_steps}\n" if decode_steps else ""
+
+    # With no fields there is nothing to name, nothing to measure and nothing
+    # to check, and an `if ()` with an empty condition is not C.
+    encode_parameters = _generic_c_parameters(operation, request_fields, writing=False)
+    encode_parameters = f"{encode_parameters},\n                                                   " \
+        if encode_parameters else ""
+    # The blank line an empty length list used to leave is kept, so every
+    # operation that has fields regenerates byte for byte.
+    # Nothing reads the payload when there are no fields, and an unused local
+    # is an error here.
+    payload_block = "   uint8_t *payload = scratch;\n" if request_fields else ""
+    decode_payload_block = ("   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;\n"
+                            if request_fields else "")
+    length_block = f"{lengths}\n"
+    check_block = f"   if ({checks})\n      return -1;\n" if checks else ""
+    write_block = writes
 
     text = f"""
-static inline int aimee_db2_{lower}_request_encode({_generic_c_parameters(operation, request_fields, writing=False)},
-                                                   uint8_t *output, size_t capacity,
+static inline int aimee_db2_{lower}_request_encode({encode_parameters}uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {{
    if (output_len)
       *output_len = 0u;
    if ({request_guard}!output || !output_len)
       return -1;
-{lengths}
-   if ({checks})
-      return -1;
-   uint8_t scratch[AIMEE_DB2_{upper}_REQUEST_MAX_LEN];
-   uint8_t *payload = scratch;
-   uint32_t cursor = 0u;
-{writes}
+{length_block}{check_block}   uint8_t scratch[AIMEE_DB2_{upper}_REQUEST_MAX_LEN];
+{payload_block}   uint32_t cursor = 0u;
+{write_block}
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, cursor, output,
                                        capacity) != 0)
@@ -14160,23 +14229,17 @@ static inline int aimee_db2_{lower}_request_encode({_generic_c_parameters(operat
    return 0;
 }}
 
-static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
-                                                   {decode_params})
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len{decode_params})
 {{
-{decode_clear}
-   if ({decode_guard})
-      return -1;
-   aimee_db2_request_header_t header = {{0}};
+{decode_clear_block}{decode_guard_block}   aimee_db2_request_header_t header = {{0}};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
        header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
        input_len < AIMEE_DB2_{upper}_REQUEST_MIN_LEN ||
        input_len > AIMEE_DB2_{upper}_REQUEST_MAX_LEN)
       return -1;
-   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
-   uint32_t payload_len = header.payload_len;
+{decode_payload_block}   uint32_t payload_len = header.payload_len;
    uint32_t cursor = 0u;
-{decode_steps}
-   if (cursor != payload_len)
+{decode_step_block}   if (cursor != payload_len)
       return -1;
    return 0;
 }}
@@ -14370,7 +14433,7 @@ def _generic_vectors(catalog: dict[str, object],
                      operation: dict[str, object]) -> dict[str, object]:
     """Fixtures for one db2-envelope-generic-v1 operation."""
     identifier = int(operation["id"])
-    request_fields = _generic_fields(operation["request"], "request")
+    request_fields = _generic_fields(operation["request"], "request", allow_empty=True)
     request_values = [_generic_sample(field, index)
                       for index, field in enumerate(request_fields)]
     request = _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0,
@@ -14484,7 +14547,7 @@ def _generic_go(operation: dict[str, object]) -> str:
     name = _go_name(str(operation["name"]))
     family = _go_name(str(operation["family"]))
     lower = str(operation["name"])
-    request_fields = _generic_fields(operation["request"], "request")
+    request_fields = _generic_fields(operation["request"], "request", allow_empty=True)
 
     bounds = []
     for field in request_fields:
@@ -14570,6 +14633,17 @@ def _generic_go(operation: dict[str, object]) -> str:
     joined_writes = "\n".join(writes)
     joined_reads = "\n".join(reads)
     joined_checks = " ||\n\t\t".join(checks)
+    # With no fields there is nothing to bound, nothing to return beside the
+    # error, and `if {} {` is not Go.
+    check_block = f"\tif {joined_checks} {{\n\t\treturn nil, ErrMalformedEnvelope\n\t}}\n" \
+        if joined_checks else ""
+    results_list = f"{results}, error" if results else "error"
+    zeros_list = f"{zeros}, " if zeros else ""
+    returned = ", ".join(_go_lower(str(field["name"])) for field in request_fields)
+    returned_list = f"{returned}, nil" if returned else "nil"
+    declaration_block = f"{declarations}\n" if declarations else ""
+    write_block = f"{joined_writes}\n" if joined_writes else ""
+    read_block = f"{joined_reads}\n" if joined_reads else ""
 
     return f"""const Event{name} = Event{family}
 const Stage{name} = Family{family}
@@ -14578,12 +14652,8 @@ const Operation{name} uint32 = {operation['id']}
 
 // Encode{name}Request writes the schema {lower} declares, in order.
 func Encode{name}Request({parameters}) ([]byte, error) {{
-	if {joined_checks} {{
-		return nil, ErrMalformedEnvelope
-	}}
-	var payload []byte
-{joined_writes}
-	header, err := EncodeRequestHeader(Operation{name}, 0, uint32(len(payload)))
+{check_block}	var payload []byte
+{write_block}	header, err := EncodeRequestHeader(Operation{name}, 0, uint32(len(payload)))
 	if err != nil {{
 		return nil, ErrMalformedEnvelope
 	}}
@@ -14591,21 +14661,19 @@ func Encode{name}Request({parameters}) ([]byte, error) {{
 }}
 
 // Decode{name}Request reads it back, checking each field against its own bound.
-func Decode{name}Request(request []byte) ({results}, error) {{
-{declarations}
-	var err error
+func Decode{name}Request(request []byte) ({results_list}) {{
+{declaration_block}	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
-		return {zeros}, ErrMalformedEnvelope
+		return {zeros_list}ErrMalformedEnvelope
 	}}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
-{joined_reads}
-	if cursor != len(payload) {{
-		return {zeros}, ErrMalformedEnvelope
+{read_block}	if cursor != len(payload) {{
+		return {zeros_list}ErrMalformedEnvelope
 	}}
-	return {", ".join(_go_lower(str(field["name"])) for field in request_fields)}, nil
+	return {returned_list}
 }}
 
 """

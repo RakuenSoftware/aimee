@@ -1879,6 +1879,62 @@ int canonical_index_code_search_excluding_project(const char *query, const char 
    return db2_code_index_code_search_excluding_project(query, excluded_project, out, max, enrich);
 }
 
+int db2_code_index_project_last_scan(char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   return 0;
+}
+
+int db2_kb_service_get_active_embedder_version(char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   return -1;
+}
+
+int db2_bandit_decision_points_list(char *buf, size_t len)
+{
+   if (buf && len >= 3)
+   {
+      buf[0] = '[';
+      buf[1] = ']';
+      buf[2] = '\0';
+   }
+   return 0;
+}
+
+int db2_corpus_pipeline_stage_counts(db2_corpus_pipeline_stage_count_t *out, int max_out)
+{
+   (void)out;
+   (void)max_out;
+   return 0;
+}
+
+int db2_memory_briefing_list_active_entities(db2_memory_briefing_entity_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_edge_walk_step_typed(const char *node, db2_entity_edge_typed_t *out, int max)
+{
+   (void)node;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_code_projection_generations_list(const char *project, code_projection_generation_row_t *out,
+                                         int max)
+{
+   (void)project;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

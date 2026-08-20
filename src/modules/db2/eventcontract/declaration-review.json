@@ -244,6 +244,14 @@
       "reason": "The typed learning.bandit_arms_list operation replaces the arm listing. What crosses is a JSON array of quoted arm identifiers built by hand: nothing escapes them, so an arm whose name contains a quote or a backslash produces a document the caller cannot parse, and an empty one is dropped. When the buffer fills the array is closed early, so a truncated listing is indistinguishable from a complete one. A read that fails returns the empty array it wrote before preparing the statement."
     },
     {
+      "symbol": "db2_bandit_decision_points_list",
+      "signature_sha256": "483c7f0927f0cf4c56cf64f33ec23b40f97492c6a8d1dbc24d53be5735fc4f88",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.bandit_decision_points operation lists the decision points that have been decided, newest first, stopping at 64. What crosses is a JSON array built by hand: nothing escapes the names, so one containing a quote or a backslash produces a document the caller cannot parse, and the array is closed early when the buffer fills. A truncated list, a list cut off at 64, and a complete one all look the same."
+    },
+    {
       "symbol": "db2_bandit_promotion_get",
       "signature_sha256": "3e2d84391a2d9777ba7b863c1ee57cdea9b00eae9e6c4983c18100b13906de28",
       "disposition": "wire-operation",
@@ -348,6 +356,14 @@
       "reason": "The typed index.project_delete operation deletes a whole indexed project. Aliases, generations and files all cascade off the projects row, so the reply's one deleted row stands for everything the project held. Unlike the file-index deletes beside it the name is not resolved through aliases, so naming an alias deletes nothing and reports zero -- the same reply as a project that was already gone."
     },
     {
+      "symbol": "db2_code_index_project_last_scan",
+      "signature_sha256": "94c607e3e2f9e9d97e7309edca6590e2a58cc61a0a0013c9b25f2945aade06aa",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.project_last_scan operation reads the newest scan stamp across every project in the current lifecycle state. The answer belongs to no project in particular -- one freshly scanned project makes the whole index look fresh. An empty stamp means no current project has ever been scanned, and is also what a failed read gives, since the buffer is cleared before the statement runs. The request carries nothing, because nothing the caller could say would narrow it."
+    },
+    {
       "symbol": "db2_code_index_purge_files_matching",
       "signature_sha256": "932fefe5fe2d1001a2fac79acd6f373ea35797754bc0876171dde6816eb413b1",
       "disposition": "wire-operation",
@@ -412,6 +428,14 @@
       "reason": "The typed index.generation_set_source_hash operation replaces the hash write. Unlike the abort beside it this statement has no condition on the generation's state, so the hash of a generation that is already visible can be changed after the fact -- which would make visible_source_hash report something the generation was not built from. That is the backend's behaviour and is recorded rather than fixed here."
     },
     {
+      "symbol": "db2_code_projection_generations_list",
+      "signature_sha256": "5307f89fa2700927ef584e06a1edb2c10c8622211364cc049b60bb0df0757566",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.projection_generations_list operation lists a project's projection generations, newest first. Unlike the reads beside it nothing here is narrowed to what is current: pending, visible and superseded generations all appear, and the project is matched by name without asking whether it is still current. That is what makes it useful for telling a caller which generations it could have asked for."
+    },
+    {
       "symbol": "db2_code_projection_project_fingerprint",
       "signature_sha256": "38a9655ba772d8e8079d09264d5e0fd771ff3fe8e0a11281c01878f5220243fa",
       "disposition": "wire-operation",
@@ -474,6 +498,14 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
+    },
+    {
+      "symbol": "db2_corpus_pipeline_stage_counts",
+      "signature_sha256": "348be2d82431b2a0d991e99f7322e0581be771535e6ce3a3d70c828507c23598",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.corpus_pipeline_stage_counts operation counts the corpus jobs in each stage and status. It groups over the jobs that exist, so a stage nothing has reached is missing from the reply rather than present with a count of zero -- a caller building a dashboard from this has to know the stages itself. The rows are ordered by stage then status, so the reply is stable between calls even though the counts are not."
     },
     {
       "symbol": "db2_cross_repo_rebuild_build_deps",
@@ -746,6 +778,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_top_targets operation ranks the entities one entity points at through a relation. It is index.entity_top_partners with one direction instead of two, and the reply is identical, so the names are the only thing distinguishing a directed ranking from an undirected one. Like its partner it matches the endpoint case-insensitively, unlike the plain neighbour listings which do not."
+    },
+    {
+      "symbol": "db2_entity_edge_walk_step_typed",
+      "signature_sha256": "9cd0f34761beaed0803c828533b14f1560638a00cbbeb0f11616c188740988f4",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_walk_step_typed operation returns the edges touching a node, heaviest first, at most fifty. The node may be either end, so the reply's source and target say which way each edge points rather than repeating the argument. An edge with no recorded relation identifier or endpoint kind reads back as the co-discussed relation and the other kind, so a default and a real value are indistinguishable in the reply."
     },
     {
       "symbol": "db2_entity_node_key_file",
@@ -1378,6 +1418,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The cJSON feedback facade is caller-specific presentation; a typed learning mutation validates bounded polarity, title, description, and weight."
+    },
+    {
+      "symbol": "db2_kb_service_get_active_embedder_version",
+      "signature_sha256": "34ee79a4e01c8c419e6bff5080840a09c243309b0c890a7e100ce97bafcc4885",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.active_embedder_version operation reads which embedder version is active. There is one row to read, so an empty answer means no embedder has ever been made active, and is also what a failed read gives. It pairs with maintenance.set_active_embedder_version, and a caller comparing the two is comparing against DB2's record rather than against whatever its own process was built to run."
     },
     {
       "symbol": "db2_kb_service_kb_document_exists",
@@ -2330,6 +2378,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of memory_refresh_aliases: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_briefing_list_active_entities",
+      "signature_sha256": "e750e4a7cb33161a28c393d084c75a16f612f24639bcb44f38bd29420c06d111",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.briefing_active_entities operation ranks the entities mentioned by recently touched memories. The window is roughly the last month, and a memory with no last-used stamp counts as recent rather than as old, so a freshly written memory that has never been read still ranks. The ordering leads with the newest memory identifier rather than the mention count, so one new memory can move an entity above a more mentioned one."
     },
     {
       "symbol": "db2_memory_chunk_upsert",

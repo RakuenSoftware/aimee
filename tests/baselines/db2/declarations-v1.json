@@ -3900,9 +3900,15 @@
           "line": 70
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_decision_points operation lists the decision points that have been decided, newest first, stopping at 64. What crosses is a JSON array built by hand: nothing escapes the names, so one containing a quote or a backslash produces a document the caller cannot parse, and the array is closed early when the buffer fills. A truncated list, a list cut off at 64, and a complete one all look the same."
+      },
       "signature": "int db2_bandit_decision_points_list ( char * buf , size_t len )",
       "signature_sha256": "483c7f0927f0cf4c56cf64f33ec23b40f97492c6a8d1dbc24d53be5735fc4f88",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_decision_points_list"
     },
     {
@@ -4457,9 +4463,15 @@
           "line": 34
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.project_last_scan operation reads the newest scan stamp across every project in the current lifecycle state. The answer belongs to no project in particular -- one freshly scanned project makes the whole index look fresh. An empty stamp means no current project has ever been scanned, and is also what a failed read gives, since the buffer is cleared before the statement runs. The request carries nothing, because nothing the caller could say would narrow it."
+      },
       "signature": "int db2_code_index_project_last_scan ( char * out , size_t cap )",
       "signature_sha256": "94c607e3e2f9e9d97e7309edca6590e2a58cc61a0a0013c9b25f2945aade06aa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_project_last_scan"
     },
     {
@@ -4914,9 +4926,15 @@
           "line": 152
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.projection_generations_list operation lists a project's projection generations, newest first. Unlike the reads beside it nothing here is narrowed to what is current: pending, visible and superseded generations all appear, and the project is matched by name without asking whether it is still current. That is what makes it useful for telling a caller which generations it could have asked for."
+      },
       "signature": "int db2_code_projection_generations_list ( const char * project , code_projection_generation_row_t * out , int max )",
       "signature_sha256": "5307f89fa2700927ef584e06a1edb2c10c8622211364cc049b60bb0df0757566",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_generations_list"
     },
     {
@@ -5651,9 +5669,15 @@
           "line": 71
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.corpus_pipeline_stage_counts operation counts the corpus jobs in each stage and status. It groups over the jobs that exist, so a stage nothing has reached is missing from the reply rather than present with a count of zero -- a caller building a dashboard from this has to know the stages itself. The rows are ordered by stage then status, so the reply is stable between calls even though the counts are not."
+      },
       "signature": "int db2_corpus_pipeline_stage_counts ( db2_corpus_pipeline_stage_count_t * out , int max_out )",
       "signature_sha256": "348be2d82431b2a0d991e99f7322e0581be771535e6ce3a3d70c828507c23598",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_corpus_pipeline_stage_counts"
     },
     {
@@ -8217,9 +8241,15 @@
           "line": 95
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_walk_step_typed operation returns the edges touching a node, heaviest first, at most fifty. The node may be either end, so the reply's source and target say which way each edge points rather than repeating the argument. An edge with no recorded relation identifier or endpoint kind reads back as the co-discussed relation and the other kind, so a default and a real value are indistinguishable in the reply."
+      },
       "signature": "int db2_entity_edge_walk_step_typed ( const char * node , db2_entity_edge_typed_t * out , int max )",
       "signature_sha256": "9cd0f34761beaed0803c828533b14f1560638a00cbbeb0f11616c188740988f4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_walk_step_typed"
     },
     {
@@ -11939,9 +11969,15 @@
           "line": 89
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.active_embedder_version operation reads which embedder version is active. There is one row to read, so an empty answer means no embedder has ever been made active, and is also what a failed read gives. It pairs with maintenance.set_active_embedder_version, and a caller comparing the two is comparing against DB2's record rather than against whatever its own process was built to run."
+      },
       "signature": "int db2_kb_service_get_active_embedder_version ( char * out , size_t out_len )",
       "signature_sha256": "34ee79a4e01c8c419e6bff5080840a09c243309b0c890a7e100ce97bafcc4885",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_get_active_embedder_version"
     },
     {
@@ -16026,9 +16062,15 @@
           "line": 52
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.briefing_active_entities operation ranks the entities mentioned by recently touched memories. The window is roughly the last month, and a memory with no last-used stamp counts as recent rather than as old, so a freshly written memory that has never been read still ranks. The ordering leads with the newest memory identifier rather than the mention count, so one new memory can move an entity above a more mentioned one."
+      },
       "signature": "int db2_memory_briefing_list_active_entities ( db2_memory_briefing_entity_t * out , int max )",
       "signature_sha256": "e750e4a7cb33161a28c393d084c75a16f612f24639bcb44f38bd29420c06d111",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_briefing_list_active_entities"
     },
     {
@@ -27102,15 +27144,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1c72b9ff7ee947263fb0f91c959f1951adfdee02782943bd3dca33da2496ec64",
+  "fingerprint": "10b4d503084466072716dad38274b31c2877b38eaa620a424d715e910388e0da",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 446,
+    "audit_pending": 439,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 513
+    "reviewed": 520
   }
 }

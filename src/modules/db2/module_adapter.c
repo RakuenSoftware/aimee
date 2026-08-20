@@ -3,6 +3,8 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/corpus_jobs.h"
+#include "c/memory_briefing.h"
 #include "c/css_migration.h"
 #include "c/sketch.h"
 #include "c/memory_scenes.h"
@@ -874,6 +876,13 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .file_definitions = db2_code_index_file_definitions,
        .code_search = db2_code_index_code_search,
        .code_search_excluding_project = db2_code_index_code_search_excluding_project,
+       .project_last_scan = db2_code_index_project_last_scan,
+       .active_embedder_version = db2_kb_service_get_active_embedder_version,
+       .bandit_decision_points = db2_bandit_decision_points_list,
+       .corpus_pipeline_stage_counts = db2_corpus_pipeline_stage_counts,
+       .briefing_active_entities = db2_memory_briefing_list_active_entities,
+       .entity_walk_step_typed = db2_entity_edge_walk_step_typed,
+       .projection_generations_list = db2_code_projection_generations_list,
    };
    return &backend;
 }
@@ -2007,6 +2016,42 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_unit_ids_for_memory_reply_encode(rows, count, response_body,
                                                            response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t limit = 0u;
+         if (aimee_db2_briefing_active_entities_request_decode(request_body, request_len, &limit) ==
+             0)
+         {
+            if (response_capacity < AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->briefing_active_entities)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_briefing_active_entities_row_t
+                rows[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_memory_briefing_entity_t found[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS];
+               int requested = (int)limit;
+               if (requested > (int)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS)
+                  requested = (int)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS;
+               int written = backend->briefing_active_entities(found, requested);
+               for (int index = 0; index < written; index++)
+               {
+                  snprintf(rows[index].entity, sizeof(rows[index].entity), "%s", found[index].name);
+                  rows[index].mentions =
+                      found[index].mentions < 0 ? 0u : (uint32_t)found[index].mentions;
+                  snprintf(rows[index].last_seen, sizeof(rows[index].last_seen), "%s",
+                           found[index].last_seen);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_briefing_active_entities_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }
@@ -3313,6 +3358,99 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_module_invocation_cancelled(invocation))
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_code_search_excluding_project_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+
+         if (aimee_db2_project_last_scan_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROJECT_LAST_SCAN_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->project_last_scan)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char last_scan[AIMEE_DB2_PROJECT_LAST_SCAN_LAST_SCAN_MAX + 1] = "";
+            (void)backend->project_last_scan(last_scan, sizeof(last_scan));
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_project_last_scan_reply_encode(last_scan, response_body,
+                                                         response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char node[AIMEE_DB2_ENTITY_WALK_STEP_TYPED_NODE_MAX + 1] = "";
+         if (aimee_db2_entity_walk_step_typed_request_decode(request_body, request_len, node,
+                                                             sizeof(node)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_WALK_STEP_TYPED_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_walk_step_typed)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_walk_step_typed_row_t rows[AIMEE_DB2_ENTITY_WALK_STEP_TYPED_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_entity_edge_typed_t found[AIMEE_DB2_ENTITY_WALK_STEP_TYPED_MAX_ROWS];
+               int written = backend->entity_walk_step_typed(
+                   node, found, AIMEE_DB2_ENTITY_WALK_STEP_TYPED_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  snprintf(rows[index].source, sizeof(rows[index].source), "%s",
+                           found[index].source);
+                  snprintf(rows[index].relation, sizeof(rows[index].relation), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].target, sizeof(rows[index].target), "%s",
+                           found[index].target);
+                  rows[index].relation_id =
+                      found[index].relation_id < 0 ? 0u : (uint32_t)found[index].relation_id;
+                  rows[index].subject_kind =
+                      found[index].subject_kind < 0 ? 0u : (uint32_t)found[index].subject_kind;
+                  rows[index].object_kind =
+                      found[index].object_kind < 0 ? 0u : (uint32_t)found[index].object_kind;
+                  rows[index].weight = found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_entity_walk_step_typed_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_PROJECTION_GENERATIONS_LIST_PROJECT_MAX + 1] = "";
+         if (aimee_db2_projection_generations_list_request_decode(request_body, request_len,
+                                                                  project, sizeof(project)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROJECTION_GENERATIONS_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->projection_generations_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_projection_generations_list_row_t
+                rows[AIMEE_DB2_PROJECTION_GENERATIONS_LIST_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               code_projection_generation_row_t
+                   found[AIMEE_DB2_PROJECTION_GENERATIONS_LIST_MAX_ROWS];
+               int written = backend->projection_generations_list(
+                   project, found, AIMEE_DB2_PROJECTION_GENERATIONS_LIST_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].generation = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].started_at, sizeof(rows[index].started_at), "%s",
+                           found[index].started_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_projection_generations_list_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
@@ -4672,6 +4810,24 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+
+         if (aimee_db2_bandit_decision_points_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_BANDIT_DECISION_POINTS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->bandit_decision_points)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char decision_points[AIMEE_DB2_BANDIT_DECISION_POINTS_DECISION_POINTS_MAX + 1] = "";
+            (void)backend->bandit_decision_points(decision_points, sizeof(decision_points));
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_bandit_decision_points_reply_encode(decision_points, response_body,
+                                                              response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
@@ -4997,6 +5153,58 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_module_invocation_cancelled(invocation))
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_retryable_index_failures_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+
+         if (aimee_db2_active_embedder_version_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ACTIVE_EMBEDDER_VERSION_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->active_embedder_version)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char embedder_version[AIMEE_DB2_ACTIVE_EMBEDDER_VERSION_EMBEDDER_VERSION_MAX + 1] = "";
+            (void)backend->active_embedder_version(embedder_version, sizeof(embedder_version));
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_active_embedder_version_reply_encode(
+                    embedder_version, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+
+         if (aimee_db2_corpus_pipeline_stage_counts_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CORPUS_PIPELINE_STAGE_COUNTS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->corpus_pipeline_stage_counts)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_corpus_pipeline_stage_counts_row_t
+                rows[AIMEE_DB2_CORPUS_PIPELINE_STAGE_COUNTS_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_corpus_pipeline_stage_count_t
+                   found[AIMEE_DB2_CORPUS_PIPELINE_STAGE_COUNTS_MAX_ROWS];
+               int written = backend->corpus_pipeline_stage_counts(
+                   found, AIMEE_DB2_CORPUS_PIPELINE_STAGE_COUNTS_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  snprintf(rows[index].stage, sizeof(rows[index].stage), "%s", found[index].stage);
+                  snprintf(rows[index].stage_status, sizeof(rows[index].stage_status), "%s",
+                           found[index].stage_status);
+                  rows[index].job_count =
+                      found[index].count < 0 ? 0u : (uint32_t)found[index].count;
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_corpus_pipeline_stage_counts_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;

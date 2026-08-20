@@ -4114,6 +4114,61 @@
       }
     },
     {
+      "family": "memory",
+      "id": 71,
+      "name": "briefing_active_entities",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and the entities mentioned in them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_briefing_list_active_entities"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only memories touched in roughly the last month count, and one never touched counts because its stamp is absent rather than old"
+        },
+        "fields": [
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 64
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "mentions",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "last_seen",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -5766,6 +5821,173 @@
       }
     },
     {
+      "family": "index",
+      "id": 38,
+      "name": "project_last_scan",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projects and when they were scanned are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_project_last_scan"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the newest scan stamp across every current project, so the answer belongs to no project in particular"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "last_scan",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 39,
+      "name": "entity_walk_step_typed",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their relations and their endpoint kinds are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_walk_step_typed"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an edge is returned whichever end the node is, and an unrecorded relation or kind reads back as a default rather than as unknown"
+        },
+        "fields": [
+          {
+            "name": "node",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "target",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "relation_id",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "subject_kind",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "object_kind",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 50
+      }
+    },
+    {
+      "family": "index",
+      "id": 40,
+      "name": "projection_generations_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projection generations and the projects they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_generations_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "every generation the project has is listed newest first, whatever state it is in and whatever lifecycle state the project is in"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "generation",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "started_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -7393,6 +7615,39 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 41,
+      "name": "bandit_decision_points",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Bandit decisions and the points they were made at are relational DB2 rows.",
+      "c_symbols": [
+        "db2_bandit_decision_points_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "at most the 64 most recently decided points are listed, and the JSON array is assembled without escaping what it quotes"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "decision_points",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 2047
           }
         ]
       }
@@ -9709,6 +9964,87 @@
           ]
         },
         "maximum_rows": 1024
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 29,
+      "name": "active_embedder_version",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The active embedder version is a relational DB2 record, not portable vector state.",
+      "c_symbols": [
+        "db2_kb_service_get_active_embedder_version"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one row holds the answer, so an empty version means no embedder has been made active rather than that this caller cannot see one"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "embedder_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 30,
+      "name": "corpus_pipeline_stage_counts",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Corpus processing jobs and the stages they are in are relational DB2 rows.",
+      "c_symbols": [
+        "db2_corpus_pipeline_stage_counts"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one row per stage and status that has at least one job, so a stage with no jobs is absent rather than zero"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "stage",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "stage_status",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "job_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 256
       }
     }
   ]
