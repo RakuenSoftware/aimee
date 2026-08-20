@@ -299,9 +299,16 @@ func main() {
 	// it. The engine and its stores stay here -- only the way in moves -- so this
 	// deletes src/server/wfe_http_proxy.c without relocating any state.
 	//
-	// A missing bus socket is not fatal: this process still serves its own
-	// listener, and reporting the stage as unserved is more honest than exiting.
-	if busSocket := os.Getenv("AIMEE_MODULE_BUS_SOCKET"); busSocket != "" {
+	// The socket comes from the SAME value the store attach used, not from the
+	// environment again. --module-bus-socket already defaults to
+	// AIMEE_MODULE_BUS_SOCKET, so reading the variable here served the env case
+	// and silently declined the flag case: an operator who passed the documented
+	// flag got a process that attached its store, logged one line, and left every
+	// /v1/workflow route and /v1/dev/submit answering 503. There is no missing
+	// case left to tolerate -- the flag is checked above and the process does not
+	// get this far without it.
+	{
+		busSocket := *moduleBusSocket
 		go func() {
 			err := bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{
 				SocketPath:     busSocket,
@@ -320,8 +327,6 @@ func main() {
 				log.Printf("workflow control stage stopped: %v", err)
 			}
 		}()
-	} else {
-		log.Print("AIMEE_MODULE_BUS_SOCKET is unset; the workflow control stage is not served")
 	}
 
 	stop := make(chan os.Signal, 1)
