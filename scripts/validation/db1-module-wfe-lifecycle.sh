@@ -267,6 +267,72 @@ if [ -n "$WI" ]; then
 fi
 
 echo
+echo "=============================================================="
+echo " the module restarts under the engine"
+echo "=============================================================="
+# The engine's store is another process now, so that process dying is an
+# ordinary event: a module upgrade, a crash, a supervisor restart. What must not
+# happen is the engine wedging, corrupting a run, or reporting success while the
+# store is gone.
+#
+# The engine attaches to the DAEMON's bus, not to the module, so its attachment
+# survives; the module re-attaches and serves again. Whether a call issued after
+# that recovers is the thing worth knowing, and it is not something reading the
+# code answers -- there is no reconnect logic in the Go client, and it may not
+# need any.
+kill "$MPID" 2>/dev/null
+wait "$MPID" 2>/dev/null
+MPID=""
+DOWN=$(wfe GET /v1/workflow/items)
+case "$DOWN" in
+*'"items":['*'wi_'*)
+   say_fail "the engine served work items from somewhere with the store gone: $(printf '%s' "$DOWN" | head -c 120)"
+   ;;
+*)
+   say_pass "with the module gone the engine does not invent an answer"
+   ;;
+esac
+if kill -0 "$WPID" 2>/dev/null; then
+   say_pass "and the engine is still alive rather than crashed"
+else
+   say_fail "the engine died when its store went away"
+fi
+
+AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >>"$HOME/module.log" 2>&1 &
+MPID=$!
+i=0
+while [ $i -lt 150 ]; do
+   [ "$(state)" = "ok" ] && break
+   sleep 0.2
+   i=$((i + 1))
+done
+[ "$(state)" = "ok" ] && say_pass "the module came back" || say_fail "the module did not come back"
+
+# The engine has to reach the NEW module process through the attachment it
+# already held. If this fails, the engine needs reconnect logic it does not
+# currently have -- which is exactly what this is here to find out.
+BACK=""
+i=0
+while [ $i -lt 40 ]; do
+   BACK=$(wfe GET /v1/workflow/items)
+   case "$BACK" in
+   *"$WI"*) break ;;
+   esac
+   sleep 0.25
+   i=$((i + 1))
+done
+case "$BACK" in
+*"$WI"*) say_pass "and the engine reaches it again without being restarted" ;;
+*) say_fail "the engine could not reach the restarted module: $(printf '%s' "$BACK" | head -c 160)" ;;
+esac
+
+# And the run is intact, not half-written by whatever was in flight.
+st=$(in_store "SELECT state FROM lifecycle_work_item WHERE work_item_id='$WI'")
+[ "$st" = "stopped" ] && say_pass "the run survived the restart unchanged (state=$st)" ||
+   say_fail "the run changed across the restart (state=$st)"
+check_owner "after the restart"
+
+echo
 echo "      --- engine log, anything that looks wrong ---"
 grep -iE "error|refused|denied|cannot" "$HOME/wfe.log" 2>/dev/null |
    grep -viE "roundtable|review|forge|runner" | head -8 | sed 's/^/      /'

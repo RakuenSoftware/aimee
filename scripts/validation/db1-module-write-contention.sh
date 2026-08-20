@@ -20,10 +20,14 @@
 # evidence. A busy_timeout does not make contention free -- it makes it slow,
 # and a write that takes longer than the timeout still fails.
 #
-# The second writer here is a sqlite3 process writing lifecycle_work_item -- a
-# Go-owned table -- in a loop. That stands in for the WFE's write pattern rather
-# than reproducing it: an idle WFE with no workflows queued writes nothing, so
-# running the real binary would measure nothing at all.
+# The second writer here is a sqlite3 process holding an IMMEDIATE transaction
+# over lifecycle_work_item in a loop. It stands in for a competing writer rather
+# than reproducing one: after the engine moved behind the module there is no
+# second writer in production, which is the point of the port -- so this is a
+# deliberately adversarial condition, and what it exercises is the module's own
+# BEGIN IMMEDIATE retry. Without that retry a caller would see an operation
+# "refused" the first time a competing writer held the lock through the
+# connection's busy timeout.
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
 MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
@@ -98,12 +102,20 @@ while [ $w -le "$WRITERS" ]; do
       err=0
       r=1
       while [ $r -le "$ROUNDS" ]; do
+         # An explicit IMMEDIATE transaction that holds the write lock for a
+         # moment, rather than a bare INSERT. A bare INSERT takes and releases
+         # the lock so fast that the module rarely collides with it, and a
+         # contention test that never contends proves nothing. Holding it is
+         # what forces the module's own BEGIN IMMEDIATE to wait and retry.
          sqlite3 "$DB" \
             "PRAGMA busy_timeout=5000;
+             BEGIN IMMEDIATE;
              INSERT INTO lifecycle_work_item
                (work_item_id, repo, proposal_path, workflow_name, workflow_version,
                 current_stage, state, mode)
-             VALUES ('w$w-$r','repo-$w','path-$w-$r','wf','1','s','queued','m');" \
+             VALUES ('w$w-$r','repo-$w','path-$w-$r','wf','1','s','queued','m');
+             SELECT COUNT(*) FROM lifecycle_work_item;
+             COMMIT;" \
             >/dev/null 2>>"$HOME/writer.$w.err" || err=$((err + 1))
          r=$((r + 1))
       done
