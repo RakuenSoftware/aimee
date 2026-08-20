@@ -891,6 +891,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .prospective_by_entity = db2_prospective_list_by_entity,
        .prospective_by_file = db2_prospective_list_by_file,
        .prospective_by_trigger_terms = db2_prospective_list_by_trigger_terms,
+       .directive_list = db2_directive_list,
+       .directive_by_entity = db2_directive_match_by_entity,
+       .directive_by_file = db2_directive_match_by_file,
+       .directive_by_lexical = db2_directive_match_by_lexical,
    };
    return &backend;
 }
@@ -5800,6 +5804,332 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_db2_corpus_pipeline_stage_counts_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char state_filter[AIMEE_DB2_DIRECTIVE_LIST_STATE_FILTER_MAX + 1] = "";
+         char cause_filter[AIMEE_DB2_DIRECTIVE_LIST_CAUSE_FILTER_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_directive_list_request_decode(request_body, request_len, state_filter,
+                                                     sizeof(state_filter), cause_filter,
+                                                     sizeof(cause_filter), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DIRECTIVE_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->directive_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_directive_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_DIRECTIVE_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_directive_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_LIST_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->directive_list(state_filter, cause_filter, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].memory_a_id =
+                      found[index].memory_a_id < 0 ? 0u : (uint64_t)found[index].memory_a_id;
+                  rows[index].memory_b_id =
+                      found[index].memory_b_id < 0 ? 0u : (uint64_t)found[index].memory_b_id;
+                  rows[index].resolution_memory_id =
+                      found[index].resolution_memory_id < 0
+                          ? 0u
+                          : (uint64_t)found[index].resolution_memory_id;
+                  rows[index].priority =
+                      found[index].priority < 0 ? 0u : (uint32_t)found[index].priority;
+                  rows[index].surfaced_count =
+                      found[index].surfaced_count < 0 ? 0u : (uint32_t)found[index].surfaced_count;
+                  snprintf(rows[index].question, sizeof(rows[index].question), "%s",
+                           found[index].question);
+                  snprintf(rows[index].topic, sizeof(rows[index].topic), "%s", found[index].topic);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].cause, sizeof(rows[index].cause), "%s", found[index].cause);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].evidence, sizeof(rows[index].evidence), "%s",
+                           found[index].evidence);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_surfaced_at, sizeof(rows[index].last_surfaced_at), "%s",
+                           found[index].last_surfaced_at);
+                  snprintf(rows[index].resolved_at, sizeof(rows[index].resolved_at), "%s",
+                           found[index].resolved_at);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_directive_list_reply_encode(rows, count, response_body, response_capacity,
+                                                      response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char entity_lowered[AIMEE_DB2_DIRECTIVE_BY_ENTITY_ENTITY_LOWERED_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_directive_by_entity_request_decode(request_body, request_len, entity_lowered,
+                                                          sizeof(entity_lowered), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DIRECTIVE_BY_ENTITY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->directive_by_entity)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_directive_by_entity_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_DIRECTIVE_BY_ENTITY_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_directive_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_BY_ENTITY_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->directive_by_entity(entity_lowered, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].memory_a_id =
+                      found[index].memory_a_id < 0 ? 0u : (uint64_t)found[index].memory_a_id;
+                  rows[index].memory_b_id =
+                      found[index].memory_b_id < 0 ? 0u : (uint64_t)found[index].memory_b_id;
+                  rows[index].resolution_memory_id =
+                      found[index].resolution_memory_id < 0
+                          ? 0u
+                          : (uint64_t)found[index].resolution_memory_id;
+                  rows[index].priority =
+                      found[index].priority < 0 ? 0u : (uint32_t)found[index].priority;
+                  rows[index].surfaced_count =
+                      found[index].surfaced_count < 0 ? 0u : (uint32_t)found[index].surfaced_count;
+                  snprintf(rows[index].question, sizeof(rows[index].question), "%s",
+                           found[index].question);
+                  snprintf(rows[index].topic, sizeof(rows[index].topic), "%s", found[index].topic);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].cause, sizeof(rows[index].cause), "%s", found[index].cause);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].evidence, sizeof(rows[index].evidence), "%s",
+                           found[index].evidence);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_surfaced_at, sizeof(rows[index].last_surfaced_at), "%s",
+                           found[index].last_surfaced_at);
+                  snprintf(rows[index].resolved_at, sizeof(rows[index].resolved_at), "%s",
+                           found[index].resolved_at);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_directive_by_entity_reply_encode(rows, count, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char file_anchor[AIMEE_DB2_DIRECTIVE_BY_FILE_FILE_ANCHOR_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_directive_by_file_request_decode(request_body, request_len, file_anchor,
+                                                        sizeof(file_anchor), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DIRECTIVE_BY_FILE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->directive_by_file)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_directive_by_file_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_DIRECTIVE_BY_FILE_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_directive_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_BY_FILE_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->directive_by_file(file_anchor, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].memory_a_id =
+                      found[index].memory_a_id < 0 ? 0u : (uint64_t)found[index].memory_a_id;
+                  rows[index].memory_b_id =
+                      found[index].memory_b_id < 0 ? 0u : (uint64_t)found[index].memory_b_id;
+                  rows[index].resolution_memory_id =
+                      found[index].resolution_memory_id < 0
+                          ? 0u
+                          : (uint64_t)found[index].resolution_memory_id;
+                  rows[index].priority =
+                      found[index].priority < 0 ? 0u : (uint32_t)found[index].priority;
+                  rows[index].surfaced_count =
+                      found[index].surfaced_count < 0 ? 0u : (uint32_t)found[index].surfaced_count;
+                  snprintf(rows[index].question, sizeof(rows[index].question), "%s",
+                           found[index].question);
+                  snprintf(rows[index].topic, sizeof(rows[index].topic), "%s", found[index].topic);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].cause, sizeof(rows[index].cause), "%s", found[index].cause);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].evidence, sizeof(rows[index].evidence), "%s",
+                           found[index].evidence);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_surfaced_at, sizeof(rows[index].last_surfaced_at), "%s",
+                           found[index].last_surfaced_at);
+                  snprintf(rows[index].resolved_at, sizeof(rows[index].resolved_at), "%s",
+                           found[index].resolved_at);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_directive_by_file_reply_encode(rows, count, response_body,
+                                                         response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char match_clause[AIMEE_DB2_DIRECTIVE_BY_LEXICAL_MATCH_CLAUSE_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_directive_by_lexical_request_decode(request_body, request_len, match_clause,
+                                                           sizeof(match_clause), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DIRECTIVE_BY_LEXICAL_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->directive_by_lexical)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_directive_by_lexical_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_DIRECTIVE_BY_LEXICAL_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_directive_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_BY_LEXICAL_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->directive_by_lexical(match_clause, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].memory_a_id =
+                      found[index].memory_a_id < 0 ? 0u : (uint64_t)found[index].memory_a_id;
+                  rows[index].memory_b_id =
+                      found[index].memory_b_id < 0 ? 0u : (uint64_t)found[index].memory_b_id;
+                  rows[index].resolution_memory_id =
+                      found[index].resolution_memory_id < 0
+                          ? 0u
+                          : (uint64_t)found[index].resolution_memory_id;
+                  rows[index].priority =
+                      found[index].priority < 0 ? 0u : (uint32_t)found[index].priority;
+                  rows[index].surfaced_count =
+                      found[index].surfaced_count < 0 ? 0u : (uint32_t)found[index].surfaced_count;
+                  snprintf(rows[index].question, sizeof(rows[index].question), "%s",
+                           found[index].question);
+                  snprintf(rows[index].topic, sizeof(rows[index].topic), "%s", found[index].topic);
+                  snprintf(rows[index].anchor_entity, sizeof(rows[index].anchor_entity), "%s",
+                           found[index].anchor_entity);
+                  snprintf(rows[index].anchor_file, sizeof(rows[index].anchor_file), "%s",
+                           found[index].anchor_file);
+                  snprintf(rows[index].cause, sizeof(rows[index].cause), "%s", found[index].cause);
+                  snprintf(rows[index].state, sizeof(rows[index].state), "%s", found[index].state);
+                  snprintf(rows[index].evidence, sizeof(rows[index].evidence), "%s",
+                           found[index].evidence);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           found[index].source_session);
+                  snprintf(rows[index].last_surfaced_at, sizeof(rows[index].last_surfaced_at), "%s",
+                           found[index].last_surfaced_at);
+                  snprintf(rows[index].resolved_at, sizeof(rows[index].resolved_at), "%s",
+                           found[index].resolved_at);
+                  snprintf(rows[index].valid_until, sizeof(rows[index].valid_until), "%s",
+                           found[index].valid_until);
+                  snprintf(rows[index].created_at, sizeof(rows[index].created_at), "%s",
+                           found[index].created_at);
+                  snprintf(rows[index].updated_at, sizeof(rows[index].updated_at), "%s",
+                           found[index].updated_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_directive_by_lexical_reply_encode(rows, count, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }

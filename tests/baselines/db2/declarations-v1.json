@@ -7135,9 +7135,15 @@
           "line": 45
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_list operation lists epistemic directives by state and cause. Each filter is dropped when empty rather than matched against the empty string, so sending neither lists every directive -- four different statements behind one name. The order is by priority, then newest, then identifier, so it is stable but a caller paging by limit alone re-reads the same head."
+      },
       "signature": "int db2_directive_list ( const char * state , const char * cause , memory_directive_t * out , int max )",
       "signature_sha256": "3791fe548397ab907e377149fc10b284a7024f37099edbc2c82d92ebeec66028",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_list"
     },
     {
@@ -7150,9 +7156,15 @@
           "line": 66
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_by_entity operation finds the open directives anchored to an entity. The comparison lowers the stored anchor and not the argument, so a caller that sends a name as written matches nothing -- the field is named for what it expects. Only open directives match, so a resolved one is invisible here whatever its anchor."
+      },
       "signature": "int db2_directive_match_by_entity ( const char * entity_lc , memory_directive_t * out , int max )",
       "signature_sha256": "1dfd16d68e1245e9f69fbede1c02b6c0423c233dd16a0cb72d1ca2e54c113901",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_match_by_entity"
     },
     {
@@ -7165,9 +7177,15 @@
           "line": 69
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_by_file operation finds the open directives anchored to a file. The path is compared exactly, where the entity matcher beside it compares a lowered anchor, so the two differ in a way neither name nor reply shows. Only open directives match."
+      },
       "signature": "int db2_directive_match_by_file ( const char * file , memory_directive_t * out , int max )",
       "signature_sha256": "2a96dac6857a3b6e1e2610174d48a5d762e12d84897fecd907a0575a06d4e4b6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_match_by_file"
     },
     {
@@ -7180,9 +7198,15 @@
           "line": 74
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_by_lexical operation finds the open directives whose question or topic contains any of a clause's words. The clause is not SQL: the backend takes alphanumeric runs from it, lowercases them, drops anything under two characters and the literal word OR, keeps at most sixteen, and matches each as a substring. So punctuation and quoting are ignored, and a seventeenth word is silently not searched for."
+      },
       "signature": "int db2_directive_match_by_lexical ( const char * match_clause , memory_directive_t * out , int max )",
       "signature_sha256": "8f0f4a7ba49f6ad32abfa6bb07eec9ade4b7c3afa9d9cf93b39051b0d9ff2049",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_match_by_lexical"
     },
     {
@@ -27192,15 +27216,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "575e64bdbad9c5cf41a83252cb97d07ab88a982856aa8018c3ae085fe216a46d",
+  "fingerprint": "43724921f67a16cae6b862e496b6f553e7352f44f3b9dc649e3077c03a2004d1",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 431,
+    "audit_pending": 427,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 528
+    "reviewed": 532
   }
 }

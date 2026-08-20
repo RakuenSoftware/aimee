@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "79550a805d3a96df8e2abc7b8bb80774c80ec8a826c8e80720a2eb6f6bad9cf3"
+const ContractSHA256 = "b56dda7a92b6651f438b34b67018215e274b3c752a9c3fe95074fd36b9e60160"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -7166,6 +7166,249 @@ func DecodeCorpusPipelineStageCountsRequest(request []byte) (error) {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+const EventDirectiveList = EventMaintenance
+const StageDirectiveList = FamilyMaintenance
+const OperationDirectiveList uint32 = 31
+const DirectiveListStateFilterMin = 0
+const DirectiveListStateFilterMax = 15
+const DirectiveListCauseFilterMin = 0
+const DirectiveListCauseFilterMax = 31
+const DirectiveListLimitMin uint32 = 1
+const DirectiveListLimitMax uint32 = 256
+
+// EncodeDirectiveListRequest writes the schema directive_list declares, in order.
+func EncodeDirectiveListRequest(stateFilter string, causeFilter string, limit uint32) ([]byte, error) {
+	if len(stateFilter) < DirectiveListStateFilterMin || len(stateFilter) > DirectiveListStateFilterMax || hasNUL(stateFilter) ||
+		len(causeFilter) < DirectiveListCauseFilterMin || len(causeFilter) > DirectiveListCauseFilterMax || hasNUL(causeFilter) ||
+		limit < DirectiveListLimitMin || limit > DirectiveListLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, stateFilter, DirectiveListStateFilterMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, causeFilter, DirectiveListCauseFilterMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDirectiveList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveListRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveListRequest(request []byte) (string, string, uint32, error) {
+	var stateFilter string
+	var causeFilter string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if stateFilter, err = takeRowText(payload, &cursor, DirectiveListStateFilterMax); err != nil ||
+		len(stateFilter) < DirectiveListStateFilterMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if causeFilter, err = takeRowText(payload, &cursor, DirectiveListCauseFilterMax); err != nil ||
+		len(causeFilter) < DirectiveListCauseFilterMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < DirectiveListLimitMin || limit > DirectiveListLimitMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return stateFilter, causeFilter, limit, nil
+}
+
+const EventDirectiveByEntity = EventMaintenance
+const StageDirectiveByEntity = FamilyMaintenance
+const OperationDirectiveByEntity uint32 = 32
+const DirectiveByEntityEntityLoweredMin = 1
+const DirectiveByEntityEntityLoweredMax = 127
+const DirectiveByEntityLimitMin uint32 = 1
+const DirectiveByEntityLimitMax uint32 = 256
+
+// EncodeDirectiveByEntityRequest writes the schema directive_by_entity declares, in order.
+func EncodeDirectiveByEntityRequest(entityLowered string, limit uint32) ([]byte, error) {
+	if len(entityLowered) < DirectiveByEntityEntityLoweredMin || len(entityLowered) > DirectiveByEntityEntityLoweredMax || hasNUL(entityLowered) ||
+		limit < DirectiveByEntityLimitMin || limit > DirectiveByEntityLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entityLowered, DirectiveByEntityEntityLoweredMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDirectiveByEntity, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveByEntityRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveByEntityRequest(request []byte) (string, uint32, error) {
+	var entityLowered string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveByEntity || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entityLowered, err = takeRowText(payload, &cursor, DirectiveByEntityEntityLoweredMax); err != nil ||
+		len(entityLowered) < DirectiveByEntityEntityLoweredMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < DirectiveByEntityLimitMin || limit > DirectiveByEntityLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entityLowered, limit, nil
+}
+
+const EventDirectiveByFile = EventMaintenance
+const StageDirectiveByFile = FamilyMaintenance
+const OperationDirectiveByFile uint32 = 33
+const DirectiveByFileFileAnchorMin = 1
+const DirectiveByFileFileAnchorMax = 127
+const DirectiveByFileLimitMin uint32 = 1
+const DirectiveByFileLimitMax uint32 = 256
+
+// EncodeDirectiveByFileRequest writes the schema directive_by_file declares, in order.
+func EncodeDirectiveByFileRequest(fileAnchor string, limit uint32) ([]byte, error) {
+	if len(fileAnchor) < DirectiveByFileFileAnchorMin || len(fileAnchor) > DirectiveByFileFileAnchorMax || hasNUL(fileAnchor) ||
+		limit < DirectiveByFileLimitMin || limit > DirectiveByFileLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, fileAnchor, DirectiveByFileFileAnchorMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDirectiveByFile, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveByFileRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveByFileRequest(request []byte) (string, uint32, error) {
+	var fileAnchor string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveByFile || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if fileAnchor, err = takeRowText(payload, &cursor, DirectiveByFileFileAnchorMax); err != nil ||
+		len(fileAnchor) < DirectiveByFileFileAnchorMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < DirectiveByFileLimitMin || limit > DirectiveByFileLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return fileAnchor, limit, nil
+}
+
+const EventDirectiveByLexical = EventMaintenance
+const StageDirectiveByLexical = FamilyMaintenance
+const OperationDirectiveByLexical uint32 = 34
+const DirectiveByLexicalMatchClauseMin = 1
+const DirectiveByLexicalMatchClauseMax = 1023
+const DirectiveByLexicalLimitMin uint32 = 1
+const DirectiveByLexicalLimitMax uint32 = 256
+
+// EncodeDirectiveByLexicalRequest writes the schema directive_by_lexical declares, in order.
+func EncodeDirectiveByLexicalRequest(matchClause string, limit uint32) ([]byte, error) {
+	if len(matchClause) < DirectiveByLexicalMatchClauseMin || len(matchClause) > DirectiveByLexicalMatchClauseMax || hasNUL(matchClause) ||
+		limit < DirectiveByLexicalLimitMin || limit > DirectiveByLexicalLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, matchClause, DirectiveByLexicalMatchClauseMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDirectiveByLexical, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveByLexicalRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveByLexicalRequest(request []byte) (string, uint32, error) {
+	var matchClause string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveByLexical || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if matchClause, err = takeRowText(payload, &cursor, DirectiveByLexicalMatchClauseMax); err != nil ||
+		len(matchClause) < DirectiveByLexicalMatchClauseMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < DirectiveByLexicalLimitMin || limit > DirectiveByLexicalLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return matchClause, limit, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

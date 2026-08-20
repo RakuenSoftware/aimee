@@ -1957,6 +1957,52 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(by_trigger_count == 0);
 
+   /* The four directive listings, against a table with none in it. Both empty
+    * filters are replayed on directive_list, because an empty filter drops its
+    * condition rather than matching nothing -- four statements behind one
+    * name, and the reply cannot say which one ran. */
+   static aimee_db2_directive_list_row_t directive_rows[AIMEE_DB2_DIRECTIVE_LIST_MAX_ROWS];
+   uint32_t directive_count = 99;
+   assert(aimee_db2_directive_list_call(call_client, &client, 9296, 0, "open", "contradiction", 8u,
+                                        directive_rows, AIMEE_DB2_DIRECTIVE_LIST_MAX_ROWS,
+                                        &directive_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(directive_count == 0);
+   directive_count = 99;
+   assert(aimee_db2_directive_list_call(call_client, &client, 9297, 0, "", "", 8u, directive_rows,
+                                        AIMEE_DB2_DIRECTIVE_LIST_MAX_ROWS, &directive_count, NULL,
+                                        NULL) == AIMEE_MODULE_CALL_OK);
+   assert(directive_count == 0);
+
+   static aimee_db2_directive_by_entity_row_t
+       directive_entity_rows[AIMEE_DB2_DIRECTIVE_BY_ENTITY_MAX_ROWS];
+   uint32_t directive_entity_count = 99;
+   assert(aimee_db2_directive_by_entity_call(
+              call_client, &client, 9298, 0, "replay-entity", 8u, directive_entity_rows,
+              AIMEE_DB2_DIRECTIVE_BY_ENTITY_MAX_ROWS, &directive_entity_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(directive_entity_count == 0);
+
+   static aimee_db2_directive_by_file_row_t
+       directive_file_rows[AIMEE_DB2_DIRECTIVE_BY_FILE_MAX_ROWS];
+   uint32_t directive_file_count = 99;
+   assert(
+       aimee_db2_directive_by_file_call(call_client, &client, 9299, 0, "src/replay.c", 8u,
+                                        directive_file_rows, AIMEE_DB2_DIRECTIVE_BY_FILE_MAX_ROWS,
+                                        &directive_file_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(directive_file_count == 0);
+
+   /* The clause is not SQL and is not quoted syntax either: the backend takes
+    * alphanumeric runs out of whatever it is given, so punctuation here is
+    * replayed as the noise the backend treats it as. */
+   static aimee_db2_directive_by_lexical_row_t
+       directive_lexical_rows[AIMEE_DB2_DIRECTIVE_BY_LEXICAL_MAX_ROWS];
+   uint32_t directive_lexical_count = 99;
+   assert(aimee_db2_directive_by_lexical_call(
+              call_client, &client, 9300, 0, "\"replay\" OR \"probe\"", 8u, directive_lexical_rows,
+              AIMEE_DB2_DIRECTIVE_BY_LEXICAL_MAX_ROWS, &directive_lexical_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(directive_lexical_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

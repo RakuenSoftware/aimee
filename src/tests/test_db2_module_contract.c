@@ -2314,6 +2314,39 @@ int db2_prospective_list_by_trigger_terms(const char *turn_text, memory_prospect
    return 0;
 }
 
+int db2_directive_list(const char *state, const char *cause, memory_directive_t *out, int max)
+{
+   (void)state;
+   (void)cause;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_directive_match_by_entity(const char *entity_lc, memory_directive_t *out, int max)
+{
+   (void)entity_lc;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_directive_match_by_file(const char *file, memory_directive_t *out, int max)
+{
+   (void)file;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_directive_match_by_lexical(const char *match_clause, memory_directive_t *out, int max)
+{
+   (void)match_clause;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

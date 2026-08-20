@@ -12839,6 +12839,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_prospective_list_by_trigger_terms",
         "policy": {"reads": 200},
     },
+    "directive_list": {
+        "key": ("maintenance", 31),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_list",
+        "policy": {"reads": 200},
+    },
+    "directive_by_entity": {
+        "key": ("maintenance", 32),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_match_by_entity",
+        "policy": {"reads": 200},
+    },
+    "directive_by_file": {
+        "key": ("maintenance", 33),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_match_by_file",
+        "policy": {"reads": 200},
+    },
+    "directive_by_lexical": {
+        "key": ("maintenance", 34),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_match_by_lexical",
+        "policy": {"reads": 200},
+    },
 }
 
 

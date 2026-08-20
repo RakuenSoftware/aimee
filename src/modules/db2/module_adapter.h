@@ -309,6 +309,10 @@ typedef struct
    int (*prospective_by_entity)(const char *entity_lowered, memory_prospective_t *out, int max);
    int (*prospective_by_file)(const char *file_anchor, memory_prospective_t *out, int max);
    int (*prospective_by_trigger_terms)(const char *turn_text, memory_prospective_t *out, int max);
+   int (*directive_list)(const char *state, const char *cause, memory_directive_t *out, int max);
+   int (*directive_by_entity)(const char *entity_lowered, memory_directive_t *out, int max);
+   int (*directive_by_file)(const char *file_anchor, memory_directive_t *out, int max);
+   int (*directive_by_lexical)(const char *match_clause, memory_directive_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
