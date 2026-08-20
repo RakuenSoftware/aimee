@@ -93,6 +93,7 @@
     "src/modules/db1/webchat_claude_sessions.c",
     "src/modules/db1/webchat_live.c",
     "src/modules/db1/wfe_binding.c",
+    "src/modules/db1/wfe_budget_store.c",
     "src/modules/db1/wfe_engine_store.c",
     "src/modules/db1/wfe_store.c",
     "src/modules/db1/windows.c",

@@ -1468,6 +1468,172 @@ static void test_the_engine_reads_keep_their_predicates(void)
    printf("  PASS: the engine reads keep their predicates\n");
 }
 
+/* The engine's bulk sweeps and its delegate-job ledger. These are the calls a
+   scheduler makes on a timer over every run at once, so what matters is the
+   predicate and the COUNT it reports: a sweep that silently moved the wrong
+   rows, or reported a number it did not move, is a scheduler that either stalls
+   or runs away. */
+static void test_the_engine_sweeps_report_what_they_moved(void)
+{
+   /* A subtree: root -> child -> grandchild. */
+   must(db1_work_item_create("tr-root", "repo/t", "p/root", "build", "1", "plan", "autonomous") == 0,
+        "root");
+   must(db1_work_item_create("tr-kid", "repo/t", "p/kid", "build", "1", "plan", "autonomous") == 0,
+        "child");
+   must(db1_work_item_create("tr-gkid", "repo/t", "p/gkid", "build", "1", "plan", "autonomous") == 0,
+        "grandchild");
+   must(db1_work_item_set_parent("tr-kid", "tr-root") == 0, "link child");
+   must(db1_work_item_set_parent("tr-gkid", "tr-kid") == 0, "link grandchild");
+
+   char ids[16][DB1_WFE_ID_LEN];
+   int n = db1_wfe_descendant_ids("tr-root", ids, 16);
+   must(n == 3, "the subtree is three deep and all of it came back");
+   must(strcmp(ids[0], "tr-root") == 0, "the root is included -- callers stop what this returns");
+
+   /* A transient pause older than the window resumes; a fresh one does not. */
+   must(db1_work_item_set_pause("tr-kid", "panel_degraded", "") == 0, "park the child");
+   must(db1_wfe_resume_transient("panel_degraded", 3600) == 0,
+        "a pause from a moment ago is not older than an hour");
+   must(db1_wfe_resume_transient("panel_degraded", 0) == 1, "with no window it resumes");
+   must(db1_wfe_resume_transient("panel_degraded", 0) == 0, "and there is nothing left to resume");
+
+   /* Wall caps: resume while the run has overrides left, abandon once it does
+      not. The same row must not be eligible for both in one sweep. */
+   must(db1_work_item_set_pause("tr-gkid", "wall_cap", "") == 0, "park on the wall cap");
+   must(db1_wfe_resume_wall_caps(1) == 1, "first resume is allowed");
+   must(db1_work_item_set_pause("tr-gkid", "wall_cap", "") == 0, "it parks again");
+   must(db1_wfe_resume_wall_caps(1) == 0, "the override is spent");
+   must(db1_wfe_abandon_exhausted_wall_caps(1, 3600) == 0, "but the grace period holds it");
+   /* updated_at is second-resolution and the comparison is strict, so a row
+      touched in this same second is not yet older than "now minus zero". The Go
+      original compares the same way against its own cutoff; asserting the edge
+      here is what keeps a later "fix" from quietly widening it to <=, which
+      would abandon runs in the same sweep that parked them. */
+   must(db1_wfe_abandon_exhausted_wall_caps(1, 0) == 0,
+        "a row parked this second is not yet past a zero grace");
+   sleep(1);
+   must(db1_wfe_abandon_exhausted_wall_caps(1, 0) == 1, "a second later it is abandoned");
+
+   /* A parent waiting on slices resumes only when every child has finished --
+      and only if it had children at all. */
+   must(db1_work_item_set_pause("tr-root", "slices_running", "") == 0, "parent waits");
+   must(db1_wfe_resume_ready_parents() == 0, "a child is still active");
+   must(db1_work_item_set_terminal("tr-kid", "accepted") == 0, "child finishes");
+   must(db1_wfe_resume_ready_parents() == 1, "now the parent resumes");
+   must(db1_work_item_create("tr-lonely", "repo/t", "p/lonely", "build", "1", "plan",
+                             "autonomous") == 0,
+        "a run with no children");
+   must(db1_work_item_set_pause("tr-lonely", "slices_running", "") == 0, "parked as if fanned out");
+   must(db1_wfe_resume_ready_parents() == 0,
+        "a parent with no children never fanned out and must not be resumed");
+
+   /* The delegate-job ledger, and claiming the jobs left behind by a run that
+      has already finished. */
+   int job = db1_agent_job_create("impl", "do the thing", "agent-1", "owner-1");
+   must(job > 0, "a delegate job exists");
+   must(db1_wfe_delegate_job_save("exec-1", "tr-kid", job, "tok-1") == 0, "record the mapping");
+
+   db1_wfe_delegate_job_t claimed[8];
+   int c = db1_wfe_delegate_jobs_terminal_claim(claimed, 8);
+   must(c == 1, "the finished run's pending job is claimable");
+   must(strcmp(claimed[0].execution_key, "exec-1") == 0, "with its execution key");
+   must(claimed[0].job_id == job, "and its job id");
+
+   /* Re-recording the step resets the attempts the claim just charged: those
+      attempts were against the previous job, not this one. */
+   int job2 = db1_agent_job_create("impl", "again", "agent-1", "owner-1");
+   must(job2 > 0, "a replacement job");
+   must(db1_wfe_delegate_job_save("exec-1", "tr-kid", job2, "tok-2") == 0, "re-record the step");
+   c = db1_wfe_delegate_jobs_terminal_claim(claimed, 8);
+   must(c == 1 && claimed[0].job_id == job2, "the new job is claimable in its own right");
+
+   printf("  PASS: the engine sweeps report what they moved\n");
+}
+
+/* The budget reservation protocol, which is the one piece of the engine's store
+   access that is not a query. What is being checked is not that numbers cross
+   the wire but that money cannot be spent twice: a fair share is computed from
+   what the tree has already committed, a second owner cannot take a live
+   reservation, a release only gives back an estimate that was never spent, and
+   reconciliation applies exactly once. */
+static void test_the_budget_protocol_holds_across_the_bus(void)
+{
+   db1_wfe_budget_reservation_t r;
+
+   /* An uncapped run reserves nothing but still takes ownership: the
+      exactly-once rules apply to the invocation whether or not there is a cap. */
+   must(db1_work_item_create("bg-free", "repo/b", "p/free", "build", "1", "run", "autonomous") == 0,
+        "an uncapped run");
+   must(db1_wfe_budget_reserve("bg-free", "owner-a", &r) == 0, "reserve it");
+   must(r.allowed == 1 && r.busy == 0, "allowed, not busy");
+   must(r.amount == 0.0, "an uncapped run reserves no amount");
+   must(strcmp(r.root_id, "bg-free") == 0, "it is its own root");
+
+   /* A capped tree divides what is left between the runnable items. */
+   must(db1_work_item_create("bg-root", "repo/b", "p/root", "build", "1", "run", "autonomous") == 0,
+        "a capped root");
+   must(db1_work_item_set_cost_cap("bg-root", 10.0) == 0, "cap it at ten");
+   must(db1_work_item_create("bg-kid", "repo/b", "p/kid", "build", "1", "run", "autonomous") == 0,
+        "a child slice");
+   must(db1_work_item_set_parent("bg-kid", "bg-root") == 0, "link it");
+
+   /* Two runnable items, nothing spent: each may claim half. */
+   must(db1_wfe_budget_reserve("bg-root", "owner-a", &r) == 0, "root reserves");
+   must(r.allowed == 1, "allowed");
+   must(r.max_usd == 10.0, "the cap comes from the root");
+   must(r.amount > 4.9 && r.amount < 5.1, "half of the tree's ten");
+
+   /* The second item sees the first reservation as outstanding and takes half
+      of what remains, not half of the cap. */
+   must(db1_wfe_budget_reserve("bg-kid", "owner-b", &r) == 0, "child reserves");
+   must(r.allowed == 1, "still allowed");
+   must(r.amount > 4.9 && r.amount < 5.1, "the rest of the tree's budget");
+   must(strcmp(r.root_id, "bg-root") == 0, "the child answers with its root");
+
+   /* A different owner cannot take a reservation whose lease is live. */
+   must(db1_wfe_budget_reserve("bg-kid", "owner-c", &r) == 0, "a third owner asks");
+   must(r.allowed == 0 && r.busy == 1, "refused as busy, not handed the same money");
+
+   /* The holder asking again gets what it already has, and does not double it. */
+   must(db1_wfe_budget_reserve("bg-kid", "owner-b", &r) == 0, "the holder asks again");
+   must(r.allowed == 1 && r.busy == 0, "still its own");
+   must(r.amount > 4.9 && r.amount < 5.1, "the same estimate, not a second one");
+
+   /* Reconciliation replaces the estimate with measured cost, exactly once. */
+   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", 1.25) == 1, "the first reconcile applies");
+   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", 1.25) == 0,
+        "the second does not -- the estimate is already actual");
+   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", -1.0) == -1, "a negative cost is refused");
+
+   /* Releasing an estimate gives the tree its headroom back; releasing measured
+      spend must not, because that money is gone. */
+   must(db1_wfe_budget_release("bg-root", "owner-a") == 0, "release the root's estimate");
+   must(db1_wfe_budget_release("bg-kid", "owner-b") == 0, "releasing an 'actual' is a no-op");
+
+   db1_wfe_budget_totals_t totals;
+   must(db1_wfe_budget_totals("bg-kid", &totals) == 0, "read the tree totals");
+   must(strcmp(totals.root_id, "bg-root") == 0, "rooted correctly");
+   must(totals.max_usd == 10.0, "the cap");
+   must(totals.spent == 0.0, "nothing has been charged to cum_cost yet");
+
+   /* With the root's estimate released and the child's actual still held, a new
+      reservation sees the child's spend as outstanding. */
+   must(db1_wfe_budget_reserve("bg-root", "owner-a", &r) == 0, "root reserves again");
+   must(r.allowed == 1, "allowed");
+   must(r.amount > 8.7 && r.amount < 8.8, "ten minus the child's 1.25, all to the one runnable");
+
+   /* Once the tree has spent its cap, nothing more is allowed. */
+   must(db1_work_item_add_cost("bg-root", 10.0) == 0, "charge the cap to the tree");
+   must(db1_wfe_budget_release("bg-root", "owner-a") == 0, "release so it may ask again");
+   must(db1_wfe_budget_reserve("bg-root", "owner-a", &r) == 0, "ask with the budget gone");
+   must(r.allowed == 0, "refused: there is nothing left to divide");
+   must(r.busy == 0, "and refused for want of budget, not because someone holds it");
+
+   must(db1_wfe_budget_heartbeat("bg-kid", "owner-b") == 0, "a heartbeat extends a held lease");
+
+   printf("  PASS: the budget protocol holds across the bus\n");
+}
+
 static void test_a_first_user_claim_says_how_it_went(void)
 {
    /* The claim validates its inputs: a webuser principal, and a bearer that is
@@ -1796,6 +1962,8 @@ int main(int argc, char **argv)
    test_a_plan_carries_its_steps_and_their_dependencies();
    test_a_roundtable_run_round_trips_and_swaps_once();
    test_the_engine_reads_keep_their_predicates();
+   test_the_engine_sweeps_report_what_they_moved();
+   test_the_budget_protocol_holds_across_the_bus();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();

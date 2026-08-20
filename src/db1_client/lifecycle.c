@@ -914,4 +914,232 @@ int db1_wfe_capacity_waits_since_progress(const char *work_item_id, const char *
    return (int)strtoll(slot0, NULL, 10);
 }
 
+int db1_wfe_descendant_ids(const char *work_item_id, char (*out_ids)[DB1_WFE_ID_LEN], int max)
+{
+   if (!work_item_id || !work_item_id[0] || !out_ids || max <= 0)
+      return -1;
+   if (max > 512)
+      max = 512;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {work_item_id, arg1};
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
+   {
+      free(wire_values);
+      free(wire_caps);
+      return -1;
+   }
+   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 1u + 0u] = out_ids[wire_row];
+      wire_caps[wire_row * 1u + 0u] = sizeof out_ids[wire_row];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_DESCENDANT_IDS, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
+   {
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 1u);
+   return wire_rows;
+}
+
+long long db1_wfe_resume_transient(const char *pause_reason, int older_than_secs)
+{
+   if (!pause_reason || !pause_reason[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", older_than_secs);
+   const char *fields[] = {pause_reason, arg1};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_RESUME_TRANSIENT, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (long long)strtoll(slot0, NULL, 10);
+}
+
+long long db1_wfe_resume_wall_caps(int max_resumes)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max_resumes);
+   const char *fields[] = {arg0};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_RESUME_WALL_CAPS, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (long long)strtoll(slot0, NULL, 10);
+}
+
+long long db1_wfe_abandon_exhausted_wall_caps(int max_resumes, int grace_secs)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max_resumes);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", grace_secs);
+   const char *fields[] = {arg0, arg1};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_ABANDON_EXHAUSTED_WALL_CAPS, fields, 2, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (long long)strtoll(slot0, NULL, 10);
+}
+
+long long db1_wfe_resume_ready_parents()
+{
+   const char *const *fields = NULL;
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_RESUME_READY_PARENTS, fields, 0, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (long long)strtoll(slot0, NULL, 10);
+}
+
+int db1_wfe_delegate_job_save(const char *execution_key, const char *work_item_id, long long job_id, const char *participant_token)
+{
+   if (!execution_key || !execution_key[0])
+      return -1;
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%lld", (long long)job_id);
+   const char *fields[] = {execution_key, work_item_id ? work_item_id : "", arg2, participant_token ? participant_token : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_DELEGATE_JOB_SAVE, fields, 4, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_delegate_jobs_terminal_claim(db1_wfe_delegate_job_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 512)
+      max = 512;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **wire_values = malloc((size_t)max * 2u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 2u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 2u + 0u] = out[wire_row].execution_key;
+      wire_caps[wire_row * 2u + 0u] = sizeof out[wire_row].execution_key;
+      wire_values[wire_row * 2u + 1u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 2u + 1u] = sizeof wire_scratch[wire_row * 1u + 0u];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_DELEGATE_JOBS_TERMINAL_CLAIM, fields, 1, wire_values, wire_caps,
+                           (uint32_t)(max * 2), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 2u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 2u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].job_id = (int64_t)strtoll(wire_scratch[wire_row * 1u + 0u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_wfe_budget_reserve(const char *work_item_id, const char *owner, db1_wfe_budget_reservation_t *out)
+{
+   if (!work_item_id || !work_item_id[0] || !owner || !owner[0] || !out)
+      return -1;
+   const char *fields[] = {work_item_id, owner};
+   char slot1[32];
+   char slot2[32];
+   char slot3[32];
+   char slot4[32];
+   char slot5[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {out->root_id, slot1, slot2, slot3, slot4, slot5};
+   const size_t caps[] = {sizeof out->root_id, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_BUDGET_RESERVE, fields, 2, values, caps, 6, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->max_usd = strtod(slot1, NULL);
+   out->amount = strtod(slot2, NULL);
+   out->allowed = (int)strtol(slot3, NULL, 10);
+   out->busy = (int)strtol(slot4, NULL, 10);
+   out->replay_only = (int)strtol(slot5, NULL, 10);
+   return 0;
+}
+
+int db1_wfe_budget_totals(const char *work_item_id, db1_wfe_budget_totals_t *out)
+{
+   if (!work_item_id || !work_item_id[0] || !out)
+      return -1;
+   const char *fields[] = {work_item_id};
+   char slot1[32];
+   char slot2[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {out->root_id, slot1, slot2};
+   const size_t caps[] = {sizeof out->root_id, sizeof slot1, sizeof slot2};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_BUDGET_TOTALS, fields, 1, values, caps, 3, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->spent = strtod(slot1, NULL);
+   out->max_usd = strtod(slot2, NULL);
+   return 0;
+}
+
+int db1_wfe_budget_release(const char *work_item_id, const char *owner)
+{
+   if (!work_item_id || !work_item_id[0] || !owner || !owner[0])
+      return -1;
+   const char *fields[] = {work_item_id, owner};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_BUDGET_RELEASE, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_budget_heartbeat(const char *work_item_id, const char *owner)
+{
+   if (!work_item_id || !work_item_id[0] || !owner || !owner[0])
+      return -1;
+   const char *fields[] = {work_item_id, owner};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_BUDGET_HEARTBEAT, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_budget_reconcile(const char *work_item_id, const char *owner, double actual)
+{
+   if (!work_item_id || !work_item_id[0] || !owner || !owner[0])
+      return -1;
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%.17g", (double)actual);
+   const char *fields[] = {work_item_id, owner, arg2};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_BUDGET_RECONCILE, fields, 3, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
 /* clang-format on */

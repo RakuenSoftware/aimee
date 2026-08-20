@@ -338,12 +338,14 @@
    "active": true,
    "doc": "work-item state and its audit log. Split from workflow because wfe_engine.c wraps sixteen of these writes in two transactions it opens and commits across separate calls, which is a redesign of that engine's write path rather than a wire question.",
    "client_doc": "",
-   "covers": "wfe_engine_store, wfe_store",
+   "covers": "wfe_budget_store, wfe_engine_store, wfe_store",
    "sources": [
+    "wfe_budget_store",
     "wfe_engine_store",
     "wfe_store"
    ],
    "retired_sources": [
+    "wfe_budget_store.c",
     "wfe_engine_store.c",
     "wfe_store.c"
    ]
@@ -24049,6 +24051,541 @@
     ],
     "max_bytes": 32
    }
+  },
+  {
+   "family": "lifecycle",
+   "id": 40,
+   "name": "wfe_descendant_ids",
+   "c_name": "db1_wfe_descendant_ids",
+   "c_params": [
+    "work_item_id",
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 512,
+     "column": {
+      "kind": "text",
+      "width": "DB1_WFE_ID_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 41,
+   "name": "wfe_resume_transient",
+   "c_name": "db1_wfe_resume_transient",
+   "c_params": [
+    "pause_reason",
+    "older_than_secs"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pause_reason",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "older_than_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "resumed",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 42,
+   "name": "wfe_resume_wall_caps",
+   "c_name": "db1_wfe_resume_wall_caps",
+   "c_params": [
+    "max_resumes"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max_resumes",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "resumed",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 43,
+   "name": "wfe_abandon_exhausted_wall_caps",
+   "c_name": "db1_wfe_abandon_exhausted_wall_caps",
+   "c_params": [
+    "max_resumes",
+    "grace_secs"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max_resumes",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "grace_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "abandoned",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 44,
+   "name": "wfe_resume_ready_parents",
+   "c_name": "db1_wfe_resume_ready_parents",
+   "c_params": [],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "resumed",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 45,
+   "name": "wfe_delegate_job_save",
+   "c_name": "db1_wfe_delegate_job_save",
+   "c_params": [
+    "execution_key",
+    "work_item_id",
+    "job_id",
+    "participant_token"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "job_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "participant_token",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 46,
+   "name": "wfe_delegate_jobs_terminal_claim",
+   "c_name": "db1_wfe_delegate_jobs_terminal_claim",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_wfe_delegate_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 512
+    },
+    "fields": [
+     {
+      "name": "execution_key",
+      "type": "text"
+     },
+     {
+      "name": "job_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 47,
+   "name": "wfe_budget_reserve",
+   "c_name": "db1_wfe_budget_reserve",
+   "c_params": [
+    "work_item_id",
+    "owner",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_wfe_budget_reservation_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "root_id",
+      "type": "text"
+     },
+     {
+      "name": "max_usd",
+      "type": "double"
+     },
+     {
+      "name": "amount",
+      "type": "double"
+     },
+     {
+      "name": "allowed",
+      "type": "int"
+     },
+     {
+      "name": "busy",
+      "type": "int"
+     },
+     {
+      "name": "replay_only",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 48,
+   "name": "wfe_budget_totals",
+   "c_name": "db1_wfe_budget_totals",
+   "c_params": [
+    "work_item_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_wfe_budget_totals_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "root_id",
+      "type": "text"
+     },
+     {
+      "name": "spent",
+      "type": "double"
+     },
+     {
+      "name": "max_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 49,
+   "name": "wfe_budget_release",
+   "c_name": "db1_wfe_budget_release",
+   "c_params": [
+    "work_item_id",
+    "owner"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 50,
+   "name": "wfe_budget_heartbeat",
+   "c_name": "db1_wfe_budget_heartbeat",
+   "c_params": [
+    "work_item_id",
+    "owner"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 51,
+   "name": "wfe_budget_reconcile",
+   "c_name": "db1_wfe_budget_reconcile",
+   "c_params": [
+    "work_item_id",
+    "owner",
+    "actual"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "actual",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "applied",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   },
+   "c_returns": "int64"
   },
   {
    "family": "mgmt_jwks",

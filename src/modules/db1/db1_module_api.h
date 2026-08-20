@@ -568,6 +568,18 @@
 #define AIMEE_DB1_OP_WFE_STAGE_LOOP_COUNT                37u
 #define AIMEE_DB1_OP_WFE_RUNNER_FAILURES_SINCE_PROGRESS  38u
 #define AIMEE_DB1_OP_WFE_CAPACITY_WAITS_SINCE_PROGRESS   39u
+#define AIMEE_DB1_OP_WFE_DESCENDANT_IDS                  40u
+#define AIMEE_DB1_OP_WFE_RESUME_TRANSIENT                41u
+#define AIMEE_DB1_OP_WFE_RESUME_WALL_CAPS                42u
+#define AIMEE_DB1_OP_WFE_ABANDON_EXHAUSTED_WALL_CAPS     43u
+#define AIMEE_DB1_OP_WFE_RESUME_READY_PARENTS            44u
+#define AIMEE_DB1_OP_WFE_DELEGATE_JOB_SAVE               45u
+#define AIMEE_DB1_OP_WFE_DELEGATE_JOBS_TERMINAL_CLAIM    46u
+#define AIMEE_DB1_OP_WFE_BUDGET_RESERVE                  47u
+#define AIMEE_DB1_OP_WFE_BUDGET_TOTALS                   48u
+#define AIMEE_DB1_OP_WFE_BUDGET_RELEASE                  49u
+#define AIMEE_DB1_OP_WFE_BUDGET_HEARTBEAT                50u
+#define AIMEE_DB1_OP_WFE_BUDGET_RECONCILE                51u
 
 /* Family 17: the management-JWKS cache row: the envelope the server verified,
  * when it is valid for, and the digests that pin it. Digests cross as hex
