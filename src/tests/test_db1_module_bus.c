@@ -1980,6 +1980,66 @@ static void test_convergence_distinguishes_no_progress_from_too_many_rounds(void
    printf("  PASS: convergence distinguishes no progress from too many rounds\n");
 }
 
+/* The work-item row, all twenty-two fields of it, across the wire.
+ *
+ * work_item_get and work_item_list are exercised by the cases above, but
+ * work_item_list_lru carries the SAME row and had no wire test -- and the row
+ * grew by four fields when the workflow engine's view of a run moved behind the
+ * module (the reservation columns, the proposal's source path, and the
+ * updated_at an operator reads to decide whether a run is stuck).
+ *
+ * A reply whose field count and whose reader disagree does not fail loudly: it
+ * shifts every value after the mismatch, which is how a repo name ends up in a
+ * stage column. So this asserts values at BOTH ends of the row and in the
+ * middle, on a row where every field is distinct.
+ */
+static void test_the_whole_work_item_row_survives_the_wire(void)
+{
+   must(db1_work_item_create("row-1", "repo/row", "p/row", "flow", "v9", "stage-x", "autonomous") ==
+            0,
+        "a run with distinctive values");
+   must(db1_work_item_set_pr_ref("row-1", "pr-77") == 0, "a pr ref");
+   must(db1_work_item_set_worktree("row-1", "aimee/wi/row-1") == 0, "a worktree");
+   must(db1_work_item_set_submitter("row-1", "someone") == 0, "a submitter");
+   must(db1_work_item_set_cost_cap("row-1", 4.5) == 0, "a cap");
+   must(db1_work_item_add_cost("row-1", 1.5) == 0, "some spend");
+   /* A live reservation, so the four columns that moved carry real values
+      rather than defaults that would look identical to a misaligned read. */
+   db1_wfe_budget_reservation_t r;
+   must(db1_wfe_budget_reserve("row-1", "owner-row", &r) == 0 && r.allowed == 1, "reserve");
+
+   /* The list is oldest-first, and by this point the suite has created plenty
+      of runs, so a small bound would cut off the one just written. Ask for the
+      declared maximum rather than a number that happens to work today. */
+   db1_work_item_t *rows = NULL;
+   int n = db1_work_item_list_lru_bounded(&rows, DB1_WORK_ITEM_LIST_MAX);
+   must(n >= 1, "the lru list came back");
+   db1_work_item_t *found = NULL;
+   for (int i = 0; i < n; i++)
+      if (strcmp(rows[i].work_item_id, "row-1") == 0)
+         found = &rows[i];
+   must(found != NULL, "and contains the run");
+
+   /* The front of the row. */
+   must(strcmp(found->repo, "repo/row") == 0, "repo");
+   must(strcmp(found->workflow_version, "v9") == 0, "workflow version");
+   must(strcmp(found->current_stage, "stage-x") == 0, "stage");
+   /* The middle, including the fields appended before this change. */
+   must(strcmp(found->pr_ref, "pr-77") == 0, "pr ref");
+   must(strcmp(found->worktree, "aimee/wi/row-1") == 0, "worktree");
+   must(strcmp(found->submitter, "someone") == 0, "submitter");
+   must(found->cum_cost_usd > 1.4 && found->cum_cost_usd < 1.6, "cumulative cost");
+   must(found->work_item_max_cost_usd > 4.4 && found->work_item_max_cost_usd < 4.6, "cap");
+   /* The tail: the four the engine's move added. A misaligned reply shows up
+      here first, because these are last. */
+   must(found->reserved_cost_usd > 0, "the reservation amount crossed");
+   must(strcmp(found->reservation_state, "reserved") == 0, "and its state");
+   must(found->updated_at[0] != '\0', "and updated_at is populated");
+   free(rows);
+
+   printf("  PASS: the whole work-item row survives the wire\n");
+}
+
 static void test_a_first_user_claim_says_how_it_went(void)
 {
    /* The claim validates its inputs: a webuser principal, and a bearer that is
@@ -2314,6 +2374,7 @@ int main(int argc, char **argv)
    test_tree_operations_move_the_whole_tree();
    test_recovery_never_releases_money_it_cannot_account_for();
    test_convergence_distinguishes_no_progress_from_too_many_rounds();
+   test_the_whole_work_item_row_survives_the_wire();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();

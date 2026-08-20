@@ -369,3 +369,24 @@ func QueryInt(t testing.TB, path, query string, args ...any) int {
 	}
 	return out
 }
+
+// Client returns the bus client itself, for tests about the generated wire
+// surface rather than about the store's behaviour.
+//
+// Most tests want a Store: it is the engine's vocabulary and the thing the
+// engine uses. A few want the layer underneath -- an operation the Store does
+// not expose, or a reply SHAPE whose handling is generated and therefore worth
+// testing once on its own.
+func Client(t testing.TB, path string) *wire.Client {
+	t.Helper()
+	if _, err := Open(t, path); err != nil {
+		t.Fatalf("start module: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	existing, ok := fixtures[path]
+	if !ok || existing.client == nil {
+		t.Fatalf("no client for %s", path)
+	}
+	return existing.client
+}
