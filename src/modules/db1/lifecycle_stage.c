@@ -179,6 +179,7 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
    db1_wfe_budget_reservation_t row_db1_wfe_budget_reservation_t;
    db1_wfe_budget_totals_t row_db1_wfe_budget_totals_t;
    db1_wfe_review_outcome_t row_db1_wfe_review_outcome_t;
+   db1_wfe_frozen_conflict_t row_db1_wfe_frozen_conflict_t;
    const char *row_slots[18];
    char row_text[5][32];
    /* A domain that returns a string hands over the allocation with it. The
@@ -2018,6 +2019,177 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       row_slots[3] = row_db1_wfe_review_outcome_t.pause_reason;
       rows = row_slots;
       row_count = 4u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_CLAIM_FROZEN_CREATES:
+   {
+      if (count != 131u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[130][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_wfe_frozen_claim_t row;
+      memset(&row, 0, sizeof row);
+      snprintf(row.parent_id, sizeof row.parent_id, "%s", field[0]);
+      snprintf(row.work_item_id, sizeof row.work_item_id, "%s", field[1]);
+      snprintf(row.creates[0].path, sizeof row.creates[0].path, "%s", field[2]);
+      snprintf(row.creates[0].content_hash, sizeof row.creates[0].content_hash, "%s", field[3]);
+      snprintf(row.creates[1].path, sizeof row.creates[1].path, "%s", field[4]);
+      snprintf(row.creates[1].content_hash, sizeof row.creates[1].content_hash, "%s", field[5]);
+      snprintf(row.creates[2].path, sizeof row.creates[2].path, "%s", field[6]);
+      snprintf(row.creates[2].content_hash, sizeof row.creates[2].content_hash, "%s", field[7]);
+      snprintf(row.creates[3].path, sizeof row.creates[3].path, "%s", field[8]);
+      snprintf(row.creates[3].content_hash, sizeof row.creates[3].content_hash, "%s", field[9]);
+      snprintf(row.creates[4].path, sizeof row.creates[4].path, "%s", field[10]);
+      snprintf(row.creates[4].content_hash, sizeof row.creates[4].content_hash, "%s", field[11]);
+      snprintf(row.creates[5].path, sizeof row.creates[5].path, "%s", field[12]);
+      snprintf(row.creates[5].content_hash, sizeof row.creates[5].content_hash, "%s", field[13]);
+      snprintf(row.creates[6].path, sizeof row.creates[6].path, "%s", field[14]);
+      snprintf(row.creates[6].content_hash, sizeof row.creates[6].content_hash, "%s", field[15]);
+      snprintf(row.creates[7].path, sizeof row.creates[7].path, "%s", field[16]);
+      snprintf(row.creates[7].content_hash, sizeof row.creates[7].content_hash, "%s", field[17]);
+      snprintf(row.creates[8].path, sizeof row.creates[8].path, "%s", field[18]);
+      snprintf(row.creates[8].content_hash, sizeof row.creates[8].content_hash, "%s", field[19]);
+      snprintf(row.creates[9].path, sizeof row.creates[9].path, "%s", field[20]);
+      snprintf(row.creates[9].content_hash, sizeof row.creates[9].content_hash, "%s", field[21]);
+      snprintf(row.creates[10].path, sizeof row.creates[10].path, "%s", field[22]);
+      snprintf(row.creates[10].content_hash, sizeof row.creates[10].content_hash, "%s", field[23]);
+      snprintf(row.creates[11].path, sizeof row.creates[11].path, "%s", field[24]);
+      snprintf(row.creates[11].content_hash, sizeof row.creates[11].content_hash, "%s", field[25]);
+      snprintf(row.creates[12].path, sizeof row.creates[12].path, "%s", field[26]);
+      snprintf(row.creates[12].content_hash, sizeof row.creates[12].content_hash, "%s", field[27]);
+      snprintf(row.creates[13].path, sizeof row.creates[13].path, "%s", field[28]);
+      snprintf(row.creates[13].content_hash, sizeof row.creates[13].content_hash, "%s", field[29]);
+      snprintf(row.creates[14].path, sizeof row.creates[14].path, "%s", field[30]);
+      snprintf(row.creates[14].content_hash, sizeof row.creates[14].content_hash, "%s", field[31]);
+      snprintf(row.creates[15].path, sizeof row.creates[15].path, "%s", field[32]);
+      snprintf(row.creates[15].content_hash, sizeof row.creates[15].content_hash, "%s", field[33]);
+      snprintf(row.creates[16].path, sizeof row.creates[16].path, "%s", field[34]);
+      snprintf(row.creates[16].content_hash, sizeof row.creates[16].content_hash, "%s", field[35]);
+      snprintf(row.creates[17].path, sizeof row.creates[17].path, "%s", field[36]);
+      snprintf(row.creates[17].content_hash, sizeof row.creates[17].content_hash, "%s", field[37]);
+      snprintf(row.creates[18].path, sizeof row.creates[18].path, "%s", field[38]);
+      snprintf(row.creates[18].content_hash, sizeof row.creates[18].content_hash, "%s", field[39]);
+      snprintf(row.creates[19].path, sizeof row.creates[19].path, "%s", field[40]);
+      snprintf(row.creates[19].content_hash, sizeof row.creates[19].content_hash, "%s", field[41]);
+      snprintf(row.creates[20].path, sizeof row.creates[20].path, "%s", field[42]);
+      snprintf(row.creates[20].content_hash, sizeof row.creates[20].content_hash, "%s", field[43]);
+      snprintf(row.creates[21].path, sizeof row.creates[21].path, "%s", field[44]);
+      snprintf(row.creates[21].content_hash, sizeof row.creates[21].content_hash, "%s", field[45]);
+      snprintf(row.creates[22].path, sizeof row.creates[22].path, "%s", field[46]);
+      snprintf(row.creates[22].content_hash, sizeof row.creates[22].content_hash, "%s", field[47]);
+      snprintf(row.creates[23].path, sizeof row.creates[23].path, "%s", field[48]);
+      snprintf(row.creates[23].content_hash, sizeof row.creates[23].content_hash, "%s", field[49]);
+      snprintf(row.creates[24].path, sizeof row.creates[24].path, "%s", field[50]);
+      snprintf(row.creates[24].content_hash, sizeof row.creates[24].content_hash, "%s", field[51]);
+      snprintf(row.creates[25].path, sizeof row.creates[25].path, "%s", field[52]);
+      snprintf(row.creates[25].content_hash, sizeof row.creates[25].content_hash, "%s", field[53]);
+      snprintf(row.creates[26].path, sizeof row.creates[26].path, "%s", field[54]);
+      snprintf(row.creates[26].content_hash, sizeof row.creates[26].content_hash, "%s", field[55]);
+      snprintf(row.creates[27].path, sizeof row.creates[27].path, "%s", field[56]);
+      snprintf(row.creates[27].content_hash, sizeof row.creates[27].content_hash, "%s", field[57]);
+      snprintf(row.creates[28].path, sizeof row.creates[28].path, "%s", field[58]);
+      snprintf(row.creates[28].content_hash, sizeof row.creates[28].content_hash, "%s", field[59]);
+      snprintf(row.creates[29].path, sizeof row.creates[29].path, "%s", field[60]);
+      snprintf(row.creates[29].content_hash, sizeof row.creates[29].content_hash, "%s", field[61]);
+      snprintf(row.creates[30].path, sizeof row.creates[30].path, "%s", field[62]);
+      snprintf(row.creates[30].content_hash, sizeof row.creates[30].content_hash, "%s", field[63]);
+      snprintf(row.creates[31].path, sizeof row.creates[31].path, "%s", field[64]);
+      snprintf(row.creates[31].content_hash, sizeof row.creates[31].content_hash, "%s", field[65]);
+      snprintf(row.creates[32].path, sizeof row.creates[32].path, "%s", field[66]);
+      snprintf(row.creates[32].content_hash, sizeof row.creates[32].content_hash, "%s", field[67]);
+      snprintf(row.creates[33].path, sizeof row.creates[33].path, "%s", field[68]);
+      snprintf(row.creates[33].content_hash, sizeof row.creates[33].content_hash, "%s", field[69]);
+      snprintf(row.creates[34].path, sizeof row.creates[34].path, "%s", field[70]);
+      snprintf(row.creates[34].content_hash, sizeof row.creates[34].content_hash, "%s", field[71]);
+      snprintf(row.creates[35].path, sizeof row.creates[35].path, "%s", field[72]);
+      snprintf(row.creates[35].content_hash, sizeof row.creates[35].content_hash, "%s", field[73]);
+      snprintf(row.creates[36].path, sizeof row.creates[36].path, "%s", field[74]);
+      snprintf(row.creates[36].content_hash, sizeof row.creates[36].content_hash, "%s", field[75]);
+      snprintf(row.creates[37].path, sizeof row.creates[37].path, "%s", field[76]);
+      snprintf(row.creates[37].content_hash, sizeof row.creates[37].content_hash, "%s", field[77]);
+      snprintf(row.creates[38].path, sizeof row.creates[38].path, "%s", field[78]);
+      snprintf(row.creates[38].content_hash, sizeof row.creates[38].content_hash, "%s", field[79]);
+      snprintf(row.creates[39].path, sizeof row.creates[39].path, "%s", field[80]);
+      snprintf(row.creates[39].content_hash, sizeof row.creates[39].content_hash, "%s", field[81]);
+      snprintf(row.creates[40].path, sizeof row.creates[40].path, "%s", field[82]);
+      snprintf(row.creates[40].content_hash, sizeof row.creates[40].content_hash, "%s", field[83]);
+      snprintf(row.creates[41].path, sizeof row.creates[41].path, "%s", field[84]);
+      snprintf(row.creates[41].content_hash, sizeof row.creates[41].content_hash, "%s", field[85]);
+      snprintf(row.creates[42].path, sizeof row.creates[42].path, "%s", field[86]);
+      snprintf(row.creates[42].content_hash, sizeof row.creates[42].content_hash, "%s", field[87]);
+      snprintf(row.creates[43].path, sizeof row.creates[43].path, "%s", field[88]);
+      snprintf(row.creates[43].content_hash, sizeof row.creates[43].content_hash, "%s", field[89]);
+      snprintf(row.creates[44].path, sizeof row.creates[44].path, "%s", field[90]);
+      snprintf(row.creates[44].content_hash, sizeof row.creates[44].content_hash, "%s", field[91]);
+      snprintf(row.creates[45].path, sizeof row.creates[45].path, "%s", field[92]);
+      snprintf(row.creates[45].content_hash, sizeof row.creates[45].content_hash, "%s", field[93]);
+      snprintf(row.creates[46].path, sizeof row.creates[46].path, "%s", field[94]);
+      snprintf(row.creates[46].content_hash, sizeof row.creates[46].content_hash, "%s", field[95]);
+      snprintf(row.creates[47].path, sizeof row.creates[47].path, "%s", field[96]);
+      snprintf(row.creates[47].content_hash, sizeof row.creates[47].content_hash, "%s", field[97]);
+      snprintf(row.creates[48].path, sizeof row.creates[48].path, "%s", field[98]);
+      snprintf(row.creates[48].content_hash, sizeof row.creates[48].content_hash, "%s", field[99]);
+      snprintf(row.creates[49].path, sizeof row.creates[49].path, "%s", field[100]);
+      snprintf(row.creates[49].content_hash, sizeof row.creates[49].content_hash, "%s", field[101]);
+      snprintf(row.creates[50].path, sizeof row.creates[50].path, "%s", field[102]);
+      snprintf(row.creates[50].content_hash, sizeof row.creates[50].content_hash, "%s", field[103]);
+      snprintf(row.creates[51].path, sizeof row.creates[51].path, "%s", field[104]);
+      snprintf(row.creates[51].content_hash, sizeof row.creates[51].content_hash, "%s", field[105]);
+      snprintf(row.creates[52].path, sizeof row.creates[52].path, "%s", field[106]);
+      snprintf(row.creates[52].content_hash, sizeof row.creates[52].content_hash, "%s", field[107]);
+      snprintf(row.creates[53].path, sizeof row.creates[53].path, "%s", field[108]);
+      snprintf(row.creates[53].content_hash, sizeof row.creates[53].content_hash, "%s", field[109]);
+      snprintf(row.creates[54].path, sizeof row.creates[54].path, "%s", field[110]);
+      snprintf(row.creates[54].content_hash, sizeof row.creates[54].content_hash, "%s", field[111]);
+      snprintf(row.creates[55].path, sizeof row.creates[55].path, "%s", field[112]);
+      snprintf(row.creates[55].content_hash, sizeof row.creates[55].content_hash, "%s", field[113]);
+      snprintf(row.creates[56].path, sizeof row.creates[56].path, "%s", field[114]);
+      snprintf(row.creates[56].content_hash, sizeof row.creates[56].content_hash, "%s", field[115]);
+      snprintf(row.creates[57].path, sizeof row.creates[57].path, "%s", field[116]);
+      snprintf(row.creates[57].content_hash, sizeof row.creates[57].content_hash, "%s", field[117]);
+      snprintf(row.creates[58].path, sizeof row.creates[58].path, "%s", field[118]);
+      snprintf(row.creates[58].content_hash, sizeof row.creates[58].content_hash, "%s", field[119]);
+      snprintf(row.creates[59].path, sizeof row.creates[59].path, "%s", field[120]);
+      snprintf(row.creates[59].content_hash, sizeof row.creates[59].content_hash, "%s", field[121]);
+      snprintf(row.creates[60].path, sizeof row.creates[60].path, "%s", field[122]);
+      snprintf(row.creates[60].content_hash, sizeof row.creates[60].content_hash, "%s", field[123]);
+      snprintf(row.creates[61].path, sizeof row.creates[61].path, "%s", field[124]);
+      snprintf(row.creates[61].content_hash, sizeof row.creates[61].content_hash, "%s", field[125]);
+      snprintf(row.creates[62].path, sizeof row.creates[62].path, "%s", field[126]);
+      snprintf(row.creates[62].content_hash, sizeof row.creates[62].content_hash, "%s", field[127]);
+      snprintf(row.creates[63].path, sizeof row.creates[63].path, "%s", field[128]);
+      snprintf(row.creates[63].content_hash, sizeof row.creates[63].content_hash, "%s", field[129]);
+      int member_130 = 0;
+      if (parse_int(field[130], &member_130) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.create_count = member_130;
+      memset(&row_db1_wfe_frozen_conflict_t, 0, sizeof row_db1_wfe_frozen_conflict_t);
+      rc = db1_wfe_claim_frozen_creates(&row, &row_db1_wfe_frozen_conflict_t);
+      row_slots[0] = row_db1_wfe_frozen_conflict_t.path;
+      row_slots[1] = row_db1_wfe_frozen_conflict_t.existing_work_item;
+      row_slots[2] = row_db1_wfe_frozen_conflict_t.conflicting_work_item;
+      rows = row_slots;
+      row_count = 3u;
       reads = 1;
       break;
    }

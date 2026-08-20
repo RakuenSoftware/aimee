@@ -450,3 +450,108 @@ int db1_wfe_reject_gate(const char *work_item_id, const char *stage, const char 
    }
    return tree_commit(db);
 }
+
+int db1_wfe_claim_frozen_creates(const db1_wfe_frozen_claim_t *claim,
+                                 db1_wfe_frozen_conflict_t *out)
+{
+   if (!claim || !out || !claim->parent_id[0] || !claim->work_item_id[0])
+      return -1;
+   memset(out, 0, sizeof *out);
+   int count = claim->create_count;
+   if (count < 0 || count > DB1_WFE_FROZEN_MAX)
+      return -1;
+   if (count == 0)
+      return 0;
+   sqlite3 *db = db1_conn();
+   if (!db || tree_begin(db) != 0)
+      return -1;
+
+   /* The first statement is a WRITE on purpose. It reserves SQLite's sole
+    * writer before the conflict read below, so two claims can never both
+    * observe an empty claim set and then race independent inserts. It also
+    * validates the owner: only an active child of this parent may freeze. */
+   static const char *own_sql = "UPDATE lifecycle_work_item SET updated_at=updated_at "
+                                "WHERE work_item_id=? AND parent_id=? AND state='active'";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, own_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      tree_rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, claim->work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, claim->parent_id, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int eligible = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
+   sqlite3_finalize(st);
+   if (eligible != 1)
+   {
+      tree_rollback(db);
+      return -1;
+   }
+
+   for (int i = 0; i < count; i++)
+   {
+      const char *path = claim->creates[i].path;
+      const char *hash = claim->creates[i].content_hash;
+      if (!path[0] || !hash[0])
+      {
+         tree_rollback(db);
+         return -1;
+      }
+      /* A sibling that froze this path with DIFFERENT content. Identical
+       * content is two slices agreeing and is allowed to coexist. */
+      static const char *clash_sql = "SELECT work_item_id FROM wfe_frozen_create "
+                                     "WHERE parent_id=? AND path=? AND work_item_id<>? "
+                                     "AND content_hash<>? ORDER BY work_item_id LIMIT 1";
+      if (sqlite3_prepare_v2(db, clash_sql, -1, &st, NULL) != SQLITE_OK)
+      {
+         tree_rollback(db);
+         return -1;
+      }
+      sqlite3_bind_text(st, 1, claim->parent_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, path, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 3, claim->work_item_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 4, hash, -1, SQLITE_TRANSIENT);
+      int clashed = sqlite3_step(st) == SQLITE_ROW;
+      if (clashed)
+      {
+         const unsigned char *existing = sqlite3_column_text(st, 0);
+         snprintf(out->path, sizeof out->path, "%s", path);
+         snprintf(out->existing_work_item, sizeof out->existing_work_item, "%s",
+                  existing ? (const char *)existing : "");
+         snprintf(out->conflicting_work_item, sizeof out->conflicting_work_item, "%s",
+                  claim->work_item_id);
+      }
+      sqlite3_finalize(st);
+      if (clashed)
+      {
+         /* Roll back the whole claim: a partial path set would let the loser's
+          * earlier paths stand while its later ones were refused. */
+         tree_rollback(db);
+         return 0;
+      }
+
+      static const char *publish_sql =
+          "INSERT INTO wfe_frozen_create (parent_id,path,work_item_id,content_hash) "
+          "VALUES (?,?,?,?) "
+          "ON CONFLICT(parent_id,path,work_item_id) DO UPDATE SET "
+          "content_hash=excluded.content_hash, updated_at=datetime('now')";
+      if (sqlite3_prepare_v2(db, publish_sql, -1, &st, NULL) != SQLITE_OK)
+      {
+         tree_rollback(db);
+         return -1;
+      }
+      sqlite3_bind_text(st, 1, claim->parent_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, path, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 3, claim->work_item_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 4, hash, -1, SQLITE_TRANSIENT);
+      rc = sqlite3_step(st);
+      sqlite3_finalize(st);
+      if (rc != SQLITE_DONE)
+      {
+         tree_rollback(db);
+         return -1;
+      }
+   }
+   return tree_commit(db);
+}

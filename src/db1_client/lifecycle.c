@@ -1360,4 +1360,22 @@ int db1_wfe_record_requested_changes(const char *work_item_id, const char *gate,
    return 0;
 }
 
+int db1_wfe_claim_frozen_creates(const db1_wfe_frozen_claim_t *claim, db1_wfe_frozen_conflict_t *out)
+{
+   if (!claim || !out)
+      return -1;
+   char arg130[32];
+   snprintf(arg130, sizeof arg130, "%d", claim->create_count);
+   const char *fields[] = {claim->parent_id, claim->work_item_id, claim->creates[0].path, claim->creates[0].content_hash, claim->creates[1].path, claim->creates[1].content_hash, claim->creates[2].path, claim->creates[2].content_hash, claim->creates[3].path, claim->creates[3].content_hash, claim->creates[4].path, claim->creates[4].content_hash, claim->creates[5].path, claim->creates[5].content_hash, claim->creates[6].path, claim->creates[6].content_hash, claim->creates[7].path, claim->creates[7].content_hash, claim->creates[8].path, claim->creates[8].content_hash, claim->creates[9].path, claim->creates[9].content_hash, claim->creates[10].path, claim->creates[10].content_hash, claim->creates[11].path, claim->creates[11].content_hash, claim->creates[12].path, claim->creates[12].content_hash, claim->creates[13].path, claim->creates[13].content_hash, claim->creates[14].path, claim->creates[14].content_hash, claim->creates[15].path, claim->creates[15].content_hash, claim->creates[16].path, claim->creates[16].content_hash, claim->creates[17].path, claim->creates[17].content_hash, claim->creates[18].path, claim->creates[18].content_hash, claim->creates[19].path, claim->creates[19].content_hash, claim->creates[20].path, claim->creates[20].content_hash, claim->creates[21].path, claim->creates[21].content_hash, claim->creates[22].path, claim->creates[22].content_hash, claim->creates[23].path, claim->creates[23].content_hash, claim->creates[24].path, claim->creates[24].content_hash, claim->creates[25].path, claim->creates[25].content_hash, claim->creates[26].path, claim->creates[26].content_hash, claim->creates[27].path, claim->creates[27].content_hash, claim->creates[28].path, claim->creates[28].content_hash, claim->creates[29].path, claim->creates[29].content_hash, claim->creates[30].path, claim->creates[30].content_hash, claim->creates[31].path, claim->creates[31].content_hash, claim->creates[32].path, claim->creates[32].content_hash, claim->creates[33].path, claim->creates[33].content_hash, claim->creates[34].path, claim->creates[34].content_hash, claim->creates[35].path, claim->creates[35].content_hash, claim->creates[36].path, claim->creates[36].content_hash, claim->creates[37].path, claim->creates[37].content_hash, claim->creates[38].path, claim->creates[38].content_hash, claim->creates[39].path, claim->creates[39].content_hash, claim->creates[40].path, claim->creates[40].content_hash, claim->creates[41].path, claim->creates[41].content_hash, claim->creates[42].path, claim->creates[42].content_hash, claim->creates[43].path, claim->creates[43].content_hash, claim->creates[44].path, claim->creates[44].content_hash, claim->creates[45].path, claim->creates[45].content_hash, claim->creates[46].path, claim->creates[46].content_hash, claim->creates[47].path, claim->creates[47].content_hash, claim->creates[48].path, claim->creates[48].content_hash, claim->creates[49].path, claim->creates[49].content_hash, claim->creates[50].path, claim->creates[50].content_hash, claim->creates[51].path, claim->creates[51].content_hash, claim->creates[52].path, claim->creates[52].content_hash, claim->creates[53].path, claim->creates[53].content_hash, claim->creates[54].path, claim->creates[54].content_hash, claim->creates[55].path, claim->creates[55].content_hash, claim->creates[56].path, claim->creates[56].content_hash, claim->creates[57].path, claim->creates[57].content_hash, claim->creates[58].path, claim->creates[58].content_hash, claim->creates[59].path, claim->creates[59].content_hash, claim->creates[60].path, claim->creates[60].content_hash, claim->creates[61].path, claim->creates[61].content_hash, claim->creates[62].path, claim->creates[62].content_hash, claim->creates[63].path, claim->creates[63].content_hash, arg130};
+   memset(out, 0, sizeof *out);
+   char *const values[] = {out->path, out->existing_work_item, out->conflicting_work_item};
+   const size_t caps[] = {sizeof out->path, sizeof out->existing_work_item, sizeof out->conflicting_work_item};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_CLAIM_FROZEN_CREATES, fields, 131, values, caps, 3, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   return 0;
+}
+
 /* clang-format on */

@@ -245,6 +245,45 @@ extern "C"
                                         int max_iterations, int max_identical, double cost,
                                         db1_wfe_review_outcome_t *out);
 
+#define DB1_WFE_FROZEN_PATH_LEN 1024
+#define DB1_WFE_FROZEN_HASH_LEN 72
+#define DB1_WFE_FROZEN_MAX      64
+
+   typedef struct
+   {
+      char path[DB1_WFE_FROZEN_PATH_LEN];
+      char content_hash[DB1_WFE_FROZEN_HASH_LEN];
+   } db1_wfe_frozen_create_t;
+
+   typedef struct
+   {
+      char parent_id[DB1_WFE_ID_LEN];
+      char work_item_id[DB1_WFE_ID_LEN];
+      db1_wfe_frozen_create_t creates[DB1_WFE_FROZEN_MAX];
+      int create_count;
+   } db1_wfe_frozen_claim_t;
+
+   /* An empty path means there was no conflict. The alternative -- a separate
+    * boolean -- gives two ways to say the same thing and eventually they disagree. */
+   typedef struct
+   {
+      char path[DB1_WFE_FROZEN_PATH_LEN];
+      char existing_work_item[DB1_WFE_ID_LEN];
+      char conflicting_work_item[DB1_WFE_ID_LEN];
+   } db1_wfe_frozen_conflict_t;
+
+   /* Publish every path a slice's frozen diff creates, as a unit.
+    *
+    * Sibling slices may create the same path with the same content -- that is
+    * two slices agreeing -- but two slices creating the same path with
+    * DIFFERENT content is a conflict, and the whole claim rolls back so there
+    * is exactly one winner and never a partial path set.
+    *
+    * Returns 0 with an empty conflict path when the claim was published, 0 with
+    * a conflict when it was refused, -1 on error. */
+   int db1_wfe_claim_frozen_creates(const db1_wfe_frozen_claim_t *claim,
+                                    db1_wfe_frozen_conflict_t *out);
+
 #ifdef __cplusplus
 }
 #endif

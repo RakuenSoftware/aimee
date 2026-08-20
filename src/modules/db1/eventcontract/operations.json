@@ -25364,6 +25364,80 @@
    }
   },
   {
+   "family": "lifecycle",
+   "id": 66,
+   "name": "wfe_claim_frozen_creates",
+   "c_name": "db1_wfe_claim_frozen_creates",
+   "c_params": [
+    "claim",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_wfe_frozen_claim_t",
+    "fields": [
+     {
+      "name": "parent_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "creates",
+      "type": "struct",
+      "repeat": 64,
+      "required": false,
+      "fields": [
+       {
+        "name": "path",
+        "type": "text"
+       },
+       {
+        "name": "content_hash",
+        "type": "text"
+       }
+      ]
+     },
+     {
+      "name": "create_count",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_wfe_frozen_conflict_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "path",
+      "type": "text"
+     },
+     {
+      "name": "existing_work_item",
+      "type": "text"
+     },
+     {
+      "name": "conflicting_work_item",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 2048
+   }
+  },
+  {
    "family": "mgmt_jwks",
    "id": 1,
    "name": "mgmt_jwks_read",

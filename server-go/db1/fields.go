@@ -22,6 +22,7 @@ package db1
 // remainder rather than returning a short final row.
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -152,4 +153,26 @@ func Atof(cell string) (float64, error) {
 		return 0, nil
 	}
 	return strconv.ParseFloat(cell, 64)
+}
+
+// callFields sends a db1-fields-v2 request to the lifecycle stage and returns
+// the module's status and reply fields.
+//
+// Every generated method funnels through here, which is the point: the framing,
+// the deadline and the event/stage pair are decided once. A generated method
+// that carried its own copy of this would be 45 chances to get the framing
+// subtly different.
+func (c *Client) callFields(ctx context.Context, op uint32, fields []string) (uint32, []string, error) {
+	if c == nil || c.caller == nil {
+		return 0, nil, ErrConfig
+	}
+	frame, err := EncodeFields(op, fields)
+	if err != nil {
+		return 0, nil, err
+	}
+	response, err := c.caller.Call(ctx, EventLifecycle, StageLifecycle, 0, c.deadline, frame)
+	if err != nil {
+		return 0, nil, err
+	}
+	return DecodeFields(response)
 }

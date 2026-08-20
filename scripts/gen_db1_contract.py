@@ -3426,6 +3426,335 @@ def stages_header_bytes(catalog: dict[str, object]) -> str:
     return "".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# The Go client.
+#
+# The C client is generated because hand-writing 458 wire encoders is how a
+# contract and its callers drift. The Go side has exactly the same problem and
+# had been solving it by not having a client at all: the workflow engine reached
+# DB1 by opening its SQLite file. Moving it onto the bus means the same 45
+# lifecycle operations need Go callers, and they are generated from this catalog
+# for the same reason the C ones are.
+#
+# Only families listed here are emitted. This is not a general Go binding for
+# every family -- it is the surface one Go process needs, and adding a family
+# here should follow a Go caller that needs it rather than precede one.
+GO_CLIENT_FAMILIES = ("lifecycle",)
+GO_CLIENT_DIR = "server-go/db1"
+
+GO_SCALAR = {"text": "string", "int": "int", "int64": "int64", "double": "float64"}
+
+
+def go_name(snake: str) -> str:
+    """work_item_id -> WorkItemID. Initialisms the Go side already spells that
+    way are kept, because a generated name that fights the surrounding code is
+    a name every caller has to look up."""
+    initialisms = {"id": "ID", "url": "URL", "usd": "USD", "pr": "PR"}
+    parts = [p for p in snake.split("_") if p]
+    return "".join(initialisms.get(p, p.capitalize()) for p in parts)
+
+
+def go_lower(snake: str) -> str:
+    name = go_name(snake)
+    head = name[0].lower() + name[1:] if name else name
+    return head + "_" if head in {"type", "range", "func", "return", "default"} else head
+
+
+def go_encode(field: dict[str, object], var: str) -> str:
+    kind = field.get("type", "text")
+    if kind == "text":
+        return var
+    if kind == "int":
+        return f"Itoa({var})"
+    if kind == "int64":
+        return f"I64toa({var})"
+    return f"Ftoa({var})"
+
+
+def go_struct_name(family: str, operation: dict[str, object]) -> str:
+    return go_name(operation["name"])
+
+
+def go_reply_shape(operation: dict[str, object]) -> str:
+    reply = operation.get("reply") or {}
+    if reply.get("list"):
+        return "list-struct" if reply.get("struct") else "list-text"
+    if reply.get("struct"):
+        return "struct"
+    if reply.get("fields"):
+        return "scalar"
+    return "none"
+
+
+
+
+# member[i].inner, the flattened spelling of a repeated struct member.
+ELEMENT_MEMBER = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]\.([A-Za-z_][A-Za-z0-9_]*)$")
+
+
+def go_repeated_group(fields: list[dict[str, object]]) -> dict[str, object] | None:
+    """Recover one repeated struct member from its flattened fields.
+
+    Returns the outer name, the member fields of one element, and how many
+    elements the wire carries, or None when the request has no repeat. More than
+    one repeated member in a single request is not something the catalog has,
+    and guessing at the interleaving of two would be worse than refusing."""
+    groups: dict[str, dict[str, object]] = {}
+    for field in fields:
+        match = ELEMENT_MEMBER.match(str(field["name"]))
+        if not match:
+            continue
+        outer, index, inner = match.group(1), int(match.group(2)), match.group(3)
+        group = groups.setdefault(outer, {"name": outer, "members": [], "count": 0})
+        group["count"] = max(int(group["count"]), index + 1)
+        if index == 0:
+            members = group["members"]
+            assert isinstance(members, list)
+            members.append({"name": inner, "type": field.get("type", "text")})
+    if not groups:
+        return None
+    if len(groups) > 1:
+        fail("go-client-repeat",
+             f"a Go client operation has {len(groups)} repeated members; one is supported")
+    return next(iter(groups.values()))
+
+
+
+def go_client_bytes(catalog: dict[str, object], family: dict[str, object],
+                    operations: list[dict[str, object]]) -> str:
+    name = family["name"]
+    lines: list[str] = []
+    lines.append("package db1")
+    lines.append("")
+    lines.append(f"// GENERATED from src/modules/db1/eventcontract/operations.json by")
+    lines.append("// scripts/gen_db1_contract.py. Do not edit: add an operation to the catalog")
+    lines.append("// and regenerate, so the wire and its callers cannot drift apart.")
+    lines.append("//")
+    lines.append(f"// Family {family['id']}: {name}, event kind {family['event_kind']}.")
+    lines.append("")
+    lines.append("import (")
+    lines.append('\t"context"')
+    lines.append('\t"fmt"')
+    lines.append(")")
+    lines.append("")
+    lines.append(f"const Event{go_name(name)} uint32 = {family['event_kind']}")
+    lines.append(f"const Stage{go_name(name)} uint32 = {family['id']}")
+    lines.append("")
+    for operation in operations:
+        lines.append(f"const op{go_name(operation['name'])} uint32 = {operation['id']}")
+    lines.append("")
+
+    # Element types for repeated request members, so a caller passes a slice of
+    # named fields rather than a flattened positional list.
+    for operation in operations:
+        repeated = go_repeated_group((operation.get("request") or {}).get("fields", []))
+        if repeated is None:
+            continue
+        item = f"{go_name(operation['name'])}Item"
+        lines.append(f"// {item} is one {repeated['name']} entry for {operation['name']}.")
+        lines.append(f"type {item} struct {{")
+        members = [(go_name(m["name"]), GO_SCALAR[m.get("type", "text")])
+                   for m in repeated["members"]]
+        pad = max((len(name) for name, _ in members), default=0)
+        for name, gotype in members:
+            lines.append(f"\t{name.ljust(pad)} {gotype}")
+        lines.append("}")
+        lines.append("")
+
+    # Reply structs, one per operation that answers with a row.
+    for operation in operations:
+        shape = go_reply_shape(operation)
+        if shape not in {"struct", "list-struct"}:
+            continue
+        reply = operation["reply"]
+        struct = go_struct_name(name, operation)
+        lines.append(f"// {struct} is the row {operation['name']} answers with.")
+        lines.append(f"type {struct} struct {{")
+        # Padded to gofmt's alignment. The generated file is checked byte for
+        # byte against what this emits, so producing something gofmt would
+        # rewrite makes every `go fmt ./...` look like catalog drift.
+        members = [(go_name(field["name"]), GO_SCALAR[field.get("type", "text")])
+                   for field in reply["fields"]]
+        width = max((len(member) for member, _ in members), default=0)
+        for member, gotype in members:
+            lines.append(f"\t{member.ljust(width)} {gotype}")
+        lines.append("}")
+        lines.append("")
+
+    for operation in operations:
+        lines.extend(go_operation_bytes(name, operation))
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def go_operation_bytes(family: str, operation: dict[str, object]) -> list[str]:
+    method = go_name(operation["name"])
+    request = (operation.get("request") or {}).get("fields", [])
+    shape = go_reply_shape(operation)
+    reply = operation.get("reply") or {}
+
+    # A repeated struct member is one Go slice, not N*width positional
+    # parameters. By the time an emitter sees the catalog the repeat has already
+    # been flattened into `member[i].inner` names -- that is what the C emitters
+    # want, because C spells an element exactly that way -- so the grouping is
+    # recovered from the names. The wire still carries every slot: the array is
+    # always N wide and unused slots are empty strings, which is what the C side
+    # reads back.
+    repeated = go_repeated_group(request)
+    plain = [f for f in request if not ELEMENT_MEMBER.match(str(f["name"]))]
+
+    params = ["ctx context.Context"]
+    for field in plain:
+        params.append(f"{go_lower(field['name'])} {GO_SCALAR[field.get('type', 'text')]}")
+    if repeated is not None:
+        params.append(f"{go_lower(str(repeated['name']))} []{go_name(operation['name'])}Item")
+
+    if shape == "none":
+        returns = "error"
+    elif shape == "scalar":
+        cell = reply["fields"][0]
+        returns = f"({GO_SCALAR[cell.get('type', 'text')]}, error)"
+    elif shape == "struct":
+        returns = f"({go_struct_name(family, operation)}, error)"
+    elif shape == "list-text":
+        returns = "([]string, error)"
+    else:
+        returns = f"([]{go_struct_name(family, operation)}, error)"
+
+    zero = {"none": "", "scalar": "0", "struct": "out", "list-text": "nil",
+            "list-struct": "nil"}[shape]
+    if shape == "scalar" and reply["fields"][0].get("type") == "text":
+        zero = '""'
+
+    lines = [f"func (c *Client) {method}({', '.join(params)}) {returns} {{"]
+    if shape == "struct":
+        lines.append(f"\tvar out {go_struct_name(family, operation)}")
+    fail_prefix = "" if shape == "none" else f"{zero}, "
+    lines.append("\tif c == nil || c.caller == nil {")
+    lines.append(f"\t\treturn {fail_prefix}ErrConfig")
+    lines.append("\t}")
+    if repeated is None:
+        encoded = ", ".join(go_encode(f, go_lower(f["name"])) for f in request)
+        lines.append(f"\tfields := []string{{{encoded}}}")
+    else:
+        slot = go_lower(str(repeated["name"]))
+        width = int(repeated["count"])
+        members = repeated["members"]
+        lines.append(f"\tif len({slot}) > {width} {{")
+        lines.append(f'\t\treturn {fail_prefix}fmt.Errorf("db1: {operation["name"]} takes at most '
+                     f'{width} {repeated["name"]}, got %d", len({slot}))')
+        lines.append("\t}")
+        lines.append("\tfields := make([]string, 0, %d)" % len(request))
+        emitted_group = False
+        for field in request:
+            if ELEMENT_MEMBER.match(str(field["name"])):
+                if emitted_group:
+                    continue
+                emitted_group = True
+                lines.append(f"\tfor i := 0; i < {width}; i++ {{")
+                lines.append(f"\t\tif i < len({slot}) {{")
+                for member in members:
+                    expr = go_encode(member, f"{slot}[i].{go_name(member['name'])}")
+                    lines.append(f"\t\t\tfields = append(fields, {expr})")
+                lines.append("\t\t} else {")
+                lines.append(f'\t\t\tfields = append(fields{", \"\"" * len(members)})')
+                lines.append("\t\t}")
+                lines.append("\t}")
+            else:
+                lines.append(f"\tfields = append(fields, {go_encode(field, go_lower(field['name']))})")
+    # An operation that answers with nothing still has a status, but naming its
+    # reply would leave 45 unused variables for the compiler to reject.
+    reply_var = "_" if shape == "none" else "reply"
+    lines.append(f"\tstatus, {reply_var}, err := c.callFields(ctx, op{method}, fields)")
+    lines.append("\tif err != nil {")
+    lines.append(f"\t\treturn {fail_prefix}err")
+    lines.append("\t}")
+    lines.append("\tif status != statusOK {")
+    lines.append(f'\t\treturn {fail_prefix}&StatusError{{Op: "{operation["name"]}", Status: status}}')
+    lines.append("\t}")
+
+    if shape == "none":
+        lines.append("\treturn nil")
+    elif shape == "scalar":
+        cell = reply["fields"][0]
+        lines.append("\tif len(reply) < 1 {")
+        lines.append(f"\t\treturn {zero}, ErrMalformed")
+        lines.append("\t}")
+        kind = cell.get("type", "text")
+        if kind == "text":
+            lines.append("\treturn reply[0], nil")
+        elif kind == "int":
+            lines.append("\treturn Atoi(reply[0])")
+        elif kind == "int64":
+            lines.append("\treturn Atoi64(reply[0])")
+        else:
+            lines.append("\treturn Atof(reply[0])")
+    elif shape == "struct":
+        width = len(reply["fields"])
+        lines.append(f"\tif len(reply) != {width} {{")
+        lines.append(f"\t\treturn out, fmt.Errorf(\"%w: {operation['name']} wants {width} fields, got %d\", ErrMalformed, len(reply))")
+        lines.append("\t}")
+        lines.extend(go_assign_row(reply["fields"], "out", "reply"))
+        lines.append("\treturn out, nil")
+    elif shape == "list-text":
+        lines.append("\treturn reply, nil")
+    else:
+        width = len(reply["fields"])
+        lines.append(f"\trows, err := Rows(reply, {width})")
+        lines.append("\tif err != nil {")
+        lines.append("\t\treturn nil, err")
+        lines.append("\t}")
+        lines.append(f"\tout := make([]{go_struct_name(family, operation)}, 0, len(rows))")
+        lines.append("\tfor _, row := range rows {")
+        lines.append(f"\t\tvar item {go_struct_name(family, operation)}")
+        lines.extend("\t" + line for line in go_assign_row(reply["fields"], "item", "row"))
+        lines.append("\t\tout = append(out, item)")
+        lines.append("\t}")
+        lines.append("\treturn out, nil")
+    lines.append("}")
+    return lines
+
+
+def go_assign_row(fields: list[dict[str, object]], target: str, source: str) -> list[str]:
+    lines: list[str] = []
+    for index, field in enumerate(fields):
+        kind = field.get("type", "text")
+        member = go_name(field["name"])
+        cell = f"{source}[{index}]"
+        if kind == "text":
+            lines.append(f"\t{target}.{member} = {cell}")
+            continue
+        parse = {"int": "Atoi", "int64": "Atoi64", "double": "Atof"}[kind]
+        lines.append(f"\tif value, parseErr := {parse}({cell}); parseErr == nil {{")
+        lines.append(f"\t\t{target}.{member} = value")
+        lines.append("\t} else {")
+        lines.append(f"\t\treturn {'out' if target == 'out' else 'nil'}, parseErr")
+        lines.append("\t}")
+    return lines
+
+
+def validate_go_clients(root: Path, catalog: dict[str, object], write: bool) -> None:
+    families = catalog["families"]
+    operations = catalog["operations"]
+    assert isinstance(families, dict) and isinstance(operations, list)
+    for family_name in GO_CLIENT_FAMILIES:
+        family = families[family_name]
+        owned = [op for op in operations if op["family"] == family_name]
+        owned.sort(key=lambda op: op["id"])
+        path = root / GO_CLIENT_DIR / f"{family_name}_gen.go"
+        expected = go_client_bytes(catalog, family, owned)
+        if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected, encoding="utf-8")
+        try:
+            actual = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            fail("go-client-missing", f"cannot read {path}: {exc}")
+        if actual != expected:
+            fail("go-client-stale",
+                 f"{path} is not what the catalog generates; run "
+                 f"scripts/gen_db1_contract.py --write")
+
 def validate_stages(root: Path, catalog: dict[str, object], write: bool) -> None:
     wanted = {(root / SOURCE_DIR / f"{family['name']}_stage.c"):
               stage_bytes(family, operations, domain_headers(root, operations), root)
@@ -3529,6 +3858,7 @@ def run(root: Path, write: bool = False) -> None:
         (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)
     validate_clients(root, catalog, write)
+    validate_go_clients(root, catalog, write)
     validate_stages(root, catalog, write)
     validate_dispatch(root, catalog)
     validate_process_contract(root, catalog)
