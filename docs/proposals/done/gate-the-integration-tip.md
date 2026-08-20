@@ -1,5 +1,9 @@
 # Proposal: gate the integration branch tip, not only the PRs that build it
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived after the single slice shipped.
 - **Historical state:** approved — single slice.
 

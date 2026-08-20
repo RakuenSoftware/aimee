@@ -9,6 +9,10 @@
 
 # Proposal: CSS migration assistant — exemplar-guided structural conversion
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — **APPROVED at human proposal-gate (JBailes, 2026-06-15) on the
   recurring/subsystem path (§9 case 1)** — build #1/#3 as first-class C
   subsystem + #4-interim + #5; #2-upgrade and #4-full remain deferred follow-on

@@ -1,5 +1,9 @@
 # Autonomous-dev webchat GUI + Random delegate — plan
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Two user-requested additions on top of the (API-first) autonomous-development
 feature. Scope-honest: the webchat is currently a read-only run viewer.
 

@@ -1,5 +1,9 @@
 # Proposal: Unified economizer with a two-tier safety model
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **COMPLETE (closed out 2026-07-04).** All five phases merged to `testing`.
   See the **Implementation status** section below for what shipped, an honest reframe the
   build surfaced, and the carried follow-ups.

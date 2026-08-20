@@ -1,5 +1,9 @@
 # Proposal: Code-graph intelligence — a living, embedded, reasoning graph over code
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Completed:** 2026-06-28
 - **Moved from:** `docs/proposals/pending/code-graph-intelligence.md`

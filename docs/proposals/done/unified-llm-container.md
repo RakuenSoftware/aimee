@@ -1,5 +1,9 @@
 # Proposal: One unified `aimee-llm` container for all LLM use (local CPU/GPU · forward · external)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **IMPLEMENTED** — all seven packets (P1–P7) merged to `testing`
   (2026-06-23). The **live production cutover** (GPU deploy + corpus re-embed) is
   deliberately **operator-gated** — see

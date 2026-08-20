@@ -1,5 +1,9 @@
 # Native TLS backends for the Windows and macOS thin clients
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Scope:** deterministic / build + client transport. Not an intelligence-surface
   proposal (no Architecture Charter role).

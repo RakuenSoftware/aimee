@@ -1,5 +1,9 @@
 # The embedder as a sidecar, and model changes as supported operations
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — sidecar substrate delivered and archived 2026-08-04; deployment/migration residual extracted.
 
 > **Archived after partial delivery.** Two baked embedder images, their guarded publish workflow,

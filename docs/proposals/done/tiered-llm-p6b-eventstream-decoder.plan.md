@@ -1,5 +1,9 @@
 # P6b implementation plan — AWS eventstream framing decoder (P6 §2, memory-safety core)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P6b of P6 (Bedrock). Branch off `testing`. The proposal §2 requires decoding the
 Bedrock streaming wire `application/vnd.amazon.eventstream` — "hand-parsed binary framing in
 C" that MUST "validate the per-message CRC, bound frame/header allocation (reject oversized),

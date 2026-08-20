@@ -258,7 +258,7 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* cJSON stores numbers as doubles. Reject fractional and unrepresentable IDs
  * instead of truncating them into a different memory's integer primary key. */
-static int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
+int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
 {
    cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||

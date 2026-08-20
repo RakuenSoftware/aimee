@@ -1,5 +1,9 @@
 # P7 rotation operations: fenced vendor workflow
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** completed (2026-07-20).
 - **Evidence:** local build/lint/unit and GCC ASAN+UBSAN; real PG17.10 schema,
   RLS, 12-worker fencing, expiry takeover, and stale-winner gates on CT103;

@@ -1,5 +1,9 @@
 # Proposal: typed-fact knowledge layer for identity & world facts
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — reviewed, converged at R3 (reviewer / architect / security
   lenses across minimax + mistral all returned no major issues)
 - **Author:** JBailes

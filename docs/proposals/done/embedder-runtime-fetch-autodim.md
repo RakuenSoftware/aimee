@@ -1,5 +1,9 @@
 # Proposal: Embedder runtime model fetch + auto-dimension
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **SHIPPED / CLOSED (2026-06-24).** The proposal's goal — runtime
   model fetch + a KB that derives `embedding_dim` from the running embedder so the
   two can never drift — is achieved: §1 (thin runtime-fetch image), §2 dim-drift

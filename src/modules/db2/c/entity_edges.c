@@ -24,6 +24,20 @@
    " JOIN projects cpp ON cpp.name=cpg.project"                                                    \
    " WHERE cpg.id=entity_edges.projection_generation_id"                                           \
    " AND cpg.state='visible' AND cpp.lifecycle_state='current'))"
+/* Recall/fusion reads admit BOTH edge populations: a graph walk cares that two
+ * nodes are connected, not which layer connected them. R1-A1 separates the
+ * populations in *results* (a typed-recall walk must not return co_discussed and
+ * vice-versa) — that is a filter on what gets rendered, not on what may serve as
+ * traversal evidence. Co-occurrence rows carry no temporal state; semantic rows
+ * do, so admitting them requires constraining them to current facts or the walk
+ * would traverse retracted ones. Always pair with EE_VISIBLE_PROJECTION. */
+#define EE_ADMIT_CURRENT_SEMANTIC                                                                  \
+   " AND (edge_class <> 'semantic'"                                                                \
+   " OR (superseded_at = '' AND suppressed = 0))"
+#define EE_ADMIT_CURRENT_SEMANTIC_E                                                                \
+   " AND (e.edge_class <> 'semantic'"                                                              \
+   " OR (e.superseded_at = '' AND e.suppressed = 0))"
+
 #define EE_VISIBLE_PROJECTION_E                                                                    \
    " AND (COALESCE(e.edge_origin, '') <> 'code_projection'"                                        \
    " OR EXISTS (SELECT 1 FROM code_projection_generations cpg"                                     \
@@ -379,9 +393,9 @@ int db2_entity_edge_neighbors(const char *entity, db2_entity_neighbor_t *out, in
    char sql[2048];
    snprintf(sql, sizeof(sql),
             "SELECT target, weight FROM entity_edges"
-            " WHERE source = ?1 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION " UNION ALL"
+            " WHERE source = ?1" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " UNION ALL"
             " SELECT source, weight FROM entity_edges"
-            " WHERE target = ?2 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION " LIMIT %d",
+            " WHERE target = ?2" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " LIMIT %d",
             limit_sql);
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -412,11 +426,11 @@ int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, co
    {
       snprintf(sql, sizeof(sql),
                "SELECT target, weight FROM entity_edges"
-               " WHERE source = ?1 AND relation IN (?2, ?3) AND edge_class <> "
-               "'semantic'" EE_VISIBLE_PROJECTION " UNION ALL"
+               " WHERE source = ?1 AND relation IN (?2, "
+               "?3)" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " UNION ALL"
                " SELECT source, weight FROM entity_edges"
-               " WHERE target = ?4 AND relation IN (?5, ?6) AND edge_class <> "
-               "'semantic'" EE_VISIBLE_PROJECTION "%s LIMIT %d",
+               " WHERE target = ?4 AND relation IN (?5, "
+               "?6)" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION "%s LIMIT %d",
                order_by_weight ? " ORDER BY weight DESC" : "", limit_sql);
       aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
       if (!st)
@@ -432,15 +446,14 @@ int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, co
       return n;
    }
 
-   snprintf(
-       sql, sizeof(sql),
-       "SELECT target, weight FROM entity_edges"
-       " WHERE source = ?1 AND relation = ?2 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION
-       " UNION ALL"
-       " SELECT source, weight FROM entity_edges"
-       " WHERE target = ?3 AND relation = ?4 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION
-       "%s LIMIT %d",
-       order_by_weight ? " ORDER BY weight DESC" : "", limit_sql);
+   snprintf(sql, sizeof(sql),
+            "SELECT target, weight FROM entity_edges"
+            " WHERE source = ?1 AND relation = ?2" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION
+            " UNION ALL"
+            " SELECT source, weight FROM entity_edges"
+            " WHERE target = ?3 AND relation = ?4" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION
+            "%s LIMIT %d",
+            order_by_weight ? " ORDER BY weight DESC" : "", limit_sql);
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
@@ -462,7 +475,7 @@ int db2_entity_edge_walk_step(const char *node, edge_t *out, int max)
       return 0;
    static const char *sql =
        "SELECT id, source, relation, target, weight FROM entity_edges"
-       " WHERE (source = ?1 OR target = ?2) AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION
+       " WHERE (source = ?1 OR target = ?2)" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION
        " ORDER BY weight DESC LIMIT 50";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -477,7 +490,8 @@ int db2_entity_edge_walk_step(const char *node, edge_t *out, int max)
    return n;
 }
 
-int db2_entity_edge_walk_step_typed(const char *node, db2_entity_edge_typed_t *out, int max)
+int db2_entity_edge_walk_step_with_kinds(const char *node, db2_entity_edge_with_kinds_t *out,
+                                         int max)
 {
    if (!node || !out || max <= 0)
       return 0;
@@ -491,7 +505,7 @@ int db2_entity_edge_walk_step_typed(const char *node, db2_entity_edge_typed_t *o
        "       COALESCE(object_kind, 99) AS ok,"
        "       weight"
        " FROM entity_edges"
-       " WHERE (source = ?1 OR target = ?2) AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION
+       " WHERE (source = ?1 OR target = ?2)" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION
        " ORDER BY weight DESC LIMIT 50";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -676,7 +690,7 @@ int db2_entity_edge_outbound_neighbors(const char *source, db2_entity_neighbor_t
    char sql[1024];
    snprintf(sql, sizeof(sql),
             "SELECT target, weight FROM entity_edges"
-            " WHERE source = ?1 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION " LIMIT %d",
+            " WHERE source = ?1" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " LIMIT %d",
             limit_sql);
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -726,9 +740,19 @@ int db2_entity_edge_prune_orphans(void)
    if (!conn)
       return 0;
    static const char *sql =
+       /* Orphan pruning is a co-occurrence policy: a co-occurrence edge whose
+        * endpoints no longer appear in any prose memory has lost its evidence and
+        * is genuinely garbage. A typed fact has NOT — it was asserted directly and
+        * carries its own §4/§5 lifecycle (supersede / tombstone, both of which
+        * RETAIN the row per "always keep the origin artifact"). Deleting one
+        * because nobody happened to write prose about the entity destroys a
+        * user-stated Class A fact outright, with no audit trail and no way to
+        * distinguish it from one that was never asserted. Semantic rows leave by
+        * retraction and expiry only. */
        "DELETE FROM entity_edges WHERE id IN ("
        " SELECT e.id FROM entity_edges e"
        " WHERE COALESCE(e.edge_origin, '') != 'code_projection'"
+       " AND e.edge_class <> 'semantic'"
        " AND NOT EXISTS ("
        "  SELECT 1 FROM memories m WHERE m.tier IN ('L1','L2')"
        "  AND (m.key LIKE '%' || e.source || '%' OR m.content LIKE '%' || e.source || '%')"
@@ -1021,6 +1045,22 @@ double db2_entity_edge_prune_priority(int weight, double decayed_utility, double
    return (double)weight + utility_weight * decayed_utility;
 }
 
+/* Split an edge_class/confidence_class row pair into the scoring fields the
+ * traversal callers need. Co-occurrence rows leave confidence_class empty so a
+ * caller can tell "no confidence signal" from a genuine class C. */
+static void edge_class_fields(const char *edge_class, const char *confidence_class,
+                              int *out_is_semantic, char *out_class, size_t class_cap)
+{
+   int semantic = (edge_class && strcmp(edge_class, "semantic") == 0);
+   if (out_is_semantic)
+      *out_is_semantic = semantic;
+   if (!out_class || class_cap == 0)
+      return;
+   out_class[0] = '\0';
+   if (semantic && confidence_class && confidence_class[0])
+      db2_copy_text(out_class, class_cap, confidence_class);
+}
+
 int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weighted_neighbor_t *out,
                                        int max, int limit_sql, int utility_scoring_enabled)
 {
@@ -1033,15 +1073,16 @@ int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weigh
       return 0;
 
    char sql[2048];
-   snprintf(
-       sql, sizeof(sql),
-       "SELECT target, weight, utility_score, utility_touched_at"
-       " FROM entity_edges WHERE source = ?1 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION
-       " UNION ALL"
-       " SELECT source, weight, utility_score, utility_touched_at"
-       " FROM entity_edges WHERE target = ?2 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION
-       " LIMIT %d",
-       limit_sql);
+   snprintf(sql, sizeof(sql),
+            "SELECT target, weight, utility_score, utility_touched_at, relation,"
+            "       edge_class, confidence_class"
+            " FROM entity_edges WHERE source = ?1" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION
+            " UNION ALL"
+            " SELECT source, weight, utility_score, utility_touched_at, relation,"
+            "       edge_class, confidence_class"
+            " FROM entity_edges WHERE target = ?2" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION
+            " LIMIT %d",
+            limit_sql);
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -1057,6 +1098,10 @@ int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weigh
       snprintf(out[n].node, sizeof(out[n].node), "%s", node);
       out[n].weight = aimee_pg_column_int(st, 1);
       out[n].utility_score = aimee_pg_column_double(st, 2);
+      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 4));
+      edge_class_fields(aimee_pg_column_text(st, 5), aimee_pg_column_text(st, 6),
+                        &out[n].is_semantic, out[n].confidence_class,
+                        sizeof(out[n].confidence_class));
       if (utility_scoring_enabled)
       {
          const char *ts = aimee_pg_column_text(st, 3);
@@ -1083,23 +1128,33 @@ int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per
    if (!conn)
       return 0;
 
-   /* CTE: hop1 = 1-hop neighbours; final = hop2 neighbours not in hop1. */
+   /* CTE: hop1 = 1-hop neighbours; final = hop2 neighbours not in hop1.
+    *
+    * Each UNION branch is PARENTHESISED because it carries its own LIMIT.
+    * Postgres rejects `SELECT ... LIMIT n UNION ALL SELECT ...` as a syntax
+    * error: an unparenthesised LIMIT binds to the whole union, so the grammar
+    * will not accept another branch after it. SQLite accepts the same text.
+    * This function's only tests run against the sqlite shim, and it had no
+    * production caller, so it was accepted by the suite and had in fact never
+    * executed against the real database. Verified against PostgreSQL 17. */
    char sql[4096];
    snprintf(sql, sizeof(sql),
             "WITH hop1 AS ("
-            "  SELECT target AS node, weight FROM entity_edges"
-            "  WHERE source = ?1 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION " LIMIT %d"
+            "  (SELECT target AS node, weight, relation, edge_class, confidence_class"
+            "   FROM entity_edges"
+            "   WHERE source = ?1" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " LIMIT %d)"
             "  UNION ALL"
-            "  SELECT source AS node, weight FROM entity_edges"
-            "  WHERE target = ?2 AND edge_class <> 'semantic'" EE_VISIBLE_PROJECTION " LIMIT %d"
+            "  (SELECT source AS node, weight, relation, edge_class, confidence_class"
+            "   FROM entity_edges"
+            "   WHERE target = ?2" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " LIMIT %d)"
             ")"
-            " SELECT node, weight, 1 AS hop FROM hop1"
+            " SELECT node, weight, 1 AS hop, relation, edge_class, confidence_class FROM hop1"
             " UNION ALL"
-            " SELECT DISTINCT e.target, e.weight, 2 AS hop"
+            " SELECT DISTINCT e.target, e.weight, 2 AS hop, e.relation, e.edge_class,"
+            "        e.confidence_class"
             " FROM entity_edges e"
             " JOIN hop1 h ON (e.source = h.node)"
-            " WHERE e.target != ?3"
-            "   AND e.edge_class <> 'semantic'" EE_VISIBLE_PROJECTION_E
+            " WHERE e.target != ?3" EE_ADMIT_CURRENT_SEMANTIC_E EE_VISIBLE_PROJECTION_E
             "   AND e.target NOT IN (SELECT node FROM hop1)"
             " LIMIT %d",
             limit_per_hop, limit_per_hop, max);
@@ -1119,6 +1174,10 @@ int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per
       snprintf(out[n].node, sizeof(out[n].node), "%s", node);
       out[n].weight = aimee_pg_column_int(st, 1);
       out[n].hop = aimee_pg_column_int(st, 2);
+      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 3));
+      edge_class_fields(aimee_pg_column_text(st, 4), aimee_pg_column_text(st, 5),
+                        &out[n].is_semantic, out[n].confidence_class,
+                        sizeof(out[n].confidence_class));
       n++;
    }
    aimee_pg_finalize(st);

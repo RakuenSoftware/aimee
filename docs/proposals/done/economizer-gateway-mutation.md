@@ -1,5 +1,9 @@
 # Proposal: Gateway mutation — primary-agent context reduction
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — implemented + merged to `testing` behind `reduce_gateway_mutate`
   (default OFF, zero behavior change when off), across 7 roundtable-reviewed PRs
   (#1015 config, #1017 session-breaker+telemetry, #1018 decision helpers, #1019

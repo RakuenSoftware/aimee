@@ -1,5 +1,9 @@
 # A delegate's shell and its file tools resolve different roots
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — root-caused and fixed 2026-08-08; all four acceptance criteria met.
 
 > **Delivered.** Shipped across six merged PRs. The headline defect turned out to

@@ -1,5 +1,9 @@
 # Proposal: Cross-repo dependency graph — precise inter-repo edges over the multi-repo corpus
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** COMPLETE (2026-07-01) — engine (S1–S9) shipped+merged; the two follow-up proposals it
   spawned (`done/cross-repo-precision-hardening.md`, `done/cross-repo-recall-recovery.md`) are filed;
   the deferred CLI line-items `--reverse` (PR #937) and `--dry-run` (PR #938) are built; §9 gates

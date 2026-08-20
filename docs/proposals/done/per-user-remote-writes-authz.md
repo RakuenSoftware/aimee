@@ -1,5 +1,9 @@
 # Proposal: Per-user `remote_writes` authorization
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — shipped scope archived 2026-08-04; residual validation extracted.
 
 > **Archived after partial delivery.** Per-user OIDC/PAM login, tiered grants, signed token minting,

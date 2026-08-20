@@ -1,5 +1,9 @@
 # Full Autonomous Development — Implementation Plan
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for the approved proposal (`full-autonomous-development.md`). Phased; each
 phase is independently shippable and roundtable-gated. **Scope invariant: aimee
 never self-initiates — every run originates from a human-submitted proposal.**

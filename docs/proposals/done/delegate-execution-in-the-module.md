@@ -1,5 +1,9 @@
 # Delegate execution moves into the module
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — Go sandbox-specification slice delivered and archived 2026-08-14.
 - **Owner:** delegates.
 

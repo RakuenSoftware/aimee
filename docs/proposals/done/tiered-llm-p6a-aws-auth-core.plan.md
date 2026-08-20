@@ -1,5 +1,9 @@
 # P6a implementation plan — AWS auth core (SigV4 + STS + session-policy + cache isolation)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P6a of P6 (Bedrock + vendor breadth). Branch off `testing`. P6 splits into:
 - **P6a (THIS)** — the PURE, OFFLINE, unit-testable AWS-auth core the proposal's own
   Testing §Unit enumerates: SigV4 signing (against AWS's published test-suite vectors),

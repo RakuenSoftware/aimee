@@ -1,5 +1,9 @@
 # Proposal: aimee-kb web console (dashboard · accounts · governance)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Completed:** 2026-07-04
 - **Moved from:** `docs/proposals/pending/kb-web-console.md`

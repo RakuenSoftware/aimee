@@ -1,5 +1,9 @@
 # Proposal: ingress cost-accounting coverage + request-level cost optimizations
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE (2026-06-16). §1–§7 are implemented and merged to `testing`
   behind default-off rollout flags; the only deferred items are §5 (complexity →
   reasoning-effort cap — deferred by design, see §5) and a *standalone* `/v1/usage/*`

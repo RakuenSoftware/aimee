@@ -1,5 +1,9 @@
 # Proposal: structured-PDF Phase 3–4 — tables → typed facts, visual evidence, OCR, and retrieval-quality (vector + answerability)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **DONE — Phases §A–§D shipped to `testing`** as four
   independently-shippable, default-off PRs (§A #883, §B #885, §C #888, §D #890),
   each roundtable-reviewed on the actual diff before merge. The remaining work is

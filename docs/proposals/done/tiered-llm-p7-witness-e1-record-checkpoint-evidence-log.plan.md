@@ -1,5 +1,9 @@
 # P7-witness-e1 witness record, checkpoint, export form, and evidence log
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
   `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). Record/checkpoint/inclusion-proof
   encodings, deterministic export form, evidence log, and per-`(tenant, provider)`

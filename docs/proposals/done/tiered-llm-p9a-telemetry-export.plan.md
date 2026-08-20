@@ -1,5 +1,9 @@
 # P9a implementation plan — kb telemetry export + ingest schema (P9 §3, +ingest target)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P9a of P9. Branch off `testing` (P1, P3a, P2a, P3b, P4a, P4b, P10 s1/s2/s3b merged).
 P9's substantive value split: §1/§2 are the **server-side forwarder** over the always-mTLS
 channel (integration — needs the P8/P2 channel, deferred); §3 is the **kb enterprise

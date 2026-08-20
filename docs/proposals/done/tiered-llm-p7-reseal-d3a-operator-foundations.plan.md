@@ -1,5 +1,9 @@
 # P7-reseal-d3a operator discovery and activation foundations
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented; production-uninvoked until D3b lands.
 - **Depends on:** P7-reseal D1, D2a, and D2b.
 - **Enables:** D3b's protected-secret START/RESUME, terminal cleanup, and explicit

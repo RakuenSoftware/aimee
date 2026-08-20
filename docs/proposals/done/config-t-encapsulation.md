@@ -1,5 +1,9 @@
 # Proposal: `config_t` is a config-module secret
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — production encapsulation delivered and archived 2026-08-04; test/safety residual extracted.
 
 > **Archived after partial delivery.** The ratchet now reports zero production files naming

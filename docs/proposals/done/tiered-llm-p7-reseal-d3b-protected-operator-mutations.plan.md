@@ -1,5 +1,9 @@
 # P7-reseal-d3b protected operator mutations and operational unseal
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented and validated; merged as the P7-D3b delivery slice.
 - **Depends on:** P7-reseal D1, D2a, D2b, and D3a.
 - **Enables:** authorized whole-vault START/RESUME, exact terminal artifact

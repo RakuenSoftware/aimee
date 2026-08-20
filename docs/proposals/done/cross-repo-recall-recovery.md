@@ -1,5 +1,9 @@
 # Proposal: Cross-repo dependency graph — recall recovery (build-declared edges)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implemented R1–R4 slice-by-slice (PRs
   #846/#847/#849/#851/#852/#853/#855/#857/#861), each roundtable-reviewed to 0-blocking before merge;
   **§9 gates MET** — HIGH+MED recall 100% (up from ~18%) AND precision 100% (0 FPs) on the live .254

@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db1_optional.h"
+#include "modules/db2/c/fact_lifecycle.h" /* §5 fact-class lifecycle jobs */
 #include "modules/db2/c/memory_health.h"
 #include "modules/db2/c/memory_query.h"
 #include "kb.h"
@@ -386,11 +387,31 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired)
       if (n > 0)
          p += n;
    }
+   /* §5 fact-class lifecycle. Both jobs were written and tested but never
+    * scheduled, which inverted the layer's central promise: Class C speculation
+    * accumulated permanently and Class B never earned durability no matter how
+    * often it was confirmed. They belong in the same cycle as the prose-memory
+    * promote/expire jobs and report through the same counters.
+    *
+    * Deliberately NOT gated on typed_facts_enabled: that gate stops new typed
+    * writes, but rows written while it was on must still be allowed to age out
+    * after it is turned off. Both are no-ops on an empty semantic population. */
+   {
+      int n = db2_fact_promote_durable(config_memory_typed_facts_promote_threshold());
+      if (n > 0)
+         p += n;
+   }
+
    int d = memory_demote();
    d += memory_demote_from_failures();
    d += memory_demote_low_effectiveness();
    int e = memory_expire();
    e += memory_enforce_retention();
+   {
+      int n = db2_fact_expire_speculative(config_memory_typed_facts_speculative_ttl_days());
+      if (n > 0)
+         e += n;
+   }
 
    if (promoted)
       *promoted = p;

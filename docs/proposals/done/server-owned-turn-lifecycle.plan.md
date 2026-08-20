@@ -1,5 +1,9 @@
 # Implementation plan: server-owned turn lifecycle (Phase 1)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Diff-level plan for the roundtable-approved design
 (`server-owned-turn-lifecycle.md`). All server-side work ships in **one PR**
 (WP-2 and WP-4 are interdependent). Webchat/SPA work (Step 8–9) may land in the

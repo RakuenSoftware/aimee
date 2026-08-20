@@ -1,5 +1,9 @@
 # P10/P7 slice 3b implementation plan — vault custody selection + seal barrier (P7 §2-3)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice 3b of P10+P7. Branch off `testing` (P1, P3a, P10 s1, P10/P7 s2 merged). The
 prerequisite the deferred CA-key slice revealed: **a live key (CA key, org vendor keys)
 may only live in the vault under an external anchor, never bare `file` custody** (P7 §3).

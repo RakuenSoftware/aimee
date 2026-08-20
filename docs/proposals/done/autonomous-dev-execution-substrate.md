@@ -1,5 +1,9 @@
 # Autonomous Development Execution Substrate: build · verify · push · validate · accept
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** **DONE** (shipped to `testing`, filed 2026-06-28). All five components
   are implemented. The mechanical acceptance block below is green
   (`scripts/dev-accept.py eval` → `passed`). The deployment/hardware **end-to-end**

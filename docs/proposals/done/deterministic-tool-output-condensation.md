@@ -1,5 +1,9 @@
 # Proposal: Deterministic command-aware tool-output condensation
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — the **delegate surface** is implemented + merged to `testing`, wired at
   the live `tool_bash` seam behind `reduce_command_filter` (default **OFF** — "wired +
   shipped, inert until an operator enables the flag"; byte-identical fall-through to the

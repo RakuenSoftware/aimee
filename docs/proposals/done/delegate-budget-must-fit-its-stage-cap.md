@@ -1,5 +1,9 @@
 # A delegate's budget and its stage wall cap must be reconcilable
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE (2026-08-08) — the two limits are reconciled, and whichever one
   stops a delegate now names both of them and the elapsed time. Clause 3 shipped
   in an amended form; see [Amendment](#amendment-2026-08-08). The Go producer, grouped diagnostics,

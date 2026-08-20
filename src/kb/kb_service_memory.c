@@ -1333,6 +1333,56 @@ int kb_handle_memory_supersede(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to supersede memory");
 }
 
+/* §4 retraction: withdraw a typed fact the layer got wrong. `target` is optional
+ * and scopes the retraction to one value; omitting it retracts every current
+ * value of (source, relation). */
+int kb_handle_facts_retract(int fd, cJSON *req)
+{
+   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(req, "source");
+   cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(req, "relation");
+   cJSON *tgt_j = cJSON_GetObjectItemCaseSensitive(req, "target");
+   cJSON *auth_j = cJSON_GetObjectItemCaseSensitive(req, "authority");
+   if (!cJSON_IsString(src_j) || !src_j->valuestring[0] || !cJSON_IsString(rel_j) ||
+       !rel_j->valuestring[0])
+      return kb_send_error(fd, "facts.retract requires a non-empty source and relation");
+   if (tgt_j && !cJSON_IsString(tgt_j))
+      return kb_send_error(fd, "facts.retract target must be a string");
+   if (auth_j && !cJSON_IsString(auth_j))
+      return kb_send_error(fd, "facts.retract authority must be a string");
+
+   cJSON *resp = db2_kb_service_facts_retract_json(
+       src_j->valuestring, rel_j->valuestring, cJSON_IsString(tgt_j) ? tgt_j->valuestring : NULL,
+       cJSON_IsString(auth_j) ? auth_j->valuestring : NULL);
+   return kb_reply_or_error(fd, resp, "failed to retract fact");
+}
+
+/* §3 entity merge: collapse two records of the same real entity into one. */
+int kb_handle_entities_merge(int fd, cJSON *req)
+{
+   cJSON *from_j = cJSON_GetObjectItemCaseSensitive(req, "from_id");
+   cJSON *into_j = cJSON_GetObjectItemCaseSensitive(req, "into_id");
+   if (!cJSON_IsNumber(from_j) || !cJSON_IsNumber(into_j))
+      return kb_send_error(fd, "entities.merge requires numeric from_id and into_id");
+   if (from_j->valuedouble <= 0 || into_j->valuedouble <= 0)
+      return kb_send_error(fd, "entities.merge ids must be positive");
+
+   cJSON *resp = db2_kb_service_entities_merge_json((int64_t)from_j->valuedouble,
+                                                    (int64_t)into_j->valuedouble);
+   return kb_reply_or_error(fd, resp, "failed to merge entities");
+}
+
+/* §3 unmerge: reverse a recorded merge. Without this the merge audit row was
+ * reversible only in principle — nothing outside a test could undo one. */
+int kb_handle_entities_unmerge(int fd, cJSON *req)
+{
+   cJSON *mid_j = cJSON_GetObjectItemCaseSensitive(req, "merge_id");
+   if (!cJSON_IsNumber(mid_j) || mid_j->valuedouble <= 0)
+      return kb_send_error(fd, "entities.unmerge requires a positive merge_id");
+
+   cJSON *resp = db2_kb_service_entities_unmerge_json((int64_t)mid_j->valuedouble);
+   return kb_reply_or_error(fd, resp, "failed to unmerge entities");
+}
+
 int kb_handle_memory_fact_history(int fd, cJSON *req)
 {
    cJSON *key_j = cJSON_GetObjectItemCaseSensitive(req, "key");

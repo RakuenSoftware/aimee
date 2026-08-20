@@ -1,5 +1,9 @@
 # Implementation plan: setup wizard + per-tab tutorials
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to [`proposal-setup-wizard-and-tab-tutorials.md`](./proposal-setup-wizard-and-tab-tutorials.md).
 This plan is the concrete, sliced build-out. Each slice is independently
 shippable, **frontend-only**, and verifiable with `npm run check` + `npm test`

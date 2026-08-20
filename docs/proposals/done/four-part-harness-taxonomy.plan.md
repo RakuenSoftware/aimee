@@ -1,5 +1,9 @@
 # Impl plan: four-part harness taxonomy
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Plan-roundtable status:** converged in two rounds. The automated multi-model
 > panel is unavailable in this environment (no built `aimee` binary, no
 > forge-brokered delegate endpoints), so the gate ran as a four-lens adversarial

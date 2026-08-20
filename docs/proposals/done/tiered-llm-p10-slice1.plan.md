@@ -1,5 +1,9 @@
 # P10 slice 1 implementation plan — vault seams in place (behavior-preserving)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice 1 of P10 (shared vault core). Branch off `testing` (P1 + P3a merged).
 
 ## Key correction to the proposal's premise (verified against the tree)

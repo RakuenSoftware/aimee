@@ -1,5 +1,9 @@
 # P5-B3a live management-health exchange core
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** reviewed implementation plan.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.plan.md`, P5-B.
 - **Depends on:** P5-A, P5-B foundation/B1a/B1b/B1c, P5-B2a/B2b/B2c.

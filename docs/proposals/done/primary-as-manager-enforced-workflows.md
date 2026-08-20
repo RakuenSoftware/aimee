@@ -1,5 +1,9 @@
 # Proposal: Primary-as-manager — request→workflow routing with aimee-enforced review + roundtable
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — all slices **S0–S4 landed / shipped default-OFF** and filed to `done/` (reviewed
   across 4 design rounds + per-slice code roundtables, §9). **Scope of "done" (§8 reconciliation,
   per the completeness roundtable 2026-07-03):** this proposal delivers the §8 guarantee as a *shipped

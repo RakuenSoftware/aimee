@@ -1,5 +1,9 @@
 # Implementation plan — replayable-evidence verification (Part A)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for [replayable-verification-and-deepening-sweep.md](replayable-verification-and-deepening-sweep.md),
 **scoped to Part A only** per the proposal's Phasing decision (ship A standalone,
 exercise its evidence vocabulary on real runs, then plan Part B separately).

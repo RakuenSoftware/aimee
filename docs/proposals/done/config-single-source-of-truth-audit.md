@@ -1,5 +1,9 @@
 # Proposal: config as single source of truth — env/CLI surface audit
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — initial audit and first safety fix archived 2026-08-04; residual extracted.
 
 > **Archived after partial delivery.** The audit established the durable-config versus

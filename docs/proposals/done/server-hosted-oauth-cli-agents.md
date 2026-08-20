@@ -1,5 +1,9 @@
 # Proposal: Server-hosted OAuth CLI agents (claude / codex)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — implemented 2026-06-15 (image enablers; server_cli_oauth
   module + unit test; agent.cli_oauth_{start,code,poll} routes + /v1 + OpenAPI;
   server_cli_oauth_enabled opt-in gate; agent_t.is_server_hosted + panel

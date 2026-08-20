@@ -1287,6 +1287,7 @@ int config_load_file(config_t *cfg)
    issues += config_parse_memory_briefing(cfg, root);
    issues += config_parse_memory_aggregation(cfg, root);
    issues += config_parse_memory_prospective(cfg, root);
+   issues += config_parse_memory_typed_facts(cfg, root);
    issues += config_parse_memory_lifecycle(cfg, root);
    issues += config_parse_memory_recall(cfg, root);
    issues += config_parse_memory_directives(cfg, root);

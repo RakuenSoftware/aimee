@@ -81,6 +81,10 @@ static const elig_row_t g_eligibility[] = {
     {"delegate_sandbox_require_isolation", 1},
     {"delegate_sandbox_learn_packages", 1},
     {"typed_facts_enabled", 1},
+    /* Section-parsed (memory.typed_facts.*) AND value-guarded (both reject <= 0,
+     * which the underlying jobs also refuse), so neither is a pure typed scalar. */
+    {"memory_typed_facts_speculative_ttl_days", 0},
+    {"memory_typed_facts_promote_threshold", 0},
     {"kb_pdf_tier", 0},
     {"kb_pdf_ingest_enabled", 1},
     {"kb_pdf_vector_enabled", 1},

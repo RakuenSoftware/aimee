@@ -1,5 +1,9 @@
 # Implementation plan: credential-vault consolidation
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to [cred-vault-consolidation.md](./cred-vault-consolidation.md) (rev. 3, USER-approved
 2026-06-14, gate 1). Base branch: `testing` (the vault lives there; the docs branch does not).
 Each packet is **independently shippable as its own PR**, built + tested + reviewed + merged
