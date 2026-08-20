@@ -549,8 +549,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *m = cJSON_AddObjectToObject(p, "modes");
       cJSON_AddStringToObject(m, "type", "string");
       cJSON_AddStringToObject(m, "description",
-                              "Comma-separated subset of replay|compact|prune|summarize. "
-                              "Empty = replay,compact,prune (default).");
+                              "Comma-separated subset of replay|compact|summarize. Empty = "
+                              "replay,compact. `prune` is NOT available here: it permanently "
+                              "deletes memories, so it is an operator action "
+                              "(`aimee memory maintain`); asking for it is declined, and an "
+                              "empty request omits it rather than running it.");
       cJSON *dr = cJSON_AddObjectToObject(p, "dry_run");
       cJSON_AddStringToObject(dr, "type", "boolean");
       cJSON_AddStringToObject(dr, "description",
@@ -560,8 +563,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(fc, "description", "Bypass the idle-guard so the cycle always runs.");
       cJSON_AddItemToArray(
           tools, mcp_tool_new("memory_maintain",
-                              "Run a memory maintenance cycle (replay/compact/prune/summarize) and "
-                              "return the summary. Idempotent; idle cycles short-circuit.",
+                              "Run a memory maintenance cycle (replay/compact/summarize) and "
+                              "return the summary. Idempotent; idle cycles short-circuit. This "
+                              "tool never deletes: the destructive `prune` mode is an operator "
+                              "action and is excluded here.",
                               s));
    }
 
@@ -1863,8 +1868,13 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
        mcp_tool_new(
            "mutate",
            "Perform a typed memory mutation. Verbs: store (write new fact), update "
-           "(replace content in place), supersede (replace with version lineage), "
-           "forget (retire/delete), affirm (positive reinforcement), reject (reduce confidence).",
+           "(replace content, keeping the previous value as a version), supersede "
+           "(replace with version lineage), forget (retire: the memory stops "
+           "answering recall but stays in fact history), affirm (positive "
+           "reinforcement), reject (reduce confidence). No verb here destroys a "
+           "stored value — update and forget both preserve the prior content, which "
+           "stays readable via fact history. Permanently erasing a memory is an "
+           "operator action outside this tool.",
            cJSON_Parse(
                "{\"type\":\"object\",\"properties\":{"
                "\"verb\":{\"type\":\"string\","

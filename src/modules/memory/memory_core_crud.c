@@ -54,13 +54,19 @@ void memory_set_audit_hook(memory_audit_hook_fn fn)
 
 /* Fire the audit hook (if installed) with the mutation's NON-CONTENT identity.
  * Never receives memory content; the key/kind are fingerprinted downstream. */
-static void mem_audit(const char *op, int64_t id, const char *tier, const char *kind,
-                      const char *key, double confidence, const char *session_id)
+void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
+                       const char *key, double confidence, const char *session_id)
 {
    memory_audit_hook_fn h = g_mem_audit_hook;
    if (h)
       h(op, id, tier ? tier : "", kind ? kind : "", key ? key : "", confidence,
         session_id ? session_id : "");
+}
+
+static void mem_audit(const char *op, int64_t id, const char *tier, const char *kind,
+                      const char *key, double confidence, const char *session_id)
+{
+   memory_audit_emit(op, id, tier, kind, key, confidence, session_id);
 }
 
 /* gate_check_sensitive, gate_check_ephemeral, and gate_has_evidence_markers
@@ -519,15 +525,46 @@ int memory_touch(int64_t id)
    return db2_memory_touch(id);
 }
 
-int memory_update_content(int64_t id, const char *content)
+int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
+                             int64_t *new_id_out)
 {
+   if (new_id_out)
+      *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
+
+   /* A model correction versions the old value instead of overwriting it. The
+    * store's own write path already makes this choice — memory_store() routes a
+    * materially-different L2 write to memory_supersede() rather than merging
+    * over the existing value — and the update verb has to make the same one, or
+    * it simply becomes the way around it. */
+   if (authority != MEMORY_AUTHORITY_USER)
+   {
+      memory_t old_mem;
+      double confidence = (memory_get(id, &old_mem) == 0) ? old_mem.confidence : 1.0;
+      memory_t sup;
+      memset(&sup, 0, sizeof(sup));
+      if (memory_supersede(id, content, confidence, NULL, &sup) != 0)
+         return -1;
+      if (new_id_out)
+         *new_id_out = sup.id;
+      return 0;
+   }
+
    int changes = db2_memory_update_content(id, content);
    int rc = changes > 0 ? 0 : -1;
    if (rc == 0)
+   {
+      if (new_id_out)
+         *new_id_out = id;
       mem_audit("memory.update", id, NULL, NULL, NULL, 0.0, NULL);
+   }
    return rc;
+}
+
+int memory_update_content(int64_t id, const char *content)
+{
+   return memory_update_content_as(id, content, MEMORY_AUTHORITY_USER, NULL);
 }
 
 int memory_reject(int64_t id, const char *reason)
@@ -548,6 +585,17 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
    if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived())
       hide_archived = 1;
    return db2_memory_list(tier, kind, hide_archived, limit, out, max);
+}
+
+int memory_delete_as(int64_t id, memory_authority_t authority)
+{
+   /* Model-initiated forgetting is a retirement, not a destruction: the content
+    * stops answering recall under its key but stays recoverable. Only a
+    * user/operator — who must clear the separate CAP_MEMORY_ADMIN gate to reach
+    * this at all — gets the irreversible path below. */
+   if (authority != MEMORY_AUTHORITY_USER)
+      return memory_retire(id, NULL);
+   return memory_delete(id);
 }
 
 int memory_delete(int64_t id)

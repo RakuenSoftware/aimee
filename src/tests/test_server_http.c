@@ -1656,6 +1656,26 @@ int main(void)
              server_capability_for_method("help.get"));
       assert(server_http_route_caps("POST", "/v1/mcp/call") == CAP_TOOL_EXECUTE);
 
+      /* Destroying a memory is graded apart from writing one, the way
+       * rules.delete is graded apart from rules.*: a grant that lets an agent
+       * remember must not, by itself, let it forget. */
+      assert(server_capability_for_method("memory.store") == CAP_MEMORY_WRITE);
+      assert(server_capability_for_method("memory.delete") == CAP_MEMORY_ADMIN);
+      assert(server_capability_for_method("memory.delete") !=
+             server_capability_for_method("memory.store"));
+      assert(server_http_route_caps("POST", "/v1/memory/delete") == CAP_MEMORY_ADMIN);
+      /* update overwrites content, so it must be a write — not the memory.*
+       * read-prefix default it used to fall through to. */
+      assert(server_capability_for_method("memory.update") == CAP_MEMORY_WRITE);
+      assert(server_capability_for_method("memory.update") != CAP_MEMORY_READ);
+      /* Mirrors the rules split this is modelled on. */
+      assert(server_capability_for_method("rules.delete") == CAP_RULES_ADMIN);
+      /* memory:admin must not leak into the read-only set, and must stay inside
+       * the authenticated set (the operator can still administer their store). */
+      assert((CAPS_READ_ONLY & CAP_MEMORY_ADMIN) == 0);
+      assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
+      assert((CAPS_ALL & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
+
       /* Reads sit within the read-only set; compute requires CAP_CHAT. */
       assert((server_http_route_caps("GET", "/v1/rules") & ~CAPS_READ_ONLY) == 0);
       assert((server_http_route_caps("POST", "/v1/kb/search") & ~CAPS_READ_ONLY) == 0);

@@ -819,10 +819,14 @@ int kb_client_memory_query_health(memory_health_t *out)
    return 0;
 }
 
-int kb_client_memory_delete(int64_t id)
+int kb_client_memory_delete_as(int64_t id, memory_authority_t authority)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "id", (double)id);
+   /* Only ever sent for a user/operator caller. The KB treats an absent field as
+    * model authority, so a stale client cannot destroy anything. */
+   if (authority == MEMORY_AUTHORITY_USER)
+      cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.delete", req);
    if (!json)
       return -1;
@@ -833,8 +837,15 @@ int kb_client_memory_delete(int64_t id)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
-   kb_client_memory_audit_note("memory.delete", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
+   kb_client_memory_audit_note(authority == MEMORY_AUTHORITY_USER ? "memory.delete"
+                                                                  : "memory.retire",
+                               id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
+}
+
+int kb_client_memory_delete(int64_t id)
+{
+   return kb_client_memory_delete_as(id, MEMORY_AUTHORITY_USER);
 }
 
 int kb_client_memory_stats(memory_stats_t *out)

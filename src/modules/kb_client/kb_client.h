@@ -656,6 +656,11 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
  * failure / kb unreachable.  Mirrors memory_delete(). */
 int kb_client_memory_delete(int64_t id);
 
+/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL retires the memory
+ * (recoverable via memory_fact_history); MEMORY_AUTHORITY_USER destroys it.
+ * kb_client_memory_delete() above is the USER-authority spelling. */
+int kb_client_memory_delete_as(int64_t id, memory_authority_t authority);
+
 /* Increment use_count and stamp last_used_at (positive reinforcement).
  * Returns 0 on success, -1 on failure / kb unreachable. */
 int kb_client_memory_touch(int64_t id);
@@ -663,6 +668,12 @@ int kb_client_memory_touch(int64_t id);
 /* Replace a memory's content in place (update verb).
  * Returns 0 on success, -1 on failure / kb unreachable. */
 int kb_client_memory_update(int64_t id, const char *content);
+
+/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL versions the old content
+ * via supersede and reports the new current id through `new_id_out` (optional);
+ * MEMORY_AUTHORITY_USER overwrites in place and reports `id`. */
+int kb_client_memory_update_as(int64_t id, const char *content, memory_authority_t authority,
+                               int64_t *new_id_out);
 
 /* Apply negative reinforcement: reduce confidence by 0.1 (floor 0.0).
  * Optional reason is recorded for audit.

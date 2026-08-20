@@ -345,6 +345,112 @@ static void test_delete_memory(void)
    teardown();
 }
 
+/* A model-authority forget must NOT destroy the content. It retires the row —
+ * renamed out of the live key — so recall for the key stops finding it while the
+ * content itself survives and stays readable through fact history. */
+static void test_delete_model_authority_retires(void)
+{
+   setup();
+   memory_t m;
+   memory_insert(TIER_L2, KIND_FACT, "retireme", "the original value", 0.5, "s1", &m);
+
+   int rc = memory_delete_as(m.id, MEMORY_AUTHORITY_MODEL);
+   assert(rc == 0);
+
+   /* The row survives, with its content intact... */
+   memory_t check;
+   rc = memory_get(m.id, &check);
+   assert(rc == 0);
+   assert(strcmp(check.content, "the original value") == 0);
+
+   /* ...renamed off the live key, so it no longer answers as the current value. */
+   assert(strcmp(check.key, "retireme") != 0);
+   assert(strstr(check.key, "retireme#v") == check.key);
+
+   /* And it is still reachable as history. */
+   memory_t hist[8];
+   int n = memory_fact_history("retireme", hist, 8);
+   assert(n >= 1);
+   int found = 0;
+   for (int i = 0; i < n; i++)
+      if (hist[i].id == m.id)
+         found = 1;
+   assert(found);
+   teardown();
+}
+
+/* The user-authority path is still a real, irreversible delete — the operator
+ * must be able to take back a memory stored by mistake. */
+static void test_delete_user_authority_destroys(void)
+{
+   setup();
+   memory_t m;
+   memory_insert(TIER_L2, KIND_FACT, "destroyme", "secret", 0.5, "s1", &m);
+
+   assert(memory_delete_as(m.id, MEMORY_AUTHORITY_USER) == 0);
+
+   memory_t check;
+   assert(memory_get(m.id, &check) != 0);
+   teardown();
+}
+
+/* A model-authority update versions the prior content instead of overwriting it;
+ * the old value stays readable and the current value moves to a new id. */
+static void test_update_model_authority_supersedes(void)
+{
+   setup();
+   memory_t m;
+   memory_insert(TIER_L2, KIND_FACT, "changeme", "old value", 0.9, "s1", &m);
+
+   int64_t new_id = 0;
+   assert(memory_update_content_as(m.id, "new value", MEMORY_AUTHORITY_MODEL, &new_id) == 0);
+   assert(new_id > 0 && new_id != m.id);
+
+   /* The new row holds the current value under the live key. */
+   memory_t cur;
+   assert(memory_get(new_id, &cur) == 0);
+   assert(strcmp(cur.content, "new value") == 0);
+   assert(strcmp(cur.key, "changeme") == 0);
+
+   /* The old row still holds the OLD content — this is the whole point. */
+   memory_t old_row;
+   assert(memory_get(m.id, &old_row) == 0);
+   assert(strcmp(old_row.content, "old value") == 0);
+   teardown();
+}
+
+/* The user-authority update still overwrites in place. */
+static void test_update_user_authority_overwrites(void)
+{
+   setup();
+   memory_t m;
+   memory_insert(TIER_L2, KIND_FACT, "editme", "old value", 0.9, "s1", &m);
+
+   int64_t new_id = 0;
+   assert(memory_update_content_as(m.id, "new value", MEMORY_AUTHORITY_USER, &new_id) == 0);
+   assert(new_id == m.id);
+
+   memory_t check;
+   assert(memory_get(m.id, &check) == 0);
+   assert(strcmp(check.content, "new value") == 0);
+   teardown();
+}
+
+/* The MCP `memory_maintain` gate grades a request as destructive when it asks
+ * for prune — including the bare `{}` call, because modes of 0 means
+ * MEMORY_MAINTENANCE_MODES_DEFAULT. That defaulting is the subtle half of the
+ * gate: if prune ever leaves the default set, mcph_memory_maintain's
+ * effective_modes logic must be revisited, or a bare call silently drops from
+ * memory:admin to memory:write. Pin the relationship the gate depends on.
+ *
+ * Prune is destructive, not merely a sweep: memory_expire() wipes every L0 row
+ * and its provenance and deletes stale L1 rows, and memory_enforce_retention()
+ * hard-deletes restricted/sensitive memories past their retention window. */
+static void test_maintenance_default_modes_include_prune(void)
+{
+   assert((MEMORY_MAINTENANCE_MODES_DEFAULT & MEMORY_MAINTENANCE_MODE_PRUNE) != 0);
+}
+
 /* --- Deeper coverage --- */
 
 static void test_list_by_tier_and_kind(void)
@@ -2455,6 +2561,11 @@ int main(void)
    test_fold_session();
    test_stats();
    test_delete_memory();
+   test_delete_model_authority_retires();
+   test_delete_user_authority_destroys();
+   test_update_model_authority_supersedes();
+   test_update_user_authority_overwrites();
+   test_maintenance_default_modes_include_prune();
    test_list_by_tier_and_kind();
    test_get_nonexistent();
    test_delete_nonexistent();
