@@ -580,6 +580,11 @@
 #define AIMEE_DB1_OP_WFE_BUDGET_RELEASE                  49u
 #define AIMEE_DB1_OP_WFE_BUDGET_HEARTBEAT                50u
 #define AIMEE_DB1_OP_WFE_BUDGET_RECONCILE                51u
+#define AIMEE_DB1_OP_WFE_MOVE                            52u
+#define AIMEE_DB1_OP_WFE_RECORD_RETRY                    53u
+#define AIMEE_DB1_OP_WFE_PARK_WITH_DETAIL                54u
+#define AIMEE_DB1_OP_WFE_RESUME                          55u
+#define AIMEE_DB1_OP_WFE_FINISH                          56u
 
 /* Family 17: the management-JWKS cache row: the envelope the server verified,
  * when it is valid for, and the digests that pin it. Digests cross as hex

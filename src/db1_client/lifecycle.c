@@ -1142,4 +1142,60 @@ int db1_wfe_budget_reconcile(const char *work_item_id, const char *owner, double
    return (int)strtoll(slot0, NULL, 10);
 }
 
+int db1_wfe_move(const char *work_item_id, const char *from_stage, const char *to_stage, const char *kind, const char *detail, const char *content_hash, double cost)
+{
+   if (!work_item_id || !work_item_id[0] || !from_stage || !from_stage[0] || !to_stage || !to_stage[0] || !kind || !kind[0])
+      return -1;
+   char arg6[32];
+   snprintf(arg6, sizeof arg6, "%.17g", (double)cost);
+   const char *fields[] = {work_item_id, from_stage, to_stage, kind, detail ? detail : "", content_hash ? content_hash : "", arg6};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_MOVE, fields, 7, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_record_retry(const char *work_item_id, const char *stage, const char *to_stage, const char *detail, int max_attempts, double cost)
+{
+   if (!work_item_id || !work_item_id[0] || !stage || !stage[0])
+      return -1;
+   char arg4[32];
+   snprintf(arg4, sizeof arg4, "%d", max_attempts);
+   char arg5[32];
+   snprintf(arg5, sizeof arg5, "%.17g", (double)cost);
+   const char *fields[] = {work_item_id, stage, to_stage ? to_stage : "", detail ? detail : "", arg4, arg5};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_RECORD_RETRY, fields, 6, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_wfe_park_with_detail(const char *work_item_id, const char *stage, const char *reason, const char *detail, double cost)
+{
+   if (!work_item_id || !work_item_id[0] || !stage || !stage[0])
+      return -1;
+   char arg4[32];
+   snprintf(arg4, sizeof arg4, "%.17g", (double)cost);
+   const char *fields[] = {work_item_id, stage, reason ? reason : "", detail ? detail : "", arg4};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_PARK_WITH_DETAIL, fields, 5, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_resume(const char *work_item_id)
+{
+   if (!work_item_id || !work_item_id[0])
+      return -1;
+   const char *fields[] = {work_item_id};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_RESUME, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_wfe_finish(const char *work_item_id, const char *stage, const char *state, const char *detail, const char *content_hash, double cost)
+{
+   if (!work_item_id || !work_item_id[0] || !state || !state[0])
+      return -1;
+   char arg5[32];
+   snprintf(arg5, sizeof arg5, "%.17g", (double)cost);
+   const char *fields[] = {work_item_id, stage ? stage : "", state, detail ? detail : "", content_hash ? content_hash : "", arg5};
+   return write_result(call_stage(AIMEE_DB1_OP_WFE_FINISH, fields, 6, NULL, NULL, 0, NULL));
+}
+
 /* clang-format on */

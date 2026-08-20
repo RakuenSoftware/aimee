@@ -5330,6 +5330,7 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/lifecycle_stage.o \
                                        $(OBJDIR)/modules/db1/wfe_engine_store.o \
                                        $(OBJDIR)/modules/db1/wfe_budget_store.o \
+                                       $(OBJDIR)/modules/db1/wfe_transition_store.o \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_stage.o \
                                        $(OBJDIR)/modules/db1/mgmt_jwks_cache.o \
                                        $(OBJDIR)/modules/db1/mgmt_nonce_stage.o \

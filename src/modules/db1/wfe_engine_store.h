@@ -131,12 +131,12 @@ extern "C"
    int db1_wfe_budget_reserve(const char *work_item_id, const char *owner,
                               db1_wfe_budget_reservation_t *out);
 
-typedef struct
-{
-   char root_id[DB1_WFE_ID_LEN];
-   double spent;
-   double max_usd;
-} db1_wfe_budget_totals_t;
+   typedef struct
+   {
+      char root_id[DB1_WFE_ID_LEN];
+      double spent;
+      double max_usd;
+   } db1_wfe_budget_totals_t;
 
    /* What the run's whole tree has spent, and the cap declared on its root. */
    int db1_wfe_budget_totals(const char *work_item_id, db1_wfe_budget_totals_t *out);
@@ -153,6 +153,34 @@ typedef struct
     * error. The caller needs that distinction because only the winner may then
     * charge the cost to the tree -- both charging would spend it twice. */
    int db1_wfe_budget_reconcile(const char *work_item_id, const char *owner, double actual);
+
+   /* Stage transitions, each one whole transaction. All of them release the
+    * run's budget reservation, because the invocation it authorized has ended.
+    *
+    * Every one is guarded by the stage the caller believes the run is in: a
+    * transition computed from a stale view must fail rather than overwrite
+    * whatever actually happened. They return -1 when that guard does not match,
+    * which is a lost race and not a broken store. */
+   int db1_wfe_move(const char *work_item_id, const char *from_stage, const char *to_stage,
+                    const char *kind, const char *detail, const char *content_hash, double cost);
+
+   /* Charge one attempt against the stage's retry budget. Returns 1 if that
+    * exhausted it and the run is now parked on 'retry_limit', 0 if it loops
+    * again, -1 on error. */
+   int db1_wfe_record_retry(const char *work_item_id, const char *stage, const char *to_stage,
+                            const char *detail, int max_attempts, double cost);
+
+   int db1_wfe_park_with_detail(const char *work_item_id, const char *stage, const char *reason,
+                                const char *detail, double cost);
+
+   /* Clear a pause and let the stage start over: the attempts that exhausted its
+    * budget are what parked it. */
+   int db1_wfe_resume(const char *work_item_id);
+
+   /* Terminal state, with the run's frozen create records dropped -- they exist
+    * to make a re-run reuse its children, and there will be no re-run. */
+   int db1_wfe_finish(const char *work_item_id, const char *stage, const char *state,
+                      const char *detail, const char *content_hash, double cost);
 
 #ifdef __cplusplus
 }

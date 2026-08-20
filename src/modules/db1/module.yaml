@@ -96,6 +96,7 @@
     "src/modules/db1/wfe_budget_store.c",
     "src/modules/db1/wfe_engine_store.c",
     "src/modules/db1/wfe_store.c",
+    "src/modules/db1/wfe_transition_store.c",
     "src/modules/db1/windows.c",
     "src/modules/db1/wm.c",
     "src/modules/db1/workflow_stage.c",

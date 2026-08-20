@@ -338,16 +338,18 @@
    "active": true,
    "doc": "work-item state and its audit log. Split from workflow because wfe_engine.c wraps sixteen of these writes in two transactions it opens and commits across separate calls, which is a redesign of that engine's write path rather than a wire question.",
    "client_doc": "",
-   "covers": "wfe_budget_store, wfe_engine_store, wfe_store",
+   "covers": "wfe_budget_store, wfe_engine_store, wfe_store, wfe_transition_store",
    "sources": [
     "wfe_budget_store",
     "wfe_engine_store",
-    "wfe_store"
+    "wfe_store",
+    "wfe_transition_store"
    ],
    "retired_sources": [
     "wfe_budget_store.c",
     "wfe_engine_store.c",
-    "wfe_store.c"
+    "wfe_store.c",
+    "wfe_transition_store.c"
    ]
   },
   {
@@ -24586,6 +24588,287 @@
     "max_bytes": 32
    },
    "c_returns": "int64"
+  },
+  {
+   "family": "lifecycle",
+   "id": 52,
+   "name": "wfe_move",
+   "c_name": "db1_wfe_move",
+   "c_params": [
+    "work_item_id",
+    "from_stage",
+    "to_stage",
+    "kind",
+    "detail",
+    "content_hash",
+    "cost"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "from_stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "to_stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "kind",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "detail",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "content_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 53,
+   "name": "wfe_record_retry",
+   "c_name": "db1_wfe_record_retry",
+   "c_params": [
+    "work_item_id",
+    "stage",
+    "to_stage",
+    "detail",
+    "max_attempts",
+    "cost"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "to_stage",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "detail",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max_attempts",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "cost",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "parked",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 54,
+   "name": "wfe_park_with_detail",
+   "c_name": "db1_wfe_park_with_detail",
+   "c_params": [
+    "work_item_id",
+    "stage",
+    "reason",
+    "detail",
+    "cost"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "detail",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 55,
+   "name": "wfe_resume",
+   "c_name": "db1_wfe_resume",
+   "c_params": [
+    "work_item_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 56,
+   "name": "wfe_finish",
+   "c_name": "db1_wfe_finish",
+   "c_params": [
+    "work_item_id",
+    "stage",
+    "state",
+    "detail",
+    "content_hash",
+    "cost"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "state",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "detail",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "content_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
   },
   {
    "family": "mgmt_jwks",

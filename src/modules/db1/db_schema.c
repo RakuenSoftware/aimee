@@ -91,7 +91,8 @@ static void db1_run_migrations(sqlite3 *db)
        "ALTER TABLE lifecycle_work_item ADD COLUMN reserved_cost_usd REAL NOT NULL DEFAULT 0",
        "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_state TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_owner TEXT NOT NULL DEFAULT ''",
-       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_lease_until TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_lease_until TEXT NOT NULL DEFAULT "
+       "''",
        /* Rename the multi-agent "workflow session" store to "ensemble" so it no
         * longer collides with the workflow ENGINE. Runs before the canonical
         * schema SQL: on a legacy DB the RENAME preserves every row and the

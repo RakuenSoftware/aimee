@@ -79,15 +79,24 @@ static char g_tmp[512];
    the wait that proves they attached read the same list, so adding a family
    cannot admit a stage the fixture then fails to wait for -- or the reverse. */
 static const unsigned served[] = {
-    AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
-    AIMEE_DB1_EVENT_CONVERSATION,     AIMEE_DB1_EVENT_AGENT_WORK,
-    AIMEE_DB1_EVENT_DELEGATION,       AIMEE_DB1_EVENT_SESSIONS,
-    AIMEE_DB1_EVENT_RUNTIME,          AIMEE_DB1_EVENT_TELEMETRY,
-    AIMEE_DB1_EVENT_GUARDRAIL_STATE,  AIMEE_DB1_EVENT_ENSEMBLE,
-    AIMEE_DB1_EVENT_WORKFLOW,         AIMEE_DB1_EVENT_ROUNDTABLE,
-    AIMEE_DB1_EVENT_IDENTITY,         AIMEE_DB1_EVENT_CHECKPOINTS,
-    AIMEE_DB1_EVENT_JTI_REPLAY,       AIMEE_DB1_EVENT_MGMT_JWKS,
-    AIMEE_DB1_EVENT_MGMT_NONCE,       AIMEE_DB1_EVENT_PKI,
+    AIMEE_DB1_EVENT_ECONOMIZER_STATE,
+    AIMEE_DB1_EVENT_GIT_OWNERSHIP,
+    AIMEE_DB1_EVENT_CONVERSATION,
+    AIMEE_DB1_EVENT_AGENT_WORK,
+    AIMEE_DB1_EVENT_DELEGATION,
+    AIMEE_DB1_EVENT_SESSIONS,
+    AIMEE_DB1_EVENT_RUNTIME,
+    AIMEE_DB1_EVENT_TELEMETRY,
+    AIMEE_DB1_EVENT_GUARDRAIL_STATE,
+    AIMEE_DB1_EVENT_ENSEMBLE,
+    AIMEE_DB1_EVENT_WORKFLOW,
+    AIMEE_DB1_EVENT_ROUNDTABLE,
+    AIMEE_DB1_EVENT_IDENTITY,
+    AIMEE_DB1_EVENT_CHECKPOINTS,
+    AIMEE_DB1_EVENT_JTI_REPLAY,
+    AIMEE_DB1_EVENT_MGMT_JWKS,
+    AIMEE_DB1_EVENT_MGMT_NONCE,
+    AIMEE_DB1_EVENT_PKI,
     /* Lifecycle was absent from this list until the engine's own reads were
      * declared, so every work-item operation in the catalog was unserved here
      * and the suite still reported that the module serves what the daemon asks
@@ -1410,8 +1419,8 @@ static void test_the_engine_reads_keep_their_predicates(void)
    must(db1_work_item_create("wi-root", "repo/a", "git:refs/heads/topic", "build", "1", "plan",
                              "autonomous") == 0,
         "create a root run");
-   must(db1_work_item_create("wi-child", "repo/a", "slice/1", "build", "1", "plan",
-                             "autonomous") == 0,
+   must(db1_work_item_create("wi-child", "repo/a", "slice/1", "build", "1", "plan", "autonomous") ==
+            0,
         "create a second run");
    must(db1_work_item_set_parent("wi-child", "wi-root") == 0, "make it a child");
 
@@ -1476,11 +1485,13 @@ static void test_the_engine_reads_keep_their_predicates(void)
 static void test_the_engine_sweeps_report_what_they_moved(void)
 {
    /* A subtree: root -> child -> grandchild. */
-   must(db1_work_item_create("tr-root", "repo/t", "p/root", "build", "1", "plan", "autonomous") == 0,
+   must(db1_work_item_create("tr-root", "repo/t", "p/root", "build", "1", "plan", "autonomous") ==
+            0,
         "root");
    must(db1_work_item_create("tr-kid", "repo/t", "p/kid", "build", "1", "plan", "autonomous") == 0,
         "child");
-   must(db1_work_item_create("tr-gkid", "repo/t", "p/gkid", "build", "1", "plan", "autonomous") == 0,
+   must(db1_work_item_create("tr-gkid", "repo/t", "p/gkid", "build", "1", "plan", "autonomous") ==
+            0,
         "grandchild");
    must(db1_work_item_set_parent("tr-kid", "tr-root") == 0, "link child");
    must(db1_work_item_set_parent("tr-gkid", "tr-kid") == 0, "link grandchild");
@@ -1632,6 +1643,98 @@ static void test_the_budget_protocol_holds_across_the_bus(void)
    must(db1_wfe_budget_heartbeat("bg-kid", "owner-b") == 0, "a heartbeat extends a held lease");
 
    printf("  PASS: the budget protocol holds across the bus\n");
+}
+
+/* Stage transitions, which are whole transactions rather than queries. The
+   things worth asserting are the ones that only hold if the transaction held:
+   that a move from the wrong stage changes nothing AND writes no event, that a
+   transition releases the budget reservation it consumed, and that a loop does
+   not wipe the attempt counter that bounds it. */
+static void test_transitions_are_all_or_nothing(void)
+{
+   db1_work_item_t item;
+   must(db1_work_item_create("tx-1", "repo/x", "p/one", "build", "1", "plan", "autonomous") == 0,
+        "a run in plan");
+
+   /* Take a reservation so the transition has something to release. */
+   db1_wfe_budget_reservation_t r;
+   must(db1_wfe_budget_reserve("tx-1", "owner-a", &r) == 0, "reserve");
+   must(r.allowed == 1, "allowed");
+
+   /* A move from a stage the run is not in must fail, and must leave no trace. */
+   must(db1_wfe_move("tx-1", "review", "merge", "advance", "d", "h", 1.0) == -1,
+        "a move from the wrong stage is refused");
+   must(db1_work_item_get("tx-1", &item) == 1, "the run is still there");
+   must(strcmp(item.current_stage, "plan") == 0, "and still in plan");
+   must(item.cum_cost_usd == 0.0, "the refused move charged nothing");
+   db1_lifecycle_event_t *events = NULL;
+   int n = db1_lifecycle_event_list("tx-1", &events);
+   free(events);
+   must(n == 0, "and wrote no event -- the whole transaction rolled back");
+
+   /* The real move: stage advances, cost is charged, reservation released. */
+   must(db1_wfe_move("tx-1", "plan", "review", "advance", "planned", "hash-1", 2.5) == 0,
+        "advance out of plan");
+   must(db1_work_item_get("tx-1", &item) == 1, "read it back");
+   must(strcmp(item.current_stage, "review") == 0, "the stage moved");
+   must(item.cum_cost_usd == 2.5, "the cost was charged");
+   must(strcmp(item.content_hash, "hash-1") == 0, "the hash was recorded");
+   /* The reservation is gone, so the next reserve computes a fresh share rather
+      than seeing this invocation's estimate as still outstanding. */
+   must(db1_wfe_budget_reserve("tx-1", "owner-b", &r) == 0, "a different owner may now reserve");
+   must(r.allowed == 1 && r.busy == 0, "because the transition released the old one");
+   must(db1_wfe_budget_release("tx-1", "owner-b") == 0, "put it back");
+
+   /* Retries: each attempt counts, and the cap parks the run in place. */
+   must(db1_wfe_record_retry("tx-1", "review", "plan", "again", 2, 0.1) == 0, "first retry loops");
+   must(db1_work_item_get("tx-1", &item) == 1, "read");
+   must(strcmp(item.current_stage, "plan") == 0, "and it looped back to plan");
+   must(db1_wfe_move("tx-1", "plan", "review", "advance", "", "", 0) == 0, "back to review");
+   must(db1_wfe_record_retry("tx-1", "review", "plan", "again", 2, 0.1) == 1,
+        "the second retry exhausts the cap");
+   must(db1_work_item_get("tx-1", &item) == 1, "read");
+   must(strcmp(item.pause_reason, "retry_limit") == 0, "parked on the retry limit");
+   must(strcmp(item.current_stage, "review") == 0, "in the stage that failed, not the next one");
+
+   /* Resuming clears the pause and the attempts that caused it, so the stage
+      does not park again on its very next try. */
+   must(db1_wfe_resume("tx-1") == 0, "resume it");
+   must(db1_work_item_get("tx-1", &item) == 1, "read");
+   must(strcmp(item.pause_reason, "") == 0, "the pause is cleared");
+   must(db1_stage_attempt_get("tx-1", "review") == 0, "and so are the attempts");
+
+   /* A loop must NOT clear the attempts of the stage it leaves: that counter is
+      what bounds the loop, and wiping it is how a gate ran 63 times against a
+      cap of 20. */
+   must(db1_wfe_record_retry("tx-1", "review", "plan", "d", 5, 0) == 0, "one attempt");
+   must(db1_stage_attempt_get("tx-1", "review") == 1, "counted");
+   must(db1_wfe_move("tx-1", "plan", "review", "loop", "", "", 0) == 0, "loop back into review");
+   must(db1_stage_attempt_get("tx-1", "review") == 1,
+        "a loop left the counter alone -- otherwise the cap could never be reached");
+   must(db1_wfe_move("tx-1", "review", "merge", "advance", "", "", 0) == 0, "now advance out");
+   must(db1_stage_attempt_get("tx-1", "review") == 0,
+        "an advance cleared the completed stage's attempts");
+
+   /* Parking records why, and charges what the attempt cost. */
+   must(db1_wfe_park_with_detail("tx-1", "merge", "ci_pending", "waiting on ci", 0.25) == 0,
+        "park it");
+   must(db1_work_item_get("tx-1", &item) == 1, "read");
+   must(strcmp(item.pause_reason, "ci_pending") == 0, "the reason is recorded");
+   /* 2.5 for the advance, 0.1 for each of the two retries, 0.25 for the park.
+      Every transition charges what its attempt cost, which is why the total is
+      worth asserting rather than just the last write. */
+   must(item.cum_cost_usd > 2.94 && item.cum_cost_usd < 2.96, "and the cost accrued");
+
+   /* Finishing is allowed from a parked run -- the decision that finishes it is
+      often the one that unparks it -- and it takes the run terminal. */
+   must(db1_wfe_finish("tx-1", "merge", "accepted", "merged", "hash-2", 0.5) == 0, "finish");
+   must(db1_work_item_get("tx-1", &item) == 1, "read");
+   must(strcmp(item.state, "accepted") == 0, "terminal");
+   must(strcmp(item.pause_reason, "") == 0, "and no longer parked");
+   must(db1_wfe_move("tx-1", "merge", "done", "advance", "", "", 0) == -1,
+        "a terminal run cannot be moved again");
+
+   printf("  PASS: transitions are all or nothing\n");
 }
 
 static void test_a_first_user_claim_says_how_it_went(void)
@@ -1964,6 +2067,7 @@ int main(int argc, char **argv)
    test_the_engine_reads_keep_their_predicates();
    test_the_engine_sweeps_report_what_they_moved();
    test_the_budget_protocol_holds_across_the_bus();
+   test_transitions_are_all_or_nothing();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();
