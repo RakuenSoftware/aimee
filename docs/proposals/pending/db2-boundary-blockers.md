@@ -200,13 +200,76 @@ the envelope should carry an explicit family discriminator is a wire-format
 decision, and changing it later is a breaking change; recorded now while the
 wire is still only spoken by this repository.
 
-## Two declarations list projects, and only one can have a reply
+## Sixty-three list operations return more rows than one reply can hold
+
+The generated client declares its reply buffer as a local array, so a whole
+list crosses in a single envelope and the generator refuses any schema whose
+widest reply passes 65536 bytes. That is a deliberate bound -- sixty-four
+memory rows do not belong on a caller's stack -- and it decides which list
+operations can be published as they stand.
+
+The arithmetic is fixed. A string field costs four bytes of length plus its
+declared maximum, a 32-bit number four, a 64-bit number or a double eight, and
+the envelope and row count take 28. So a row type's widest encoding divides
+65508 to give the rows one reply holds.
+
+Measured against what callers actually ask for -- the size of the arrays they
+declare of that row type, which is what they pass as the maximum -- the 132
+pending declarations returning a struct row divide as:
+
+    49  fit what their callers ask for
+    63  hold fewer rows than a caller asks for
+    20  could not be measured from the headers
+
+The forty pending declarations returning bare identifiers are not affected: at
+eight bytes a row, one reply holds more than eight thousand.
+
+The short ones are short by a lot, not a little:
+
+    row type                bytes/row   rows per reply   caller asks for
+    project_info_t               4265               15               512
+    term_hit_t                   4273               15               128
+    caller_hit_t                 4365               15               128
+    db2_memory_pair_row_t        4118               15               200
+    db2_decision_log_row_t       3382               19               256
+    memory_directive_t           1823               35               256
+    memory_prospective_t         2125               30               256
+    anti_pattern_t               1664               39               256
+    rule_t                       1568               41               256
+
+The row types are wide because their string fields are declared at the largest
+size the column allows -- a directive's question is 512 bytes and its evidence
+another 512, whether or not any real directive fills them. The wire has to
+budget for the maximum; the database rarely returns it.
+
+Three ways out, and they are not exclusive:
+
+Page the reply. The request grows a cursor and the reply says whether more
+follows. This is the honest answer for a list whose length the caller does not
+control, and it is a change every caller of a paged operation has to make.
+
+Narrow the rows. Several of these operations are read for two or three of their
+fields and hand back twenty. A projection with the fields the caller uses would
+put most of the short list back under the bound, at the cost of a schema per
+caller rather than per table.
+
+Raise the bound. Sixty-four kilobytes on a caller's stack is already generous;
+a heap reply would lift the limit and change what a generated client is. That
+is a decision about the client, not about any operation.
+
+Nothing here is blocked on a defect. It is blocked on choosing, once, how this
+boundary carries a list that does not fit -- and the choice should be made
+before sixty-three operations are written to whichever convention came first.
+
+## Two declarations list projects, and one of them should go
 
     int db2_canonical_index_list_projects(project_info_t *out, int max);
     int db2_code_index_project_list(project_info_t *out, int max);
 
-They return the same rows in the same shape. One of them should go, but a
-project row carries a path of up to 4KB and the count is unbounded, so neither
-can be published until the reply format for a list of large rows exists. Folding
-them before that would mean choosing which of the two names survives without
-being able to test that the survivor returns what both callers expect.
+They return the same rows in the same shape. Both are in the short list above
+-- a project row is 4265 bytes at its widest, fifteen to a reply, against the
+512 a caller asks for -- so whichever way that is settled applies to both. What
+is particular to this pair is that one of them is redundant, and folding them
+means choosing which name survives without being able to test that the survivor
+returns what both callers expect. Doing that at the same time as changing how
+the list crosses would make a behaviour change look like a plumbing change.
