@@ -1,5 +1,9 @@
 # P6c-egress authority slice — catalog target resolution and policy region semantics
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 **State:** delivered and validated on PostgreSQL 17 (focused units, ASAN/UBSAN,
 server/kb builds, static gates, and the full tenant/RLS gate).
 

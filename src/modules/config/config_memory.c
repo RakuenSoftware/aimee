@@ -328,6 +328,53 @@ int config_parse_memory_prospective(config_t *cfg, const cJSON *root)
    return issues;
 }
 
+/* memory.typed_facts.* — §5 fact-class lifecycle horizons, consumed by the two
+ * maintenance jobs in memory_run_maintenance(). Separate from kb.typed_facts.*,
+ * which governs rel_type promotion rather than per-fact confidence class. */
+int config_parse_memory_typed_facts(config_t *cfg, const cJSON *root)
+{
+   const cJSON *memory = cJSON_GetObjectItemCaseSensitive(root, "memory");
+   if (!memory)
+      return 0;
+   if (!cJSON_IsObject(memory))
+      return config_issue("\"memory\" expected object, got %s", jo_type_name(memory));
+
+   const cJSON *tf = cJSON_GetObjectItemCaseSensitive(memory, "typed_facts");
+   if (!tf)
+      return 0;
+   if (!cJSON_IsObject(tf))
+      return config_issue("\"memory.typed_facts\" expected object, got %s", jo_type_name(tf));
+
+   int issues = 0;
+   const cJSON *item = cJSON_GetObjectItemCaseSensitive(tf, "speculative_ttl_days");
+   if (item)
+   {
+      if (!cJSON_IsNumber(item))
+         issues += config_issue("\"memory.typed_facts.speculative_ttl_days\" expected number, "
+                                "got %s",
+                                jo_type_name(item));
+      else if ((int)item->valuedouble <= 0)
+         /* The underlying job rejects a non-positive TTL, and silently keeping a
+          * value it will refuse would read as "expiry configured" while nothing
+          * expires — the exact failure this whole change is fixing. */
+         issues += config_issue("\"memory.typed_facts.speculative_ttl_days\" must be > 0");
+      else
+         cfg->memory_typed_facts_speculative_ttl_days = (int)item->valuedouble;
+   }
+   item = cJSON_GetObjectItemCaseSensitive(tf, "promote_threshold");
+   if (item)
+   {
+      if (!cJSON_IsNumber(item))
+         issues += config_issue("\"memory.typed_facts.promote_threshold\" expected number, got %s",
+                                jo_type_name(item));
+      else if ((int)item->valuedouble <= 0)
+         issues += config_issue("\"memory.typed_facts.promote_threshold\" must be > 0");
+      else
+         cfg->memory_typed_facts_promote_threshold = (int)item->valuedouble;
+   }
+   return issues;
+}
+
 int config_parse_memory_lifecycle(config_t *cfg, const cJSON *root)
 {
    const cJSON *memory = cJSON_GetObjectItemCaseSensitive(root, "memory");

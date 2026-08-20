@@ -1,5 +1,9 @@
 # Proposal: run CI on slice sub-PRs
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived after the implementation and rollout decision were completed.
 - **Historical state:** implementation prepared — option 1 is present in `ci.yml`; rollout remained
   blocked until the pre-enablement Q0 baseline was recorded.

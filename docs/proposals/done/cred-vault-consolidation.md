@@ -1,5 +1,9 @@
 # Proposal: complete credential-vault consolidation
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — rev. 3 implemented across P1–P4 + a 2026-06-28 closeout (PRs #833/#834/#836/#837);
   see §Closeout. (rev. 3 history: R1+R2 reviewed → revised; fleet can only reliably review a doc this
   size via one model — see §Review history; USER proposal-approval was gate 1.)

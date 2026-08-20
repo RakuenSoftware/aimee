@@ -1,5 +1,9 @@
 # Handoff: nomic embedder + prefix support, and reranker removal
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **DONE.** All three work items landed on `rewrite/go-server-wfe`:
   prefix support (`8a925c322`, `7e1cce7d6`), the embedder registry that made the
   swap modular (`98f72a58f`), and the reranker removal (`af6bb1f6e` serving side,

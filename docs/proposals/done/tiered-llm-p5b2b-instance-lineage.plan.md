@@ -1,5 +1,9 @@
 # P5-B2b primary management-instance lineage
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** completed; roundtable-converged and validated locally plus CT260 real PG17 and production-profile leaves.
 - **Depends on:** P5-B1c online status authority; P5-B2a workload provider;
   P5-A management certificate profile and enrollment substrate.

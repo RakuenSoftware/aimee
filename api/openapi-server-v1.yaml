@@ -3603,6 +3603,125 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /facts/retract:
+    post:
+      summary: Retract a typed fact
+      description: >
+        Withdraws a typed fact the store got wrong. Nothing is deleted: the
+        relation's correction_behavior decides whether the edge is superseded
+        (archived, still auditable) or tombstoned, and either way the row is
+        retained. Omit `target` to retract every current value of
+        (source, relation); supply it to retract one specific value.
+
+        `authority` defaults to "model". A model authority may not retract a
+        user-stated Class A fact; those edges are skipped rather than refused,
+        so a partial retraction reports how many edges it actually affected.
+        `retracted: 0` is a success meaning nothing current matched.
+
+        An immutable relation is refused with 400 unless the authority is "user".
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, relation]
+              properties:
+                source: { type: string, minLength: 1 }
+                relation: { type: string, minLength: 1 }
+                target:
+                  type: string
+                  description: Optional; omit to retract all current values of (source, relation)
+                authority:
+                  type: string
+                  enum: [user, model]
+                  default: model
+      responses:
+        "200":
+          description: Retraction result ({ retracted })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing source/relation, bad authority, or an immutable relation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: The knowledge service refused the retraction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /entities/merge:
+    post:
+      summary: Merge two entity records into one
+      description: >
+        Collapses `from_id` into `into_id` when both name the same real entity.
+        Entity resolution then follows the merge pointer, so facts recorded
+        against either name resolve to one node.
+
+        The response carries `merge_id`, the audit handle /entities/unmerge
+        needs. A caller that discards it cannot reverse the merge.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_id, into_id]
+              properties:
+                from_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                into_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+      responses:
+        "200":
+          description: Merge result ({ merge_id })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing or non-positive ids, or from_id equal to into_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Merge refused; both ids must be distinct active entities
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /entities/unmerge:
+    post:
+      summary: Reverse a recorded entity merge
+      description: >
+        Restores the merged entity to active and marks the audit row undone,
+        using the `merge_id` returned by /entities/merge.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merge_id]
+              properties:
+                merge_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+      responses:
+        "200":
+          description: Unmerge result ({ merge_id, undone })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing or non-positive merge_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such merge, or it was already undone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/get:
     post:
       summary: Get a memory by id

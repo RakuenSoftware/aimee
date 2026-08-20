@@ -1,5 +1,9 @@
 # P5-C2d online management-token authority
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented and validated. Two completed reviewer passes were incorporated;
   the final multi-seat convergence call was attempted twice with distinct runner
   `p5c2d-token-authority-plan-v10-ensemble-20260722` and timed out at the bounded service gate.

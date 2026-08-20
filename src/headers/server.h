@@ -387,10 +387,17 @@ cJSON *memory_store_command(const cJSON *req);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
 cJSON *memory_delete_command(cJSON *req);
+/* Typed-fact correction surface (§3 / §4); all CAP_MEMORY_WRITE. */
+cJSON *facts_retract_command(cJSON *req);
+cJSON *entities_merge_command(cJSON *req);
+cJSON *entities_unmerge_command(cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -1,5 +1,9 @@
 # Implementation plan: Deterministic context folding
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `deterministic-context-folding.md` (PR #881). This plan grounds each
 proposal phase in the actual `testing`-branch code, names the seams, the config
 wiring, the tests, and the per-slice PR/roundtable gate. **Nothing here changes the

@@ -5,15 +5,26 @@ name: Module inventory
 # classic Team-plan check, their workflow/script definitions are reviewable PR
 # content. Do not present proposal-ordering as an isolated trusted executor; a
 # stronger guarantee requires Enterprise required workflows or an external app.
-# These filters match the BASE branch. `feature/core-modularization` alone meant
-# every gate below ran on nothing for a PR into `testing` -- not a weaker gate, no
-# gate at all, which is the exact failure ci.yml warns about in its own filter.
-# Module work now merges to `testing`, so this list tracks ci.yml's.
+# These filters match the BASE branch, and the only base these gates exist for
+# is `main`.
+#
+# Everything in this workflow governs the module boundary: the canonical
+# inventory, source ownership, and the frozen DB2 consumer surface. Those are
+# promote-time questions, decided when work is promoted to `main`. `testing` is
+# the shared integration branch, so running them there blocks ordinary feature
+# work on a module-structure decision that is not being made at that point.
+#
+# This is the same call the refactor-surface-baseline step below already made
+# for itself, and for the same reason: a branch whose job is to absorb in-flight
+# work trips a freeze constantly, and the useful review is the one diff at the
+# promote, not a rejection per feature PR. That step now carries a `base_ref !=
+# testing` guard it no longer needs, since the workflow cannot fire on testing
+# at all; it is left in place as defence in depth if these filters widen again.
 on:
   pull_request:
-    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
+    branches: [main]
   push:
-    branches: [main, testing, feature/core-modularization]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

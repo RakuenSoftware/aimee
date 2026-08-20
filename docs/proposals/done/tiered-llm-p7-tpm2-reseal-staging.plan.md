@@ -1,5 +1,9 @@
 # P7-reseal-c bounded vault re-wrap staging and promotion
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and validated on PostgreSQL 17 (CT260), including the
   standalone AES-KW mock driver and concurrency/failure gate.
 - **Depends on:** P7-reseal-a prepared TPM2 receipts and P7-reseal-b primary barrier.

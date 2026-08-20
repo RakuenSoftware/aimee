@@ -1,5 +1,9 @@
 # WFE panel capacity and deadline residual
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implemented in Go and archived 2026-08-14.
 - **Archived parent:**
   [`wfe-panel-cannot-seat-under-self-load.md`](../done/wfe-panel-cannot-seat-under-self-load.md).

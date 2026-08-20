@@ -625,7 +625,9 @@ int config_save(const config_t *cfg)
        cfg->memory_profile_cards_stale_secs > 0 || cfg->memory_briefing_enabled ||
        cfg->memory_briefing_limit_tokens > 0 || cfg->memory_aggregation_enabled ||
        cfg->memory_aggregation_max_items > 0 || cfg->memory_prospective_enabled ||
-       cfg->memory_prospective_max_matches > 0 || cfg->memory_lifecycle_enabled ||
+       cfg->memory_prospective_max_matches > 0 ||
+       cfg->memory_typed_facts_speculative_ttl_days != 30 ||
+       cfg->memory_typed_facts_promote_threshold != 3 || cfg->memory_lifecycle_enabled ||
        cfg->memory_lifecycle_hide_archived || cfg->memory_lifecycle_ttl_date_days > 0 ||
        cfg->memory_lifecycle_ttl_relative_days > 0 ||
        cfg->memory_lifecycle_ttl_open_ended_days > 0 || cfg->memory_recall_enabled ||
@@ -775,6 +777,21 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(prosp, "enabled", cfg->memory_prospective_enabled ? 1 : 0);
          if (cfg->memory_prospective_max_matches > 0)
             cJSON_AddNumberToObject(prosp, "max_matches", cfg->memory_prospective_max_matches);
+      }
+      /* Only emit a non-default horizon, so a clean install writes nothing here. */
+      if (cfg->memory_typed_facts_speculative_ttl_days != 30 ||
+          cfg->memory_typed_facts_promote_threshold != 3)
+      {
+         cJSON *tf = cJSON_AddObjectToObject(memory, "typed_facts");
+         if (tf)
+         {
+            if (cfg->memory_typed_facts_speculative_ttl_days != 30)
+               cJSON_AddNumberToObject(tf, "speculative_ttl_days",
+                                       cfg->memory_typed_facts_speculative_ttl_days);
+            if (cfg->memory_typed_facts_promote_threshold != 3)
+               cJSON_AddNumberToObject(tf, "promote_threshold",
+                                       cfg->memory_typed_facts_promote_threshold);
+         }
       }
       if (cfg->memory_lifecycle_enabled || cfg->memory_lifecycle_hide_archived ||
           cfg->memory_lifecycle_ttl_date_days > 0 || cfg->memory_lifecycle_ttl_relative_days > 0 ||

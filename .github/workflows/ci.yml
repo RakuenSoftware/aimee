@@ -140,8 +140,29 @@ jobs:
         run: |
           range="${BASE_SHA}..${HEAD_SHA}"
           # Match the actual trailer forms only (anchored), not prose that happens
-          # to mention them: a "co-authored-by:" line, or the markdown-link
-          # "Generated with [Claude Code]"/"[Codex ...]" attribution line.
+          # to mention them: a co-authorship trailer line, or the markdown-link
+          # generated-with attribution line.
+          #
+          # Every alternative is line-anchored, which the generated-with one was
+          # NOT until now -- so a commit message describing this check tripped
+          # it, which is exactly how this was found. Anchoring costs nothing:
+          # both are trailer lines by construction, and the leading
+          # [[:space:]]* still allows an indented one.
+          #
+          # Session back-links are the same thing wearing a different hat, and
+          # they were getting through: assistant harnesses append a
+          # "<tool>-Session: <url>" trailer, or a bare session permalink on its
+          # own line, and neither matches the two forms above. A PR landed here
+          # carrying one in all three commits AND the body before this was
+          # widened. The URL alternative is anchored to the session path rather
+          # than the bare host so that citing a docs page is still fine, and the
+          # trailer alternative is line-anchored so prose naming the trailer (a
+          # commit that FIXES this check, for instance) does not trip it.
+          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
+          export ATTRIBUTION_RE
           # Immutable commits that entered testing carrying a trailer. They are
           # grandfathered only for the testing -> main integration PR; exact SHAs
           # keep the exception from hiding descendants or any newly introduced
@@ -168,7 +189,7 @@ jobs:
                 esac
               fi
               git show -s --format='%H%n%B' "$commit" \
-                | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true
+                | grep -inE "$ATTRIBUTION_RE" || true
             done
           )
           if [ -n "$hits" ]; then
@@ -182,8 +203,14 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          # Same set as the commit scan above; kept in step with it deliberately,
+          # because a body-only session link is the easy way for one to land.
+          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
           hits=$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
-                 | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true)
+                 | grep -inE "$ATTRIBUTION_RE" || true)
           if [ -n "$hits" ]; then
             echo "::error::The PR title/body carries AI attribution; remove it (standing directive)."
             echo "$hits"

@@ -1,5 +1,9 @@
 # Implementation plan: autonomous-dev execution substrate
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to [autonomous-dev-execution-substrate.md](./autonomous-dev-execution-substrate.md)
 (**APPROVED**, human proposal-gate 2026-06-21). Base branch: `testing`. Each packet is
 **independently shippable as its own PR** — built/linted/tested + roundtable-reviewed +

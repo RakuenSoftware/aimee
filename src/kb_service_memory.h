@@ -80,6 +80,10 @@ int kb_handle_memory_find_id_by_key_kind(int fd, cJSON *req);
 int kb_handle_memory_search_facts_patterns_by_keyword(int fd, cJSON *req);
 int kb_handle_memory_supersede(int fd, cJSON *req);
 int kb_handle_memory_fact_history(int fd, cJSON *req);
+/* Typed-fact §4 correction + §3 entity merge/unmerge surface. */
+int kb_handle_facts_retract(int fd, cJSON *req);
+int kb_handle_entities_merge(int fd, cJSON *req);
+int kb_handle_entities_unmerge(int fd, cJSON *req);
 int kb_handle_memory_check_drift(int fd, cJSON *req);
 int kb_handle_task_list(int fd, cJSON *req);
 int kb_handle_task_create(int fd, cJSON *req);

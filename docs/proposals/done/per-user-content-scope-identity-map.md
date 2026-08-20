@@ -1,5 +1,9 @@
 # The KB boundary already has an identity; preserve it for content scope
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — all six bounded slices delivered and archived 2026-08-15.
 - **Owner:** KB content scope.
 

@@ -1,5 +1,9 @@
 # The page chunker splits exact needles, defeating a documented guarantee
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — delivered scope archived 2026-07-26.
 
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,

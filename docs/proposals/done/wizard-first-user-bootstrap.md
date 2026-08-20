@@ -1,5 +1,9 @@
 # Proposal: Wizard-owned first-user bootstrap
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implemented, validated, and archived 2026-08-04.
 
 > **Archived as complete.** The first-install/first-write bootstrap contract shipped in

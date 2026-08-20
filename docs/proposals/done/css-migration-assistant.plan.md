@@ -9,6 +9,10 @@
 
 # Impl plan: CSS migration assistant (approved subsystem path)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Plan-roundtable status:** automated panel queue-blocked (delegate worker
 > wedged after the first job — same as the proposal R2). Plan converged via
 > adversarial self-review; 4 findings folded: WP-A CSS-parser scope + SCSS

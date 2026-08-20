@@ -1,5 +1,9 @@
 # P8c: durable thin-client mTLS ramp
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 ## Scope
 
 Complete the bounded `optional` to `required` transition described by

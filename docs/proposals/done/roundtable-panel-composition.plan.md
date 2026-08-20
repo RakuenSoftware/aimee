@@ -1,5 +1,9 @@
 # Implementation plan: roundtable panel composition
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `roundtable-panel-composition.md` (State: READY). This plan is the
 concrete change list. Scope = panel *composition* on the existing engine; no new
 pipeline, no routing-layer rework. `ENSEMBLE_MAX_REFS = 8` is unchanged.

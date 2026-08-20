@@ -843,6 +843,26 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
 int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
                                const char *session_id, memory_t *out);
 
+/* Typed-fact §4 retraction via aimee-kb.  `target` NULL/empty retracts every
+ * current value of (source, relation); `authority` is "user" or "model" (NULL
+ * and anything unrecognised read as model, which cannot retract a user-stated
+ * Class A fact).  *out_retracted receives the number of edges affected — 0 is a
+ * success meaning nothing current matched.  *out_immutable is set when the
+ * relation is immutable and this authority may not override it, so a caller can
+ * report a refusal rather than an unexplained failure.  Both out params may be
+ * NULL.  Returns 0 on success, -1 on refusal / kb unreachable. */
+int kb_client_facts_retract(const char *source, const char *relation, const char *target,
+                            const char *authority, int *out_retracted, int *out_immutable);
+
+/* §3 entity merge via aimee-kb: collapse from_id into into_id.  *out_merge_id
+ * receives the audit id, which is the handle kb_client_entities_unmerge needs —
+ * a caller that discards it cannot reverse the merge.  0 / -1. */
+int kb_client_entities_merge(int64_t from_id, int64_t into_id, int64_t *out_merge_id);
+
+/* Reverse a recorded merge by its audit id.  0 on success, -1 if unknown or
+ * already undone. */
+int kb_client_entities_unmerge(int64_t merge_id);
+
 /* Fetch the version history for a memory key via aimee-kb.  Returns
  * the number of rows written into |out| (0 if kb is unreachable).
  * Mirrors memory_fact_history(). */

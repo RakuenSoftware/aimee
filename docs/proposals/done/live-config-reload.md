@@ -1,5 +1,9 @@
 # Proposal: Config changes take effect immediately (live reload)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **CORE COMPLETE — all core phases merged to `testing` (closed out
   2026-07-04).** The central goal — a config change takes effect **immediately** on the
   running server, with the few genuinely restart-bound settings surfaced honestly — is

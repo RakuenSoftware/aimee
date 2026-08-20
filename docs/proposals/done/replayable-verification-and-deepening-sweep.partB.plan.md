@@ -1,5 +1,9 @@
 # Implementation plan — deepening sweep (Part B)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for **Part B** of [replayable-verification-and-deepening-sweep.md](replayable-verification-and-deepening-sweep.md)
 (Part A — the replay engine + verifier + rubric — shipped to `testing` in #558 + #560).
 Grounded in `origin/testing`. Analysis-only: the sweep writes work items + per-area

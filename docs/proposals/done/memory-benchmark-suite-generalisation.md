@@ -1,5 +1,9 @@
 # Proposal: generalise the `memory.benchmark` RPC beyond code-graph-fusion
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Author:** JBailes
 - **Date:** 2026-06-08

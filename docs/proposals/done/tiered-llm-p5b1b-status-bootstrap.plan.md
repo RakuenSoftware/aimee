@@ -1,5 +1,9 @@
 # P5-B1b management-status key bootstrap and online DB boundary
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** completed; roundtable-converged and merged-ready.
 - **Depends on:** P5-B1a status custody core and P7 KMS signed-HWM custody.
 - **Followed by:** P5-B1c required-mTLS status authority.

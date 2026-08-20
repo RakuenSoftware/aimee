@@ -1,5 +1,9 @@
 # P5-D2b bounded safe configuration projection and P5 close-out
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** completed and roundtable-converged; validated on real PostgreSQL 17, the CT260/CT262
   required-mTLS topology, ASAN/UBSAN, and deterministic fuzz gates.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§2–4.

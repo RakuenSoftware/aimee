@@ -34,9 +34,18 @@ extern "C"
     * existing one for this relation. NOT NULL in the table, default supersede. */
    typedef enum
    {
-      CORR_SUPERSEDE = 0,   /* archive the old, assert the new (default) */
-      CORR_HARD_DELETE = 1, /* tombstone the old (suppressed flag) */
-      CORR_IMMUTABLE = 2,   /* reject the change; the fact is fixed (born_in) */
+      CORR_SUPERSEDE = 0, /* archive the old, assert the new (default) */
+      /* NOTHING IS DELETED. Despite the name, this sets suppressed=1 and stamps
+       * superseded_at — a tombstone. The row is RETAINED and stays auditable,
+       * exactly like CORR_SUPERSEDE; the only difference is that a tombstone also
+       * hides the fact from recall, where a supersede merely closes it.
+       *
+       * The name is the persisted text value in rel_types.correction_behavior and
+       * is asserted against by ABI tests, so renaming it is a data migration, not
+       * an edit. Read it as "hard" in the sense of a harder retraction than
+       * supersede — never as a DELETE. */
+      CORR_HARD_DELETE = 1,
+      CORR_IMMUTABLE = 2, /* reject the change; the fact is fixed (born_in) */
    } correction_behavior_t;
 
    /* §7 PII gating tier. NOT NULL, defaults to the restrictive `pii` so a

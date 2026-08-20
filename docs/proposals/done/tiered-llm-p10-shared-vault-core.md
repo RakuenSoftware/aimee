@@ -1,5 +1,9 @@
 # Proposal: P10 — Shared vault core (one vault, two profiles)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived after P10 delivery.
 - **Historical state:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-18).

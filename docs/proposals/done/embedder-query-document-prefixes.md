@@ -1,5 +1,9 @@
 # Proposal: query/document prefixes for the embedder
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implemented and archived 2026-08-04.
 
 > **Archived as complete.** `scripts/embedders.json` now owns both prefixes as part of the

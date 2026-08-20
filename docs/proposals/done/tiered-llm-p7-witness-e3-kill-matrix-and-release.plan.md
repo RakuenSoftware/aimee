@@ -1,5 +1,9 @@
 # P7-witness-e3 full kill matrix and the release gate
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
   `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). The kill matrix (daemon hard-kill,
   boot-tpm under swtpm, hardened boot over verify-full TLS both directions), the

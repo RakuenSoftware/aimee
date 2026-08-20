@@ -605,6 +605,18 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.supersede");
 }
+int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "facts.retract");
+}
+int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "entities.merge");
+}
+int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "entities.unmerge");
+}
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.read");

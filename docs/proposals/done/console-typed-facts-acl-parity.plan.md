@@ -1,5 +1,9 @@
 # Console typed-facts ACL parity correction
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered; plan and frozen-diff reviews converged in jobs 8985 and 8986.
 - **Scope:** restore the existing Go/C console-admin containment invariant.
 

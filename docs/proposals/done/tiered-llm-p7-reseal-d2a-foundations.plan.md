@@ -1,5 +1,9 @@
 # P7-reseal-d2a canonical receipts and typed verification foundations
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and validated on PostgreSQL 17 (CT260), with focused
   default and ASAN/UBSAN tests; production-uninvoked and disabled by construction.
 - **Depends on:** P7-reseal-a/c and P7-reseal-d1.

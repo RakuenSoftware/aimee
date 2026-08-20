@@ -1,5 +1,9 @@
 # Implementation plan — ingress-compression P0: the Envelope IR
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for [ingress-compression-and-cache-alignment.md](ingress-compression-and-cache-alignment.md),
 **scoped to P0 only** per the proposal's §7 phasing ("Envelope IR (§1.1) —
 refactor `ingress_preinject_build()` to assemble a typed entry list and render

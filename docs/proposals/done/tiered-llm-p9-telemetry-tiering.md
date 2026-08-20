@@ -1,5 +1,9 @@
 # Proposal: P9 — Telemetry tiering: logs & metrics to aimee-kb, enterprise export, PII posture
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
 > [`tiered-llm-p9-forwarding-and-otlp.md`](../pending/tiered-llm-p9-forwarding-and-otlp.md).

@@ -1,5 +1,9 @@
 # Spec: Aimee shared-memory event bus — wire and segment specification (v0)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — v0 promoted and archived 2026-08-04; third-language residual later rejected.
 
 > **Archived after partial delivery.** The C host, C and Go clients, frozen vectors, cross-process

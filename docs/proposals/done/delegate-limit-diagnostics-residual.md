@@ -1,5 +1,9 @@
 # Delegate limit diagnostics: grouped dispatch and Go executor exhaustion proof
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — Go-owned grouped diagnostics and real producer-exhaustion proof delivered
   2026-08-16.
 - **Archived parent:**

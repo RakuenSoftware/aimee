@@ -1,5 +1,9 @@
 # Implementation plan: one unified `aimee-llm` container
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to [unified-llm-container.md](./unified-llm-container.md) (rev 7, roundtable
 **signed off at rev 6**). Base branch: `testing`. Each packet is **independently shippable
 as its own PR** — built/lint/unit-tested + roundtable-reviewed + (where applicable)
