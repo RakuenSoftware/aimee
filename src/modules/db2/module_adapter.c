@@ -777,6 +777,134 @@ static const aimee_db2_module_backend_t *production_backend(void)
    return &backend;
 }
 
+/* db2-envelope-string-u32-v1: one bounded string in, one bounded number out.
+ * Every operation on this format is handled the same way, so the shape lives
+ * here and each family below carries a table of its own rows. `bound` is the
+ * operation's own maximum, applied to whatever the backend answers -- an
+ * existence probe must not put a two on a wire whose contract says zero or
+ * one, whatever its backend returns. */
+typedef struct
+{
+   int (*decode)(const uint8_t *input, size_t input_len, char *argument, size_t capacity);
+   int (*encode)(uint32_t answer, uint8_t *output, size_t capacity, uint32_t *output_len);
+   int (*read)(const char *argument);
+   uint32_t bound;
+} db2_string_count_binding_t;
+
+/* The argument buffer is sized for the widest string any of these operations
+ * accepts; each decoder still enforces its own narrower bound. */
+#define DB2_STRING_COUNT_ARGUMENT_MAX AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ARGUMENT_MAX
+
+static aimee_module_status_t
+db2_dispatch_string_count(const db2_string_count_binding_t *bindings, size_t count,
+                          const uint8_t *request_body, uint32_t request_len, uint8_t *response_body,
+                          size_t response_capacity, uint32_t *response_len,
+                          const aimee_module_invocation_t *invocation, int *handled)
+{
+   char argument[DB2_STRING_COUNT_ARGUMENT_MAX + 1];
+   *handled = 0;
+   for (size_t index = 0; index < count; index++)
+   {
+      const db2_string_count_binding_t *binding = &bindings[index];
+      if (binding->decode(request_body, request_len, argument, sizeof(argument)) != 0)
+         continue;
+      *handled = 1;
+      if (response_capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!binding->read)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int counted = binding->read(argument);
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (counted < 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      uint32_t value = (uint32_t)counted;
+      if (value > binding->bound)
+         value = binding->bound;
+      if (binding->encode(value, response_body, response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+   return AIMEE_MODULE_STATUS_OK;
+}
+
+/* db2-envelope-u64-u32-v1: one positive identifier in, one Boolean out. A
+ * backend that cannot run its statement answers negative, which is reported as
+ * false rather than invented as true. */
+typedef struct
+{
+   int (*decode)(const uint8_t *input, size_t input_len, uint64_t *identifier);
+   int (*encode)(uint32_t exists, uint8_t *output, size_t capacity, uint32_t *output_len);
+   int (*read)(int64_t identifier);
+} db2_u64_probe_binding_t;
+
+static aimee_module_status_t
+db2_dispatch_u64_probe(const db2_u64_probe_binding_t *bindings, size_t count,
+                       const uint8_t *request_body, uint32_t request_len, uint8_t *response_body,
+                       size_t response_capacity, uint32_t *response_len,
+                       const aimee_module_invocation_t *invocation, int *handled)
+{
+   uint64_t identifier = 0u;
+   *handled = 0;
+   for (size_t index = 0; index < count; index++)
+   {
+      const db2_u64_probe_binding_t *binding = &bindings[index];
+      if (binding->decode(request_body, request_len, &identifier) != 0)
+         continue;
+      *handled = 1;
+      if (response_capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!binding->read)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int found = binding->read((int64_t)identifier);
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (binding->encode(found > 0 ? 1u : 0u, response_body, response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+   return AIMEE_MODULE_STATUS_OK;
+}
+
+/* db2-envelope-u64-ack-v1: one positive identifier in, an acknowledgement out. */
+typedef struct
+{
+   int (*decode)(const uint8_t *input, size_t input_len, uint64_t *identifier);
+   int (*encode)(uint8_t *output, size_t capacity, uint32_t *output_len);
+   int (*write)(int64_t identifier);
+} db2_u64_ack_binding_t;
+
+static aimee_module_status_t db2_dispatch_u64_ack(const db2_u64_ack_binding_t *bindings,
+                                                  size_t count, const uint8_t *request_body,
+                                                  uint32_t request_len, uint8_t *response_body,
+                                                  size_t response_capacity, uint32_t *response_len,
+                                                  const aimee_module_invocation_t *invocation,
+                                                  int *handled)
+{
+   uint64_t identifier = 0u;
+   *handled = 0;
+   for (size_t index = 0; index < count; index++)
+   {
+      const db2_u64_ack_binding_t *binding = &bindings[index];
+      if (binding->decode(request_body, request_len, &identifier) != 0)
+         continue;
+      *handled = 1;
+      if (response_capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!binding->write)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int written = binding->write((int64_t)identifier);
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (written != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      if (binding->encode(response_body, response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+   return AIMEE_MODULE_STATUS_OK;
+}
+
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
                                            const uint8_t *request_body, uint32_t request_len,
                                            uint8_t *response_body, uint32_t response_capacity,
@@ -1469,24 +1597,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         /* A probe that answers for two tables at once. A backend that cannot
-          * run its statement reports a negative, which is reported as false
-          * rather than invented as true. */
-         uint64_t record_id = 0u;
-         if (aimee_db2_record_exists_request_decode(request_body, request_len, &record_id) == 0)
-         {
-            if (response_capacity < AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!backend || !backend->record_exists)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            int found = backend->record_exists((int64_t)record_id);
-            if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            if (aimee_db2_record_exists_reply_encode(found > 0 ? 1u : 0u, response_body,
-                                                     response_capacity, response_len) != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
-         }
+         /* Every db2-envelope-u64-u32-v1 operation this family owns. */
+         const db2_u64_probe_binding_t bindings[] = {
+             {aimee_db2_record_exists_request_decode, aimee_db2_record_exists_reply_encode,
+              backend ? backend->record_exists : NULL},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_u64_probe(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
       }
       uint32_t promotions = 0u, demotions = 0u, expirations = 0u;
       if (aimee_db2_health_record_request_decode(request_body, request_len, &promotions, &demotions,
@@ -2166,37 +2287,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          return AIMEE_MODULE_STATUS_OK;
       }
       {
-         /* One string in, one number out. Each clamps its own answer: a probe
-          * must not put a two on a wire whose contract says zero or one. */
-         char argument[AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ARGUMENT_MAX + 1];
-         int (*read)(const char *) = NULL;
-         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
-         uint32_t bound = 0u;
-         if (!answer && aimee_db2_entity_observation_count_request_decode(
-                            request_body, request_len, argument, sizeof(argument)) == 0)
-         {
-            read = backend ? backend->entity_observation_count : NULL;
-            answer = aimee_db2_entity_observation_count_reply_encode;
-            bound = AIMEE_DB2_ENTITY_OBSERVATION_COUNT_MAX;
-         }
-         if (answer)
-         {
-            if (response_capacity < AIMEE_DB2_ENTITY_OBSERVATION_COUNT_RESPONSE_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!read)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            int counted = read(argument);
-            if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            if (counted < 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            uint32_t value = (uint32_t)counted;
-            if (value > bound)
-               value = bound;
-            if (answer(value, response_body, response_capacity, response_len) != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
-         }
+         /* Every db2-envelope-string-u32-v1 operation this family owns. */
+         const db2_string_count_binding_t bindings[] = {
+             {aimee_db2_entity_observation_count_request_decode,
+              aimee_db2_entity_observation_count_reply_encode,
+              backend ? backend->entity_observation_count : NULL,
+              AIMEE_DB2_ENTITY_OBSERVATION_COUNT_MAX},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_count(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
       }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
@@ -2518,54 +2621,30 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          return AIMEE_MODULE_STATUS_OK;
       }
       {
-         uint64_t document_id = 0u;
-         if (aimee_db2_document_exists_request_decode(request_body, request_len, &document_id) == 0)
-         {
-            if (response_capacity < AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!backend || !backend->document_exists)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            int found = backend->document_exists((int64_t)document_id);
-            if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            if (aimee_db2_document_exists_reply_encode(found > 0 ? 1u : 0u, response_body,
-                                                       response_capacity, response_len) != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
-         }
+         /* Every db2-envelope-string-u32-v1 operation this family owns. */
+         const db2_string_count_binding_t bindings[] = {
+             {aimee_db2_blob_referenced_request_decode, aimee_db2_blob_referenced_reply_encode,
+              backend ? backend->blob_referenced : NULL, AIMEE_DB2_BLOB_REFERENCED_MAX},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_count(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
       }
       {
-         /* One string in, one number out. Each clamps its own answer: a probe
-          * must not put a two on a wire whose contract says zero or one. */
-         char argument[AIMEE_DB2_BLOB_REFERENCED_ARGUMENT_MAX + 1];
-         int (*read)(const char *) = NULL;
-         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
-         uint32_t bound = 0u;
-         if (!answer && aimee_db2_blob_referenced_request_decode(request_body, request_len,
-                                                                 argument, sizeof(argument)) == 0)
-         {
-            read = backend ? backend->blob_referenced : NULL;
-            answer = aimee_db2_blob_referenced_reply_encode;
-            bound = AIMEE_DB2_BLOB_REFERENCED_MAX;
-         }
-         if (answer)
-         {
-            if (response_capacity < AIMEE_DB2_BLOB_REFERENCED_RESPONSE_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!read)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            int counted = read(argument);
-            if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            if (counted < 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            uint32_t value = (uint32_t)counted;
-            if (value > bound)
-               value = bound;
-            if (answer(value, response_body, response_capacity, response_len) != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
-         }
+         /* Every db2-envelope-u64-u32-v1 operation this family owns. */
+         const db2_u64_probe_binding_t bindings[] = {
+             {aimee_db2_document_exists_request_decode, aimee_db2_document_exists_reply_encode,
+              backend ? backend->document_exists : NULL},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_u64_probe(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
       }
       char project[AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX + 1] = {0};
       if (aimee_db2_clear_project_request_decode(request_body, request_len, project,
@@ -2681,26 +2760,6 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          return AIMEE_MODULE_STATUS_OK;
       }
       {
-         uint64_t last_trace_id = 0u;
-         if (aimee_db2_trace_mining_record_request_decode(request_body, request_len,
-                                                          &last_trace_id) == 0)
-         {
-            if (response_capacity < AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!backend || !backend->trace_mining_record)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            int recorded = backend->trace_mining_record((int64_t)last_trace_id);
-            if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            if (recorded != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            if (aimee_db2_trace_mining_record_reply_encode(response_body, response_capacity,
-                                                           response_len) != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
-         }
-      }
-      {
          /* Four reads that take one string and answer one number. They share an
           * argument buffer because the widest bound covers them all, and each
           * clamps its own answer: an existence probe must not report two. */
@@ -2756,37 +2815,49 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         /* One string in, one number out. Each clamps its own answer: a probe
-          * must not put a two on a wire whose contract says zero or one. */
-         char argument[AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ARGUMENT_MAX + 1];
-         int (*read)(const char *) = NULL;
-         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
-         uint32_t bound = 0u;
-         if (!answer && aimee_db2_fidelity_attribution_count_request_decode(
-                            request_body, request_len, argument, sizeof(argument)) == 0)
-         {
-            read = backend ? backend->fidelity_attribution_count : NULL;
-            answer = aimee_db2_fidelity_attribution_count_reply_encode;
-            bound = AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_MAX;
-         }
-         if (answer)
-         {
-            if (response_capacity < AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_RESPONSE_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!read)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            int counted = read(argument);
-            if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            if (counted < 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            uint32_t value = (uint32_t)counted;
-            if (value > bound)
-               value = bound;
-            if (answer(value, response_body, response_capacity, response_len) != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
-         }
+         /* Every db2-envelope-string-u32-v1 operation this family owns. */
+         const db2_string_count_binding_t bindings[] = {
+             {aimee_db2_anti_pattern_exists_exact_request_decode,
+              aimee_db2_anti_pattern_exists_exact_reply_encode,
+              backend ? backend->anti_pattern_exists_exact : NULL,
+              AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_MAX},
+             {aimee_db2_anti_pattern_exists_by_source_ref_request_decode,
+              aimee_db2_anti_pattern_exists_by_source_ref_reply_encode,
+              backend ? backend->anti_pattern_exists_by_source_ref : NULL,
+              AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_MAX},
+             {aimee_db2_artifact_citation_count_request_decode,
+              aimee_db2_artifact_citation_count_reply_encode,
+              backend ? backend->artifact_citation_count : NULL,
+              AIMEE_DB2_ARTIFACT_CITATION_COUNT_MAX},
+             {aimee_db2_commits_in_last_7_days_request_decode,
+              aimee_db2_commits_in_last_7_days_reply_encode,
+              backend ? backend->commits_in_last_7_days : NULL,
+              AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_MAX},
+             {aimee_db2_fidelity_attribution_count_request_decode,
+              aimee_db2_fidelity_attribution_count_reply_encode,
+              backend ? backend->fidelity_attribution_count : NULL,
+              AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_MAX},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_count(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
+      {
+         /* Every db2-envelope-u64-ack-v1 operation this family owns. */
+         const db2_u64_ack_binding_t bindings[] = {
+             {aimee_db2_trace_mining_record_request_decode,
+              aimee_db2_trace_mining_record_reply_encode,
+              backend ? backend->trace_mining_record : NULL},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_u64_ack(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
       }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
@@ -2882,37 +2953,18 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        invocation->stage_id == AIMEE_DB2_STAGE_CURATOR_REENQUEUE_EXTRACT_ALL)
    {
       {
-         /* One string in, one number out. Each clamps its own answer: a probe
-          * must not put a two on a wire whose contract says zero or one. */
-         char argument[AIMEE_DB2_ASYNC_PENDING_COUNT_ARGUMENT_MAX + 1];
-         int (*read)(const char *) = NULL;
-         int (*answer)(uint32_t, uint8_t *, size_t, uint32_t *) = NULL;
-         uint32_t bound = 0u;
-         if (!answer && aimee_db2_async_pending_count_request_decode(
-                            request_body, request_len, argument, sizeof(argument)) == 0)
-         {
-            read = backend ? backend->async_pending_count : NULL;
-            answer = aimee_db2_async_pending_count_reply_encode;
-            bound = AIMEE_DB2_ASYNC_PENDING_COUNT_MAX;
-         }
-         if (answer)
-         {
-            if (response_capacity < AIMEE_DB2_ASYNC_PENDING_COUNT_RESPONSE_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!read)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            int counted = read(argument);
-            if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            if (counted < 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            uint32_t value = (uint32_t)counted;
-            if (value > bound)
-               value = bound;
-            if (answer(value, response_body, response_capacity, response_len) != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
-         }
+         /* Every db2-envelope-string-u32-v1 operation this family owns. */
+         const db2_string_count_binding_t bindings[] = {
+             {aimee_db2_async_pending_count_request_decode,
+              aimee_db2_async_pending_count_reply_encode,
+              backend ? backend->async_pending_count : NULL, AIMEE_DB2_ASYNC_PENDING_COUNT_MAX},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_count(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
       }
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {
