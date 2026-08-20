@@ -157,6 +157,15 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    return NULL;
 }
 
+/* The real one lives beside the routing fault latch, which this suite does not
+ * link. With no module authority in play the honest wording is the empty-roster
+ * one, which is exactly what these route stubs model. */
+void agent_route_failure_message(const char *role, char *buf, size_t len)
+{
+   if (buf && len)
+      snprintf(buf, len, "no agent available for role '%s'", role ? role : "");
+}
+
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
 {
    if (!cfg || !role)

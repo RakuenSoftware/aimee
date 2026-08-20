@@ -11,10 +11,54 @@
 #include "server_conn_io.h" /* server_conn_io_has_ssl/get_ssl — native-TLS attestation */
 #include "server_tls.h"     /* server_tls_peer_identity — mTLS client cert CN */
 #include "kb_mgmt_status.h"
+#include "server.h" /* server_ct_equal */
 #include "platform_ipc.h"
 #include "vault_principal.h"
 #include <aimee/core/connection/auth.h>
+#include <ctype.h>
 #include <string.h>
+
+#define AIMEE_SESSION_BEARER_MARKER ".aimee-session."
+
+int server_http_session_bearer_unbind(const char *presented, char *bearer, size_t bearer_n,
+                                      char *session_id, size_t session_n)
+{
+   if (!bearer || bearer_n == 0 || !session_id || session_n == 0)
+      return 0;
+   snprintf(bearer, bearer_n, "%s", presented ? presented : "");
+   session_id[0] = '\0';
+   if (!presented)
+      return 0;
+   const char *mark = strstr(presented, AIMEE_SESSION_BEARER_MARKER);
+   if (!mark || strlen(mark + sizeof(AIMEE_SESSION_BEARER_MARKER) - 1) != 32)
+      return 0;
+   const char *sid = mark + sizeof(AIMEE_SESSION_BEARER_MARKER) - 1;
+   for (int i = 0; i < 32; i++)
+      if (!isdigit((unsigned char)sid[i]) && !(sid[i] >= 'a' && sid[i] <= 'f'))
+         return 0;
+   size_t base_n = (size_t)(mark - presented);
+   if (base_n == 0 || base_n >= bearer_n || 33 > session_n)
+      return 0;
+   memcpy(bearer, presented, base_n);
+   bearer[base_n] = '\0';
+   memcpy(session_id, sid, 33);
+   return 1;
+}
+
+/* Compare a presented credential against the configured bearer, ignoring any
+ * `.aimee-session.<32hex>` suffix the client appended to scope its connection to
+ * one session. The suffix is client-chosen routing metadata, not a secret, so it
+ * must not change whether the credential authenticates -- otherwise every
+ * session-scoped client would be rejected at the door. The base token is still
+ * compared in constant time. */
+int server_http_bearer_matches(const char *presented, const char *bearer_cfg)
+{
+   if (!presented || !presented[0] || !bearer_cfg || !bearer_cfg[0])
+      return 0;
+   char base[4097], sid[33];
+   (void)server_http_session_bearer_unbind(presented, base, sizeof(base), sid, sizeof(sid));
+   return server_ct_equal(base, bearer_cfg);
+}
 
 /* Per-thread captured identity for the request currently being routed. Thread-
  * local for the same reason as the front-end's g_rpc_conn_caps: each connection
@@ -101,7 +145,29 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
       {
          const char *bearer = aimee_core_bearer_token(authz);
          if (bearer)
-            snprintf(tl_bearer, sizeof(tl_bearer), "%s", bearer);
+         {
+            char bound_sid[80];
+            (void)server_http_session_bearer_unbind(bearer, tl_bearer, sizeof(tl_bearer), bound_sid,
+                                                    sizeof(bound_sid));
+            if (!tl_session_hdr[0] && bound_sid[0])
+               snprintf(tl_session_hdr, sizeof(tl_session_hdr), "%s", bound_sid);
+         }
+      }
+      /* The connection bearer may arrive in x-api-key instead of Authorization
+       * -- that split is the supported shape when Authorization carries a caller
+       * identity JWT. Recover the session binding from there too, or a client
+       * that scopes itself that way authenticates but presents NO session, and
+       * every per-session decision keyed on it (persona delivery, economizer
+       * session keys) silently treats each request as a brand new session. */
+      char api_key[512] = "";
+      if (!tl_session_hdr[0] && http_header(buf, "x-api-key", api_key, sizeof(api_key)) &&
+          api_key[0])
+      {
+         char base[sizeof(tl_bearer)], bound_sid[80];
+         if (server_http_session_bearer_unbind(api_key, base, sizeof(base), bound_sid,
+                                               sizeof(bound_sid)) &&
+             bound_sid[0])
+            snprintf(tl_session_hdr, sizeof(tl_session_hdr), "%s", bound_sid);
       }
       http_header(buf, "X-Aimee-Management-Status", tl_status_staple, sizeof(tl_status_staple));
    }

@@ -23,6 +23,7 @@
 #include "vault_config_bootstrap.h"
 #include "server.h"
 #include "server_http.h"
+#include "server_http_identity.h" /* server_http_bearer_matches */
 #include <aimee/core/connection/auth.h>
 
 /* Additional bearers accepted alongside the primary. HTTP connections and
@@ -368,9 +369,8 @@ int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *
 
    const char *presented_bearer = aimee_core_bearer_token(auth_header);
 
-   int authorized = presented_bearer ? server_ct_equal(presented_bearer, bearer_cfg) : 0;
-   if (api_key_header && api_key_header[0])
-      authorized |= server_ct_equal(api_key_header, bearer_cfg);
+   int authorized = server_http_bearer_matches(presented_bearer, bearer_cfg);
+   authorized |= server_http_bearer_matches(api_key_header, bearer_cfg);
 
    /* Do not return after a primary match: compare the same configured set for
     * primary, enrolled and invalid credentials alike. */
@@ -378,10 +378,8 @@ int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *
    {
       if (!extra[i] || !extra[i][0])
          continue;
-      if (presented_bearer)
-         authorized |= server_ct_equal(presented_bearer, extra[i]);
-      if (api_key_header && api_key_header[0])
-         authorized |= server_ct_equal(api_key_header, extra[i]);
+      authorized |= server_http_bearer_matches(presented_bearer, extra[i]);
+      authorized |= server_http_bearer_matches(api_key_header, extra[i]);
    }
    return authorized ? 0 : 401;
 }

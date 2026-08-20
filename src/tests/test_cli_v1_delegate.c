@@ -69,6 +69,29 @@ static void test_json_error_envelopes_remain_structured(void)
    printf("  PASS: test_json_error_envelopes_remain_structured\n");
 }
 
+static void test_index_investigate_requires_useful_evidence(void)
+{
+   cJSON *resp = cJSON_Parse("{\"results\":[{\"query\":\"where is cache\",\"error_status\":-1}]}");
+   assert(resp != NULL);
+   assert(cli_index_investigate_response_is_failure(resp) == 1);
+   cJSON_Delete(resp);
+
+   resp = cJSON_Parse("{\"results\":[{\"query\":\"one\",\"error_status\":504},"
+                      "{\"query\":\"two\",\"result\":{\"results\":[{\"file_path\":"
+                      "\"src/cache.c\"}]}}]}");
+   assert(resp != NULL);
+   assert(cli_index_investigate_response_is_failure(resp) == 0);
+   cJSON_Delete(resp);
+
+   resp = cJSON_Parse("{\"results\":[]}");
+   assert(resp != NULL);
+   assert(cli_index_investigate_response_is_failure(resp) == 1);
+   cJSON_Delete(resp);
+   assert(cli_index_investigate_response_is_failure(NULL) == 1);
+
+   printf("  PASS: test_index_investigate_requires_useful_evidence\n");
+}
+
 /* Capture the exact post-transport production path, including ownership,
  * stream selection, JSON shaping, and process return code. */
 static int finish_response_capture(const char *method, const char *json, int http_status,
@@ -659,6 +682,22 @@ static void test_provider_routes_and_marshaling(void)
    printf("  PASS: test_provider_routes_and_marshaling\n");
 }
 
+static void test_agent_set_route_and_marshaling(void)
+{
+   cli_v1_route_t route;
+   char *lookup[] = {"set", "qwen38", "--delegate-default"};
+   assert(cli_v1_lookup("agent", 3, lookup, &route));
+   assert(strcmp(route.method, "model.set") == 0);
+   assert(route.skip_subcmd == 1);
+
+   cJSON *req = marshal_request(route.method, 2, lookup + 1);
+   cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "args");
+   assert(cJSON_IsArray(args) && cJSON_GetArraySize(args) == 2);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(args, 0)), "qwen38") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(args, 1)), "--delegate-default") == 0);
+   cJSON_Delete(req);
+}
+
 static void test_catalog_routes_and_marshaling(void)
 {
    cli_v1_route_t route;
@@ -911,18 +950,18 @@ static void test_agent_probe_failure_controls_exit_status(void)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "model_available", 0);
    cJSON_AddBoolToObject(resp, "execution_ok", 0);
-   assert(agent_probe_response_is_failure(resp) == 1);
+   assert(cli_agent_probe_response_is_failure(resp) == 1);
    cJSON_ReplaceItemInObject(resp, "execution_ok", cJSON_CreateTrue());
    /* A successful execution wins over a hosted provider's unavailable /models. */
-   assert(agent_probe_response_is_failure(resp) == 0);
+   assert(cli_agent_probe_response_is_failure(resp) == 0);
    cJSON_DeleteItemFromObject(resp, "execution_ok");
-   assert(agent_probe_response_is_failure(resp) == 1); /* --no-run model probe */
+   assert(cli_agent_probe_response_is_failure(resp) == 1); /* --no-run model probe */
    cJSON_ReplaceItemInObject(resp, "model_available", cJSON_CreateTrue());
-   assert(agent_probe_response_is_failure(resp) == 0);
+   assert(cli_agent_probe_response_is_failure(resp) == 0);
    cJSON_Delete(resp);
 
    resp = cJSON_CreateObject();
-   assert(agent_probe_response_is_failure(resp) == 0); /* old server compatibility */
+   assert(cli_agent_probe_response_is_failure(resp) == 0); /* old server compatibility */
    cJSON_Delete(resp);
    printf("  PASS: test_agent_probe_failure_controls_exit_status\n");
 }
@@ -1234,6 +1273,47 @@ static void test_index_current_project_proxy_context(void)
    assert(strcmp(cJSON_GetObjectItem(blast, "file_path")->valuestring, "src/index.c") == 0);
    cJSON_Delete(blast);
 
+   /* A launcher/session project survives the move into a hidden worktree and
+    * scopes the first investigate call without model-side flag discovery. */
+   setenv("AIMEE_PROJECT_ID", "session-project", 1);
+   char *investigate_argv[] = {"where is the shared date helper?"};
+   cJSON *investigate = marshal_index_investigate(1, investigate_argv);
+   assert(investigate != NULL);
+   assert(strcmp(cJSON_GetObjectItem(investigate, "project")->valuestring, "session-project") == 0);
+   cJSON_Delete(investigate);
+
+   /* An explicit command-line project has highest precedence. */
+   char *explicit_argv[] = {"where is the helper?", "--project", "explicit-project"};
+   investigate = marshal_index_investigate(3, explicit_argv);
+   assert(strcmp(cJSON_GetObjectItem(investigate, "project")->valuestring, "explicit-project") ==
+          0);
+   cJSON_Delete(investigate);
+
+   char *fallback_argv[] = {"where is the helper?", "--fallback", "--no-include-code"};
+   investigate = marshal_index_investigate(3, fallback_argv);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(investigate, "fallback")));
+   assert(cJSON_IsFalse(cJSON_GetObjectItem(investigate, "include_code")));
+   cJSON_Delete(investigate);
+   unsetenv("AIMEE_PROJECT_ID");
+
+   /* index deps is part of the same family: an agent inside a checkout must be
+    * able to ask without naming the project, or the one command that reports
+    * cross-repo dependencies is the one that demands a flag the others do not. */
+   setenv("AIMEE_PROJECT_ID", "session-project", 1);
+   char *deps_argv[] = {"--reverse"};
+   cJSON *deps = marshal_index_deps(1, deps_argv);
+   assert(deps != NULL);
+   assert(cJSON_IsString(cJSON_GetObjectItem(deps, "project")));
+   assert(strcmp(cJSON_GetObjectItem(deps, "project")->valuestring, "session-project") == 0);
+   assert(cJSON_IsString(cJSON_GetObjectItem(deps, "cwd")));
+   cJSON_Delete(deps);
+
+   char *deps_named[] = {"named-project"};
+   deps = marshal_index_deps(1, deps_named);
+   assert(cJSON_IsString(cJSON_GetObjectItem(deps, "project")));
+   assert(strcmp(cJSON_GetObjectItem(deps, "project")->valuestring, "named-project") == 0);
+   cJSON_Delete(deps);
+   unsetenv("AIMEE_PROJECT_ID");
    printf("  PASS: test_index_current_project_proxy_context\n");
 }
 
@@ -1927,10 +2007,24 @@ static void test_delegate_scope_is_forwarded(void)
    assert(cJSON_IsString(scope) && strcmp(scope->valuestring, "whole_task") == 0);
    cJSON_Delete(req);
 
-   /* Absent unless asked for: an omitted flag must not imply a ceiling. */
+   /* The thin client leaves the default to the server so CLI, MCP, and future
+    * transports share one policy owner. */
    char *plain[] = {"review", "task"};
    req = marshal_delegate(2, plain);
    assert(cJSON_GetObjectItemCaseSensitive(req, "scope") == NULL);
+   cJSON_Delete(req);
+}
+
+static void test_delegate_handoff_override_is_forwarded(void)
+{
+   char *automatic[] = {"execute", "task"};
+   cJSON *req = marshal_delegate(2, automatic);
+   assert(cJSON_GetObjectItemCaseSensitive(req, "handoff_json") == NULL);
+   cJSON_Delete(req);
+
+   char *disabled[] = {"execute", "task", "--no-handoff-json"};
+   req = marshal_delegate(3, disabled);
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(req, "handoff_json")));
    cJSON_Delete(req);
 }
 
@@ -2142,6 +2236,7 @@ int main(void)
    printf("test_cli_v1_delegate\n");
    test_remote_workspace_hidden_roots_are_rejected();
    test_json_error_envelopes_remain_structured();
+   test_index_investigate_requires_useful_evidence();
    test_json_roundtable_failure_preserves_user_visible_envelope();
    test_human_roundtable_failure_uses_stderr();
    test_success_with_string_error_remains_success();
@@ -2166,6 +2261,7 @@ int main(void)
    test_delegate_prompt_stdin_rejects_prompt_file();
    test_delegate_depth_requires_parent_env();
    test_provider_routes_and_marshaling();
+   test_agent_set_route_and_marshaling();
    test_catalog_routes_and_marshaling();
    test_memory_show_alias_route();
    test_memory_stats_route();
@@ -2219,6 +2315,7 @@ int main(void)
    test_client_endpoint_selection();
    test_delegate_unsupported_routed_flags_are_refused();
    test_delegate_scope_is_forwarded();
+   test_delegate_handoff_override_is_forwarded();
    printf("All tests passed.\n");
    return 0;
 }

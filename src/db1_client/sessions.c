@@ -800,4 +800,28 @@ int db1_webchat_live_get(const char *session_id, long long since_rev, char **tur
    return 1;
 }
 
+int db1_server_session_persona_delivery_claim(const char *id)
+{
+   if (!id || !id[0])
+      return -1;
+   const char *fields[] = {id};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_server_session_persona_delivery_finish(const char *id, int delivered)
+{
+   if (!id || !id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", delivered);
+   const char *fields[] = {id, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_FINISH, fields, 2, NULL, NULL, 0, NULL));
+}
+
 /* clang-format on */

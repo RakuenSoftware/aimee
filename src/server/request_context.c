@@ -73,3 +73,16 @@ void request_context_override_caller_authorization(const char *jwt)
    memset(g_req_ctx.caller_subject, 0, sizeof(g_req_ctx.caller_subject));
    snprintf(g_req_ctx.caller_authorization, sizeof(g_req_ctx.caller_authorization), "%s", jwt);
 }
+
+void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls,
+                                        const char *intervention, const char *tool_transport)
+{
+   if (!g_req_ctx_set)
+      return;
+   g_req_ctx.aimee_tool_calls = tool_calls;
+   g_req_ctx.aimee_redundant_tool_calls = redundant_tool_calls;
+   snprintf(g_req_ctx.aimee_intervention, sizeof(g_req_ctx.aimee_intervention), "%s",
+            intervention ? intervention : "");
+   snprintf(g_req_ctx.aimee_tool_transport, sizeof(g_req_ctx.aimee_tool_transport), "%s",
+            tool_transport ? tool_transport : "none");
+}

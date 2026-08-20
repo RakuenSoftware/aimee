@@ -113,6 +113,7 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *provider = NULL;
    const char *remote = NULL;
    const char *head = NULL;
+   int prepare = 0;
    for (int i = 1; i + 1 < argc; i++)
    {
       if (strcmp(argv[i], "--provider") == 0)
@@ -121,7 +122,12 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          remote = argv[i + 1];
       else if (strcmp(argv[i], "--head") == 0)
          head = argv[i + 1];
+      else if (strcmp(argv[i], "--prepare") == 0)
+         prepare = 1;
    }
+   for (int i = 1; i < argc; i++)
+      if (strcmp(argv[i], "--prepare") == 0)
+         prepare = 1;
    if (provider && strcmp(provider, "shared") != 0 && strcmp(provider, "detached") != 0 &&
        strcmp(provider, "mirror") != 0)
       return server_send_error(conn, "workspace: --provider must be shared, detached or mirror",
@@ -211,6 +217,7 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       jo_add_str(resp, "provider", "detached");
       cJSON_AddArrayToObject(resp, "projects");
       cJSON_AddNumberToObject(resp, "project_count", 0);
+      cJSON_AddBoolToObject(resp, "ready", 0);
       return send_and_free(conn, resp);
    }
 
@@ -234,18 +241,50 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * reconciled them anyway. Default stays true: an interactive
     * `aimee workspace add` should still say whether the index is populated. */
    const cJSON *scan_req = cJSON_GetObjectItemCaseSensitive(req, "scan");
-   int eager_scan = cJSON_IsBool(scan_req) ? cJSON_IsTrue(scan_req) : 1;
-   int kb_live = eager_scan && kb_client_is_live();
+   int eager_scan = prepare ? 1 : (cJSON_IsBool(scan_req) ? cJSON_IsTrue(scan_req) : 1);
+   int kb_live = eager_scan && (prepare || kb_client_is_live());
    cJSON *resp = jo_ok();
    jo_add_str(resp, "path", abs);
+   jo_add_str(resp, "host_path", abs);
+   jo_add_str(resp, "index_root", abs);
    /* Idempotent success still tells the caller which it was, so a UI can say
     * "already registered" without having to treat it as a failure. */
    cJSON_AddBoolToObject(resp, "already_registered", already_registered);
+   jo_add_str(resp, "workspace_state", already_registered ? "reused" : "registered");
    cJSON *arr = cJSON_AddArrayToObject(resp, "projects");
+   int all_ready = count > 0;
    for (int i = 0; i < count; i++)
    {
       const char *name = strrchr(projects[i], '/');
       name = name ? name + 1 : projects[i];
+
+      char identity[128];
+      snprintf(identity, sizeof(identity), "%s", name);
+      if (prepare)
+      {
+         project_info_t indexed[256];
+         int indexed_count = kb_client_index_list(indexed, 256);
+         int collision = 0, reused = 0;
+         for (int k = 0; k < indexed_count; k++)
+         {
+            if (strcmp(indexed[k].root, projects[i]) == 0)
+            {
+               snprintf(identity, sizeof(identity), "%s", indexed[k].name);
+               reused = 1;
+               break;
+            }
+            if (strcmp(indexed[k].name, name) == 0)
+               collision = 1;
+         }
+         if (!reused && collision)
+         {
+            unsigned long hash = 2166136261u;
+            for (const unsigned char *p = (const unsigned char *)projects[i]; *p; p++)
+               hash = (hash ^ *p) * 16777619u;
+            snprintf(identity, sizeof(identity), "%s-%08lx", name, hash & 0xfffffffful);
+         }
+         name = identity;
+      }
 
       cJSON *p = cJSON_CreateObject();
       jo_add_str(p, "name", name);
@@ -261,6 +300,7 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                     eager_scan ? "knowledge service offline — queued for background ingest"
                                : "scan not requested — queued for background ingest");
          cJSON_AddItemToArray(arr, p);
+         all_ready = 0;
          continue;
       }
 
@@ -286,6 +326,9 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        * rather than calling a working older kb broken. */
       int ok = server_workspace_scan_indexed(rc, res.skipped, res.inspected, res.files);
       cJSON_AddBoolToObject(p, "indexed", ok);
+      cJSON_AddBoolToObject(p, "ready", ok);
+      if (!ok)
+         all_ready = 0;
       if (!ok)
       {
          if (rc != 0 || res.skipped)
@@ -296,6 +339,7 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddItemToArray(arr, p);
    }
    cJSON_AddNumberToObject(resp, "project_count", count);
+   cJSON_AddBoolToObject(resp, "ready", all_ready);
    return send_and_free(conn, resp);
 }
 

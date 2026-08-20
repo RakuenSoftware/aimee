@@ -64,6 +64,7 @@ static const golden_t g_golden[] = {
     {"wfe_live_forge_enabled", "false"},
     {"wfe_proposals_autoscan_enabled", "false"},
     {"client_integrations_enabled", "true"},
+    {"client_tool_transport_preference", "\"cli-first\""},
     {"audit_action_enabled", "true"},
     {"audit_worm_enabled", "false"},
     {"css_render_command",

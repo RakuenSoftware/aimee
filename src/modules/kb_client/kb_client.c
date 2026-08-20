@@ -576,6 +576,24 @@ char *kb_client_health_json(void)
    return body;
 }
 
+char *kb_client_agent_surfaces_json(void)
+{
+   int http_status = 0;
+   char *body = kb_client_v1_get_json("/v1/capabilities", CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   if (!body || http_status < 200 || http_status >= 300)
+   {
+      free(body);
+      return NULL;
+   }
+
+   cJSON *root = cJSON_Parse(body);
+   free(body);
+   cJSON *surfaces = root ? cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces") : NULL;
+   char *projection = cJSON_IsObject(surfaces) ? cJSON_PrintUnformatted(surfaces) : NULL;
+   cJSON_Delete(root);
+   return projection;
+}
+
 /* Cached read of the KB's advertised typed-facts capability (proposal §8).
  * aimee-server gates per-turn fact injection on THIS instead of owning
  * typed_facts_enabled itself — the KB is the single source of truth. Short TTL so

@@ -47,6 +47,69 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
+typedef struct
+{
+   int fd;
+   pthread_mutex_t mu;
+   pthread_cond_t cv;
+   int stop;
+} sse_live_ctx_t;
+
+static void sse_event_emit(void *ctx, const char *event, const char *data_json)
+{
+   sse_live_ctx_t *live = (sse_live_ctx_t *)ctx;
+   if (!data_json)
+      return;
+   int need = server_http_sse_event_format(event, data_json, NULL, 0);
+   char *frame = malloc((size_t)need + 1);
+   if (!frame)
+      return;
+   server_http_sse_event_format(event, data_json, frame, (size_t)need + 1);
+   pthread_mutex_lock(&live->mu);
+   (void)write_all_fd(live->fd, frame, need);
+   pthread_mutex_unlock(&live->mu);
+   free(frame);
+}
+
+static void *sse_keepalive_main(void *arg)
+{
+   sse_live_ctx_t *live = (sse_live_ctx_t *)arg;
+   pthread_mutex_lock(&live->mu);
+   while (!live->stop)
+   {
+      struct timespec until;
+      clock_gettime(CLOCK_REALTIME, &until);
+      until.tv_sec += 15;
+      int rc = pthread_cond_timedwait(&live->cv, &live->mu, &until);
+      if (!live->stop && rc == ETIMEDOUT)
+         (void)write_all_fd(live->fd, ": keep-alive\n\n", 14);
+   }
+   pthread_mutex_unlock(&live->mu);
+   return NULL;
+}
+
+/* Keep long provider generations alive without changing the typed SSE event
+ * stream. The same owner serves Responses and Anthropic Messages. */
+void server_http_sse_live_run(int fd, const char *body, server_http_responses_stream_fn handler)
+{
+   sse_live_ctx_t live = {.fd = fd};
+   pthread_mutex_init(&live.mu, NULL);
+   pthread_cond_init(&live.cv, NULL);
+   pthread_t keepalive;
+   int started = pthread_create(&keepalive, NULL, sse_keepalive_main, &live) == 0;
+   handler(body ? body : "", sse_event_emit, &live);
+   if (started)
+   {
+      pthread_mutex_lock(&live.mu);
+      live.stop = 1;
+      pthread_cond_signal(&live.cv);
+      pthread_mutex_unlock(&live.mu);
+      pthread_join(keepalive, NULL);
+   }
+   pthread_cond_destroy(&live.cv);
+   pthread_mutex_destroy(&live.mu);
+}
+
 void handle_session_events(int fd, const char *id_in, const char *request_id)
 {
    /* id_in may carry a resume position as "<sid>?cursor=N" (threaded from the

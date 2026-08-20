@@ -50,6 +50,7 @@ jobs:
   # embedding) and merge (image tags) jobs agree.
   prep:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
@@ -98,6 +99,7 @@ jobs:
           - { arch: amd64, runner: ubuntu-latest }
           - { arch: arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -176,6 +178,7 @@ jobs:
     # Nothing to merge when nothing was pushed. A PR stops after the build.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

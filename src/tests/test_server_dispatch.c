@@ -17,6 +17,7 @@
 #include "log.h"
 #include "server.h"
 #include "server_http.h"
+#include "server_mcp_internal.h"
 #include "toolset.h"
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
@@ -2267,6 +2268,32 @@ static void test_session_brief_assemble(void)
    printf("test_session_brief_assemble: PASS\n");
 }
 
+static void test_mcp_span_shorthand_batch_parse(void)
+{
+   const char *items[] = {"app/items.py:1-260", "tests/test_items.py:7-42", "malformed"};
+   int valid = 0;
+   for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++)
+   {
+      char path[128] = "";
+      int start = 0, end = 0;
+      int parsed = server_mcp_span_shorthand_parse(items[i], path, sizeof(path), &start, &end);
+      if (i == 0)
+         assert(parsed && strcmp(path, "app/items.py") == 0 && start == 1 && end == 260);
+      else if (i == 1)
+         assert(parsed && strcmp(path, "tests/test_items.py") == 0 && start == 7 && end == 42);
+      else
+         assert(!parsed);
+      valid += parsed;
+   }
+   assert(valid == 2);
+   char path[8];
+   int start = 0, end = 0;
+   assert(!server_mcp_span_shorthand_parse("x.py:0-4", path, sizeof(path), &start, &end));
+   assert(!server_mcp_span_shorthand_parse("x.py:9-4", path, sizeof(path), &start, &end));
+   assert(!server_mcp_span_shorthand_parse("x.py:1-4-extra", path, sizeof(path), &start, &end));
+   printf("test_mcp_span_shorthand_batch_parse: PASS\n");
+}
+
 /* The kb block in server.health is where "accepted, reports healthy, cannot work"
  * became visible to users: `status` was `reachable ? "ok" : "unreachable"`, and
  * every capability the kb reported sat beside it as a sibling that nothing read.
@@ -2380,6 +2407,7 @@ int main(void)
    test_health_kb_verdict_states();
    test_invalid_json();
    test_session_brief_assemble();
+   test_mcp_span_shorthand_batch_parse();
    test_conn_update_events_null_evloop();
    test_config_secret_redaction_and_vault_write();
    test_api_enroll_preserves_sequential_bearers();

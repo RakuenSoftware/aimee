@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (92)
+## CLI-settable keys (93)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -37,6 +37,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
 | `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs: Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
+| `client_tool_transport_preference` | string | n/a |
 | `code_cochange_git_enabled` | bool | Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on. |
 | `code_trust_actuation_enabled` | bool | Use earned code-graph trust lessons only as an equal-score retrieval tiebreak (default off). |
 | `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
@@ -121,7 +122,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`, `client_tool_transport_preference`
 
 ### Advanced tuning keys (83)
 
@@ -294,7 +295,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 233 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -606,7 +607,7 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
+`AIMEE_CLI_PATH`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
 
 ## External & provider environment
 
@@ -769,6 +770,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `cost_tier` | Cost-tier label for routing. |
 | `credentials` | Credential block / reference. |
 | `default_agent` | Top-level: name of the default agent. |
+| `default_delegate` | Delegate this agent hands work to when a task arrives with no explicit delegate. Lets a project pin its own worker without every caller passing --delegate. |
 | `desc` | Human description of the agent. |
 | `enabled` | Whether the agent is active. |
 | `endpoint` | Provider endpoint URL. |

@@ -822,6 +822,12 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   /* Write delegates must prove what changed and which tests passed without
+    * every CLI/MCP caller remembering an opt-in. An explicit JSON false keeps a
+    * deliberate escape hatch for compatibility or interactive experimentation;
+    * otherwise write-role handoff validation is part of the delegate contract. */
+   if (!cJSON_IsBool(jhandoff) && delegate_role_is_write(role))
+      handoff_json = 1;
    /* What this delegate may do, resolved ONCE, here, because this is the first
     * point at which the role is known to be real. Everything downstream reads
     * this: the tool default below, the mount, the drift check, the no-op check.
@@ -1012,13 +1018,20 @@ void delegate_worker(void *arg)
    }
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
    int min_context = cJSON_IsNumber(jmin_ctx) ? (int)jmin_ctx->valuedouble : 0;
-   /* The packet's scope CEILING. Routing is the server's job, so the ceiling is
-    * enforced here rather than by the caller. Absent or unparseable leaves it
-    * UNSET, which admits every seat - the client validates the spelling, so an
-    * unparseable value here means a non-CLI caller, and the permissive default
-    * matches the previous behaviour for every existing caller. */
-   agent_scope_t scope =
-       cJSON_IsString(jscope) ? agent_scope_from_string(jscope->valuestring) : AGENT_SCOPE_UNSET;
+   /* A delegate packet is bounded unless its caller explicitly says it owns the
+    * whole task. This policy belongs here so CLI, MCP, coordinator dispatch, and
+    * future transports all get the same safe default. Invalid strings are an
+    * error instead of silently becoming an unrestricted/whole-task packet. */
+   agent_scope_t scope = AGENT_SCOPE_BOUNDED;
+   if (cJSON_IsString(jscope))
+   {
+      scope = agent_scope_from_string(jscope->valuestring);
+      if (scope == AGENT_SCOPE_UNSET)
+      {
+         delegation_compute_error(cctx, "delegate scope must be 'bounded' or 'whole_task'");
+         goto delegate_fail;
+      }
+   }
    {
       char route_err[256];
       unsigned inferred_caps = 0;

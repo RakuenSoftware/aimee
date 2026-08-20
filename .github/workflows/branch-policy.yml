@@ -20,6 +20,7 @@ jobs:
   allow-only-testing-source:
     name: allow-only-testing-source
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Require the PR source branch to be `testing`
         env:

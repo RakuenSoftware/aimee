@@ -52,7 +52,7 @@ void delegate_print_help(void)
            "  --model NAME       Override the routed agent's model for this run\n"
            "  --tier N           Route to the best agent at cost tier N\n"
            "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
-           "                     lower max_scope are excluded (default whole_task)\n"
+           "                     lower max_scope are excluded (default bounded)\n"
            "  --plan             Use plan-mode execution\n"
            "  --dry-run          Show what would be sent without executing\n"
            "\n"

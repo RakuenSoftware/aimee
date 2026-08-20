@@ -66,6 +66,12 @@ static void db1_run_migrations(sqlite3 *db)
        /* Gateway ambient-presence: track which platform/channel originated a session */
        "ALTER TABLE server_sessions ADD COLUMN source TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE server_sessions ADD COLUMN chat_key TEXT NOT NULL DEFAULT ''",
+       /* First-message persona delivery, claimed once per durable session:
+        * 0 = not delivered, 2 = a request is delivering it right now, 1 = done.
+        * Held in the row rather than in process memory so two concurrent
+        * first requests on the same session cannot each decide they are the
+        * first and deliver the persona twice. */
+       "ALTER TABLE server_sessions ADD COLUMN persona_delivery_state INTEGER NOT NULL DEFAULT 0",
        /* Autonomous-dev: persist the forge PR ref opened by pr.open so the
         * downstream gate.ci / check.mergeable / merge blocks resolve the real PR
         * instead of the work-item id (full-autonomous-development Phase A). */

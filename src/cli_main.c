@@ -54,13 +54,15 @@ int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out
       return 0;
    out[0] = '\0';
 
-   const char *sid = NULL;
+   /* The universal launcher establishes the session before the client starts;
+    * its inherited id outranks a client-local thread id from the hook payload.
+    * Without a launcher, the payload remains the authoritative fallback. */
+   const char *sid = getenv("AIMEE_SESSION_ID");
    const cJSON *jsid = hook_json ? cJSON_GetObjectItemCaseSensitive(hook_json, "session_id") : NULL;
-   if (cJSON_IsString(jsid) && jsid->valuestring[0])
+   if ((!sid || !sid[0]) && cJSON_IsString(jsid) && jsid->valuestring[0])
       sid = jsid->valuestring;
 
-   static const char *env_keys[] = {"AIMEE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID",
-                                    NULL};
+   static const char *env_keys[] = {"CLAUDE_SESSION_ID", "CODEX_THREAD_ID", NULL};
    for (int i = 0; (!sid || !sid[0]) && env_keys[i]; i++)
       sid = getenv(env_keys[i]);
 
@@ -394,7 +396,9 @@ static void client_delegate_usage(void)
            "  --max-tokens N     Limit response tokens\n"
            "  --max-turns N      Override the delegate turn limit\n"
            "  --timeout N        Timeout in milliseconds\n"
-           "  --handoff-json     Require delegate_result_v1 JSON handoff output\n"
+           "  --handoff-json     Require delegate_result_v1 JSON handoff output (automatic for\n"
+           "                     write roles)\n"
+           "  --no-handoff-json  Disable automatic handoff validation for a write role\n"
            "  --worktree BRANCH  Check out BRANCH in the session worktree\n"
            "  --via AGENT        Route to a specific agent by name\n"
            "  --acp CMD          Route via an inline ACP agent (e.g. --acp claude)\n"
@@ -403,7 +407,7 @@ static void client_delegate_usage(void)
            "  --model NAME       Override provider model\n"
            "  --tier N           Route to the best agent at cost tier N\n"
            "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
-           "                     lower max_scope are excluded (default whole_task)\n"
+           "                     lower max_scope are excluded (default bounded)\n"
            "\n"
            "Subcommands:\n"
            "  aimee delegate plan <proposal.md>        Generate read-only work packets\n"
@@ -1052,6 +1056,33 @@ static int handle_hooks(int argc, char **argv, int json_output)
       }
    }
 
+   char hook_sid[64] = "";
+   const char *sid =
+       client_hook_payload_session_id(json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
+   const char *discovery_command = NULL;
+   cJSON *discovery_input = cJSON_Parse(tool_input);
+   if (cJSON_IsObject(discovery_input))
+      discovery_command =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(discovery_input, "command"));
+   char discovery_reason[1024];
+   int discovery_deny = attn_discovery_gate(tool_name, discovery_command, sid, discovery_reason,
+                                            sizeof(discovery_reason));
+   cJSON_Delete(discovery_input);
+   if (discovery_deny)
+   {
+      if (cli_hook_client_uses_pretool_json())
+      {
+         emit_pretool_deny_json(discovery_reason);
+         discovery_deny = 0; /* denial is carried by the hook JSON contract */
+      }
+      else
+         fprintf(stderr, "aimee: %s\n", discovery_reason);
+      free(stdin_data);
+      cJSON_Delete(json);
+      free(tool_input_heap);
+      return discovery_deny;
+   }
+
    /* Worktree isolation — pure filesystem check, before we even try the server,
     * so it holds regardless of aimee-server reachability. */
    const char *hook_cwd = NULL;
@@ -1113,10 +1144,6 @@ static int handle_hooks(int argc, char **argv, int json_output)
          }
       }
    }
-
-   char hook_sid[64] = "";
-   const char *sid =
-       client_hook_payload_session_id(json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
@@ -2218,8 +2245,10 @@ int main(int argc, char **argv)
     * server would try to realpath against its own filesystem and reject). */
    if (cli_v1_remote_endpoint_is_network())
    {
-      if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "add") == 0)
-         return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL);
+      if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 &&
+          (strcmp(sub_argv[0], "add") == 0 || strcmp(sub_argv[0], "prepare") == 0))
+         return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL,
+                                         strcmp(sub_argv[0], "prepare") == 0, json_output);
       if (strcmp(cmd, "index") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "scan") == 0)
          return cli_index_scan_remote(sub_argc - 1, sub_argv + 1);
       /* `agent add ... --key K` is forwarded verbatim: the server vaults the key

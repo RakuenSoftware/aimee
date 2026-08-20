@@ -53,3 +53,11 @@
     "vault.lock",
     "workers",
     "workspace.list",
+
+/* These two take no arguments at all -- their marshallers build the empty
+   envelope and nothing else -- but were unserved because they happen to have a
+   dedicated marshaller rather than an entry alongside the rest here. Serving
+   them costs nothing and needs no spec. */
+"index.list",
+"memory.read",
+

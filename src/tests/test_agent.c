@@ -464,6 +464,14 @@ static void test_agent_route(void)
    cfg.agents[1].cost_tier = 2;
    cfg.agents[1].enabled = 1;
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   /* A delegate preference is independent from the primary default and may
+    * intentionally choose a dearer local/default worker. */
+   strcpy(cfg.default_delegate, "expensive");
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
+   cfg.agents[1].enabled = 0;
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   cfg.agents[1].enabled = 1;
+   cfg.default_delegate[0] = '\0';
    cfg.agents[1].cost_tier = 0;
    /* Equal eligible peers are both used despite an explicit primary default. */
    agent_t *first = agent_route(&cfg, "summarize");
@@ -510,6 +518,84 @@ static int test_route_selector(int randomized, uint32_t candidate_count, uint32_
    return 0;
 }
 
+static void test_route_authority_refuses_without_provider(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   for (int i = 0; i < 2; i++)
+   {
+      snprintf(cfg.agents[i].name, sizeof(cfg.agents[i].name), "peer%d", i);
+      strcpy(cfg.agents[i].roles[0], "review");
+      cfg.agents[i].role_count = 1;
+      cfg.agents[i].enabled = 1;
+      cfg.agents[i].cost_tier = 0;
+   }
+   /* No authority yet: the built-in balancer serves equal peers. */
+   agent_reset_route_selection_authority();
+   assert(agent_route(&cfg, "review") != NULL);
+   /* Declare an authority, then lose the provider. The daemon must refuse
+    * rather than quietly resume the built-in balancer under a different
+    * policy than the operator deployed. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(agent_route(&cfg, "review") == NULL);
+   /* The refusal must be legible as a routing fault, not as an empty roster:
+    * that distinction is the whole reason the flag exists. */
+   assert(agent_route_last_was_module_fault());
+   /* Dropping the authority drops the fault with it: a later empty roster must
+    * not inherit this outage and be reported as one. */
+   agent_reset_route_selection_authority();
+   assert(!agent_route_last_was_module_fault());
+   assert(agent_route(&cfg, "review") != NULL);
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) != -1);
+   /* The role picker is the second seam with the same shape. Exercise it from a
+    * cleared flag so this asserts the picker's own bookkeeping and not a fault
+    * left behind by agent_route above -- a delegate that routes through here
+    * would otherwise still be told the roster was empty. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(!agent_route_last_was_module_fault());
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   assert(agent_route_last_was_module_fault());
+   /* The words an operator actually reads. Every caller renders a failed route
+    * through this one helper, so this is where the two cases are pinned: each
+    * site that spelled the message itself got the distinction wrong. */
+   char why[256];
+   agent_route_failure_message("review", why, sizeof(why));
+   assert(strstr(why, "routing module unavailable") != NULL);
+   assert(strstr(why, "no agent available") == NULL);
+   agent_reset_route_selection_authority();
+   agent_route_failure_message("review", why, sizeof(why));
+   assert(strstr(why, "no agent available for role") != NULL);
+   assert(strstr(why, "routing module unavailable") == NULL);
+
+   /* A seat that is produced WITHOUT consulting the provider still clears the
+    * latch. The single-candidate shortcut returns before the provider is asked,
+    * so clearing only on provider success left the fault latched after the
+    * module came back -- and the next genuinely empty roster then read as an
+    * outage. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(agent_route(&cfg, "review") == NULL);
+   assert(agent_route_last_was_module_fault());
+   agent_config_t one;
+   memset(&one, 0, sizeof(one));
+   one.agent_count = 1;
+   snprintf(one.agents[0].name, sizeof(one.agents[0].name), "solo");
+   strcpy(one.agents[0].roles[0], "review");
+   one.agents[0].role_count = 1;
+   one.agents[0].enabled = 1;
+   one.agents[0].cost_tier = 0;
+   /* Deliberately NO reset here: the latch has to still be set going in, or this
+    * asserts nothing. One candidate needs no selection, so the shortcut answers
+    * before the authority is consulted -- and that success must clear the latch. */
+   assert(agent_route_last_was_module_fault());
+   assert(agent_route(&one, "review") == &one.agents[0]);
+   assert(!agent_route_last_was_module_fault());
+   agent_reset_route_selection_authority();
+}
+
 static void test_agent_route_selection_provider(void)
 {
    agent_config_t cfg;
@@ -540,13 +626,24 @@ static void test_agent_route_selection_provider(void)
     * or invalid reply cannot silently resurrect the old in-process decision. */
    g_route_selector_fail = 1;
    assert(agent_route(&cfg, "review") == NULL);
+   assert(agent_route_last_was_module_fault());
+   /* Clear via a successful pick, so the role-picker assertion below is about
+    * that seam rather than the fault agent_route just recorded. */
+   g_route_selector_fail = 0;
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) >= 0);
+   assert(!agent_route_last_was_module_fault());
+   g_route_selector_fail = 1;
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   assert(agent_route_last_was_module_fault());
 
    g_route_selector_fail = 0;
    g_route_selector_pick = 2;
    assert(agent_route(&cfg, "review") == NULL);
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
-   agent_set_route_selection_provider(NULL);
+   /* Drop the latched authority too: a plain provider=NULL now REFUSES rather
+    * than silently resuming the built-in balancer, which is the whole point of
+    * the latch. Only a suite may undo it. */
+   agent_reset_route_selection_authority();
 }
 
 /* The OpenAI Chat and Responses tool surfaces are generated from one builtin
@@ -987,7 +1084,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    {
       FILE *f = fopen(agent_config_path(), "w");
       assert(f != NULL);
-      fputs("{\"agents\":[{\"name\":\"codex-cli\",\"roles\":[\"code\"],"
+      fputs("{\"default_delegate\":\"codex-cli\",\"agents\":[{\"name\":\"codex-cli\",\"roles\":["
+            "\"code\"],"
             "\"backend\":\"cli-stdio\",\"cli_kind\":\"codex\",\"cli_cmd\":\"codex\","
             "\"cli_idle_timeout_ms\":1234,\"session_reuse\":true},"
             "{\"name\":\"claude\",\"provider\":\"claude\",\"roles\":[\"code\"],"
@@ -1013,6 +1111,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    agent_config_t loaded;
    assert(agent_load_config(&loaded) == 0);
    assert(loaded.agent_count == 6);
+   assert(strcmp(loaded.default_delegate, "codex-cli") == 0);
    assert(strcmp(loaded.agents[0].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[0].cli_kind, "codex") == 0);
    assert(strcmp(loaded.agents[0].cli_cmd, "codex") == 0);
@@ -1060,6 +1159,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    agent_config_t reloaded;
    assert(agent_load_config(&reloaded) == 0);
    assert(reloaded.agent_count == 6);
+   assert(strcmp(reloaded.default_delegate, "codex-cli") == 0);
    assert(strcmp(reloaded.agents[0].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[0].cli_kind, "codex") == 0);
    assert(strcmp(reloaded.agents[0].cli_cmd, "codex") == 0);
@@ -3679,6 +3779,7 @@ int main(void)
    test_agent_find();
    test_agent_route();
    test_agent_route_selection_provider();
+   test_route_authority_refuses_without_provider();
    test_agent_route_policy_filter();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();

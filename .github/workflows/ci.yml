@@ -42,6 +42,24 @@ jobs:
   # success, so required checks remain mergeable for documentation-only PRs.
   change-scope:
     runs-on: ubuntu-latest
+    # No job here had a timeout, so a hung one ran until GitHub's 6-hour
+    # default. That is not hypothetical: five jobs on one run sat in_progress
+    # for three hours, `lint` stuck the whole time on "Install clang-format" --
+    # an apt-mirror hang with nothing to do with the change under test -- and
+    # would have held the PR for three more.
+    #
+    # 30 minutes is ~4.5x the slowest job measured across three green runs on
+    # `testing`:
+    #
+    #     6m33s  e2e-docker (T2)      2m59s  build-integrity
+    #     6m01s  e2e-docker (T1)      2m25s  lint
+    #     5m16s  unit-tests (1/2)     0m04s  change-scope
+    #
+    # Deliberately uniform and deliberately generous. Tuning each job to its own
+    # runtime is how module-inventory's descriptor-envelope ended up cancelled
+    # at 5m16s against a 5m cap, passing or failing on runner weather. This
+    # bounds a HANG; it is not a performance budget.
+    timeout-minutes: 30
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       # Separate from docs_only on purpose: see the documentation step below.
@@ -107,6 +125,7 @@ jobs:
     # Scans only the PR's NEW commits (base..head), so existing history is
     # grandfathered while any newly introduced trailer fails the PR.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -176,6 +195,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -195,8 +215,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q clang-format-19 ripgrep
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          i=0; until timeout 240 sudo apt-get install -y -q clang-format-19 ripgrep; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Check formatting
         if: needs.change-scope.outputs.docs_only != 'true'
         run: cd src && make lint
@@ -237,6 +257,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -255,8 +276,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build
@@ -298,6 +319,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -316,8 +338,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
@@ -335,6 +357,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     name: unit-tests (${{ matrix.label }}/2)
     strategy:
       fail-fast: false
@@ -398,8 +421,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make ccache \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make ccache \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client
       - name: Wait for Postgres
@@ -447,6 +470,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       AIMEE_DB2_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_db2_process_ci
       EMBEDDER_DIMS: "384"
@@ -467,13 +491,13 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0
-          until sudo apt-get update -q; do
+          until timeout 240 sudo apt-get update -q; do
             i=$((i+1))
             [ "$i" -ge 5 ] && break
             echo "apt-get update retry $i (transient repo failure)"
             sleep $((i*4))
           done
-          sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -498,6 +522,7 @@ jobs:
     needs: [change-scope, unit-test-shards, db2-process-replay, p1-rls-gate]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Confirm complete unit gate
         env:
@@ -565,6 +590,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -650,6 +676,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -657,8 +684,8 @@ jobs:
         # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Start the identity provider
@@ -707,6 +734,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -725,8 +753,8 @@ jobs:
         # PQ_CFLAGS comes from pkg-config, and L_KB/L_SERVER link -lzstd -lz.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Wait for Postgres
@@ -774,6 +802,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -790,8 +819,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates \
             libpam-modules passwd
@@ -830,6 +859,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -846,8 +876,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Wait for Postgres
@@ -909,6 +939,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -925,8 +956,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q postgresql-client python3
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          i=0; until timeout 240 sudo apt-get install -y -q postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -950,6 +981,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # The harness builds the workflow control module, which is Go. The runner
@@ -965,8 +997,8 @@ jobs:
         run: |
           # Same transient-apt-mirror workaround the sibling jobs carry.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       # actions/checkout leaves refs/remotes/origin/HEAD unset -- it clones
@@ -1004,6 +1036,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -1022,8 +1055,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Init/migrate service routing smoke test
@@ -1054,6 +1087,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -1144,6 +1178,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Set up MinGW-w64
@@ -1220,6 +1255,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # macOS ships ONE universal (arm64 + x86_64) thin client, matching the
@@ -1289,6 +1325,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -1307,8 +1344,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Memory retrieval eval (corpus + regression check)
@@ -1325,6 +1362,7 @@ jobs:
     # One runner per topology so the deploy matrix runs in PARALLEL instead of
     # serially on one runner (T1+T2+T3 back-to-back was the long pole of CI).
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -1415,6 +1453,7 @@ jobs:
     # bootstrap bearer must pin the cert, auto-rotate to a strong bearer, and
     # persist it on both sides; the consumed bootstrap must be dead afterwards.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -1422,8 +1461,8 @@ jobs:
           # Same apt hygiene as the build jobs: drop flaky third-party repos,
           # retry update with backoff.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Thin-client adoption E2E
@@ -1442,6 +1481,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -1456,8 +1496,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make git \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make git \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev
       - name: Build + run the opt-in tree-sitter test
         run: |
@@ -1472,13 +1512,14 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev softhsm2 opensc
       - name: Run the SoftHSM2 PKCS#11 custody gate (must not skip)

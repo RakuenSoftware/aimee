@@ -243,6 +243,24 @@ int text_is_valid_utf8(const char *s)
    return 1;
 }
 
+size_t text_utf8_chunk_len(const char *s, size_t remaining, size_t max_bytes)
+{
+   if (!s || remaining == 0 || max_bytes == 0)
+      return 0;
+
+   size_t take = remaining < max_bytes ? remaining : max_bytes;
+   if (take == remaining)
+      return take;
+
+   /* `take` is the first byte excluded from the chunk. If it is a continuation
+    * byte, walk back to the lead byte and leave the whole code point for the
+    * next chunk. If it is ASCII or a lead byte, the prefix already ends at a
+    * character boundary. */
+   while (take > 0 && ((unsigned char)s[take] & 0xc0) == 0x80)
+      take--;
+   return take;
+}
+
 double trigram_similarity(const char *a, const char *b)
 {
    if (!a || !b || !a[0] || !b[0])

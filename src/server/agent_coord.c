@@ -498,8 +498,18 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
       return -1;
 
    agent_t *ag = agent_route(cfg, "execute");
-   int timeout = ag ? ag->timeout_ms : AGENT_DEFAULT_TIMEOUT_MS;
-   rc = agent_plan_execute(&plan, ag, timeout);
+   if (!ag)
+   {
+      /* agent_plan_execute reaches agent_execute, which reads agent->name with
+       * no NULL guard: running the plan without a seat is a segfault, not a
+       * degraded run. The ternary below used to imply a NULL agent was survivable
+       * -- it only ever survived because a route this late almost always found
+       * something. Refuse, and say which of the two reasons it was. */
+      agent_route_failure_message("execute", out->error, sizeof(out->error));
+      (void)db1_execution_plan_set_status(plan.id, "failed");
+      return -1;
+   }
+   rc = agent_plan_execute(&plan, ag, ag->timeout_ms);
 
    /* Build response from plan outputs */
    size_t resp_len = 1024;

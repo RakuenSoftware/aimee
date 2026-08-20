@@ -1,8 +1,10 @@
 /* client_session_worktree.h: thin-client per-session worktree bootstrap.
  *
- * Every new agent session — a Claude Code session via the SessionStart hook, an
- * MCP-hosted session via `aimee mcp serve` — must run on its OWN branch cut from
- * the repository's default branch, inside its OWN worktree. The server-side
+ * Every new agent session, regardless of host client, must run on its OWN branch
+ * cut from the repository's default branch, inside its OWN worktree. The generic
+ * `aimee launch -- <client>` process boundary calls this before the client starts;
+ * SessionStart and MCP children never try to move their already-running parent.
+ * The server-side
  * implementation of that policy lives in modules/workspace (worktree_create_
  * sibling_at_ref); this is the thin-client twin of it.
  *
@@ -32,7 +34,7 @@
 /* Ensure the per-session worktree for `sid` exists, creating it (and its
  * session branch, cut from the base branch) if needed. Idempotent: re-running
  * for the same session id reuses the same worktree, so startup/resume/compact
- * all land in one place.
+ * all land in one place. The launcher calls this before exec'ing the client.
  *
  * Writes the absolute worktree path into out[cap] on success.
  *

@@ -229,28 +229,30 @@
 #define AIMEE_DB1_EVENT_SESSIONS 11782u
 #define AIMEE_DB1_STAGE_SESSIONS 6u
 
-#define AIMEE_DB1_OP_SERVER_SESSION_CREATE                 1u
-#define AIMEE_DB1_OP_SERVER_SESSION_GET                    2u
-#define AIMEE_DB1_OP_SERVER_SESSION_SET_OUTCOME            3u
-#define AIMEE_DB1_OP_SERVER_SESSION_DELETE                 4u
-#define AIMEE_DB1_OP_SERVER_SESSION_LIST_RECENT            5u
-#define AIMEE_DB1_OP_SERVER_SESSION_SEARCH_BY_TITLE        6u
-#define AIMEE_DB1_OP_SERVER_SESSION_COUNT                  7u
-#define AIMEE_DB1_OP_SERVER_SESSION_LIST_EXPIRED           8u
-#define AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED         9u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_SAVE                  10u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_LOAD                  11u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_DELETE                12u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT          13u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH          14u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST            15u
-#define AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD             16u
-#define AIMEE_DB1_OP_SESSION_STALE_READS                   17u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET            18u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER 19u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND           20u
-#define AIMEE_DB1_OP_WEBCHAT_LIVE_SET                      21u
-#define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                      22u
+#define AIMEE_DB1_OP_SERVER_SESSION_CREATE                  1u
+#define AIMEE_DB1_OP_SERVER_SESSION_GET                     2u
+#define AIMEE_DB1_OP_SERVER_SESSION_SET_OUTCOME             3u
+#define AIMEE_DB1_OP_SERVER_SESSION_DELETE                  4u
+#define AIMEE_DB1_OP_SERVER_SESSION_LIST_RECENT             5u
+#define AIMEE_DB1_OP_SERVER_SESSION_SEARCH_BY_TITLE         6u
+#define AIMEE_DB1_OP_SERVER_SESSION_COUNT                   7u
+#define AIMEE_DB1_OP_SERVER_SESSION_LIST_EXPIRED            8u
+#define AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED          9u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_SAVE                   10u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_LOAD                   11u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_DELETE                 12u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT           13u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH           14u
+#define AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST             15u
+#define AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD              16u
+#define AIMEE_DB1_OP_SESSION_STALE_READS                    17u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET             18u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER  19u
+#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND            20u
+#define AIMEE_DB1_OP_WEBCHAT_LIVE_SET                       21u
+#define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                       22u
+#define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM  23u
+#define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_FINISH 24u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */

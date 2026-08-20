@@ -588,6 +588,32 @@ cJSON *marshal_index_ast_grep(int argc, char **argv)
    return req;
 }
 
+/* Every index command carries the same three pieces of caller context: which
+ * project the question is about, how wide to look, and where the caller stands.
+ * A launcher or session exports AIMEE_PROJECT_ID, so an agent moved into a
+ * hidden worktree still scopes its first lookup correctly without having to
+ * discover a --project flag first. An explicit flag always wins over it. */
+static void marshal_add_index_context(cJSON *req, const cli_args_t *opts)
+{
+   if (!cJSON_GetObjectItemCaseSensitive(req, "project"))
+   {
+      const char *project = opts ? cli_args_get(opts, "project") : NULL;
+      if (!project || !project[0])
+         project = getenv("AIMEE_PROJECT_ID");
+      if (project && project[0])
+         cJSON_AddStringToObject(req, "project", project);
+   }
+   if (!cJSON_GetObjectItemCaseSensitive(req, "scope") && opts)
+   {
+      const char *scope = cli_args_get(opts, "scope");
+      if (scope && scope[0])
+         cJSON_AddStringToObject(req, "scope", scope);
+   }
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+}
+
 cJSON *marshal_index_find(int argc, char **argv)
 {
    static const char *bools[] = {"json", NULL};
@@ -597,12 +623,7 @@ cJSON *marshal_index_find(int argc, char **argv)
    cJSON *req = marshal_no_args("index.find");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "identifier", opts.positional[0]);
-   const char *scope = cli_args_get(&opts, "scope");
-   if (scope)
-      cJSON_AddStringToObject(req, "scope", scope);
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
+   marshal_add_index_context(req, &opts);
    return req;
 }
 
@@ -629,9 +650,7 @@ static cJSON *marshal_index_file_request(const char *method, int argc, char **ar
    }
    else if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "file_path", opts.positional[0]);
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
+   marshal_add_index_context(req, &opts);
    return req;
 }
 
@@ -665,9 +684,7 @@ cJSON *marshal_index_span(int argc, char **argv)
       cJSON_AddNumberToObject(req, "line_start", atoi(opts.positional[at + 1]));
    if (opts.pos_count > at + 2)
       cJSON_AddNumberToObject(req, "line_end", atoi(opts.positional[at + 2]));
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
+   marshal_add_index_context(req, &opts);
    return req;
 }
 
@@ -694,18 +711,14 @@ cJSON *marshal_index_hybrid(int argc, char **argv)
       for (int i = 0; i < opts.pos_count; i++)
          cJSON_AddItemToArray(arr, cJSON_CreateString(opts.positional[i]));
    }
-   const char *scope = cli_args_get(&opts, "scope");
-   if (scope && scope[0])
-      cJSON_AddStringToObject(req, "scope", scope);
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
+   marshal_add_index_context(req, &opts);
    return req;
 }
 
 cJSON *marshal_index_investigate(int argc, char **argv)
 {
-   static const char *bools[] = {"json", NULL};
+   static const char *bools[] = {"json",         "fallback",        "no-fallback",
+                                 "include-code", "no-include-code", NULL};
    cli_args_t opts;
    cli_args_parse(argc, argv, bools, &opts);
 
@@ -718,9 +731,16 @@ cJSON *marshal_index_investigate(int argc, char **argv)
       for (int i = 0; i < opts.pos_count; i++)
          cJSON_AddItemToArray(arr, cJSON_CreateString(opts.positional[i]));
    }
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
+   /* Explicit --no-X beats --X so a wrapper script can force the narrow form. */
+   if (cli_args_has_flag(&opts, "no-fallback"))
+      cJSON_AddFalseToObject(req, "fallback");
+   else if (cli_args_has_flag(&opts, "fallback"))
+      cJSON_AddTrueToObject(req, "fallback");
+   if (cli_args_has_flag(&opts, "no-include-code"))
+      cJSON_AddFalseToObject(req, "include_code");
+   else if (cli_args_has_flag(&opts, "include-code"))
+      cJSON_AddTrueToObject(req, "include_code");
+   marshal_add_index_context(req, &opts);
    return req;
 }
 
@@ -745,12 +765,7 @@ cJSON *marshal_index_find_callers(int argc, char **argv)
       cJSON_AddStringToObject(req, "symbol", opts.positional[0]);
    if (opts.pos_count > 1)
       cJSON_AddStringToObject(req, "project", opts.positional[1]);
-   const char *scope = cli_args_get(&opts, "scope");
-   if (scope)
-      cJSON_AddStringToObject(req, "scope", scope);
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
+   marshal_add_index_context(req, &opts);
    return req;
 }
 
@@ -778,6 +793,7 @@ cJSON *marshal_index_deps(int argc, char **argv)
       cJSON_AddStringToObject(req, "direction", "in");
    if (cli_args_get(&opts, "dry-run"))
       cJSON_AddBoolToObject(req, "dry_run", 1);
+   marshal_add_index_context(req, &opts);
    return req;
 }
 
@@ -2013,9 +2029,9 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
 
 cJSON *marshal_delegate(int argc, char **argv)
 {
-   static const char *bool_flags[] = {"json",         "background",   "durable", "coordination",
-                                      "plan",         "dry-run",      "tools",   "no-tools",
-                                      "handoff-json", "prompt-stdin", NULL};
+   static const char *bool_flags[] = {
+       "json",  "background", "durable",      "coordination",    "plan",         "dry-run",
+       "tools", "no-tools",   "handoff-json", "no-handoff-json", "prompt-stdin", NULL};
    cli_args_t opts;
    cli_args_parse(argc, argv, bool_flags, &opts);
 
@@ -2135,7 +2151,12 @@ cJSON *marshal_delegate(int argc, char **argv)
       cJSON_AddTrueToObject(req, "tools");
    if (toolset_override && toolset_override[0])
       cJSON_AddStringToObject(req, "toolset", toolset_override);
-   if (cli_args_get(&opts, "handoff-json"))
+   /* Same fail-safe precedence as --tools: an explicit --no-handoff-json turns
+    * the write-role handoff check off even when a wrapper also passed it on.
+    * Absent both, the field stays unset so the server keeps its own default. */
+   if (cli_args_has_flag(&opts, "no-handoff-json"))
+      cJSON_AddFalseToObject(req, "handoff_json");
+   else if (cli_args_get(&opts, "handoff-json"))
       cJSON_AddTrueToObject(req, "handoff_json");
    int mt = cli_args_get_int(&opts, "max-tokens", 0);
    if (mt > 0)

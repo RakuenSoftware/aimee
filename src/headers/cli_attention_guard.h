@@ -116,6 +116,15 @@ int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd);
 int attn_external_memory_blocked(attn_op_t op, const char *tool_name, const char *file_path,
                                  const char *bash_cmd, const char *cwd);
 
+/* Enforce the generated client's effective Aimee discovery transport before its
+ * first ordinary tool call. The integration stamps AIMEE_HOOK_TRANSPORT=cli or
+ * =mcp into the hook command only when it has successfully registered that
+ * surface; an unstamped/legacy hook is left unchanged. A successful discovery
+ * attempt is remembered per host session. Returns 2 to deny and fills `reason`,
+ * otherwise 0. */
+int attn_discovery_gate(const char *tool_name, const char *command, const char *session_id,
+                        char *reason, size_t reason_len);
+
 /* `aimee attention-guard` PreToolUse-hook entry. Reads the host hook JSON from
  * stdin, updates the per-session attention log, and returns the hook exit code
  * (2 = block a hard-destructive op on a high-attention file, or — only when a
@@ -127,8 +136,7 @@ int handle_attention_guard(void);
 
 /* Authoritative "is session-worktree isolation required?" check (default ON
  * unless aimee.yaml sets `require_session_worktree: false`). Exposed so the
- * remote/thin session-start path can gate its worktree-prep directive on the
- * same answer the guard uses to block. */
+ * universal launcher can make the same decision the guard uses to block. */
 int attn_require_session_worktree(void);
 
 #endif /* DEC_CLI_ATTENTION_GUARD_H */

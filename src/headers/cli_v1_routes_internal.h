@@ -18,6 +18,10 @@ typedef struct
    int flag_count;
 } cli_args_t;
 int cli_v1_args_request_json(int argc, char **argv);
+int cli_agent_probe_response_is_failure(cJSON *resp);
+int cli_index_investigate_response_is_failure(cJSON *resp);
+void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
+                             char *out, size_t out_len);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);
 const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot);
 int git_verify_response_is_failure(cJSON *resp);
@@ -63,6 +67,9 @@ cJSON *marshal_kb_search(int argc, char **argv);
 cJSON *marshal_kb_status(int argc, char **argv);
 cJSON *marshal_kb_update(int argc, char **argv);
 cJSON *marshal_mcp_recheck(int argc, char **argv);
+cJSON *marshal_tool_call(int argc, char **argv);
+cJSON *marshal_workspace_add(int argc, char **argv);
+cJSON *marshal_workspace_prepare(int argc, char **argv);
 cJSON *marshal_memory_benchmark(int argc, char **argv);
 cJSON *marshal_memory_get(int argc, char **argv);
 cJSON *marshal_memory_delete(int argc, char **argv);

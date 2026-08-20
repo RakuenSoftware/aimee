@@ -145,6 +145,7 @@ attn_op_t attn_classify(const char *tool_name, const char *bash_cmd)
 #define ATTN_MAX_RECORDS    1024
 #define ATTN_PRUNE_AGE_SECS (24 * 3600)
 #define ATTN_RAW_SCAN_PATH  "__aimee_raw_scan__"
+#define ATTN_DISCOVERY_PATH "__aimee_discovery__"
 
 static void attn_log_path(const char *session_id, char *out, size_t cap)
 {
@@ -262,6 +263,110 @@ static void attn_record(cJSON *arr, const char *path, int weight, long now_ts)
    cJSON_AddNumberToObject(e, "weight", weight);
    cJSON_AddNumberToObject(e, "ts", (double)now_ts);
    cJSON_AddItemToArray(arr, e);
+}
+
+static int attn_has_recent_marker(cJSON *arr, const char *marker, long now_ts)
+{
+   cJSON *e = NULL;
+   cJSON_ArrayForEach(e, arr)
+   {
+      const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "path"));
+      cJSON *ts = cJSON_GetObjectItemCaseSensitive(e, "ts");
+      if (!path || strcmp(path, marker) != 0 || !cJSON_IsNumber(ts))
+         continue;
+      long age = now_ts - (long)ts->valuedouble;
+      if (age >= 0 && age <= ATTN_PRUNE_AGE_SECS)
+         return 1;
+   }
+   return 0;
+}
+
+static int attn_cli_discovery(const char *tool_name, const char *command)
+{
+   if (!tool_name || !command || !command[0])
+      return 0;
+   if (strcasecmp(tool_name, "Bash") != 0 && strcasecmp(tool_name, "shell") != 0 &&
+       strcasecmp(tool_name, "command_execution") != 0)
+      return 0;
+   return strstr(command, "aimee index investigate") != NULL;
+}
+
+static int attn_contains_ci(const char *text, const char *needle)
+{
+   if (!text || !needle || !needle[0])
+      return 0;
+   size_t n = strlen(needle);
+   for (const char *p = text; *p; p++)
+      if (strncasecmp(p, needle, n) == 0)
+         return 1;
+   return 0;
+}
+
+static int attn_mcp_discovery(const char *tool_name, const char *command)
+{
+   if (!attn_contains_ci(tool_name, "aimee"))
+      return 0;
+   return attn_contains_ci(tool_name, "index") || attn_contains_ci(tool_name, "find_symbol") ||
+          attn_contains_ci(tool_name, "search_memory") || attn_contains_ci(tool_name, "context") ||
+          attn_contains_ci(command, "investigate");
+}
+
+int attn_discovery_gate(const char *tool_name, const char *command, const char *session_id,
+                        char *reason, size_t reason_len)
+{
+   if (reason && reason_len)
+      reason[0] = '\0';
+   const char *transport = getenv("AIMEE_HOOK_TRANSPORT");
+   int cli = transport && strcmp(transport, "cli") == 0;
+   int mcp = transport && strcmp(transport, "mcp") == 0;
+   if ((!cli && !mcp) || !tool_name || !tool_name[0])
+      return 0; /* legacy/unregistered hooks retain their existing behavior */
+
+   char path[1024];
+   attn_log_path(session_id, path, sizeof(path));
+   cJSON *arr = attn_load(path);
+   long now_ts = (long)time(NULL);
+   if (attn_has_recent_marker(arr, ATTN_DISCOVERY_PATH, now_ts))
+   {
+      cJSON_Delete(arr);
+      return 0;
+   }
+
+   int activated =
+       cli ? attn_cli_discovery(tool_name, command) : attn_mcp_discovery(tool_name, command);
+   if (activated)
+   {
+      attn_record(arr, ATTN_DISCOVERY_PATH, 1, now_ts);
+      attn_save(path, arr, now_ts);
+      cJSON_Delete(arr);
+      return 0;
+   }
+   cJSON_Delete(arr);
+
+   if (reason && reason_len)
+   {
+      if (cli)
+      {
+         const char *cli_path = getenv("AIMEE_CLI_PATH");
+         if (!cli_path || !cli_path[0])
+            cli_path = "aimee";
+         snprintf(reason, reason_len,
+                  "Aimee discovery is the required first repository action for this session. "
+                  "Retry through the registered CLI before reading, searching, editing, or "
+                  "running repository commands: `%s index investigate \"<plain-language "
+                  "summary of the task>\"`. If the command reports unavailable, you may "
+                  "continue after that attempted call.",
+                  cli_path);
+      }
+      else
+         snprintf(reason, reason_len,
+                  "Aimee discovery is the required first repository action for this session. "
+                  "Retry through the registered Aimee MCP surface with index/investigate (or "
+                  "another indexed discovery operation) before using ordinary repository "
+                  "tools. If the MCP call reports unavailable, you may continue after that "
+                  "attempted call.");
+   }
+   return 2;
 }
 
 static int attn_raw_scan_count(cJSON *arr, long now_ts)
@@ -1530,6 +1635,15 @@ int handle_attention_guard(void)
    const char *bash_cmd =
        ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "command")) : NULL;
 
+   char discovery_reason[1024];
+   if (attn_discovery_gate(tool, bash_cmd, sid, discovery_reason, sizeof(discovery_reason)) != 0)
+   {
+      fprintf(stderr, "aimee attention-guard: %s\n", discovery_reason);
+      cJSON_Delete(hook);
+      free(stdin_data);
+      return 2;
+   }
+
    long now_ts = (long)time(NULL);
    attn_op_t op = attn_classify(tool, bash_cmd);
 
@@ -1568,11 +1682,10 @@ int handle_attention_guard(void)
       }
    }
 
-   /* Session-isolation guard (OPT-IN via require_session_worktree). Fails closed
-    * on a mutating op outside an aimee-managed worktree, so a session that never
-    * ran `session-start` (e.g. a missing SessionStart hook) cannot mutate the
-    * primary checkout / default branch. This is the aimee-level backstop for the
-    * worktree+branch isolation that the SessionStart hook would otherwise set up. */
+   /* Session-isolation guard (default on via require_session_worktree). Fails
+    * closed on a mutating op outside an aimee-managed worktree, so a client that
+    * bypassed `aimee launch` cannot mutate the primary checkout/default branch.
+    * A SessionStart hook supplies context only and is never treated as cwd state. */
    if ((op == ATTN_OP_SOFT || op == ATTN_OP_HARD) && attn_config_require_session_worktree())
    {
       char cwd[1024];

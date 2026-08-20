@@ -91,12 +91,12 @@ typedef struct cJSON cJSON;
 #define SHTTP_MAX_ROUNDTABLE_BODY (2 * ROUNDTABLE_MAX_ARTIFACT)
 
 /* Per-method payload size limits */
-#define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
-#define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
-#define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
+#define LIMIT_MEMORY     (256 * 1024)      /* 256KB for memory operations */
+#define LIMIT_TOOL       (4 * 1024 * 1024) /* 4MB for tool I/O */
+#define LIMIT_DELEGATE   (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
 #define LIMIT_ROUNDTABLE SHTTP_MAX_ROUNDTABLE_BODY /* artifact + JSON escaping; see above */
-#define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
-#define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
+#define LIMIT_CHAT       (512 * 1024)              /* 512KB for chat messages */
+#define LIMIT_INGEST     (1024 * 1024)             /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
    (3 * 1024 * 1024)               /* 3MB: session transcript snapshots (< SHTTP_MAX_BODY) */
 #define LIMIT_DEFAULT (256 * 1024) /* 256KB default */
@@ -393,6 +393,11 @@ int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Canonical investigation packet shared by the command and MCP surfaces.  The
+ * returned object is owned by the caller.  It performs the product-level
+ * context -> hybrid fallback and attaches systemic-scope evidence. */
+cJSON *server_index_investigate_packet(const char *query, const char *symbol, const char *project,
+                                       int include_code, int fallback_enabled);
 int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

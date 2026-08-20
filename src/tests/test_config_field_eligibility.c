@@ -97,6 +97,7 @@ static const elig_row_t g_eligibility[] = {
     {"wfe_live_forge_enabled", 1},
     {"wfe_proposals_autoscan_enabled", 1},
     {"client_integrations_enabled", 1},
+    {"client_tool_transport_preference", 1},
     {"audit_action_enabled", 1},
     {"audit_worm_enabled", 1},
     {"css_render_command", 1},

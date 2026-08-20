@@ -22,13 +22,13 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0
-          until sudo apt-get update -q; do
+          until timeout 240 sudo apt-get update -q; do
             i=$((i + 1))
             [ "$i" -ge 5 ] && break
             echo "apt-get update retry $i (transient repo failure)"
             sleep $((i * 4))
           done
-          sudo apt-get install -y -q gcc make \
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libp11-kit-dev libpq-dev
       - name: Build benchmark
