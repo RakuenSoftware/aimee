@@ -347,6 +347,15 @@ static char *translate_sql(const char *sql_in)
          p += 6;
          continue;
       }
+      /* ::jsonb -> drop.  The other direction of the same cast: on Postgres a
+       * text parameter cannot be assigned to a JSONB column without it, and on
+       * SQLite the column is TEXT so the bare value is what is wanted. Must
+       * precede no rule with a shorter literal that would match first. */
+      if (starts_with(p, "::jsonb"))
+      {
+         p += 7;
+         continue;
+      }
       /* ::vector -> drop.  pgvector cast; the SQLite schema stubs store
        * embeddings as TEXT so the bare value is compatible without a cast. */
       if (starts_with(p, "::vector"))

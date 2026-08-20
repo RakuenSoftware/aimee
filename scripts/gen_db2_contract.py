@@ -12554,6 +12554,48 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_rules_delete_by_directive_type",
         "policy": {"writes": 200},
     },
+    "artifact_flag_review": {
+        "key": ("learning", 37),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_flag_review",
+        "policy": {"writes": 200},
+    },
+    "verdict_suppressed": {
+        "key": ("learning", 38),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_verdict_suppressed",
+        "policy": {"reads": 200},
+    },
+    "css_migration_assert_conventions": {
+        "key": ("maintenance", 25),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_css_migration_assert_conventions",
+        "policy": {"writes": 200},
+    },
+    "curator_invalidate_doc": {
+        "key": ("learning", 39),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_curator_invalidate_doc",
+        "policy": {"writes": 200},
+    },
+    "doc_assets_delete_for_doc": {
+        "key": ("organization", 17),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_doc_assets_delete_for_doc",
+        "policy": {"writes": 200},
+    },
+    "ontology_map": {
+        "key": ("organization", 18),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_ontology_map",
+        "policy": {"writes": 200},
+    },
+    "minhash_delete_file": {
+        "key": ("index", 24),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_sketch_minhash_signature_delete",
+        "policy": {"writes": 200},
+    },
 }
 
 

@@ -1736,6 +1736,55 @@ int db2_rules_delete_by_directive_type(const char *directive_type)
    return 0;
 }
 
+int db2_artifact_flag_review(const char *id, const char *reason)
+{
+   (void)id;
+   (void)reason;
+   return 0;
+}
+
+int db2_artifact_verdict_suppressed(const char *verdict_tag, const char *verdict_scope)
+{
+   (void)verdict_tag;
+   (void)verdict_scope;
+   return 0;
+}
+
+int db2_css_migration_assert_conventions(const char *project, const char *now_iso)
+{
+   (void)project;
+   (void)now_iso;
+   return 0;
+}
+
+int db2_curator_invalidate_doc(const char *project, const char *file_path)
+{
+   (void)project;
+   (void)file_path;
+   return 0;
+}
+
+int db2_kb_doc_assets_delete_for_doc(const char *project, const char *document_key)
+{
+   (void)project;
+   (void)document_key;
+   return 0;
+}
+
+int db2_ontology_map(const char *novel, const char *target)
+{
+   (void)novel;
+   (void)target;
+   return 0;
+}
+
+int db2_sketch_minhash_signature_delete(const char *project, const char *file_path)
+{
+   (void)project;
+   (void)file_path;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

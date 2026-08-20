@@ -5197,6 +5197,15 @@ $(OBJDIR)/aimee-module-db1: $(DB1_MODULE_INPUTS)
 # that its complete descriptor-owned source set still produces the executable
 # the grant names. The descriptor generates schema_data.h in the bundle build
 # directory, so this proof does not depend on a prior monolithic build.
+# Both module binaries are built from a source closure the exporter decides, so
+# make cannot see what they depend on: the production target had no
+# prerequisites at all, and the replay target had only its own main. Once built
+# neither was ever rebuilt, so every later run tested whichever DB2 sources
+# happened to be in the tree the first time. Declaring them phony rebuilds the
+# bundle on each invocation, which is the cost of these targets being able to
+# tell you anything. Both are test-only and are asked for by name.
+.PHONY: $(OBJDIR)/aimee-module-db2 $(OBJDIR)/aimee-module-db2-replay
+
 $(OBJDIR)/aimee-module-db2:
 	@rm -rf $(OBJDIR)/db2-module-bundle
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null

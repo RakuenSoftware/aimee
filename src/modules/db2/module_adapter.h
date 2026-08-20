@@ -249,6 +249,13 @@ typedef struct
    int (*ontology_approve)(const char *rel_type);
    int (*ontology_reject)(const char *rel_type);
    int (*rules_delete_by_directive_type)(const char *directive_type);
+   int (*artifact_flag_review)(const char *artifact_id, const char *flag_reason);
+   int (*verdict_suppressed)(const char *verdict_tag, const char *verdict_scope);
+   int (*css_migration_assert_conventions)(const char *project, const char *now_iso);
+   int (*curator_invalidate_doc)(const char *project, const char *file_path);
+   int (*doc_assets_delete_for_doc)(const char *project, const char *document_key);
+   int (*ontology_map)(const char *rel_type, const char *mapped_to);
+   int (*minhash_delete_file)(const char *project, const char *file_path);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

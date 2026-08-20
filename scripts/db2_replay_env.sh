@@ -100,6 +100,56 @@ run_sql "$DB" "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EX
    >/dev/null || { say "could not create the extensions $DB needs"; exit 1; }
 
 cd "$(dirname "$0")/.." || exit 1
+
+# Both the pre-applied schema and the replay itself must agree on this.
+EMBED_DIM=384
+
+# Copy a local SQL file into the container and run it there, for anything too
+# large to pass through run_sql's heredoc.
+run_file() {
+   local database=$1 path=$2
+   # schema.sql carries the __EMBED_DIM__ placeholder that db_schema.c fills in
+   # at runtime, so it is not valid SQL until the dimension is substituted. The
+   # value has to match the EMBEDDER_DIMS the replay runs with, or the module
+   # would find a halfvec of the wrong width already there.
+   sed "s/__EMBED_DIM__/$EMBED_DIM/g" "$path" |
+      on_host "pct exec $CT -- bash -c 'cat > /tmp/db2-replay-file.sql'" || return 1
+   on_host "pct exec $CT -- su postgres -c 'psql -XAt -v ON_ERROR_STOP=1 -d $database \
+      -f /tmp/db2-replay-file.sql'"
+}
+
+# The replay's module applies the schema itself on connect, so the database
+# only has to exist. It is applied here as well, first, because some replay
+# cases need a row to exist before the module starts: on a fresh schema every
+# read answers zero and every write against a missing row is refused, and
+# neither distinguishes a working operation from a broken one.
+say "applying the schema so the replay can be seeded"
+run_file "$DB" src/modules/db2/c/schema.sql >/dev/null ||
+   { say "could not apply the schema to $DB"; exit 1; }
+
+# One artifact, committed, with a payload of its own, for the flag-review
+# replay to merge into and for the assertion afterwards to read back.
+run_sql "$DB" "INSERT INTO artifacts (id, kind, state, payload)
+   VALUES ('replay-flag-probe', 'probe', 'committed', '{\"kept\": 1}'::jsonb)
+   ON CONFLICT (id) DO UPDATE SET state = 'committed', payload = '{\"kept\": 1}'::jsonb" \
+   >/dev/null || { say "could not seed the flag-review fixture"; exit 1; }
+
 AIMEE_DB2_URL="postgres://aimee:aimee@$DBHOST:5432/$DB" \
-   EMBEDDER_DIMS=384 \
-   make -C src -j8 GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay
+   EMBEDDER_DIMS=$EMBED_DIM \
+   make -C src -j8 GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay || exit 1
+
+# What the replay cannot assert for itself: the flagged artifact came back with
+# its own payload intact beside the flag, and its state reset. A merge that
+# dropped the existing keys, and a write that never happened, both satisfy the
+# replay's assertion on the reply and fail here.
+say "checking what the flag-review replay wrote"
+flagged=$(run_sql "$DB" "SELECT state
+   || ' kept=' || COALESCE((payload->>'kept'), 'missing')
+   || ' flagged=' || COALESCE((payload->>'flagged_for_review'), 'missing')
+   || ' reason=' || COALESCE((payload->>'flagged_reason'), 'missing')
+   FROM artifacts WHERE id = 'replay-flag-probe'")
+if [ "$flagged" != "proposed kept=1 flagged=true reason=replayed" ]; then
+   say "flag-review left the artifact as: ${flagged:-<no row>}"
+   exit 1
+fi
+say "flag-review merged the flag into the artifact's own payload"

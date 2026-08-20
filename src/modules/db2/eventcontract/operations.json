@@ -4890,6 +4890,52 @@
       }
     },
     {
+      "family": "index",
+      "id": 24,
+      "name": "minhash_delete_file",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Minhash signatures are relational DB2 rows keyed by project, generation and file.",
+      "c_symbols": [
+        "db2_sketch_minhash_signature_delete"
+      ],
+      "request": {
+        "policy": {
+          "writes": "only the signature is deleted, so the LSH buckets built from it are left behind"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -6384,6 +6430,144 @@
       }
     },
     {
+      "family": "learning",
+      "id": 37,
+      "name": "artifact_flag_review",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifacts, their state and their payload are relational DB2 rows.",
+      "c_symbols": [
+        "db2_artifact_flag_review"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the artifact is put back into the proposed state whatever state it was in, an empty reason is stored as the word flagged, and an artifact that does not exist is refused"
+        },
+        "fields": [
+          {
+            "name": "artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "flag_reason",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 38,
+      "name": "verdict_suppressed",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events and the verdicts recorded on them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_artifact_verdict_suppressed"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a failure to read answers not suppressed, so the operation fails open in the direction that lets suppressed content through"
+        },
+        "fields": [
+          {
+            "name": "verdict_tag",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "verdict_scope",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "suppressed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 39,
+      "name": "curator_invalidate_doc",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Documents, their chunks and the artifacts citing them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_curator_invalidate_doc"
+      ],
+      "request": {
+        "policy": {
+          "writes": "at most 1024 of the document's chunks are considered, the artifact invalidations are not one transaction, and the invalidation event is recorded only when something was staled"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "invalidated",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -7032,6 +7216,98 @@
         "fields": [
           {
             "name": "rel_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 17,
+      "name": "doc_assets_delete_for_doc",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Documents and the assets extracted from them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_doc_assets_delete_for_doc"
+      ],
+      "request": {
+        "policy": {
+          "writes": "only assets whose document is a PDF in the project's current generation are deleted, so a matching key of any other kind deletes nothing"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "document_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 18,
+      "name": "ontology_map",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Relationship types and the evaluations that decide them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_ontology_map"
+      ],
+      "request": {
+        "policy": {
+          "writes": "both names are normalized first, the target must already exist, mapping a type to itself is refused, and the evaluation must match exactly one row"
+        },
+        "fields": [
+          {
+            "name": "rel_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "mapped_to",
             "type": "utf8",
             "minimum_bytes": 1,
             "maximum_bytes": 63
@@ -8129,6 +8405,52 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 4096
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 25,
+      "name": "css_migration_assert_conventions",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "CSS rules, declarations and the typed facts derived from them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_css_migration_assert_conventions"
+      ],
+      "request": {
+        "policy": {
+          "writes": "two configuration flags are read inside the module, and the timestamp written is the one the caller supplied rather than DB2's own clock"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "now_iso",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "asserted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2
           }
         ]
       }

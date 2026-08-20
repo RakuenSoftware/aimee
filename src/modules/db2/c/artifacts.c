@@ -1269,6 +1269,21 @@ int db2_artifact_links_read(const char *id, db2_artifact_link_row_t *out, int ma
    return n;
 }
 
+/* Flag an artifact for review, and put it back into the proposed state.
+ *
+ * The merge used to be a json_build_object expression inside the UPDATE. It
+ * never ran: one arm compared payload against '' and payload is JSONB on
+ * Postgres, so the server raised 22P02 while planning the statement, for a
+ * matching row and a missing one alike. Removing that arm was not enough
+ * either -- both arms ended in ::text, and Postgres will not assign text to a
+ * jsonb column. Nothing caught it because the SQLite test schema declares
+ * payload TEXT, and the shim has no json_build_object at all.
+ *
+ * Merging in C works the same on both backends and needs no JSON SQL. Reading
+ * the row first also means a missing artifact can be reported as missing,
+ * which the single UPDATE could not do. The two statements run in one
+ * transaction so a concurrent writer cannot land between them and be
+ * overwritten. */
 int db2_artifact_flag_review(const char *id, const char *reason)
 {
    void *conn = db2_conn();
@@ -1277,27 +1292,83 @@ int db2_artifact_flag_review(const char *id, const char *reason)
 
    const char *r = reason && reason[0] ? reason : "flagged";
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "UPDATE artifacts"
-       "   SET state = 'proposed',"
-       "       payload = CASE"
-       "                   WHEN payload IS NULL OR payload = '' THEN"
-       "                     json_build_object('flagged_for_review', true,"
-       "                                       'flagged_reason', ?2::text)::text"
-       "                   ELSE"
-       "                     (payload::jsonb ||"
-       "                      json_build_object('flagged_for_review', true,"
-       "                                        'flagged_reason', ?2::text)::jsonb)::text"
-       "                 END"
-       " WHERE id = ?1",
-       err, sizeof(err));
-   if (!st)
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
       return -1;
 
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT payload FROM artifacts WHERE id = ?1", err, sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
    aimee_pg_bind_text(st, "?1", id);
-   aimee_pg_bind_text(st, "?2", r);
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(st);
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   const char *stored = aimee_pg_column_text(st, 0);
+   cJSON *payload = (stored && stored[0]) ? cJSON_Parse(stored) : NULL;
+   aimee_pg_finalize(st);
+
+   /* A payload that is absent, empty or not an object is replaced rather than
+    * refused: the flag is the point of the call, and there is nothing in a
+    * non-object payload for the flag to merge into. */
+   if (!cJSON_IsObject(payload))
+   {
+      cJSON_Delete(payload);
+      payload = cJSON_CreateObject();
+   }
+   if (!payload)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(payload, "flagged_for_review");
+   cJSON_DeleteItemFromObjectCaseSensitive(payload, "flagged_reason");
+   if (!cJSON_AddTrueToObject(payload, "flagged_for_review") ||
+       !cJSON_AddStringToObject(payload, "flagged_reason", r))
+   {
+      cJSON_Delete(payload);
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   char *merged = cJSON_PrintUnformatted(payload);
+   cJSON_Delete(payload);
+   if (!merged)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+
+   /* The cast is required: payload is JSONB on Postgres and a bound text
+    * parameter cannot be assigned to it without one. The SQLite shim drops
+    * ::jsonb, where the column is TEXT and the bare value is correct. */
+   st = aimee_pg_prepare(
+       conn, "UPDATE artifacts SET state = 'proposed', payload = ?2::jsonb WHERE id = ?1", err,
+       sizeof(err));
+   if (!st)
+   {
+      free(merged);
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   aimee_pg_bind_text(st, "?1", id);
+   aimee_pg_bind_text(st, "?2", merged);
    aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
-   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
+   free(merged);
+   if (rc != AIMEE_PG_DONE && rc != AIMEE_PG_ROW)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   return 0;
 }

@@ -3324,9 +3324,15 @@
           "line": 247
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_flag_review operation flags an artifact for review. It also sets the state back to proposed whatever the state was, so flagging a committed artifact un-commits it, which the name does not say. An empty reason is stored as the word flagged rather than refused. The payload merge happens in C rather than in SQL -- the json_build_object expression it replaced could never run against Postgres -- so an artifact that does not exist is refused rather than acknowledged."
+      },
       "signature": "int db2_artifact_flag_review ( const char * id , const char * reason )",
       "signature_sha256": "164cfa2ffafbaa93aff9234bc1d612a52d0d2452325618be0dcd753ff9596df9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_flag_review"
     },
     {
@@ -3641,9 +3647,15 @@
           "line": 61
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.verdict_suppressed operation reports whether anything has been thumbed down under a tag and scope. Every failure path answers not suppressed: an empty tag, no connection, a statement that will not prepare. So the operation fails open, and a caller using it as a suppression gate lets suppressed content through whenever the database is unreachable. Recorded because a Boolean reply cannot say which of the two answers it is."
+      },
       "signature": "int db2_artifact_verdict_suppressed ( const char * verdict_tag , const char * verdict_scope )",
       "signature_sha256": "b63ab840e1a0a8aebd23bd28b73b98fc89da5c8fb9b062c69e4b52088a27d2bd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_verdict_suppressed"
     },
     {
@@ -6091,9 +6103,15 @@
           "line": 81
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.css_migration_assert_conventions operation derives two facts about a project's CSS from its indexed rules. Two things the reply hides: it reads the style-graph and typed-fact configuration flags, which over the bus are the module process's flags and not the caller's, and answers zero when either is off -- the same zero as a project with nothing indexed. The timestamp is the caller's, not DB2's clock, so a caller with a wrong clock dates the facts wrongly."
+      },
       "signature": "int db2_css_migration_assert_conventions ( const char * project , const char * now_iso )",
       "signature_sha256": "cb9d3aa4dec85a059b1de6cd7cf04c3ffdb560557d8574ca469283df1171ff18",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_css_migration_assert_conventions"
     },
     {
@@ -6272,9 +6290,15 @@
           "line": 115
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.curator_invalidate_doc operation stales the artifacts citing a document. It reads at most 1024 of the document's chunks and stops, so a larger document leaves the artifacts citing its later chunks valid and reports a count that looks complete. The invalidations run one chunk at a time with no transaction, so a partial run is reported as its partial count, and the invalidation event is written only when the count is above zero."
+      },
       "signature": "int db2_curator_invalidate_doc ( const char * project , const char * file_path )",
       "signature_sha256": "dfa247a68f88b971d2fedc9f970c6e2800cd78042cc04b216e92b64c39e86752",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_curator_invalidate_doc"
     },
     {
@@ -9557,9 +9581,15 @@
           "line": 343
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.doc_assets_delete_for_doc operation deletes the assets extracted from one document. The statement narrows twice more than the arguments suggest: the generation must be the project's current one, and the document must be of kind pdf. So naming a real document of any other kind deletes nothing and reports zero, which is also what an already-clean document reports."
+      },
       "signature": "int db2_kb_doc_assets_delete_for_doc ( const char * project , const char * document_key )",
       "signature_sha256": "b6c62173eceb4d9354b6b56d300fca5c70fc984fa931e100db9aec82d5265d11",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_assets_delete_for_doc"
     },
     {
@@ -20206,9 +20236,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.ontology_map operation maps a proposed relationship type onto an existing one. It is the strictest of the three ontology decisions: both names are normalized, the target must already resolve to a real type, and a type cannot be mapped to itself -- which two differently written names can become after normalization. As with approve and reject the evaluation must match exactly one row, and marking the source type mapped is the best-effort half of the transaction."
+      },
       "signature": "int db2_ontology_map ( const char * novel , const char * target )",
       "signature_sha256": "67707a7da648911487ece0360e4b3e200ecf33811016677f679e5dd298b541a5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_ontology_map"
     },
     {
@@ -22171,9 +22207,15 @@
           "line": 29
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.minhash_delete_file operation drops one file's minhash signature in the project's current generation. Unlike index.minhash_delete_current_generation beside it, which deletes signatures and their LSH buckets together, this deletes only the signature and leaves every bucket entry the file put in the index. Anything reading the buckets still finds the file until the whole generation is cleared."
+      },
       "signature": "int db2_sketch_minhash_signature_delete ( const char * project , const char * file_path )",
       "signature_sha256": "5d40f5481d5c32540bc723f702207c2ce7eb4af104ee51179f45bb7e98e1c59b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_sketch_minhash_signature_delete"
     },
     {
@@ -26898,15 +26940,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "95cbc776de4dae7b099a056ee313e4ed89a75077121ec10a198d45a714af4826",
+  "fingerprint": "1c295856a4d14b667ffb6ba29f2ca6004d627dba99dc66a64335ca5856b6d0d4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 479,
+    "audit_pending": 472,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 479
+    "reviewed": 486
   }
 }

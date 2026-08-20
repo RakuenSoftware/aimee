@@ -1229,6 +1229,97 @@ int main(int argc, char **argv)
    assert(domain_result == AIMEE_DB2_RESULT_NOT_FOUND && reembed.target_dimension == 0 &&
           reembed.started_epoch == 0);
 
+   /* The seven operations added with this batch, against real Postgres.
+    *
+    * flag_review is the one that matters. Its merge used to be a
+    * json_build_object expression that Postgres refused to plan, so it failed
+    * on every call; a fresh schema hid that, because with no artifact to flag
+    * the refusal was the expected answer. The replay environment seeds one
+    * committed artifact carrying a payload of its own, so the acknowledgement
+    * here means a row was read, merged and written back. Whether the merge
+    * kept the artifact's own keys is asserted by the replay script afterwards,
+    * which reads the row: this call can only see the reply. */
+   uint32_t flagged = 9;
+   assert(aimee_db2_artifact_flag_review_call(call_client, &client, 9191, 0, "replay-flag-probe",
+                                              "replayed", &flagged, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(flagged == 1);
+   flagged = 9;
+   assert(aimee_db2_artifact_flag_review_call(call_client, &client, 9192, 0, "replay-flag-missing",
+                                              "replayed", &flagged, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(flagged == 0);
+
+   /* Nothing has been thumbed down on this schema, so the answer is no. The
+    * catalog records that the same no comes back when the read fails, which is
+    * why this assertion proves less than it looks. */
+   uint32_t suppressed = 9;
+   assert(aimee_db2_verdict_suppressed_call(call_client, &client, 9193, 0, "replay-tag",
+                                            "replay-scope", &suppressed, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(suppressed == 0);
+
+   /* No project is indexed, so there is no document to invalidate and no asset
+    * to delete; both answer zero, which is also what a project whose work was
+    * already done answers. */
+   uint32_t invalidated = 9;
+   assert(aimee_db2_curator_invalidate_doc_call(call_client, &client, 9194, 0, "demo",
+                                                "src/replay.c", &invalidated, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(invalidated == 0);
+   uint32_t assets_deleted = 9;
+   assert(aimee_db2_doc_assets_delete_for_doc_call(call_client, &client, 9195, 0, "demo",
+                                                   "docs/replay.pdf", &assets_deleted, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(assets_deleted == 0);
+   uint32_t minhash_gone = 9;
+   assert(aimee_db2_minhash_delete_file_call(call_client, &client, 9196, 0, "demo", "src/replay.c",
+                                             &minhash_gone, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(minhash_gone == 1);
+
+   /* The three ontology decisions all require an evaluation row to exist, and
+    * none does here, so each is refused. That the refusal reaches the caller
+    * as a zero rather than a transport error is the part worth replaying: each
+    * one rolls its transaction back inside the module. */
+   uint32_t decided = 9;
+   assert(aimee_db2_ontology_approve_call(call_client, &client, 9197, 0, "replay_rel", &decided,
+                                          NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided == 0);
+   decided = 9;
+   assert(aimee_db2_ontology_reject_call(call_client, &client, 9198, 0, "replay_rel", &decided,
+                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided == 0);
+   decided = 9;
+   assert(aimee_db2_ontology_map_call(call_client, &client, 9199, 0, "replay_rel", "replay_target",
+                                      &decided, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided == 0);
+
+   /* Nothing is indexed for this project, so nothing is enumerated and no
+    * convention can be derived. assert_conventions also answers zero when the
+    * style-graph or typed-fact configuration is off, and the module process
+    * decides that, not this caller. */
+   uint32_t enumerated = 9;
+   assert(aimee_db2_css_migration_enumerate_call(call_client, &client, 9200, 0, "demo", &enumerated,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(enumerated == 0);
+   uint32_t asserted = 9;
+   assert(aimee_db2_css_migration_assert_conventions_call(call_client, &client, 9201, 0, "demo",
+                                                          "2026-01-01T00:00:00Z", &asserted, NULL,
+                                                          NULL) == AIMEE_MODULE_CALL_OK);
+   assert(asserted == 0);
+
+   /* Nothing carries this directive type and no project of this name exists,
+    * so both deletes report zero rows. */
+   uint32_t rules_deleted = 9;
+   assert(aimee_db2_rules_delete_by_directive_type_call(call_client, &client, 9202, 0, "replay",
+                                                        &rules_deleted, NULL,
+                                                        NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rules_deleted == 0);
+   uint32_t project_deleted = 9;
+   assert(aimee_db2_project_delete_call(call_client, &client, 9203, 0, "replay-absent-project",
+                                        &project_deleted, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(project_deleted == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

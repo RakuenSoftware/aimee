@@ -156,6 +156,14 @@
       "reason": "The typed learning.artifact_cite operation replaces the citation insert. The citing artifact is a foreign key and an unknown one is refused; the cited source is not checked at all, so a citation can name a source that does not exist. The span is written as zero to zero and is part of the key, so this records that a source was cited and never where in it, and a spanned citation added later would be a second row."
     },
     {
+      "symbol": "db2_artifact_flag_review",
+      "signature_sha256": "164cfa2ffafbaa93aff9234bc1d612a52d0d2452325618be0dcd753ff9596df9",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_flag_review operation flags an artifact for review. It also sets the state back to proposed whatever the state was, so flagging a committed artifact un-commits it, which the name does not say. An empty reason is stored as the word flagged rather than refused. The payload merge happens in C rather than in SQL -- the json_build_object expression it replaced could never run against Postgres -- so an artifact that does not exist is refused rather than acknowledged."
+    },
+    {
       "symbol": "db2_artifact_gen_id",
       "signature_sha256": "c1911e29817cc9bb30d28d255c09b434818be47018ce579c1036cef1a398bb4a",
       "disposition": "private-db2",
@@ -194,6 +202,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.artifact_stamp_reflected operation replaces the reflection stamp. The time written is DB2's own clock and never crosses, so a caller can record that an artifact was reflected on but not when. An identifier naming nothing updates no row and is acknowledged the same as one that did, which the wire cannot show."
+    },
+    {
+      "symbol": "db2_artifact_verdict_suppressed",
+      "signature_sha256": "b63ab840e1a0a8aebd23bd28b73b98fc89da5c8fb9b062c69e4b52088a27d2bd",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.verdict_suppressed operation reports whether anything has been thumbed down under a tag and scope. Every failure path answers not suppressed: an empty tag, no connection, a statement that will not prepare. So the operation fails open, and a caller using it as a suppression gate lets suppressed content through whenever the database is unreachable. Recorded because a Boolean reply cannot say which of the two answers it is."
     },
     {
       "symbol": "db2_bandit_arms_list",
@@ -404,12 +420,28 @@
       "reason": "The typed index.cross_repo_rebuild_routes operation replaces the pass that empties and rebuilds the cross-repo include route table inside one transaction. The routing heuristics are fixed policy and travel nowhere: quoted includes only, the fan-out threshold that suppresses ubiquitous headers, and the generated-build-header rejects. Each was tuned against live findings, and a caller able to send them could reroute a repository's symbol resolution."
     },
     {
+      "symbol": "db2_css_migration_assert_conventions",
+      "signature_sha256": "cb9d3aa4dec85a059b1de6cd7cf04c3ffdb560557d8574ca469283df1171ff18",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.css_migration_assert_conventions operation derives two facts about a project's CSS from its indexed rules. Two things the reply hides: it reads the style-graph and typed-fact configuration flags, which over the bus are the module process's flags and not the caller's, and answers zero when either is off -- the same zero as a project with nothing indexed. The timestamp is the caller's, not DB2's clock, so a caller with a wrong clock dates the facts wrongly."
+    },
+    {
       "symbol": "db2_css_migration_enumerate",
       "signature_sha256": "1bc3fa6043b871a822db2321cc5006afd8cbcca102aff451840c970619843fcd",
       "disposition": "wire-operation",
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.css_migration_enumerate operation refreshes a project's CSS migration units from its component files. Two things the count does not show: it reads at most 4096 component files and stops, so a larger project reports 4096 and silently leaves the rest un-enumerated; and the upserts run one at a time with no transaction, so a failure part way leaves some units refreshed and reports failure for all of them. An existing unit keeps its state and its note; only the token counts are refreshed."
+    },
+    {
+      "symbol": "db2_curator_invalidate_doc",
+      "signature_sha256": "dfa247a68f88b971d2fedc9f970c6e2800cd78042cc04b216e92b64c39e86752",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.curator_invalidate_doc operation stales the artifacts citing a document. It reads at most 1024 of the document's chunks and stops, so a larger document leaves the artifacts citing its later chunks valid and reports a count that looks complete. The invalidations run one chunk at a time with no transaction, so a partial run is reported as its partial count, and the invalidation event is written only when the count is above zero."
     },
     {
       "symbol": "db2_curator_reembed_all",
@@ -698,6 +730,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.blob_referenced operation replaces the reference probe. It answers whether any document asset still points at the blob, not how many do: the statement stops at the first row, which is what makes it cheap enough to run before a delete."
+    },
+    {
+      "symbol": "db2_kb_doc_assets_delete_for_doc",
+      "signature_sha256": "b6c62173eceb4d9354b6b56d300fca5c70fc984fa931e100db9aec82d5265d11",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.doc_assets_delete_for_doc operation deletes the assets extracted from one document. The statement narrows twice more than the arguments suggest: the generation must be the project's current one, and the document must be of kind pdf. So naming a real document of any other kind deletes nothing and reports zero, which is also what an already-clean document reports."
     },
     {
       "symbol": "db2_kb_doc_delete",
@@ -3044,6 +3084,14 @@
       "reason": "The typed organization.ontology_eval_status operation replaces the evaluation status read. A relation type that has never been evaluated reads back as the empty string, and because no recorded status is empty, that is a usable signal rather than an ambiguity -- unlike the other string reads in this batch, which is why it is worth stating the difference."
     },
     {
+      "symbol": "db2_ontology_map",
+      "signature_sha256": "67707a7da648911487ece0360e4b3e200ecf33811016677f679e5dd298b541a5",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.ontology_map operation maps a proposed relationship type onto an existing one. It is the strictest of the three ontology decisions: both names are normalized, the target must already resolve to a real type, and a type cannot be mapped to itself -- which two differently written names can become after normalization. As with approve and reject the evaluation must match exactly one row, and marking the source type mapped is the best-effort half of the transaction."
+    },
+    {
       "symbol": "db2_ontology_reject",
       "signature_sha256": "b3b46ff86fb67bb350c08d1f6d61682e477b3bf1cacf40831bde3987c8214e71",
       "disposition": "wire-operation",
@@ -3202,6 +3250,14 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "Connection and pool teardown belongs to supervised process termination; callers cannot remotely shut down the required DB2 capability."
+    },
+    {
+      "symbol": "db2_sketch_minhash_signature_delete",
+      "signature_sha256": "5d40f5481d5c32540bc723f702207c2ce7eb4af104ee51179f45bb7e98e1c59b",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.minhash_delete_file operation drops one file's minhash signature in the project's current generation. Unlike index.minhash_delete_current_generation beside it, which deletes signatures and their LSH buckets together, this deletes only the signature and leaves every bucket entry the file put in the index. Anything reading the buckets still finds the file until the whole generation is cleared."
     },
     {
       "symbol": "db2_sketch_minhash_signature_delete_project",

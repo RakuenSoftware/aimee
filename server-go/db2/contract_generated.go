@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "5a5e6bfb0188833bba52c77b82bd59c17a3134f32c50025a99654b381a00eac2"
+const ContractSHA256 = "fb44b336973f697dae87dc1ec5eb39e1f7df1e798a099ff4085df3a86a474b17"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1443,6 +1443,60 @@ func DecodeMinhashDeleteCurrentGenerationRequest(request []byte) (string, error)
 		return "", ErrMalformedEnvelope
 	}
 	return project, nil
+}
+
+const EventMinhashDeleteFile = EventIndex
+const StageMinhashDeleteFile = FamilyIndex
+const OperationMinhashDeleteFile uint32 = 24
+const MinhashDeleteFileProjectMin = 1
+const MinhashDeleteFileProjectMax = 127
+const MinhashDeleteFileFilePathMin = 1
+const MinhashDeleteFileFilePathMax = 1023
+
+// EncodeMinhashDeleteFileRequest writes the schema minhash_delete_file declares, in order.
+func EncodeMinhashDeleteFileRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < MinhashDeleteFileProjectMin || len(project) > MinhashDeleteFileProjectMax || hasNUL(project) ||
+		len(filePath) < MinhashDeleteFileFilePathMin || len(filePath) > MinhashDeleteFileFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, MinhashDeleteFileProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, MinhashDeleteFileFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMinhashDeleteFile, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMinhashDeleteFileRequest reads it back, checking each field against its own bound.
+func DecodeMinhashDeleteFileRequest(request []byte) (string, string, error) {
+	var project string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMinhashDeleteFile || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, MinhashDeleteFileProjectMax); err != nil ||
+		len(project) < MinhashDeleteFileProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, MinhashDeleteFileFilePathMax); err != nil ||
+		len(filePath) < MinhashDeleteFileFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
 }
 
 const EventTraceMiningRecord = EventLearning
@@ -3142,6 +3196,168 @@ func DecodeRulesDeleteByDirectiveTypeRequest(request []byte) (string, error) {
 	return directiveType, nil
 }
 
+const EventArtifactFlagReview = EventLearning
+const StageArtifactFlagReview = FamilyLearning
+const OperationArtifactFlagReview uint32 = 37
+const ArtifactFlagReviewArtifactIDMin = 1
+const ArtifactFlagReviewArtifactIDMax = 127
+const ArtifactFlagReviewFlagReasonMin = 0
+const ArtifactFlagReviewFlagReasonMax = 511
+
+// EncodeArtifactFlagReviewRequest writes the schema artifact_flag_review declares, in order.
+func EncodeArtifactFlagReviewRequest(artifactID string, flagReason string) ([]byte, error) {
+	if len(artifactID) < ArtifactFlagReviewArtifactIDMin || len(artifactID) > ArtifactFlagReviewArtifactIDMax || hasNUL(artifactID) ||
+		len(flagReason) < ArtifactFlagReviewFlagReasonMin || len(flagReason) > ArtifactFlagReviewFlagReasonMax || hasNUL(flagReason) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, ArtifactFlagReviewArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, flagReason, ArtifactFlagReviewFlagReasonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactFlagReview, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactFlagReviewRequest reads it back, checking each field against its own bound.
+func DecodeArtifactFlagReviewRequest(request []byte) (string, string, error) {
+	var artifactID string
+	var flagReason string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactFlagReview || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, ArtifactFlagReviewArtifactIDMax); err != nil ||
+		len(artifactID) < ArtifactFlagReviewArtifactIDMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if flagReason, err = takeRowText(payload, &cursor, ArtifactFlagReviewFlagReasonMax); err != nil ||
+		len(flagReason) < ArtifactFlagReviewFlagReasonMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return artifactID, flagReason, nil
+}
+
+const EventVerdictSuppressed = EventLearning
+const StageVerdictSuppressed = FamilyLearning
+const OperationVerdictSuppressed uint32 = 38
+const VerdictSuppressedVerdictTagMin = 1
+const VerdictSuppressedVerdictTagMax = 127
+const VerdictSuppressedVerdictScopeMin = 0
+const VerdictSuppressedVerdictScopeMax = 127
+
+// EncodeVerdictSuppressedRequest writes the schema verdict_suppressed declares, in order.
+func EncodeVerdictSuppressedRequest(verdictTag string, verdictScope string) ([]byte, error) {
+	if len(verdictTag) < VerdictSuppressedVerdictTagMin || len(verdictTag) > VerdictSuppressedVerdictTagMax || hasNUL(verdictTag) ||
+		len(verdictScope) < VerdictSuppressedVerdictScopeMin || len(verdictScope) > VerdictSuppressedVerdictScopeMax || hasNUL(verdictScope) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, verdictTag, VerdictSuppressedVerdictTagMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, verdictScope, VerdictSuppressedVerdictScopeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationVerdictSuppressed, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeVerdictSuppressedRequest reads it back, checking each field against its own bound.
+func DecodeVerdictSuppressedRequest(request []byte) (string, string, error) {
+	var verdictTag string
+	var verdictScope string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationVerdictSuppressed || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if verdictTag, err = takeRowText(payload, &cursor, VerdictSuppressedVerdictTagMax); err != nil ||
+		len(verdictTag) < VerdictSuppressedVerdictTagMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if verdictScope, err = takeRowText(payload, &cursor, VerdictSuppressedVerdictScopeMax); err != nil ||
+		len(verdictScope) < VerdictSuppressedVerdictScopeMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return verdictTag, verdictScope, nil
+}
+
+const EventCuratorInvalidateDoc = EventLearning
+const StageCuratorInvalidateDoc = FamilyLearning
+const OperationCuratorInvalidateDoc uint32 = 39
+const CuratorInvalidateDocProjectMin = 1
+const CuratorInvalidateDocProjectMax = 127
+const CuratorInvalidateDocFilePathMin = 1
+const CuratorInvalidateDocFilePathMax = 1023
+
+// EncodeCuratorInvalidateDocRequest writes the schema curator_invalidate_doc declares, in order.
+func EncodeCuratorInvalidateDocRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < CuratorInvalidateDocProjectMin || len(project) > CuratorInvalidateDocProjectMax || hasNUL(project) ||
+		len(filePath) < CuratorInvalidateDocFilePathMin || len(filePath) > CuratorInvalidateDocFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, CuratorInvalidateDocProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, CuratorInvalidateDocFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCuratorInvalidateDoc, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCuratorInvalidateDocRequest reads it back, checking each field against its own bound.
+func DecodeCuratorInvalidateDocRequest(request []byte) (string, string, error) {
+	var project string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCuratorInvalidateDoc || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, CuratorInvalidateDocProjectMax); err != nil ||
+		len(project) < CuratorInvalidateDocProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, CuratorInvalidateDocFilePathMax); err != nil ||
+		len(filePath) < CuratorInvalidateDocFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -3832,6 +4048,114 @@ func DecodeOntologyRejectRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return relType, nil
+}
+
+const EventDocAssetsDeleteForDoc = EventOrganization
+const StageDocAssetsDeleteForDoc = FamilyOrganization
+const OperationDocAssetsDeleteForDoc uint32 = 17
+const DocAssetsDeleteForDocProjectMin = 1
+const DocAssetsDeleteForDocProjectMax = 127
+const DocAssetsDeleteForDocDocumentKeyMin = 1
+const DocAssetsDeleteForDocDocumentKeyMax = 1023
+
+// EncodeDocAssetsDeleteForDocRequest writes the schema doc_assets_delete_for_doc declares, in order.
+func EncodeDocAssetsDeleteForDocRequest(project string, documentKey string) ([]byte, error) {
+	if len(project) < DocAssetsDeleteForDocProjectMin || len(project) > DocAssetsDeleteForDocProjectMax || hasNUL(project) ||
+		len(documentKey) < DocAssetsDeleteForDocDocumentKeyMin || len(documentKey) > DocAssetsDeleteForDocDocumentKeyMax || hasNUL(documentKey) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, DocAssetsDeleteForDocProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, documentKey, DocAssetsDeleteForDocDocumentKeyMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDocAssetsDeleteForDoc, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDocAssetsDeleteForDocRequest reads it back, checking each field against its own bound.
+func DecodeDocAssetsDeleteForDocRequest(request []byte) (string, string, error) {
+	var project string
+	var documentKey string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocAssetsDeleteForDoc || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, DocAssetsDeleteForDocProjectMax); err != nil ||
+		len(project) < DocAssetsDeleteForDocProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if documentKey, err = takeRowText(payload, &cursor, DocAssetsDeleteForDocDocumentKeyMax); err != nil ||
+		len(documentKey) < DocAssetsDeleteForDocDocumentKeyMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, documentKey, nil
+}
+
+const EventOntologyMap = EventOrganization
+const StageOntologyMap = FamilyOrganization
+const OperationOntologyMap uint32 = 18
+const OntologyMapRelTypeMin = 1
+const OntologyMapRelTypeMax = 63
+const OntologyMapMappedToMin = 1
+const OntologyMapMappedToMax = 63
+
+// EncodeOntologyMapRequest writes the schema ontology_map declares, in order.
+func EncodeOntologyMapRequest(relType string, mappedTo string) ([]byte, error) {
+	if len(relType) < OntologyMapRelTypeMin || len(relType) > OntologyMapRelTypeMax || hasNUL(relType) ||
+		len(mappedTo) < OntologyMapMappedToMin || len(mappedTo) > OntologyMapMappedToMax || hasNUL(mappedTo) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, relType, OntologyMapRelTypeMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, mappedTo, OntologyMapMappedToMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationOntologyMap, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeOntologyMapRequest reads it back, checking each field against its own bound.
+func DecodeOntologyMapRequest(request []byte) (string, string, error) {
+	var relType string
+	var mappedTo string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationOntologyMap || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if relType, err = takeRowText(payload, &cursor, OntologyMapRelTypeMax); err != nil ||
+		len(relType) < OntologyMapRelTypeMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if mappedTo, err = takeRowText(payload, &cursor, OntologyMapMappedToMax); err != nil ||
+		len(mappedTo) < OntologyMapMappedToMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return relType, mappedTo, nil
 }
 
 const EventEnrollmentActive = EventCustody
@@ -4750,6 +5074,60 @@ func DecodeCssMigrationEnumerateRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return project, nil
+}
+
+const EventCssMigrationAssertConventions = EventMaintenance
+const StageCssMigrationAssertConventions = FamilyMaintenance
+const OperationCssMigrationAssertConventions uint32 = 25
+const CssMigrationAssertConventionsProjectMin = 1
+const CssMigrationAssertConventionsProjectMax = 127
+const CssMigrationAssertConventionsNowIsoMin = 1
+const CssMigrationAssertConventionsNowIsoMax = 31
+
+// EncodeCssMigrationAssertConventionsRequest writes the schema css_migration_assert_conventions declares, in order.
+func EncodeCssMigrationAssertConventionsRequest(project string, nowIso string) ([]byte, error) {
+	if len(project) < CssMigrationAssertConventionsProjectMin || len(project) > CssMigrationAssertConventionsProjectMax || hasNUL(project) ||
+		len(nowIso) < CssMigrationAssertConventionsNowIsoMin || len(nowIso) > CssMigrationAssertConventionsNowIsoMax || hasNUL(nowIso) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, CssMigrationAssertConventionsProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, nowIso, CssMigrationAssertConventionsNowIsoMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCssMigrationAssertConventions, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCssMigrationAssertConventionsRequest reads it back, checking each field against its own bound.
+func DecodeCssMigrationAssertConventionsRequest(request []byte) (string, string, error) {
+	var project string
+	var nowIso string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCssMigrationAssertConventions || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, CssMigrationAssertConventionsProjectMax); err != nil ||
+		len(project) < CssMigrationAssertConventionsProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if nowIso, err = takeRowText(payload, &cursor, CssMigrationAssertConventionsNowIsoMax); err != nil ||
+		len(nowIso) < CssMigrationAssertConventionsNowIsoMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, nowIso, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex
