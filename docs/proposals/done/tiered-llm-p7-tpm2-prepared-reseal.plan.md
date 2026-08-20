@@ -1,5 +1,9 @@
 # P7-reseal-a TPM2 prepared-reseal foundation
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and disabled pending the P7-reseal-b/c/d orchestration slices.
 - **Depends on:** P7 TPM2 PolicyNV anti-rollback.
 

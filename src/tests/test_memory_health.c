@@ -40,6 +40,52 @@ static int edge_weight_max(const char *relation)
    return v;
 }
 
+/* Insert a semantic edge with an explicit §5 lifecycle state. Written straight to
+ * SQL rather than through db2_fact_commit so the test can pin confidence_class,
+ * weight and asserted_at exactly, without standing up the fact-gate provider. */
+static void insert_semantic_edge(const char *source, const char *relation, const char *target,
+                                 const char *cls, double confidence, int weight,
+                                 const char *asserted_at)
+{
+   char qerr[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "INSERT INTO entity_edges (source, relation, target, weight, edge_class,"
+                        " confidence_class, confidence, asserted_at, superseded_at, suppressed)"
+                        " VALUES (?1, ?2, ?3, ?4, 'semantic', ?5, ?6, ?7, '', 0)",
+                        qerr, sizeof(qerr));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", source);
+   aimee_pg_bind_text(st, "?2", relation);
+   aimee_pg_bind_text(st, "?3", target);
+   aimee_pg_bind_int(st, "?4", weight);
+   aimee_pg_bind_text(st, "?5", cls);
+   aimee_pg_bind_double(st, "?6", confidence);
+   aimee_pg_bind_text(st, "?7", asserted_at);
+   assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+}
+
+/* (superseded_at, confidence) for a semantic edge, so the test can tell an
+ * expired row from a live one and a durable row from an unconfirmed one. */
+static void semantic_edge_state(const char *source, const char *relation, char *out_superseded,
+                                size_t cap, double *out_confidence)
+{
+   char qerr[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(),
+                                          "SELECT superseded_at, confidence FROM entity_edges"
+                                          " WHERE source = ?1 AND relation = ?2"
+                                          "   AND edge_class = 'semantic' LIMIT 1",
+                                          qerr, sizeof(qerr));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", source);
+   aimee_pg_bind_text(st, "?2", relation);
+   assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
+   snprintf(out_superseded, cap, "%s", aimee_pg_column_text(st, 0));
+   *out_confidence = aimee_pg_column_double(st, 1);
+   aimee_pg_finalize(st);
+}
+
 int main(void)
 {
    printf("memory_health: ");
@@ -336,6 +382,147 @@ int main(void)
       /* The run counter starts clean and is readable. */
       assert(memory_quiet_cycles() >= 0);
       printf("quiet_lane_alarm OK ");
+   }
+
+   /* --- §5 fact-class lifecycle runs as part of the maintenance cycle ---
+    *
+    * db2_fact_expire_speculative and db2_fact_promote_durable were written and
+    * unit-tested but never scheduled, so neither ever ran in production: Class C
+    * speculation accumulated forever and Class B never earned durability. These
+    * assertions go through memory_run_maintenance rather than calling the jobs
+    * directly, because "the job works" was already true — what was missing, and
+    * what this pins, is that the cycle invokes it. */
+   {
+      /* Unconfirmed (weight 1) Class C, asserted long before any sane TTL. */
+      insert_semantic_edge("lifecycle-c", "frobnicates", "thing", "C", 0.4, 1,
+                           "2000-01-01 00:00:00");
+      /* Confirmed (weight 2) Class C: repeatedly observed, so it must survive. */
+      insert_semantic_edge("lifecycle-c-confirmed", "wibbles", "y", "C", 0.4, 2,
+                           "2000-01-01 00:00:00");
+      /* Class B confirmed well past the default threshold of 3. */
+      insert_semantic_edge("lifecycle-b", "works_for", "ecorp", "B", 0.6, 5, "2000-01-01 00:00:00");
+
+      int p_ = 0, d_ = 0, e_ = 0;
+      memory_run_maintenance(&p_, &d_, &e_);
+
+      char superseded[64] = "";
+      double confidence = 0.0;
+
+      semantic_edge_state("lifecycle-c", "frobnicates", superseded, sizeof(superseded),
+                          &confidence);
+      assert(superseded[0] != '\0'); /* aged-out speculation was stamped */
+
+      semantic_edge_state("lifecycle-c-confirmed", "wibbles", superseded, sizeof(superseded),
+                          &confidence);
+      assert(superseded[0] == '\0'); /* confirmed C is not speculation any more */
+
+      semantic_edge_state("lifecycle-b", "works_for", superseded, sizeof(superseded), &confidence);
+      assert(superseded[0] == '\0'); /* promotion must not expire anything */
+      assert(confidence == 0.8);     /* B became durable */
+
+      /* Both jobs report through the cycle's own counters, so a run that only
+       * moved typed facts is not mistaken for a quiet lane. */
+      assert(p_ >= 1);
+      assert(e_ >= 1);
+      printf("fact_lifecycle_scheduled OK ");
+
+      /* Orphan pruning must not reach typed facts. None of the entities above
+       * appears in any L1/L2 memory, so every one of these rows is an "orphan" by
+       * the co-occurrence rule — and a maintenance cycle just ran. If the prune
+       * treated them as co-occurrence edges they would have been DELETEd rather
+       * than stamped, and the reads above would have found nothing at all. Assert
+       * the rows are still present, including the one expiry superseded: a
+       * superseded fact is archived, not erased. */
+      char qerr[128] = "";
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(db2_conn(),
+                           "SELECT COUNT(*) FROM entity_edges WHERE edge_class = 'semantic'"
+                           " AND source LIKE 'lifecycle-%'",
+                           qerr, sizeof(qerr));
+      assert(st);
+      assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(st, 0) == 3);
+      aimee_pg_finalize(st);
+      printf("semantic_survives_prune OK ");
+
+      /* Weight normalisation must not touch typed facts either. The same cycle
+       * that runs the lifecycle jobs also rescales edge weights per relation so
+       * the maximum is 100 -- which is meaningful for a co-occurrence tally and
+       * destructive for a semantic edge, where weight IS the confirmation count
+       * the §5 thresholds read (promote_durable weight>=threshold,
+       * expire_speculative weight<=1).
+       *
+       * Give 'works_for' a co-occurrence edge heavy enough to set the scale.
+       * Before the fix, lifecycle-b (weight 5) was rescaled and the Class A row
+       * went 1 -> 20, which on the next cycle is "confirmed 20 times". */
+      insert_semantic_edge("norm-a", "works_for", "norm-corp", "A", 1.0, 1, "2026-01-01 00:00:00");
+      {
+         char qerr2[128] = "";
+         aimee_pg_stmt_t *ins = aimee_pg_prepare(
+             db2_conn(),
+             "INSERT INTO entity_edges (source, relation, target, weight, edge_class)"
+             " VALUES ('norm-cooccur', 'works_for', 'norm-other', 50, 'cooccurrence')",
+             qerr2, sizeof(qerr2));
+         assert(ins);
+         assert(aimee_pg_step(ins, qerr2, sizeof(qerr2)) == AIMEE_PG_DONE);
+         aimee_pg_finalize(ins);
+      }
+
+      int p2 = 0, d2 = 0, e2 = 0;
+      memory_run_maintenance(&p2, &d2, &e2);
+
+      /* The typed facts keep their real counts; only the co-occurrence edge is
+       * rescaled. Asserting the exact values, because "unchanged" is the whole
+       * point -- an off-by-scaling here silently re-dates every fact's
+       * confirmation history. */
+      char qerr3[128] = "";
+      aimee_pg_stmt_t *w = aimee_pg_prepare(db2_conn(),
+                                            "SELECT weight FROM entity_edges"
+                                            " WHERE source = ?1 AND relation = 'works_for'",
+                                            qerr3, sizeof(qerr3));
+      assert(w);
+      aimee_pg_bind_text(w, "?1", "norm-a");
+      assert(aimee_pg_step(w, qerr3, sizeof(qerr3)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(w, 0) == 1); /* Class A still asserted once */
+      aimee_pg_finalize(w);
+
+      semantic_edge_state("lifecycle-b", "works_for", superseded, sizeof(superseded), &confidence);
+      w = aimee_pg_prepare(db2_conn(),
+                           "SELECT weight FROM entity_edges WHERE source = 'lifecycle-b'", qerr3,
+                           sizeof(qerr3));
+      assert(w);
+      assert(aimee_pg_step(w, qerr3, sizeof(qerr3)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(w, 0) == 5); /* still five confirmations, not 100 */
+      aimee_pg_finalize(w);
+      printf("semantic_weight_not_normalised OK ");
+   }
+
+   /* --- a co-occurrence observation must not bump a typed fact's weight ---
+    *
+    * The unique index is on the bare (source, relation, target) triple, so a
+    * semantic row and a co-occurrence row for one triple cannot coexist and the
+    * upsert's ON CONFLICT lands on whichever is there. Without a guard, "these
+    * two words appeared in the same session" increments the confirmation count
+    * that §5 uses to grant durability. */
+   {
+      insert_semantic_edge("share-src", "works_for", "share-tgt", "B", 0.6, 1,
+                           "2026-01-01 00:00:00");
+      int added = -1;
+      /* Same triple, via the co-occurrence writer. */
+      assert(db2_entity_edge_upsert("share-src", "works_for", "share-tgt", 0, 0, 0, 0, &added) ==
+             0);
+
+      char qerr[128] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(),
+                                             "SELECT weight, edge_class FROM entity_edges"
+                                             " WHERE source = 'share-src'",
+                                             qerr, sizeof(qerr));
+      assert(st);
+      assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(st, 0) == 1); /* NOT bumped to 2 */
+      assert(strcmp(aimee_pg_column_text(st, 1), "semantic") == 0);
+      aimee_pg_finalize(st);
+      printf("cooccurrence_does_not_bump_fact OK ");
    }
 
    db1_shutdown();

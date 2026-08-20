@@ -1,5 +1,9 @@
 # Implementation plan — Webchat git projects + in-browser VSCode
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **Source:** `docs/proposals/done/webchat-git-projects-and-vscode.md` (USER-APPROVED).
 - **State:** IMPLEMENTED + CLOSED OUT (2026-06-29). WP-0..WP-K shipped across
   merged PRs (WP-A #451, WP-F #461, WP-J #467, credential panels #486–#489,

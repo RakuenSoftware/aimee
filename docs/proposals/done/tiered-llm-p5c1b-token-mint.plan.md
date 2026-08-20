@@ -1,5 +1,9 @@
 # P5-C1b exact management-token mint core
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implementation, adversarial branch review, local/ASAN/fuzz gates, and exact-head CT260 validation passed.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
 - **Depends on:** P5-C1a strict verifier and durable server replay consume.

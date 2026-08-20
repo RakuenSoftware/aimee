@@ -1,5 +1,9 @@
 # Replayable-evidence verification + architecture-deepening sweep
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — roundtable-reviewed in two rounds — R1 (3 lenses: architect /
   security / contrarian → 2 approve-with-changes, 1 rework, all converging),
   R2 (focused consult on the rubric split + the `typed_facts` modeling → both

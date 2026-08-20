@@ -51,6 +51,15 @@ const method_policy_t method_registry[] = {
      * must not fall through to the memory.* read prefix below. */
     {"memory.update", CAP_MEMORY_WRITE, "update memory content"},
     {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
+    /* Typed-fact corrections sit at WRITE, not the ADMIN tier memory.delete was
+     * just moved to, and for exactly the reason given there: writing and
+     * destroying are different privileges. None of these destroys anything.
+     * Retraction stamps superseded_at or sets the tombstone flag and the row is
+     * RETAINED and auditable either way, and unmerge flips an audit flag. They
+     * belong with the correcting write. */
+    {"facts.retract", CAP_MEMORY_WRITE, "retract a typed fact"},
+    {"entities.merge", CAP_MEMORY_WRITE, "merge two entities"},
+    {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */

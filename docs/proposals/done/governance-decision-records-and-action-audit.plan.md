@@ -1,5 +1,9 @@
 # Implementation Plan: governance decision records + per-action policy-verdict audit
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `governance-decision-records-and-action-audit.md` (merged to `testing`, PR #945).
 Grounded against the code 2026-07-02. **P2 (audit) ships before P1 (decision record)** per the
 proposal's reader-before-writer, lowest-risk-first sequencing.

@@ -1,5 +1,9 @@
 # Webchat git projects + in-browser VSCode
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** IMPLEMENTED + CLOSED OUT (2026-06-29). Both phases shipped across a
   series of merged PRs; this proposal is filed to `done/`. See **Status at
   close-out** at the foot of this file for the shipped surface, the

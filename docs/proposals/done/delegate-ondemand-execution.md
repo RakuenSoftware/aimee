@@ -1,5 +1,9 @@
 # Proposal: on-demand delegate execution (retire the CPU-pool gate)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** landed — merged to `testing` via PR #333. The server-only on-demand
   delegate execution (per-thread spawn + `delegate_max_inflight` backstop, all
   three call sites converted, the CPU-pool gate retired) is in tree

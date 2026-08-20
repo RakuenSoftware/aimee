@@ -1,5 +1,9 @@
 # P5-B1c required-mTLS management-status authority
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** complete; plan and adversarial branch roundtables converged.
 - **Depends on:** P5-B1a custody core, P5-B1b fixed-key bootstrap/online DB boundary, P7 KMS signed-HWM custody.
 - **Followed by:** P5-B2/B3 workload enrollment and challenge-to-health orchestration.

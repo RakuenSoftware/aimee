@@ -1,5 +1,9 @@
 # Proposal: delegate refactor — async-only model + per-user credential vault
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Status refreshed:** 2026-06-13
 - **Completion:** all phases shipped to `testing` — WP-A #210, WP-B #212, WP-C.0 #214, WP-C.1 #217, WP-C.2a #219, WP-C.2b #221, WP-C.2c(1) #226, WP-C.2c(2) #227, WP-C.2c(3) #232; WP-C.3 (per-principal credential pool re-key + vault-cred 429 cooldown + codex-oauth vault override) in #235, verify-local green, pending roundtable + merge.

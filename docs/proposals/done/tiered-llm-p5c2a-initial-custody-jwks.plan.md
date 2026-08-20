@@ -1,5 +1,9 @@
 # P5-C2a management-token and JWKS trust-root bootstrap
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** complete.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
 - **Depends on:** P7 KMS signed-HWM custody and P5-C1b's fixed RS256 token contract.

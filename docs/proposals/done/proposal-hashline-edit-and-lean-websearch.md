@@ -1,5 +1,9 @@
 # Proposal: Hashline edit core + a token-lean websearch
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done (implemented; P5 `old_string` removal deferred pending the eval-gate roster run)
 
 > **Implementation note (shipped).** P1–P4 landed on branch

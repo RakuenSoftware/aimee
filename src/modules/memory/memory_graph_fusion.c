@@ -23,29 +23,61 @@
 
 /* --- Relation gravity table (provisional random-walk priors) --- */
 
-double memory_graph_relation_gravity(const char *relation)
+/* Table lookup proper: returns 1 and fills *out when `relation` has an explicit
+ * prior, 0 when it does not. Kept separate from the public accessor so callers
+ * that know the edge's class can pick a class-appropriate fallback instead of
+ * the co-occurrence default. */
+static int relation_gravity_lookup(const char *relation, double *out)
 {
    if (!relation || !relation[0])
-      return 0.45; /* default ~ co_discussed weight */
+      return 0;
+   double g;
    if (strcmp(relation, "defines") == 0)
+      g = 1.00;
+   else if (strcmp(relation, "contains") == 0)
+      g = 0.85;
+   else if (strcmp(relation, "depends_on") == 0)
+      g = 0.75;
+   else if (strcmp(relation, "routes") == 0)
+      g = 0.70;
+   else if (strcmp(relation, "exports") == 0)
+      g = 0.60;
+   else if (strcmp(relation, "co_edited") == 0)
+      g = 0.60;
+   else if (strcmp(relation, "calls") == 0)
+      g = 0.55;
+   else if (strcmp(relation, "co_discussed") == 0)
+      g = 0.45;
+   else if (strcmp(relation, "imports") == 0)
+      g = 0.30;
+   else
+      return 0;
+   if (out)
+      *out = g;
+   return 1;
+}
+
+double memory_graph_relation_gravity(const char *relation)
+{
+   double g;
+   if (relation_gravity_lookup(relation, &g))
+      return g;
+   return MEMORY_GRAPH_GRAVITY_DEFAULT; /* default ~ co_discussed weight */
+}
+
+double memory_graph_confidence_factor(const char *confidence_class)
+{
+   /* Only semantic edges carry a class; an empty/absent one means "no confidence
+    * signal" (a co-occurrence edge) and must not be penalised for it. */
+   if (!confidence_class || !confidence_class[0])
+      return 1.0;
+   if (confidence_class[0] == 'A' || confidence_class[0] == 'a')
       return 1.00;
-   if (strcmp(relation, "contains") == 0)
-      return 0.85;
-   if (strcmp(relation, "depends_on") == 0)
+   if (confidence_class[0] == 'B' || confidence_class[0] == 'b')
       return 0.75;
-   if (strcmp(relation, "routes") == 0)
-      return 0.70;
-   if (strcmp(relation, "exports") == 0)
-      return 0.60;
-   if (strcmp(relation, "co_edited") == 0)
-      return 0.60;
-   if (strcmp(relation, "calls") == 0)
-      return 0.55;
-   if (strcmp(relation, "co_discussed") == 0)
-      return 0.45;
-   if (strcmp(relation, "imports") == 0)
-      return 0.30;
-   return 0.45;
+   /* Class C, and anything unrecognised: fail conservative, matching the
+    * FACT_CLASS default the writer applies for an unspecified class. */
+   return 0.50;
 }
 
 static double clampd(double v, double lo, double hi)
@@ -58,9 +90,17 @@ static double clampd(double v, double lo, double hi)
 }
 
 double memory_graph_edge_score(const char *relation, int is_code_edge, int structural_weight,
-                               int weight, double effective_utility, int hop)
+                               int weight, double effective_utility, int hop,
+                               const char *confidence_class)
 {
-   double gravity = memory_graph_relation_gravity(relation);
+   /* A non-empty confidence_class is what marks this as a typed-fact edge. */
+   int is_semantic = (confidence_class && confidence_class[0]);
+
+   double gravity;
+   if (!relation_gravity_lookup(relation, &gravity))
+      gravity = is_semantic ? MEMORY_GRAPH_GRAVITY_SEMANTIC : MEMORY_GRAPH_GRAVITY_DEFAULT;
+
+   double confidence_factor = memory_graph_confidence_factor(confidence_class);
 
    double structural_factor = 1.0;
    if (is_code_edge)
@@ -73,7 +113,8 @@ double memory_graph_edge_score(const char *relation, int is_code_edge, int struc
    int hop_dist = hop > 1 ? hop : 1;
    double hop_decay = pow(0.5, (double)(hop_dist - 1));
 
-   return gravity * structural_factor * observed_factor * utility_factor * hop_decay;
+   return gravity * confidence_factor * structural_factor * observed_factor * utility_factor *
+          hop_decay;
 }
 
 /* --- Code-shape detection --- */
@@ -191,7 +232,9 @@ int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int m
       /* Seed-direct: memories attached to the seed node itself (the node the
        * vector/lexical hit mapped to) are the most direct evidence. */
       {
-         double seed_score = memory_graph_edge_score(NULL, node_key_is_code(seed), 0, 1, 0.0, 1);
+         /* The seed is a node, not an edge: no relation, no confidence class. */
+         double seed_score =
+             memory_graph_edge_score(NULL, node_key_is_code(seed), 0, 1, 0.0, 1, NULL);
          memory_t shits[8];
          int sgot = db2_memory_collect_entity_matches(seed, 4, shits,
                                                       (int)(sizeof(shits) / sizeof(shits[0])));
@@ -226,10 +269,12 @@ int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int m
          if (!allow_code_graph && node_key_is_code(neighbors[i].node))
             continue;
 
-         /* Hop-1 edge score (relation unknown here → use generic gravity). */
-         double escore =
-             memory_graph_edge_score(NULL, node_key_is_code(neighbors[i].node), 0,
-                                     neighbors[i].weight, neighbors[i].effective_utility, 1);
+         /* Hop-1 edge score. The reader now returns the traversed edge's relation
+          * and, for typed facts, its confidence class, so both the gravity table
+          * and the A/B/C weighting apply instead of the generic default. */
+         double escore = memory_graph_edge_score(
+             neighbors[i].relation, node_key_is_code(neighbors[i].node), 0, neighbors[i].weight,
+             neighbors[i].effective_utility, 1, neighbors[i].confidence_class);
 
          /* Look up memories linked to this reached node. */
          memory_t hits[8];

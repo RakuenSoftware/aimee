@@ -1,5 +1,9 @@
 # Aimee canonical IR — protocol-neutral request/response (no direct translation)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — the goal is **shipped and live-proven**; all slices are landed or
   roundtable-sequenced as sanctioned follow-ups; filed to `done/`. On the default live path
   (`AIMEE_IR_PATH` default-ON) every client request PARSES to the IR and every provider request BUILDS

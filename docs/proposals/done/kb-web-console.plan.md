@@ -1,5 +1,9 @@
 # Implementation Plan: aimee-kb web console
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `kb-web-console.md` (merged to `testing`, PR #1058). Grounded against the code
 2026-07-04; **plan-roundtabled 2026-07-04 (v2 — 3 blocking + top findings folded in)**.
 Backend-before-UI ordering; each slice is independently shippable and default-off, so nothing

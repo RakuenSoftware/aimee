@@ -1,5 +1,9 @@
 # Four-part harness taxonomy: name the parts, attribute the failures, delete the scaffolding
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Status: done — reference tools shipped (PR #622); C ports + A/B harness are specced follow-ons
 Owner: harness / observability
 Scope: vocabulary + two measurement tools (one shipped runnable, one C port specced)

@@ -659,6 +659,14 @@ typedef struct config
    int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional
                                                relations */
    int kb_typed_facts_promote_threshold;    /* observations before auto-promote (default 3) */
+   /* memory.typed_facts.* — §5 fact-class lifecycle, run from memory_run_maintenance.
+    * Distinct from kb_typed_facts_promote_threshold above, which governs promotion of
+    * a provisional REL_TYPE; these govern the confidence class of individual facts.
+    * Both jobs run regardless of typed_facts_enabled: that gate stops new writes, and
+    * speculation already on disk still has to be allowed to age out. */
+   int memory_typed_facts_speculative_ttl_days; /* Class C expiry horizon (default 30) */
+   int memory_typed_facts_promote_threshold;    /* confirmations before Class B goes durable
+                                                   (default 3) */
    /* structured-PDF pipeline preset: the everyday knob for the 5 kb_pdf_*_enabled
     * stage gates. "off" (default) = plain pdftotext, "basic" = ingest + vector,
     * "full" = every stage (ingest, vector, tsr, assets, ocr). Drives the gates at

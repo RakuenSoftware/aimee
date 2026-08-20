@@ -1,5 +1,9 @@
 # Proposal: Envelope compression, cache-prefix alignment, reversible rehydration, and failure-mined corrections
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — **defaults flipped ON** (operator decision, 2026-06-28). The full
   machinery (P0–P5 + the §6 bench) shipped behind flags (PRs #585, #743, #744, #746,
   #748, #750, #751, #754, with deploy/transport fixes #756/#759/#761), was validated

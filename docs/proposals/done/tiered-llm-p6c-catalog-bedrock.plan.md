@@ -1,5 +1,9 @@
 # P6c-catalog plan — Bedrock catalog routing fields + adapter-registry validation (P6 §3)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice of P6 (Bedrock). Branch off `testing`. Completes the **authoritative-target boundary**
 that P6a documented as a P6b/c invariant: `bedrock_session_policy(target)` (merged P6a) and
 the §2 adapter selection MUST read the target's type / partition / region-set / ARNs /

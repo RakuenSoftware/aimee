@@ -1,5 +1,9 @@
 # Proposal: Move delegate execution into the delegates module
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — Go producer and bus cutover landed.
 - **Date:** 2026-08-10.
 - **Charter roles:** Enforce / Constrain-Verify.

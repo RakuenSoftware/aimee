@@ -1,5 +1,9 @@
 # Proposal: Cross-repo dependency graph — precision hardening (structural edges, IDF distinctiveness, FFI-aware)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** IMPLEMENTED (13 PRs merged) + precision live-validated, but the FORMAL §9 acceptance is
   **NOT met** (recall). The formal Wilson-CI measurement (2026-06-28; docs/validation/
   cross-repo-precision-h4-runbook.md §"FORMAL §9 MEASUREMENT") shows the emitted edge set COLLAPSED to

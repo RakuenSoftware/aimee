@@ -1,5 +1,9 @@
 # P5-C2b immutable signed JWKS publication
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** complete — implementation, real-PG17/KMS-HWM concurrency and crash recovery, sanitizer/fuzz gates, and adversarial branch review converged with no surviving findings (three review attempts; unavailable seats left the artifacts coverage-degraded).
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, section 3.
 - **Depends on:** P5-C2a's enabled RSA-3072 token root, independent Ed25519 manifest root, canonical JWK codec, and pristine signed publication HWM at value 1.

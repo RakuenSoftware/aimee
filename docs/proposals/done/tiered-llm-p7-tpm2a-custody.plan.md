@@ -1,5 +1,9 @@
 # P7-tpm2a plan — real TPM2 custody provider (seal barrier + live-key anchor)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice of P7 (hardened kb vault). Branch off `testing`. Implements the FIRST real external-anchor
 custody provider — `tpm2` — against libtss2/ESAPI, validated on a software TPM2 (swtpm) in the
 integration CT (260). Flips `kb_vault_live_keys_allowed()` from "never" to a genuine anchor-backed

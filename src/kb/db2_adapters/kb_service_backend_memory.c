@@ -8,7 +8,9 @@
 #include "aimee.h"
 #include "modules/db2/c/memory_lint.h"
 #include "config.h"
+#include "modules/db2/c/entity_registry.h"  /* db2_entity_merge / db2_entity_unmerge */
 #include "modules/db2/c/fact_ingest.h"      /* db2_typed_fact_ingress */
+#include "modules/db2/c/fact_lifecycle.h"   /* db2_fact_retract, FACT_RETRACT_IMMUTABLE */
 #include "modules/db2/c/fact_recall.h"      /* db2_fact_recall_in_query */
 #include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "modules/db2/c/kb_payload.h"       /* db2_kb_async_enqueue */
@@ -2019,5 +2021,93 @@ cJSON *db2_kb_service_memory_lint_json(void)
       cJSON_AddStringToObject(iss, "message", issues[i].message);
       cJSON_AddItemToArray(arr, iss);
    }
+   return resp;
+}
+
+/* --- Typed-fact §4 retraction and §3 entity merge/unmerge ---
+ *
+ * These three primitives were built, tested, and left with no production caller:
+ * a wrong entity merge was recorded and reversible in principle, with no way to
+ * reverse one outside a test, and retraction was reachable only from the
+ * pattern-extraction path in fact_ingest. They are the correction half of the
+ * typed-fact layer — without a surface, the layer can learn a wrong fact but
+ * cannot be told that it is wrong. */
+
+cJSON *db2_kb_service_facts_retract_json(const char *source, const char *relation,
+                                         const char *target, const char *authority)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+
+   /* §4/§5 authority guard: only an explicit "user" authority may retract a
+    * user-stated Class A fact. Anything else — including an absent or
+    * unrecognised value — is treated as model authority, the conservative
+    * reading, since a caller that cannot name its authority must not inherit the
+    * user's. */
+   fact_authority_t auth =
+       (authority && strcmp(authority, "user") == 0) ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
+
+   int rc = db2_fact_retract(source ? source : "", relation ? relation : "",
+                             (target && target[0]) ? target : NULL, auth);
+   if (rc == FACT_RETRACT_IMMUTABLE)
+   {
+      /* Distinct from a plain failure: the relation is immutable and this caller
+       * lacks the authority to override it. Naming that lets a client explain the
+       * refusal instead of retrying a request that can never succeed. */
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "reason", "immutable");
+      cJSON_AddStringToObject(resp, "message",
+                              "this relation is immutable; only a user authority may retract it");
+      return resp;
+   }
+   if (rc < 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "fact retraction failed");
+      return resp;
+   }
+
+   cJSON_AddStringToObject(resp, "status", "ok");
+   /* rc == 0 is success with nothing matched, NOT an error: retracting a fact
+    * that is already gone leaves the caller in exactly the state they asked for.
+    * The count is what distinguishes the two cases, so it is always reported. */
+   cJSON_AddNumberToObject(resp, "retracted", rc);
+   return resp;
+}
+
+cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   int64_t merge_id = db2_entity_merge(from_id, into_id);
+   if (merge_id <= 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message",
+                              "merge refused: both ids must be distinct active entities");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   /* The audit id is the only handle a caller can later unmerge with, so it is
+    * the one field this response must always carry. */
+   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
+   return resp;
+}
+
+cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (db2_entity_unmerge(merge_id) != 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "no such merge, or it was already undone");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
    return resp;
 }

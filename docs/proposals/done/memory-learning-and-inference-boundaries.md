@@ -1,5 +1,9 @@
 # Proposal: unify memory, learning, skills, and inference boundaries
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived 2026-08-04 as partially implemented. Source ownership and the memory,
   learning, skills, response-composition, and synthesis boundaries now exist; cross-process bus
   isolation and remaining production-quality contracts continue in

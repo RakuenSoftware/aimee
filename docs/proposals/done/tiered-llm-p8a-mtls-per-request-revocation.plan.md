@@ -1,5 +1,9 @@
 # P8a implementation plan — per-request durable revocation/expiry re-check (P8 §3)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P8a of P8 (thin-client↔server mTLS). Branch off `testing`. P8's server-side mTLS is
 mostly "wiring, not green-field" (server_api_mtls 0/1/2, mtls_verify_cb, client TLS+TOFU,
 the enrollment CA, cert:CN principal all exist). P8a ships the ONE load-bearing security

@@ -1,5 +1,9 @@
 # P1 implementation plan (v2) — Tenancy + identity
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for `tiered-llm-p1-tenancy-identity.md`. Worktree branch off `testing`.
 One feature branch; slices are roundtable checkpoints + commits, merged once at
 convergence. **v2 addresses the round-1 panel: every slice carries its own

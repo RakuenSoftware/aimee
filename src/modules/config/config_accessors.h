@@ -88,6 +88,8 @@ int config_memory_prospective_enabled(void);
 int config_memory_prospective_max_matches(void);
 int config_memory_lifecycle_enabled(void);
 int config_memory_lifecycle_hide_archived(void);
+int config_memory_typed_facts_speculative_ttl_days(void);
+int config_memory_typed_facts_promote_threshold(void);
 int config_memory_lifecycle_ttl_date_days(void);
 int config_memory_lifecycle_ttl_relative_days(void);
 int config_memory_lifecycle_ttl_open_ended_days(void);

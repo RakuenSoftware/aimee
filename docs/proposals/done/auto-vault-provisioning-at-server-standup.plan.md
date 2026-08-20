@@ -1,5 +1,9 @@
 # Implementation plan — Automatic delegate-vault provisioning at standup
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for [auto-vault-provisioning-at-server-standup.md](auto-vault-provisioning-at-server-standup.md).
 Grounded in `origin/testing` (server v0.2.85 line). Default-safe, no new always-on
 behavior beyond an idempotent boot pass that no-ops when no secret source is set.

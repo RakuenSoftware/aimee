@@ -1,5 +1,9 @@
 # P7-tpm2b plan — TPM2 NV monotonic-counter anti-rollback for the sealed KEK (P7 §9)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice of P7. Branch off `testing`. Adds the P7 §9 ANTI-ROLLBACK core to the tpm2 custody
 provider (P7-tpm2a, merged): a TPM2 NV **monotonic counter** binds a GENERATION into the sealed
 blob, so restoring an OLD sealed-KEK blob after a re-seal is DETECTED and REFUSED. Validated on

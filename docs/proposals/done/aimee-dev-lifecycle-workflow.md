@@ -1,5 +1,9 @@
 # Proposal: aimee workflows — a user-definable, autonomy-first development engine
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — roundtable-converged READY (5 diverse-panel rounds; all lenses incl.
   contrarian); user-approved (proposal gate). Implementation remains BLOCKED-ON §0.
 - **Author:** JBailes

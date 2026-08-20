@@ -447,8 +447,8 @@ int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int m
       for (int f = 0; f < frontier_n && count < max; f++)
       {
          const char *node = frontier[f];
-         db2_entity_edge_typed_t buf[50];
-         int n = db2_entity_edge_walk_step_typed(node, buf, 50);
+         db2_entity_edge_with_kinds_t buf[50];
+         int n = db2_entity_edge_walk_step_with_kinds(node, buf, 50);
 
          for (int b = 0; b < n && count < max; b++)
          {

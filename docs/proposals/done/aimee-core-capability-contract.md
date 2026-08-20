@@ -1,5 +1,9 @@
 # Proposal: define Aimee's required core capability contract
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived 2026-08-04 as partially implemented. The capability taxonomy,
   descriptors, source ownership, and initial module-event adapters landed; the required
   cross-process round trip remains in

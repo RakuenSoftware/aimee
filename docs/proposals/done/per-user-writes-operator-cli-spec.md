@@ -1,5 +1,9 @@
 # Operator CLI for per-user `/v1` write grants — command spec
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implemented, live-tested, and archived 2026-08-04.
 
 > **Archived as complete.** The atomic SQL/C reporting seam, revoked-inclusive list,

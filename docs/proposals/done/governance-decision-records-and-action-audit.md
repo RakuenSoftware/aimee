@@ -1,5 +1,9 @@
 # Proposal: Governance surface — decision records + per-action policy-verdict audit
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Completed:** 2026-07-02
 - **Moved from:** `docs/proposals/pending/governance-decision-records-and-action-audit.md`

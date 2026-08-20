@@ -1,5 +1,9 @@
 # Proposal: finish the first-class `/v1` migration residual cleanup
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Status refreshed:** 2026-06-09
 - **Split:** functional `/v1` dispatch migration, `cli_v1_dispatch_local`, retired `/v1/rpc`, and kb-intelligence ownership gate moved to `docs/proposals/done/v1-dispatch-migration.md`.

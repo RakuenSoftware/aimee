@@ -1,5 +1,9 @@
 # Proposal: Learning-to-rank weight fitting — close the loop on the KB-hybrid ranker
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — Phases 1–4 implemented as **option A** (the fitter sidecar
   `scripts/rank-fit.py` + training-view/`export-view` + benchmark-gated commit +
   scheduled refit), shipped default-off behind `intelligence.ranking.fit.enabled`.

@@ -1,5 +1,9 @@
 # P2b-a — buffered kb Bedrock egress authority
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** COMPLETE (2026-07-21). Roundtable-converged plan v5; implementation and
   adversarial branch review converged, with real PG17/swtpm/CT260 validation.
 - **Depends on:** P1 identity/RLS, P2a catalog, P3a pricing/audit, P4a budget,

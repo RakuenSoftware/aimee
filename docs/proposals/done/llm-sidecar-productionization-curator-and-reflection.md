@@ -1,5 +1,9 @@
 # Proposal: LLM-sidecar productionization — graduate curator extraction and idle reflection from stub to production
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE (2026-07-09). All acceptance criteria are met and the machinery
   is validated end-to-end (see the **Reconciliation** section at the end for the
   per-criterion map + evidence). Shipped across #1140/#1152/#1153/#1157–1159

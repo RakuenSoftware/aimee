@@ -1,5 +1,9 @@
 # Proposal: appliance state-recovery runbook
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implemented by workflow and archived 2026-08-04.
 - **Author:** JBailes
 - **Charter roles:** Recall (operator orientation), Constrain-Verify (a checklist a human follows under incident pressure).

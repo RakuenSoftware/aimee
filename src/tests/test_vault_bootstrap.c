@@ -422,60 +422,60 @@ static void test_no_plaintext_at_rest(void)
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
-/* Take credential-shaped variables out of the ambient environment.
+/* Remove every credential-shaped variable this process INHERITED, before any
+ * test runs.
  *
- * test_env_source asserts that after a bootstrap NOTHING credential-shaped is
- * left set, which quietly assumes the environment it inherited had none. Any
- * *_TOKEN, *_SECRET, *_API_KEY and so on breaks it -- and the harness this
- * suite is developed under exports CLAUDE_CODE_MESSAGING_TOKEN, so it failed
- * on every run here while passing in CI, which is the worst way for a test to
- * be wrong: red for one person and green for everyone else.
+ * Several assertions here are global -- vault_env_has_credential_environment()
+ * answers "is there ANY credential left in the environment", not "is mine gone".
+ * That makes them a property of the whole environment, so a single unrelated
+ * variable in the developer's shell fails the test no matter how correct the
+ * code under test is. It bit exactly that way: a harness-injected
+ * CLAUDE_CODE_MESSAGING_TOKEN matches the `_TOKEN` suffix rule, so the scrub
+ * assertion could never pass locally while CI, with no such variable, stayed
+ * green.
  *
- * The suffixes mirror name_span_is_credential in vault_env_bootstrap.c. They
- * are duplicated rather than exported because the point is to make this test
- * independent of the ambient environment, and a test that asked the code under
- * test which variables to remove would be asking the thing it is checking. */
-static void scrub_ambient_credentials(void)
+ * Deliberately reusing vault_env_name_is_any_credential() rather than
+ * re-listing the patterns: the point is to clear precisely what the predicate
+ * under test counts, so the two cannot drift apart and reopen this.
+ *
+ * environ is rebuilt by unsetenv(), so collect the names first and only then
+ * remove them -- unsetting mid-walk skips entries. */
+#define TEST_ENV_NAME_MAX 128 /* mirrors ENV_NAME_MAX, private to the module */
+
+static void scrub_inherited_credential_env(void)
 {
-   static const char *const suffixes[] = {
-       "_TOKEN",  "_SECRET", "_PASSWORD",   "_PRIVATE_KEY", "_API_KEY", "_DSN",
-       "_BEARER", "_PASS",   "_CREDENTIAL", "_CREDENTIALS", NULL};
-   for (;;)
+   extern char **environ;
+   char names[64][TEST_ENV_NAME_MAX];
+   int n = 0;
+
+   for (char **entry = environ; *entry && n < (int)(sizeof(names) / sizeof(names[0])); entry++)
    {
-      extern char **environ;
-      char *victim = NULL;
-      for (char **entry = environ; *entry && !victim; entry++)
-      {
-         const char *eq = strchr(*entry, '=');
-         if (!eq || eq == *entry)
-            continue;
-         size_t len = (size_t)(eq - *entry);
-         for (int i = 0; suffixes[i] && !victim; i++)
-         {
-            size_t sl = strlen(suffixes[i]);
-            if (len >= sl && memcmp(*entry + len - sl, suffixes[i], sl) == 0)
-               victim = strndup(*entry, len);
-         }
-         if (!victim && strstr(*entry, "_SECRET_") && strstr(*entry, "_SECRET_") < eq)
-            victim = strndup(*entry, len);
-      }
-      if (!victim)
-         return;
-      /* unsetenv invalidates the walk, so restart after each removal. */
-      unsetenv(victim);
-      free(victim);
+      const char *eq = strchr(*entry, '=');
+      if (!eq || eq == *entry)
+         continue;
+      size_t len = (size_t)(eq - *entry);
+      if (len >= TEST_ENV_NAME_MAX)
+         continue;
+      memcpy(names[n], *entry, len);
+      names[n][len] = '\0';
+      if (vault_env_name_is_any_credential(names[n]))
+         n++;
    }
+
+   for (int i = 0; i < n; i++)
+      unsetenv(names[i]);
 }
 
 int main(void)
 {
+   scrub_inherited_credential_env();
+
    snprintf(g_root, sizeof(g_root), "/tmp/aimee-vaultboot-test-%d", (int)getpid());
    snprintf(g_home, sizeof(g_home), "%s/home", g_root);
    char mk[700];
    snprintf(mk, sizeof(mk), "rm -rf %s && mkdir -p %s", g_root, g_home);
    assert(system(mk) == 0);
    setenv("AIMEE_HOME", g_home, 1);
-   scrub_ambient_credentials();
    vault_kek_cache_clear();
    server_vault_bootstrap_set_resolver(fake_resolver);
 

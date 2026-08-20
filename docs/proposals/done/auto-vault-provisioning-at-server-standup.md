@@ -1,5 +1,9 @@
 # Automatic delegate-vault provisioning at aimee-server standup
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** **DONE / shipped.** Core (WP-A/B) landed in **PR #410**
   (`server_vault_bootstrap`, env scrub, audit, idempotence, `test_vault_bootstrap`);
   WP-C container surface is in tree (`combined-entrypoint.sh` + `server-entrypoint.sh`

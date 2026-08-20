@@ -1,5 +1,9 @@
 # Proposal: C++ class/method symbol extraction (recall §7)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — T0 shipped (#873); the §6 HIGH-recall gate is MET (86% ≥ 70%). T1/T2 are optional
   future-work (see §8), not required. Design roundtable converged 0-blocking over 5 rounds (9→5→1→1→0);
   prerequisites #1 (#867 .hpp collection) + #2 (routes) DONE. **Live §9 on .254 2026-06-29 after T0: recall HIGH+MED 100%, precision 100% (7/7
