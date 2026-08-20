@@ -356,3 +356,31 @@ aimee_module_call_result_t aimee_db2_task_update_state_call(aimee_db2_call_fn ca
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_release_add_doc_call(aimee_db2_call_fn call,
+                                                          void *call_context, uint64_t trace_id,
+                                                          uint64_t deadline_ns, uint64_t release_id,
+                                                          uint64_t doc_id, uint32_t *acknowledged,
+                                                          aimee_module_cancelled_fn cancelled,
+                                                          void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RELEASE_ADD_DOC_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RELEASE_ADD_DOC_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_release_add_doc_request_encode(release_id, doc_id, request, sizeof(request),
+                                                &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RELEASE_ADD_DOC, AIMEE_DB2_STAGE_RELEASE_ADD_DOC,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_release_add_doc_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}

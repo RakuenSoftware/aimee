@@ -2277,6 +2277,98 @@
       }
     },
     {
+      "family": "memory",
+      "id": 66,
+      "name": "scene_member_exists",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Scenes and the memories belonging to them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_scene_member_exists"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the pair is matched in the order given, so membership is directional in the sense that swapping the arguments asks a different question"
+        },
+        "fields": [
+          {
+            "name": "scene_memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "scene_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "member",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 67,
+      "name": "unit_edge_exists",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory units and the edges between them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_unit_edge_exists"
+      ],
+      "request": {
+        "policy": {
+          "reads": "both orders are tried, so an edge stored in either direction answers true and swapping the arguments asks the same question"
+        },
+        "fields": [
+          {
+            "name": "unit_id_a",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "unit_id_b",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "connected",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -3891,6 +3983,214 @@
       }
     },
     {
+      "family": "learning",
+      "id": 32,
+      "name": "artifact_cite",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifacts and the sources they cite are relational DB2 rows.",
+      "c_symbols": [
+        "db2_artifact_cite"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the citation span is written as zero to zero, so this records that a source was cited and never where in it"
+        },
+        "fields": [
+          {
+            "name": "citing_artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "source_kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "source_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 33,
+      "name": "artifact_link",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifacts and the links between them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_artifact_link"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the link is directional and the kind is stored as given, so an unknown kind is recorded rather than refused"
+        },
+        "fields": [
+          {
+            "name": "from_artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "to_artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "link_kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 34,
+      "name": "bandit_promotion_set",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Promoted arms and the decision points they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_bandit_promotion_set"
+      ],
+      "request": {
+        "policy": {
+          "writes": "one promotion per decision point, so setting a second replaces the first, and the promotion stamp is DB2's own clock"
+        },
+        "fields": [
+          {
+            "name": "decision_point",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "arm_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "rollback_arm",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 35,
+      "name": "collab_rule_propose",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Collaboration rules and their proposers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_collab_rules_propose"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the new rule's identifier is returned, and zero means the insert did not happen rather than a rule numbered zero"
+        },
+        "fields": [
+          {
+            "name": "rule_text",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 2047
+          },
+          {
+            "name": "rule_reason",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "proposed_by",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -4261,6 +4561,52 @@
         "fields": [
           {
             "name": "changed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 14,
+      "name": "release_add_doc",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Releases and the documents they contain are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_release_add_doc"
+      ],
+      "request": {
+        "policy": {
+          "writes": "adding a document already in the release does nothing and is acknowledged, so a repeat is indistinguishable from a first add"
+        },
+        "fields": [
+          {
+            "name": "release_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "doc_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
             "type": "u32",
             "minimum": 0,
             "maximum": 1
@@ -4970,6 +5316,52 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 23,
+      "name": "directive_resolve",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Epistemic directives, their states and the memories that resolve them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_directive_resolve"
+      ],
+      "request": {
+        "policy": {
+          "writes": "only an open directive is resolved, and the memory that resolves it is recorded without being checked to exist"
+        },
+        "fields": [
+          {
+            "name": "directive_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "resolution_memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
           }
         ]
       }

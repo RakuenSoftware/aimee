@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "68b2bb2a6bb18285c511c45873e38b4e85e8c2e52f85c64b1cb3bb082b8caa4c"
+const ContractSHA256 = "747e1c06f98273ee99db295931dcd997ff1078016e20b373b7eb4aeb65028f06"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -679,6 +679,130 @@ func DecodeDedupeByKeyRequest(request []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return dryRun, nil
+}
+
+const EventSceneMemberExists = EventMemory
+const StageSceneMemberExists = FamilyMemory
+const OperationSceneMemberExists uint32 = 66
+const SceneMemberExistsSceneMemoryIDMin uint64 = 1
+const SceneMemberExistsSceneMemoryIDMax uint64 = 9223372036854775807
+const SceneMemberExistsSceneIDMin uint64 = 1
+const SceneMemberExistsSceneIDMax uint64 = 9223372036854775807
+
+// EncodeSceneMemberExistsRequest writes the schema scene_member_exists declares, in order.
+func EncodeSceneMemberExistsRequest(sceneMemoryID uint64, sceneID uint64) ([]byte, error) {
+	if sceneMemoryID < SceneMemberExistsSceneMemoryIDMin || sceneMemoryID > SceneMemberExistsSceneMemoryIDMax ||
+		sceneID < SceneMemberExistsSceneIDMin || sceneID > SceneMemberExistsSceneIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var sceneMemoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(sceneMemoryIDBytes[:], sceneMemoryID)
+	payload = append(payload, sceneMemoryIDBytes[:]...)
+	var sceneIDBytes [8]byte
+	binary.LittleEndian.PutUint64(sceneIDBytes[:], sceneID)
+	payload = append(payload, sceneIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationSceneMemberExists, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeSceneMemberExistsRequest reads it back, checking each field against its own bound.
+func DecodeSceneMemberExistsRequest(request []byte) (uint64, uint64, error) {
+	var sceneMemoryID uint64
+	var sceneID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSceneMemberExists || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	sceneMemoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if sceneMemoryID < SceneMemberExistsSceneMemoryIDMin || sceneMemoryID > SceneMemberExistsSceneMemoryIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	sceneID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if sceneID < SceneMemberExistsSceneIDMin || sceneID > SceneMemberExistsSceneIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return sceneMemoryID, sceneID, nil
+}
+
+const EventUnitEdgeExists = EventMemory
+const StageUnitEdgeExists = FamilyMemory
+const OperationUnitEdgeExists uint32 = 67
+const UnitEdgeExistsUnitIDAMin uint64 = 1
+const UnitEdgeExistsUnitIDAMax uint64 = 9223372036854775807
+const UnitEdgeExistsUnitIDBMin uint64 = 1
+const UnitEdgeExistsUnitIDBMax uint64 = 9223372036854775807
+
+// EncodeUnitEdgeExistsRequest writes the schema unit_edge_exists declares, in order.
+func EncodeUnitEdgeExistsRequest(unitIDA uint64, unitIDB uint64) ([]byte, error) {
+	if unitIDA < UnitEdgeExistsUnitIDAMin || unitIDA > UnitEdgeExistsUnitIDAMax ||
+		unitIDB < UnitEdgeExistsUnitIDBMin || unitIDB > UnitEdgeExistsUnitIDBMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var unitIDABytes [8]byte
+	binary.LittleEndian.PutUint64(unitIDABytes[:], unitIDA)
+	payload = append(payload, unitIDABytes[:]...)
+	var unitIDBBytes [8]byte
+	binary.LittleEndian.PutUint64(unitIDBBytes[:], unitIDB)
+	payload = append(payload, unitIDBBytes[:]...)
+	header, err := EncodeRequestHeader(OperationUnitEdgeExists, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeUnitEdgeExistsRequest reads it back, checking each field against its own bound.
+func DecodeUnitEdgeExistsRequest(request []byte) (uint64, uint64, error) {
+	var unitIDA uint64
+	var unitIDB uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationUnitEdgeExists || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	unitIDA = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if unitIDA < UnitEdgeExistsUnitIDAMin || unitIDA > UnitEdgeExistsUnitIDAMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	unitIDB = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if unitIDB < UnitEdgeExistsUnitIDBMin || unitIDB > UnitEdgeExistsUnitIDBMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return unitIDA, unitIDB, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -2586,6 +2710,266 @@ func DecodeCalibrationSurfacesWithDataRequest(request []byte) (uint32, error) {
 	return minRows, nil
 }
 
+const EventArtifactCite = EventLearning
+const StageArtifactCite = FamilyLearning
+const OperationArtifactCite uint32 = 32
+const ArtifactCiteCitingArtifactIDMin = 1
+const ArtifactCiteCitingArtifactIDMax = 127
+const ArtifactCiteSourceKindMin = 1
+const ArtifactCiteSourceKindMax = 63
+const ArtifactCiteSourceIDMin = 1
+const ArtifactCiteSourceIDMax = 127
+
+// EncodeArtifactCiteRequest writes the schema artifact_cite declares, in order.
+func EncodeArtifactCiteRequest(citingArtifactID string, sourceKind string, sourceID string) ([]byte, error) {
+	if len(citingArtifactID) < ArtifactCiteCitingArtifactIDMin || len(citingArtifactID) > ArtifactCiteCitingArtifactIDMax || hasNUL(citingArtifactID) ||
+		len(sourceKind) < ArtifactCiteSourceKindMin || len(sourceKind) > ArtifactCiteSourceKindMax || hasNUL(sourceKind) ||
+		len(sourceID) < ArtifactCiteSourceIDMin || len(sourceID) > ArtifactCiteSourceIDMax || hasNUL(sourceID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, citingArtifactID, ArtifactCiteCitingArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, sourceKind, ArtifactCiteSourceKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, sourceID, ArtifactCiteSourceIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactCite, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactCiteRequest reads it back, checking each field against its own bound.
+func DecodeArtifactCiteRequest(request []byte) (string, string, string, error) {
+	var citingArtifactID string
+	var sourceKind string
+	var sourceID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactCite || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if citingArtifactID, err = takeRowText(payload, &cursor, ArtifactCiteCitingArtifactIDMax); err != nil ||
+		len(citingArtifactID) < ArtifactCiteCitingArtifactIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if sourceKind, err = takeRowText(payload, &cursor, ArtifactCiteSourceKindMax); err != nil ||
+		len(sourceKind) < ArtifactCiteSourceKindMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if sourceID, err = takeRowText(payload, &cursor, ArtifactCiteSourceIDMax); err != nil ||
+		len(sourceID) < ArtifactCiteSourceIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return citingArtifactID, sourceKind, sourceID, nil
+}
+
+const EventArtifactLink = EventLearning
+const StageArtifactLink = FamilyLearning
+const OperationArtifactLink uint32 = 33
+const ArtifactLinkFromArtifactIDMin = 1
+const ArtifactLinkFromArtifactIDMax = 127
+const ArtifactLinkToArtifactIDMin = 1
+const ArtifactLinkToArtifactIDMax = 127
+const ArtifactLinkLinkKindMin = 1
+const ArtifactLinkLinkKindMax = 63
+
+// EncodeArtifactLinkRequest writes the schema artifact_link declares, in order.
+func EncodeArtifactLinkRequest(fromArtifactID string, toArtifactID string, linkKind string) ([]byte, error) {
+	if len(fromArtifactID) < ArtifactLinkFromArtifactIDMin || len(fromArtifactID) > ArtifactLinkFromArtifactIDMax || hasNUL(fromArtifactID) ||
+		len(toArtifactID) < ArtifactLinkToArtifactIDMin || len(toArtifactID) > ArtifactLinkToArtifactIDMax || hasNUL(toArtifactID) ||
+		len(linkKind) < ArtifactLinkLinkKindMin || len(linkKind) > ArtifactLinkLinkKindMax || hasNUL(linkKind) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, fromArtifactID, ArtifactLinkFromArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, toArtifactID, ArtifactLinkToArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, linkKind, ArtifactLinkLinkKindMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactLink, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactLinkRequest reads it back, checking each field against its own bound.
+func DecodeArtifactLinkRequest(request []byte) (string, string, string, error) {
+	var fromArtifactID string
+	var toArtifactID string
+	var linkKind string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactLink || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if fromArtifactID, err = takeRowText(payload, &cursor, ArtifactLinkFromArtifactIDMax); err != nil ||
+		len(fromArtifactID) < ArtifactLinkFromArtifactIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if toArtifactID, err = takeRowText(payload, &cursor, ArtifactLinkToArtifactIDMax); err != nil ||
+		len(toArtifactID) < ArtifactLinkToArtifactIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if linkKind, err = takeRowText(payload, &cursor, ArtifactLinkLinkKindMax); err != nil ||
+		len(linkKind) < ArtifactLinkLinkKindMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return fromArtifactID, toArtifactID, linkKind, nil
+}
+
+const EventBanditPromotionSet = EventLearning
+const StageBanditPromotionSet = FamilyLearning
+const OperationBanditPromotionSet uint32 = 34
+const BanditPromotionSetDecisionPointMin = 1
+const BanditPromotionSetDecisionPointMax = 127
+const BanditPromotionSetArmIDMin = 1
+const BanditPromotionSetArmIDMax = 127
+const BanditPromotionSetRollbackArmMin = 0
+const BanditPromotionSetRollbackArmMax = 127
+
+// EncodeBanditPromotionSetRequest writes the schema bandit_promotion_set declares, in order.
+func EncodeBanditPromotionSetRequest(decisionPoint string, armID string, rollbackArm string) ([]byte, error) {
+	if len(decisionPoint) < BanditPromotionSetDecisionPointMin || len(decisionPoint) > BanditPromotionSetDecisionPointMax || hasNUL(decisionPoint) ||
+		len(armID) < BanditPromotionSetArmIDMin || len(armID) > BanditPromotionSetArmIDMax || hasNUL(armID) ||
+		len(rollbackArm) < BanditPromotionSetRollbackArmMin || len(rollbackArm) > BanditPromotionSetRollbackArmMax || hasNUL(rollbackArm) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionPoint, BanditPromotionSetDecisionPointMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, armID, BanditPromotionSetArmIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, rollbackArm, BanditPromotionSetRollbackArmMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationBanditPromotionSet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditPromotionSetRequest reads it back, checking each field against its own bound.
+func DecodeBanditPromotionSetRequest(request []byte) (string, string, string, error) {
+	var decisionPoint string
+	var armID string
+	var rollbackArm string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditPromotionSet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionPoint, err = takeRowText(payload, &cursor, BanditPromotionSetDecisionPointMax); err != nil ||
+		len(decisionPoint) < BanditPromotionSetDecisionPointMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if armID, err = takeRowText(payload, &cursor, BanditPromotionSetArmIDMax); err != nil ||
+		len(armID) < BanditPromotionSetArmIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if rollbackArm, err = takeRowText(payload, &cursor, BanditPromotionSetRollbackArmMax); err != nil ||
+		len(rollbackArm) < BanditPromotionSetRollbackArmMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return decisionPoint, armID, rollbackArm, nil
+}
+
+const EventCollabRulePropose = EventLearning
+const StageCollabRulePropose = FamilyLearning
+const OperationCollabRulePropose uint32 = 35
+const CollabRuleProposeRuleTextMin = 1
+const CollabRuleProposeRuleTextMax = 2047
+const CollabRuleProposeRuleReasonMin = 0
+const CollabRuleProposeRuleReasonMax = 1023
+const CollabRuleProposeProposedByMin = 1
+const CollabRuleProposeProposedByMax = 127
+
+// EncodeCollabRuleProposeRequest writes the schema collab_rule_propose declares, in order.
+func EncodeCollabRuleProposeRequest(ruleText string, ruleReason string, proposedBy string) ([]byte, error) {
+	if len(ruleText) < CollabRuleProposeRuleTextMin || len(ruleText) > CollabRuleProposeRuleTextMax || hasNUL(ruleText) ||
+		len(ruleReason) < CollabRuleProposeRuleReasonMin || len(ruleReason) > CollabRuleProposeRuleReasonMax || hasNUL(ruleReason) ||
+		len(proposedBy) < CollabRuleProposeProposedByMin || len(proposedBy) > CollabRuleProposeProposedByMax || hasNUL(proposedBy) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, ruleText, CollabRuleProposeRuleTextMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, ruleReason, CollabRuleProposeRuleReasonMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, proposedBy, CollabRuleProposeProposedByMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCollabRulePropose, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCollabRuleProposeRequest reads it back, checking each field against its own bound.
+func DecodeCollabRuleProposeRequest(request []byte) (string, string, string, error) {
+	var ruleText string
+	var ruleReason string
+	var proposedBy string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCollabRulePropose || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if ruleText, err = takeRowText(payload, &cursor, CollabRuleProposeRuleTextMax); err != nil ||
+		len(ruleText) < CollabRuleProposeRuleTextMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if ruleReason, err = takeRowText(payload, &cursor, CollabRuleProposeRuleReasonMax); err != nil ||
+		len(ruleReason) < CollabRuleProposeRuleReasonMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if proposedBy, err = takeRowText(payload, &cursor, CollabRuleProposeProposedByMax); err != nil ||
+		len(proposedBy) < CollabRuleProposeProposedByMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return ruleText, ruleReason, proposedBy, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -3128,6 +3512,68 @@ func DecodeTaskUpdateStateRequest(request []byte) (uint64, string, error) {
 		return 0, "", ErrMalformedEnvelope
 	}
 	return taskID, state, nil
+}
+
+const EventReleaseAddDoc = EventOrganization
+const StageReleaseAddDoc = FamilyOrganization
+const OperationReleaseAddDoc uint32 = 14
+const ReleaseAddDocReleaseIDMin uint64 = 1
+const ReleaseAddDocReleaseIDMax uint64 = 9223372036854775807
+const ReleaseAddDocDocIDMin uint64 = 1
+const ReleaseAddDocDocIDMax uint64 = 9223372036854775807
+
+// EncodeReleaseAddDocRequest writes the schema release_add_doc declares, in order.
+func EncodeReleaseAddDocRequest(releaseID uint64, docID uint64) ([]byte, error) {
+	if releaseID < ReleaseAddDocReleaseIDMin || releaseID > ReleaseAddDocReleaseIDMax ||
+		docID < ReleaseAddDocDocIDMin || docID > ReleaseAddDocDocIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var releaseIDBytes [8]byte
+	binary.LittleEndian.PutUint64(releaseIDBytes[:], releaseID)
+	payload = append(payload, releaseIDBytes[:]...)
+	var docIDBytes [8]byte
+	binary.LittleEndian.PutUint64(docIDBytes[:], docID)
+	payload = append(payload, docIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationReleaseAddDoc, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeReleaseAddDocRequest reads it back, checking each field against its own bound.
+func DecodeReleaseAddDocRequest(request []byte) (uint64, uint64, error) {
+	var releaseID uint64
+	var docID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReleaseAddDoc || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	releaseID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if releaseID < ReleaseAddDocReleaseIDMin || releaseID > ReleaseAddDocReleaseIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	docID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if docID < ReleaseAddDocDocIDMin || docID > ReleaseAddDocDocIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return releaseID, docID, nil
 }
 
 const EventEnrollmentActive = EventCustody
@@ -3941,6 +4387,68 @@ func DecodeResetStuckVectorOpsRequest(request []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return maxAttempts, nil
+}
+
+const EventDirectiveResolve = EventMaintenance
+const StageDirectiveResolve = FamilyMaintenance
+const OperationDirectiveResolve uint32 = 23
+const DirectiveResolveDirectiveIDMin uint64 = 1
+const DirectiveResolveDirectiveIDMax uint64 = 9223372036854775807
+const DirectiveResolveResolutionMemoryIDMin uint64 = 1
+const DirectiveResolveResolutionMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeDirectiveResolveRequest writes the schema directive_resolve declares, in order.
+func EncodeDirectiveResolveRequest(directiveID uint64, resolutionMemoryID uint64) ([]byte, error) {
+	if directiveID < DirectiveResolveDirectiveIDMin || directiveID > DirectiveResolveDirectiveIDMax ||
+		resolutionMemoryID < DirectiveResolveResolutionMemoryIDMin || resolutionMemoryID > DirectiveResolveResolutionMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var directiveIDBytes [8]byte
+	binary.LittleEndian.PutUint64(directiveIDBytes[:], directiveID)
+	payload = append(payload, directiveIDBytes[:]...)
+	var resolutionMemoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(resolutionMemoryIDBytes[:], resolutionMemoryID)
+	payload = append(payload, resolutionMemoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDirectiveResolve, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveResolveRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveResolveRequest(request []byte) (uint64, uint64, error) {
+	var directiveID uint64
+	var resolutionMemoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveResolve || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	directiveID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if directiveID < DirectiveResolveDirectiveIDMin || directiveID > DirectiveResolveDirectiveIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	resolutionMemoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if resolutionMemoryID < DirectiveResolveResolutionMemoryIDMin || resolutionMemoryID > DirectiveResolveResolutionMemoryIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return directiveID, resolutionMemoryID, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

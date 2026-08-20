@@ -1806,6 +1806,67 @@ int db2_memory_dedupe_by_key(int dry_run)
    return 0;
 }
 
+int db2_directive_resolve(int64_t id, int64_t resolution_memory_id)
+{
+   (void)id;
+   (void)resolution_memory_id;
+   return 0;
+}
+
+int db2_kb_release_add_doc(int64_t release_id, int64_t doc_id)
+{
+   (void)release_id;
+   (void)doc_id;
+   return 0;
+}
+
+int db2_memory_scene_member_exists(int64_t memory_id, int64_t scene_id)
+{
+   (void)memory_id;
+   (void)scene_id;
+   return 0;
+}
+
+int db2_memory_unit_edge_exists(int64_t unit_id_a, int64_t unit_id_b)
+{
+   (void)unit_id_a;
+   (void)unit_id_b;
+   return 0;
+}
+
+int db2_artifact_cite(const char *artifact_id, const char *source_kind, const char *source_id)
+{
+   (void)artifact_id;
+   (void)source_kind;
+   (void)source_id;
+   return 0;
+}
+
+int db2_artifact_link(const char *from_id, const char *to_id, const char *link_kind)
+{
+   (void)from_id;
+   (void)to_id;
+   (void)link_kind;
+   return 0;
+}
+
+int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                             const char *rollback_arm)
+{
+   (void)decision_point;
+   (void)arm_id;
+   (void)rollback_arm;
+   return 0;
+}
+
+int db2_collab_rules_propose(const char *text, const char *reason, const char *proposed_by)
+{
+   (void)text;
+   (void)reason;
+   (void)proposed_by;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -12464,6 +12464,54 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_dedupe_by_key",
         "policy": {"writes": 200},
     },
+    "directive_resolve": {
+        "key": ("maintenance", 23),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_resolve",
+        "policy": {"writes": 200},
+    },
+    "release_add_doc": {
+        "key": ("organization", 14),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_release_add_doc",
+        "policy": {"writes": 200},
+    },
+    "scene_member_exists": {
+        "key": ("memory", 66),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_scene_member_exists",
+        "policy": {"reads": 200},
+    },
+    "unit_edge_exists": {
+        "key": ("memory", 67),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_unit_edge_exists",
+        "policy": {"reads": 200},
+    },
+    "artifact_cite": {
+        "key": ("learning", 32),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_cite",
+        "policy": {"writes": 200},
+    },
+    "artifact_link": {
+        "key": ("learning", 33),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_link",
+        "policy": {"writes": 200},
+    },
+    "bandit_promotion_set": {
+        "key": ("learning", 34),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_promotion_set",
+        "policy": {"writes": 200},
+    },
+    "collab_rule_propose": {
+        "key": ("learning", 35),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_collab_rules_propose",
+        "policy": {"writes": 200},
+    },
 }
 
 
@@ -31158,7 +31206,8 @@ def _write(path: Path, content: bytes) -> None:
     path.write_bytes(content)
 
 
-def _client_sources(catalog: dict[str, object], client_source: bytes) -> list[tuple[Path, bytes]]:
+def _client_sources(root: Path, catalog: dict[str, object],
+                    client_source: bytes) -> list[tuple[Path, bytes]]:
     """Split the client wrappers into one file per operation family.
 
     Every wrapper is named aimee_db2_<operation>_call, so which family a
@@ -31200,8 +31249,14 @@ def _client_sources(catalog: dict[str, object], client_source: bytes) -> list[tu
     # correctly in advance, and every derived wrapper would otherwise cost a
     # round trip: generate, discover the formatter disagreed, edit the template,
     # generate again.
+    # The formatter reads its configuration from the directory of the file it
+    # is given, so the scratch file has to sit under `root` and not under
+    # whichever directory the generator happened to be started from. Passing a
+    # repository-relative path here formatted the client to the compiled-in
+    # defaults whenever the cwd was elsewhere, which the drift check then
+    # reported against a tree nobody had touched.
     return [(CLIENT_SOURCE_DIR / f"generated_{family}.c",
-             _clang_formatted(CLIENT_SOURCE_DIR / f"generated_{family}.c",
+             _clang_formatted(root / CLIENT_SOURCE_DIR / f"generated_{family}.c",
                               "\n\n".join([prologue] + blocks) + "\n").encode("utf-8"))
             for family, blocks in grouped.items()]
 
@@ -31212,7 +31267,7 @@ def run(root: Path, write: bool) -> None:
     outputs = (
         (HEADER, header),
         (CLIENT_HEADER, client_header),
-        *_client_sources(catalog, client_source),
+        *_client_sources(root, catalog, client_source),
         (GO_CONTRACT, go_contract),
         (BASELINE, baseline),
     )

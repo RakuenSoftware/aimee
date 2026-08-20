@@ -3251,9 +3251,15 @@
           "line": 97
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_cite operation replaces the citation insert. The citing artifact is a foreign key and an unknown one is refused; the cited source is not checked at all, so a citation can name a source that does not exist. The span is written as zero to zero and is part of the key, so this records that a source was cited and never where in it, and a spanned citation added later would be a second row."
+      },
       "signature": "int db2_artifact_cite ( const char * artifact_id , const char * source_kind , const char * source_id )",
       "signature_sha256": "5e4a74e6c434ee8be88984c9b911b96afab0027980fa61fb106ce1171d1fe2da",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_cite"
     },
     {
@@ -3398,9 +3404,15 @@
           "line": 103
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_link operation replaces the link insert. Both artifacts are foreign keys, so an unknown end is refused, but the kind is stored unchecked: a caller can record a relationship no reader understands, in a direction only it knows the meaning of. Linking the same pair and kind twice does nothing and is acknowledged."
+      },
       "signature": "int db2_artifact_link ( const char * from_id , const char * to_id , const char * link_kind )",
       "signature_sha256": "42b7daf4d5ca0123931ccf85a6c5588d16a6754c5fce655593730ea2f2a491f8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_link"
     },
     {
@@ -3933,9 +3945,15 @@
           "line": 82
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_promotion_set operation replaces the promotion write. There is one promotion per decision point, so setting a second replaces the first and the previous rollback arm is lost with it -- a caller wanting to keep it has to have read it first. The stamp is DB2's clock. An empty rollback arm is allowed, which records a promotion with nothing to fall back to."
+      },
       "signature": "int db2_bandit_promotion_set ( const char * decision_point , const char * arm_id , const char * rollback_arm )",
       "signature_sha256": "833a9238464b16136566448ca67f94f8360e3c8c2555c89c8462bfcc2c92191b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_promotion_set"
     },
     {
@@ -5072,9 +5090,15 @@
           "line": 15
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.collab_rule_propose operation replaces the proposal insert. It returns the new rule's identifier, which is what the approve and reject operations need, and zero means the insert did not happen rather than naming a rule -- identifiers start at one. Nothing deduplicates, so proposing the same text twice creates two rules."
+      },
       "signature": "int db2_collab_rules_propose ( const char * text , const char * reason , const char * proposed_by )",
       "signature_sha256": "59dad25096cbf493833e8febdbebe3a8625d4b53269fd66f9bc9e9420e7be7ea",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_collab_rules_propose"
     },
     {
@@ -7060,9 +7084,15 @@
           "line": 54
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_resolve operation replaces the resolution write. Only an open directive is touched, so resolving one twice does nothing the second time. The resolving memory is stored without being checked to exist -- there is no foreign key here -- so a caller can point a resolved directive at a memory that was never created, and nothing will notice until something tries to read it."
+      },
       "signature": "int db2_directive_resolve ( int64_t id , int64_t resolution_memory_id )",
       "signature_sha256": "b89ee801e6742c47e935d7c2cf55937a4b8d4a9b17de9f108cc935c008eeb71c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_resolve"
     },
     {
@@ -10416,9 +10446,15 @@
           "line": 51
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.release_add_doc operation replaces the release membership insert. Both ends are foreign keys, so an unknown release or an unknown document is refused and the reply says so -- this is not a write that always succeeds. Adding a document already in the release does nothing and is still acknowledged, so a caller cannot tell a repeat from a first add, which is what makes a retry safe."
+      },
       "signature": "int db2_kb_release_add_doc ( int64_t release_id , int64_t doc_id )",
       "signature_sha256": "06abca359179da7548235b7fd72a987d734bfb292a9f9ef37f9308f9017464e1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_release_add_doc"
     },
     {
@@ -18789,9 +18825,15 @@
           "line": 54
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.scene_member_exists operation replaces the membership probe. The pair is matched in the order given, unlike memory.unit_edge_exists beside it which tries both orders, so swapping the arguments here asks a genuinely different question. A statement that cannot run answers false, indistinguishable from an absent membership."
+      },
       "signature": "int db2_memory_scene_member_exists ( int64_t memory_id , int64_t scene_id )",
       "signature_sha256": "714a801435c0781369ab2ec4f23d4462f2a9ad7d9a9a0e2d910df0eab7fde703",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scene_member_exists"
     },
     {
@@ -19458,9 +19500,15 @@
           "line": 113
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.unit_edge_exists operation replaces the edge probe. Both orders are tried, so an edge stored either way answers true and the arguments are interchangeable -- the opposite of memory.scene_member_exists beside it, and not visible in a Boolean. The edge type is ignored, and nothing stops the same pair being stored twice, so this answers whether the units are connected at all and never how."
+      },
       "signature": "int db2_memory_unit_edge_exists ( int64_t unit_id_a , int64_t unit_id_b )",
       "signature_sha256": "0f0f9800a7cc7a749c31f7beb80de944d286f1e25f848b8e9e0a93d482241649",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_unit_edge_exists"
     },
     {
@@ -26808,15 +26856,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e880559c80e75b7672cc7d8fb79e126cf2a3d50b37ddc75c491d73ab85160706",
+  "fingerprint": "8ffa1fff44ed5d2f2d86c78963b2e184a27d3ec77ab6a53f08d770fa5f6e83b1",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 494,
+    "audit_pending": 486,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 464
+    "reviewed": 472
   }
 }

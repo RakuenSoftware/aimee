@@ -49,7 +49,6 @@ class ContractTests(unittest.TestCase):
             generator.PROCESS_CONTRACTS,
             generator.HEADER,
             generator.CLIENT_HEADER,
-            generator.CLIENT_SOURCE,
             generator.GO_CONTRACT,
             generator.BASELINE,
             generator.DECLARATION_REVIEW,
@@ -58,6 +57,12 @@ class ContractTests(unittest.TestCase):
             target = root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO_ROOT / relative, target)
+        # The client wrappers are one file per family, so the fixture copies
+        # whatever the split produced rather than a single named source.
+        for source in sorted((REPO_ROOT / generator.CLIENT_SOURCE_DIR).glob("generated_*.c")):
+            target = root / generator.CLIENT_SOURCE_DIR / source.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
         return temporary
 
     def test_production_catalog_and_generated_outputs_match(self) -> None:
@@ -66,7 +71,10 @@ class ContractTests(unittest.TestCase):
         header, client_header, client_source, go_contract, baseline = generator.generated(REPO_ROOT)
         self.assertEqual(header, (REPO_ROOT / generator.HEADER).read_bytes())
         self.assertEqual(client_header, (REPO_ROOT / generator.CLIENT_HEADER).read_bytes())
-        self.assertEqual(client_source, (REPO_ROOT / generator.CLIENT_SOURCE).read_bytes())
+        # generated() still returns the wrappers as one blob; the tree holds
+        # them split by family, so the comparison is against the split.
+        for path, content in generator._client_sources(REPO_ROOT, catalog, client_source):
+            self.assertEqual(content, (REPO_ROOT / path).read_bytes())
         self.assertEqual(go_contract, (REPO_ROOT / generator.GO_CONTRACT).read_bytes())
         self.assertEqual(baseline, (REPO_ROOT / generator.BASELINE).read_bytes())
         fingerprint = generator.catalog_fingerprint(catalog)
@@ -1500,7 +1508,8 @@ class ContractTests(unittest.TestCase):
             root = Path(temporary.name)
             (root / generator.HEADER).unlink()
             (root / generator.CLIENT_HEADER).unlink()
-            (root / generator.CLIENT_SOURCE).unlink()
+            for source in (root / generator.CLIENT_SOURCE_DIR).glob("generated_*.c"):
+                source.unlink()
             (root / generator.GO_CONTRACT).unlink()
             (root / generator.BASELINE).unlink()
             generator.run(root, True)

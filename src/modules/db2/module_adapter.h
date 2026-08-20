@@ -234,6 +234,14 @@ typedef struct
    int (*calibration_surfaces_with_data)(int min_rows);
    int (*reset_stuck_vector_ops)(int max_attempts);
    int (*dedupe_by_key)(int dry_run);
+   int (*directive_resolve)(int64_t directive_id, int64_t resolution_memory_id);
+   int (*release_add_doc)(int64_t release_id, int64_t doc_id);
+   int (*scene_member_exists)(int64_t scene_memory_id, int64_t scene_id);
+   int (*unit_edge_exists)(int64_t unit_id_a, int64_t unit_id_b);
+   int (*artifact_cite)(const char *citing_artifact_id, const char *source_kind, const char *source_id);
+   int (*artifact_link)(const char *from_artifact_id, const char *to_artifact_id, const char *link_kind);
+   int (*bandit_promotion_set)(const char *decision_point, const char *arm_id, const char *rollback_arm);
+   int (*collab_rule_propose)(const char *rule_text, const char *rule_reason, const char *proposed_by);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
