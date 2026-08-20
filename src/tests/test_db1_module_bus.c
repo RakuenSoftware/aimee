@@ -1905,6 +1905,69 @@ static void test_recovery_never_releases_money_it_cannot_account_for(void)
    printf("  PASS: recovery never releases money it cannot account for\n");
 }
 
+/* Convergence: a review loop bounded twice, once by rounds and once by whether
+   anything is actually changing. The interesting assertion is that the two
+   bounds are distinguishable -- a run that keeps producing the same artifact
+   should be reported as making no progress, not as merely out of rounds, because
+   those call for different interventions. */
+static void test_convergence_distinguishes_no_progress_from_too_many_rounds(void)
+{
+   db1_wfe_review_outcome_t out;
+   db1_work_item_t item;
+
+   must(db1_work_item_create("cv-1", "repo/c", "p/1", "build", "1", "review", "autonomous") == 0,
+        "a run at a review gate");
+
+   /* Different feedback each round: progress, so it loops. */
+   must(db1_wfe_record_requested_changes("cv-1", "review", "plan", "plan-a", "fb-1", "", 5, 3, 0.1,
+                                         &out) == 0,
+        "round one");
+   must(out.parked == 0 && out.attempts == 1 && out.identical_repeats == 1, "loops, first attempt");
+   must(db1_work_item_get("cv-1", &item) == 1 && strcmp(item.current_stage, "plan") == 0,
+        "and it was routed back to the plan stage");
+
+   must(db1_wfe_record_requested_changes("cv-1", "review", "plan", "plan-b", "fb-2", "", 5, 3, 0.1,
+                                         &out) == 0,
+        "round two with a different artifact");
+   must(out.identical_repeats == 1, "a changed artifact resets the repeat count");
+
+   /* Now the same artifact and the same feedback, twice more: no progress. */
+   must(db1_wfe_record_requested_changes("cv-1", "review", "plan", "plan-b", "fb-2", "", 5, 3, 0.1,
+                                         &out) == 0,
+        "identical round");
+   must(out.identical_repeats == 2 && out.parked == 0, "counted, not yet at the limit");
+   must(db1_wfe_record_requested_changes("cv-1", "review", "plan", "plan-b", "fb-2", "still X", 5,
+                                         3, 0.1, &out) == 0,
+        "a third identical round");
+   must(out.parked == 1, "parked");
+   must(strcmp(out.pause_reason, "convergence_no_progress") == 0,
+        "and reported as making no progress, not as out of rounds");
+   must(db1_work_item_get("cv-1", &item) == 1, "read");
+   must(strcmp(item.pause_reason, "convergence_no_progress") == 0, "the run carries the reason");
+
+   /* The other bound: always-changing artifacts that simply run too long. */
+   must(db1_work_item_create("cv-2", "repo/c", "p/2", "build", "1", "review", "autonomous") == 0,
+        "another run");
+   must(db1_wfe_record_requested_changes("cv-2", "review", "plan", "h1", "f1", "", 2, 5, 0, &out) ==
+            0,
+        "round one");
+   must(out.parked == 0, "still going");
+   must(db1_wfe_record_requested_changes("cv-2", "review", "plan", "h2", "f2", "", 2, 5, 0, &out) ==
+            0,
+        "round two hits the iteration cap");
+   must(out.parked == 1, "parked");
+   must(strcmp(out.pause_reason, "convergence_limit") == 0,
+        "and reported as out of rounds -- every round DID change something");
+
+   /* A terminal run is not routed anywhere. */
+   must(db1_work_item_set_terminal("cv-2", "accepted") == 0, "finish it");
+   must(db1_wfe_record_requested_changes("cv-2", "review", "plan", "h3", "f3", "", 5, 5, 0, &out) ==
+            -1,
+        "a finished run takes no more review rounds");
+
+   printf("  PASS: convergence distinguishes no progress from too many rounds\n");
+}
+
 static void test_a_first_user_claim_says_how_it_went(void)
 {
    /* The claim validates its inputs: a webuser principal, and a bearer that is
@@ -2238,6 +2301,7 @@ int main(int argc, char **argv)
    test_transitions_are_all_or_nothing();
    test_tree_operations_move_the_whole_tree();
    test_recovery_never_releases_money_it_cannot_account_for();
+   test_convergence_distinguishes_no_progress_from_too_many_rounds();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();

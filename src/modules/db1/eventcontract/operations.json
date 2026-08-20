@@ -25265,6 +25265,105 @@
    }
   },
   {
+   "family": "lifecycle",
+   "id": 65,
+   "name": "wfe_record_requested_changes",
+   "c_name": "db1_wfe_record_requested_changes",
+   "c_params": [
+    "work_item_id",
+    "gate",
+    "plan_stage",
+    "plan_hash",
+    "feedback_hash",
+    "unresolved",
+    "max_iterations",
+    "max_identical",
+    "cost",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "gate",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "plan_stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "plan_hash",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "feedback_hash",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "unresolved",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max_iterations",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max_identical",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "cost",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_wfe_review_outcome_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "attempts",
+      "type": "int"
+     },
+     {
+      "name": "identical_repeats",
+      "type": "int"
+     },
+     {
+      "name": "parked",
+      "type": "int"
+     },
+     {
+      "name": "pause_reason",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
    "family": "mgmt_jwks",
    "id": 1,
    "name": "mgmt_jwks_read",

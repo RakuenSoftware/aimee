@@ -226,6 +226,25 @@ extern "C"
     * hold. */
    int db1_wfe_recover_lost_replay(const char *work_item_id, const char *stage, const char *owner);
 
+   typedef struct
+   {
+      int attempts;
+      int identical_repeats;
+      int parked;
+      char pause_reason[32];
+   } db1_wfe_review_outcome_t;
+
+   /* A review gate that asked for changes. Bounded twice: by how many rounds it
+    * has run, and by how many of those produced the SAME artifact against the
+    * SAME feedback. The second is reported in preference to the first, because
+    * a run that is repeating itself should be described as repeating itself
+    * rather than as merely out of rounds. */
+   int db1_wfe_record_requested_changes(const char *work_item_id, const char *gate,
+                                        const char *plan_stage, const char *plan_hash,
+                                        const char *feedback_hash, const char *unresolved,
+                                        int max_iterations, int max_identical, double cost,
+                                        db1_wfe_review_outcome_t *out);
+
 #ifdef __cplusplus
 }
 #endif

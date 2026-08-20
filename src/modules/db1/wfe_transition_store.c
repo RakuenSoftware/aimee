@@ -415,3 +415,226 @@ int db1_wfe_finish(const char *work_item_id, const char *stage, const char *stat
    }
    return tx_commit(db);
 }
+
+/* A review gate that asked for changes, and the two ways a refinement loop can
+ * fail to converge.
+ *
+ * Two independent bounds, because they catch different pathologies:
+ *
+ *   attempts >= max_iterations   the loop has run too many times, whatever it
+ *                                produced. 'convergence_limit'.
+ *   repeats  >= max_identical    the loop produced the SAME artifact against the
+ *                                SAME feedback that many times running. Nothing
+ *                                is changing, so more rounds will not help.
+ *                                'convergence_no_progress'.
+ *
+ * The second is checked first: a run that is repeating itself should be reported
+ * as repeating itself, not as merely having run out of rounds. Repeats reset the
+ * moment either hash changes, because a different artifact or different feedback
+ * is progress even if the round still failed.
+ */
+int db1_wfe_record_requested_changes(const char *work_item_id, const char *gate,
+                                     const char *plan_stage, const char *plan_hash,
+                                     const char *feedback_hash, const char *unresolved,
+                                     int max_iterations, int max_identical, double cost,
+                                     db1_wfe_review_outcome_t *out)
+{
+   if (!work_item_id || !work_item_id[0] || !gate || !gate[0] || !plan_stage || !plan_stage[0] ||
+       !plan_hash || !plan_hash[0] || !feedback_hash || !feedback_hash[0] || max_iterations < 1 ||
+       max_identical < 1 || !out || !cost_is_sane(cost))
+      return -1;
+   memset(out, 0, sizeof *out);
+   sqlite3 *db = db1_conn();
+   if (!db || tx_begin(db) != 0)
+      return -1;
+
+   /* Only an active run can be routed anywhere. */
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT state FROM lifecycle_work_item WHERE work_item_id=?", -1, &st,
+                          NULL) != SQLITE_OK)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   int have = sqlite3_step(st) == SQLITE_ROW;
+   char state[24] = "";
+   if (have)
+   {
+      const unsigned char *text = sqlite3_column_text(st, 0);
+      snprintf(state, sizeof state, "%s", text ? (const char *)text : "");
+   }
+   sqlite3_finalize(st);
+   if (!have || strcmp(state, "active") != 0)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+
+   static const char *bump_sql =
+       "INSERT INTO lifecycle_stage_attempt (work_item_id, stage, attempts) VALUES (?,?,1) "
+       "ON CONFLICT(work_item_id, stage) DO UPDATE SET attempts = attempts + 1";
+   if (sqlite3_prepare_v2(db, bump_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, gate, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   if (rc != SQLITE_DONE)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+   if (sqlite3_prepare_v2(
+           db, "SELECT attempts FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?", -1,
+           &st, NULL) != SQLITE_OK)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, gate, -1, SQLITE_TRANSIENT);
+   int attempts = (sqlite3_step(st) == SQLITE_ROW) ? sqlite3_column_int(st, 0) : -1;
+   sqlite3_finalize(st);
+   if (attempts < 0)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+
+   /* Has this gate seen exactly this artifact against exactly this feedback
+    * before? Missing is not an error: the first round has nothing to compare. */
+   int repeats = 1;
+   static const char *seen_sql = "SELECT artifact_hash, feedback_hash, identical_repeats "
+                                 "FROM wfe_convergence WHERE work_item_id=? AND gate=?";
+   if (sqlite3_prepare_v2(db, seen_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, gate, -1, SQLITE_TRANSIENT);
+   if (sqlite3_step(st) == SQLITE_ROW)
+   {
+      const unsigned char *old_plan = sqlite3_column_text(st, 0);
+      const unsigned char *old_feedback = sqlite3_column_text(st, 1);
+      int old_repeats = sqlite3_column_int(st, 2);
+      if (old_plan && old_feedback && strcmp((const char *)old_plan, plan_hash) == 0 &&
+          strcmp((const char *)old_feedback, feedback_hash) == 0)
+         repeats = old_repeats + 1;
+   }
+   sqlite3_finalize(st);
+
+   static const char *observe_sql =
+       "INSERT INTO wfe_convergence "
+       "(work_item_id, gate, artifact_hash, feedback_hash, identical_repeats, updated_at) "
+       "VALUES (?,?,?,?,?,datetime('now')) "
+       "ON CONFLICT(work_item_id, gate) DO UPDATE SET artifact_hash=excluded.artifact_hash, "
+       "feedback_hash=excluded.feedback_hash, identical_repeats=excluded.identical_repeats, "
+       "updated_at=datetime('now')";
+   if (sqlite3_prepare_v2(db, observe_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, gate, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 3, plan_hash, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 4, feedback_hash, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(st, 5, repeats);
+   rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   if (rc != SQLITE_DONE)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+
+   out->attempts = attempts;
+   out->identical_repeats = repeats;
+   if (repeats >= max_identical)
+   {
+      out->parked = 1;
+      snprintf(out->pause_reason, sizeof out->pause_reason, "convergence_no_progress");
+   }
+   else if (attempts >= max_iterations)
+   {
+      out->parked = 1;
+      snprintf(out->pause_reason, sizeof out->pause_reason, "convergence_limit");
+   }
+
+   char detail[512];
+   if (out->parked)
+   {
+      static const char *park_sql =
+          "UPDATE lifecycle_work_item "
+          "SET current_stage=?, pause_reason=?, paused_state=?, content_hash=?, "
+          "cum_cost_usd=cum_cost_usd+?, " CLEAR_RESERVATION ", updated_at=datetime('now') "
+          "WHERE work_item_id=?";
+      if (sqlite3_prepare_v2(db, park_sql, -1, &st, NULL) != SQLITE_OK)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+      sqlite3_bind_text(st, 1, plan_stage, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, out->pause_reason, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 3, gate, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 4, plan_hash, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_double(st, 5, cost);
+      sqlite3_bind_text(st, 6, work_item_id, -1, SQLITE_TRANSIENT);
+      rc = sqlite3_step(st);
+      sqlite3_finalize(st);
+      if (rc != SQLITE_DONE)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+      /* The detail names what is still unresolved when the reviewer said so:
+       * the person who reads this event is deciding whether to intervene, and
+       * "convergence_limit" alone does not tell them what to look at. */
+      if (unresolved && unresolved[0])
+         snprintf(detail, sizeof detail, "%s after %d rounds; still unresolved: %s",
+                  out->pause_reason, attempts, unresolved);
+      else
+         snprintf(detail, sizeof detail, "%s", out->pause_reason);
+      if (add_event(db, work_item_id, gate, "pause", "go-wfe", detail, plan_hash, cost) != 0)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+   }
+   else
+   {
+      static const char *loop_sql =
+          "UPDATE lifecycle_work_item "
+          "SET current_stage=?, pause_reason='', paused_state='', content_hash=?, "
+          "cum_cost_usd=cum_cost_usd+?, " CLEAR_RESERVATION ", updated_at=datetime('now') "
+          "WHERE work_item_id=?";
+      if (sqlite3_prepare_v2(db, loop_sql, -1, &st, NULL) != SQLITE_OK)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+      sqlite3_bind_text(st, 1, plan_stage, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, plan_hash, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_double(st, 3, cost);
+      sqlite3_bind_text(st, 4, work_item_id, -1, SQLITE_TRANSIENT);
+      rc = sqlite3_step(st);
+      sqlite3_finalize(st);
+      if (rc != SQLITE_DONE)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+      if (add_event(db, work_item_id, gate, "loop", "go-wfe", "requested_changes", plan_hash,
+                    cost) != 0)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+   }
+   return tx_commit(db);
+}

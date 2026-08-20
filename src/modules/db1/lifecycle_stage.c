@@ -178,6 +178,7 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
    db1_work_item_t row_db1_work_item_t;
    db1_wfe_budget_reservation_t row_db1_wfe_budget_reservation_t;
    db1_wfe_budget_totals_t row_db1_wfe_budget_totals_t;
+   db1_wfe_review_outcome_t row_db1_wfe_review_outcome_t;
    const char *row_slots[18];
    char row_text[5][32];
    /* A domain that returns a string hands over the allocation with it. The
@@ -1944,6 +1945,80 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       row_slots[0] = row_text[0];
       rows = row_slots;
       row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_RECORD_REQUESTED_CHANGES:
+   {
+      if (count != 9u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[4][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[6][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[7][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed6;
+      if (parse_int(field[6], &parsed6) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed7;
+      if (parse_int(field[7], &parsed7) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      double parsed8;
+      if (parse_double(field[8], &parsed8) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_db1_wfe_review_outcome_t, 0, sizeof row_db1_wfe_review_outcome_t);
+      rc = db1_wfe_record_requested_changes(field[0], field[1], field[2], field[3], field[4], field[5], parsed6, parsed7, parsed8, &row_db1_wfe_review_outcome_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_db1_wfe_review_outcome_t.attempts);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_db1_wfe_review_outcome_t.identical_repeats);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_db1_wfe_review_outcome_t.parked);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_text[1];
+      row_slots[2] = row_text[2];
+      row_slots[3] = row_db1_wfe_review_outcome_t.pause_reason;
+      rows = row_slots;
+      row_count = 4u;
+      reads = 1;
       break;
    }
    default:

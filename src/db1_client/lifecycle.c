@@ -1332,4 +1332,32 @@ int db1_wfe_recover_lost_replay(const char *work_item_id, const char *stage, con
    return (int)strtoll(slot0, NULL, 10);
 }
 
+int db1_wfe_record_requested_changes(const char *work_item_id, const char *gate, const char *plan_stage, const char *plan_hash, const char *feedback_hash, const char *unresolved, int max_iterations, int max_identical, double cost, db1_wfe_review_outcome_t *out)
+{
+   if (!work_item_id || !work_item_id[0] || !gate || !gate[0] || !plan_stage || !plan_stage[0] || !plan_hash || !plan_hash[0] || !feedback_hash || !feedback_hash[0] || !out)
+      return -1;
+   char arg6[32];
+   snprintf(arg6, sizeof arg6, "%d", max_iterations);
+   char arg7[32];
+   snprintf(arg7, sizeof arg7, "%d", max_identical);
+   char arg8[32];
+   snprintf(arg8, sizeof arg8, "%.17g", (double)cost);
+   const char *fields[] = {work_item_id, gate, plan_stage, plan_hash, feedback_hash, unresolved ? unresolved : "", arg6, arg7, arg8};
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, slot1, slot2, out->pause_reason};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof out->pause_reason};
+   int wire_status = call_stage(AIMEE_DB1_OP_WFE_RECORD_REQUESTED_CHANGES, fields, 9, values, caps, 4, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->attempts = (int)strtol(slot0, NULL, 10);
+   out->identical_repeats = (int)strtol(slot1, NULL, 10);
+   out->parked = (int)strtol(slot2, NULL, 10);
+   return 0;
+}
+
 /* clang-format on */

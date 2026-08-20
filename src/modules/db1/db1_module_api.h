@@ -593,6 +593,7 @@
 #define AIMEE_DB1_OP_WFE_REJECT_GATE                     62u
 #define AIMEE_DB1_OP_WFE_PARK_RUNNER_FAILURE             63u
 #define AIMEE_DB1_OP_WFE_RECOVER_LOST_REPLAY             64u
+#define AIMEE_DB1_OP_WFE_RECORD_REQUESTED_CHANGES        65u
 
 /* Family 17: the management-JWKS cache row: the envelope the server verified,
  * when it is valid for, and the digests that pin it. Digests cross as hex
