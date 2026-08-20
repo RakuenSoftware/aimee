@@ -17,113 +17,113 @@
  * vocabulary general enough to ask for one is general enough to ask for a
  * credential. See the note below on the 26 methods this distinction cost.
  *
- * WHY THE REST ARE NOT HERE YET. 153 of the 181 CLI-reachable methods are
- * served. The 28 that are not are listed BY NAME below, with what each would
- * take. None of them is "not looked at", and none is blocked by the spec
- * language being small -- they are blocked by what the marshaller does.
+ * WHY THE REST ARE NOT HERE YET. 156 of the 181 CLI-reachable methods are
+ * served. The 25 that are not are listed BY NAME below with what each would
+ * take. None is blocked by the spec language being small; each is blocked by
+ * what its marshaller does.
  *
- * TWO CLAIMS IN THIS FILE TURNED OUT TO BE MISTAKES, and both had the same
- * shape: a line drawn on convenience and then defended as principle.
+ * THREE CLAIMS IN THIS FILE TURNED OUT TO BE MISTAKES, all the same shape: a
+ * line drawn on convenience and then defended as principle.
  *
  *   1. "43 methods must never be served, they read the client's own state."
  *      That conflated the client DECIDING a field needs getcwd() -- client-side
- *      knowledge, and exactly what forces a rebuild -- with the client
- *      SUPPLYING it because a served spec asked. Only the first is a problem.
- *      Cost: 26 methods. The genuinely client-only set is SIX.
+ *      knowledge, and what forces a rebuild -- with the client SUPPLYING it
+ *      because a served spec asked. Cost: 26 methods. The genuinely client-only
+ *      set is SIX.
  *
- *   2. "No branch may decide which fields exist." Stated that way it forbade
- *      index.hybrid, which sends "query" for one positional and "queries" for
- *      several. But this vocabulary is FULL of conditionals -- empty:"drop",
- *      omit_if_nonpositive, omit_below, max_positionals, the first_of cascade
- *      -- and none of them makes a spec a program. What would is a rule that
- *      consults ANOTHER FIELD's value, or computes. An arity gate consults the
- *      invocation's shape, which max_positionals already does one level up.
- *      count_min/count_max/argc_min are that gate. Cost: 6 methods.
+ *   2. "No branch may decide which fields exist." This vocabulary is FULL of
+ *      conditionals -- empty:"drop", omit_if_nonpositive, omit_below,
+ *      max_positionals, first_of -- and none makes a spec a program. An ARITY
+ *      gate consults the invocation's shape, which max_positionals already does
+ *      one level up. count_min/count_max/argc_min are that gate. Cost: 6.
  *
- * THE LINE, restated so it is judgeable: a field's rule may depend on its own
- * value, its own flags, named client facts the SERVER asked for, and the
- * invocation's ARITY. It may not depend on another field's value, and it may
- * not compute.
+ *   3. "A literal comparison is string surgery." skip_if_dash already tests a
+ *      field's own value against a prefix; `equals`/`not_equals` test it
+ *      against a literal, which is the same kind of rule. skill.lint reads
+ *      argv[0] and sends `all` when it is exactly "--all" and `name` when it is
+ *      not. Cost: 2.
+ *
+ * THE LINE, restated so it can be judged rather than re-argued: a field's rule
+ * may depend on ITS OWN value, its own flags, named client facts the SERVER
+ * asked for, and the invocation's ARITY. It may not depend on ANOTHER FIELD's
+ * value, and it may not compute one.
+ *
+ * That line still forbids things, and holds where it should: skill.archive gates
+ * absorbed_into (read from argv[2]) on argv[1] being "--absorbed-into", and is
+ * refused for exactly that reason -- a spec without the gate would send the
+ * field for any third argument.
  *
  * WHAT REMAINS, and what each would take:
  *
- *   SIX are genuinely client-only. The file CONTENTS or key material go into
- *   the request body, so the client must read them, and a spec that could say
- *   "read this path" could say "read ~/.ssh/id_rsa":
+ *   SIX are genuinely client-only: the file CONTENTS or key material go into the
+ *   body, and a spec that could say "read this path" could say "read
+ *   ~/.ssh/id_rsa":
  *     delegate, delegate.launch, roundtable.review, skill.create, skill.edit,
  *     vault.unlock
  *
  *   FIVE wear the MCP tool-call envelope -- method "mcp.call" or "help.get", a
- *   constant `tool`, a nested `arguments`, no protocol_version. Serving them
- *   needs an envelope-suppression escape hatch that every other served spec
- *   currently makes unnecessary, and four of the five read $AIMEE_SESSION_ID or
- *   the cwd or parse argv themselves anyway:
+ *   constant `tool`, a nested `arguments`, no protocol_version -- and four of
+ *   the five read $AIMEE_SESSION_ID or the cwd or parse argv anyway:
  *     get_help, git.cli, git.verify, index.ast_grep, tool.call
  *
- *   FOUR derive a value rather than source one: the memory.user_capture family
- *   joins the positionals from index 1, prefixes the key, and refuses one over
- *   512 characters. That is string surgery, and encoding it would make the spec
- *   a program:
+ *   FOUR derive rather than source: the memory.user_capture family joins the
+ *   positionals from index 1, prefixes the key, and refuses one over 512
+ *   characters:
  *     memory.archive, memory.identity, memory.prefer, memory.store
  *
  *   THREE parse argv with a grammar of their own, in a loop, without
- *   cli_args_parse -- memory.supersede accepts only the inline --flag=value
- *   form. Describing them means describing a second PARSER:
+ *   cli_args_parse -- so they take `--snapshot X` but NOT `--snapshot=X`, which
+ *   cli_args_parse accepts and every served spec therefore does:
  *     memory.supersede, skill.autostub, skill.lifecycle
  *
- *   TEN need a CROSS-FIELD rule, which is the half of the line that still
- *   forbids something. Each would be served by a marshaller change, not a
- *   vocabulary change, and that change alters what the CLI sends:
+ *   SEVEN need a CROSS-FIELD rule, the half of the line that still forbids.
+ *   Each would be served by a marshaller change, not a vocabulary change, and
+ *   that change alters what the CLI sends:
  *     cron.enable, cron.disable  -- job_id OR all:true, and a refusal when
- *                                  NEITHER is given: a required rule that
- *                                  consults two fields at once.
+ *                                  NEITHER is given.
  *     trigger.fire               -- --source AND (--task OR --proposal).
  *     primary.set                -- --show / --clear / a positional select
  *                                  three different METHODS, not three fields.
- *     delegate.status            -- job_ids (array) or job_id (scalar), and the
- *                                  array is built from a nested shape.
+ *     delegate.status            -- job_ids (array) or job_id (scalar).
  *     catalog.show               -- splits "provider:model" on a colon and
  *                                  truncates at 64 bytes.
  *     index.span                 -- the positional INDEX depends on whether an
  *                                  earlier argument parses as a number.
- *     skill.lint, skill.patch    -- argv[0] is compared against a literal flag
- *                                  to choose which field is sent.
- *     init.run                   -- a custom body inside marshal_request rather
- *                                  than a named marshaller.
+ *     skill.archive              -- gated on a different argv slot than it reads.
  *
  * AND NOTE WHAT THE TEST CANNOT SEE. Its samples are generated FROM the spec, so
  * a rule the spec omits is invisible. Every defect below was found that way, and
- * every one is the same shape -- reading PART of a rule:
+ * each is the same shape -- reading PART of a rule:
  *
- *   - memory.delete SHIPPED saying number_lenient (atoi) where the marshaller
- *     calls atoll(). atoi() keeps the LOW 32 BITS AS A SIGNED INT, measured on a
- *     real appliance: 2147483648 -> -2147483648, 4294967296 -> 0, 4294967297 ->
- *     1. `aimee memory delete 4294967297` deleted memory 1. A JSON number is a
- *     double, so ids above 2^53 cannot round-trip whatever parse is named.
+ *   - memory.delete SHIPPED saying atoi where the marshaller calls atoll().
+ *     atoi() keeps the LOW 32 BITS AS A SIGNED INT, measured on a real
+ *     appliance: 4294967297 -> 1. `aimee memory delete 4294967297` deleted
+ *     memory 1. A JSON number is a double, so ids above 2^53 cannot round-trip
+ *     whatever parse is named -- a ceiling shared with the marshaller.
  *   - index.structure sent the file as a PROJECT. Two positionals mean
- *     <project> <file_path>, one means <file_path>; the spec assumed two. The
- *     samples generated two and three, never ONE -- the way the command is used.
- *     Found by running the real command against a real server.
- *   - kb.search reuses one scratch variable for four flags; reading the FIRST
- *     assignment gave scope, fusion_mode and embedding_command all --project.
- *   - memory.recall is a four-step cascade; reading the NEAREST assignment gave
- *     the last step and dropped --task and the positional.
- *   - worktree.gc clamps after reading, and a clamp is itself an assignment, so
- *     "nearest" landed on `days = 365` and resolved nothing.
+ *     <project> <file_path>, one means <file_path>. The samples generated two
+ *     and three, never ONE -- the way the command is used. Found by running the
+ *     real command against a real server.
+ *   - kb.search reuses one scratch variable for four flags; the FIRST assignment
+ *     gave scope, fusion_mode and embedding_command all --project.
+ *   - memory.recall is a four-step cascade; the NEAREST assignment gave the last
+ *     step and dropped --task and the positional.
+ *   - worktree.gc clamps after reading, and a clamp is itself an assignment.
  *   - provider.list guards available_only with --available; deriving the flag
  *     from the FIELD name produced a spec that never set it.
- *   - skill.pin guards on argc, not on pos_count: `skill pin --x y` has argc 2
- *     and pos_count 0, and the marshaller sends name="--x".
+ *   - skill.pin guards on argc, not pos_count: `skill pin --x y` has argc 2 and
+ *     pos_count 0, and the marshaller sends name="--x".
  *   - the session precedence plant PASSED once, undetected, because no spec used
- *     the source and $AIMEE_SESSION_ID was unset. The test sets it now.
+ *     the source and $AIMEE_SESSION_ID was unset.
  *
- * Hence: adversarial samples, both-sources samples, numeric samples straddling
- * 2^31, cascade samples supplying two steps at once, ARITY samples at every
- * count from one to n+1, and scripts/check_argspec_numeric_parity.py, which
- * compares each spec's numeric type against the parse its marshaller calls
- * rather than hoping an input lands on the boundary. Each was plant-tested: a
- * deliberate violation introduced and the check confirmed to FAIL on it,
- * because a check that has never failed is decoration.
+ * Hence the sample set: adversarial, both-sources, numeric straddling 2^31,
+ * cascades supplying two steps at once, ARITY at every count from one to n+1,
+ * and the `--flag=value` form -- plus
+ * scripts/check_argspec_numeric_parity.py, which compares each spec's numeric
+ * type against the parse its marshaller calls rather than hoping an input lands
+ * on the boundary. Each was plant-tested: a deliberate violation introduced and
+ * the check confirmed to FAIL on it, because a check that has never failed is
+ * decoration.
  */
 
 /* No fields at all, and a refusal if anything positional is typed: `aimee
@@ -372,6 +372,29 @@
  "\"argc_min\":1,\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}"
  ",{\"json\":\"pinned\",\"argc_min\":1,\"from\":\"const\",\"type\":"
  "\"const_bool\",\"value\":false}]}"},
+
+{"skill.lint",
+ "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"all\","
+ "\"from\":\"argv_index\",\"index\":0,\"type\":\"const_bool\",\"value\":"
+ "true,\"equals\":\"--all\",\"argc_min\":1},{\"json\":\"name\",\"from\":"
+ "\"argv_index\",\"index\":0,\"not_equals\":\"--all\",\"argc_min\":1,"
+ "\"empty\":\"emit\"}]}"},
+
+{"skill.patch",
+ "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
+ "\"argc_min\":1,\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}"
+ ",{\"json\":\"old_string\",\"argc_min\":3,\"from\":\"argv_index\","
+ "\"index\":1,\"empty\":\"emit\"},{\"json\":\"new_string\",\"argc_min\":"
+ "3,\"from\":\"argv_index\",\"index\":2,\"empty\":\"emit\"},{\"json\":"
+ "\"replace_all\",\"argc_min\":4,\"from\":\"argv_index\",\"index\":3,"
+ "\"type\":\"const_bool\",\"value\":true,\"equals\":\"--all\"}]}"},
+
+/* A custom body inside marshal_request rather than a named marshaller, which is
+   why the generator never saw it: one cwd field, and argc/argv explicitly
+   discarded. It was filed under client-local state for most of this work, on the
+   reading that a client touching getcwd() could not be served at all. */
+{"init.run",
+ "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"delegate.log",
  "{\"usage\":\"usage: aimee delegate log [--json]; for a background job log, "

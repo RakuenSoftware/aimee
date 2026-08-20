@@ -502,6 +502,28 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
    int required = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "required"));
 
    const char *from = field_str(field, "from");
+   /* `equals` / `not_equals`: emit only when the field's OWN source value does
+    * or does not match a literal. skill.lint reads argv[0] and sends `all: true`
+    * when it is exactly "--all" and `name` when it is anything else -- the
+    * marshaller compares raw argv because it never calls cli_args_parse.
+    *
+    * A rule about this field's own value, like skip_if_dash, which is the same
+    * test with a prefix instead of a literal. NOT a licence to consult another
+    * slot: skill.archive gates on argv[1] while reading argv[2], and stays
+    * refused, because that is another field's value. */
+   {
+      const char *eq = field_str(field, "equals");
+      const char *ne = field_str(field, "not_equals");
+      if (eq || ne)
+      {
+         const char *v = field_value(field, opts, joined, argc, argv);
+         if (eq && (!v || strcmp(v, eq) != 0))
+            return 0;
+         if (ne && v && strcmp(v, ne) == 0)
+            return 0;
+      }
+   }
+
    if (type && !strcmp(type, TYPE_CONST_BOOL))
    {
       cJSON_AddBoolToObject(req, json_name,

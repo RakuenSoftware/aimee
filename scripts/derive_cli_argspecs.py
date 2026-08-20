@@ -388,9 +388,14 @@ def spec_for(method):
                 depth += 1
             elif c == "{":
                 if depth == 0:
+                    lead = head[:i].rstrip()
+                    am = re.search(r"(else\s+)?if \(argc\s*(>=|>)\s*(\d+)\)\s*$", lead)
+                    if am:
+                        n = int(am.group(3))
+                        gate["argc_min"] = max(gate.get("argc_min", 0),
+                                               n + 1 if am.group(2) == ">" else n)
                     m = re.search(
-                        r"(else\s+)?if \(opts\.pos_count\s*(==|>=|>)\s*(\d+)\)\s*$",
-                        head[:i].rstrip())
+                        r"(else\s+)?if \(opts\.pos_count\s*(==|>=|>)\s*(\d+)\)\s*$", lead)
                     if m:
                         op, n = m.group(2), int(m.group(3))
                         if op == "==":
@@ -504,8 +509,41 @@ def spec_for(method):
             seen.add(name)
             continue
 
+        # `if (argc >= 1 && strcmp(argv[0], "--all") == 0) AddBool(all, 1)` and
+        # its else-branch. The gate is on the field's OWN slot, which is what
+        # makes it describable; a gate on a DIFFERENT slot (skill.archive reads
+        # argv[2] but tests argv[1]) is another field's value and stays refused.
+        eqm = re.search(
+            rf'if \(argc > ?=? ?\d+ && strcmp\(argv\[(\d+)\], "([^"]+)"\) == 0\)\s*\n\s*'
+            rf'cJSON_Add(?:Bool|True)ToObject\(req, "{re.escape(name)}"', body)
+        if eqm:
+            f.update({"from": "argv_index", "index": int(eqm.group(1)),
+                      "type": "const_bool", "value": True,
+                      "equals": eqm.group(2), "argc_min": int(eqm.group(1)) + 1})
+            fields.append(f)
+            seen.add(name)
+            continue
+        nem = re.search(
+            rf'if \(argc > ?=? ?\d+ && strcmp\(argv\[(\d+)\], "([^"]+)"\) == 0\)[^\n]*\n'
+            rf'[^\n]*\n\s*else if \(argc >= (\d+)\)\s*\n\s*'
+            rf'cJSON_AddStringToObject\(req, "{re.escape(name)}", argv\[(\d+)\]\)', body)
+        if nem:
+            f.update({"from": "argv_index", "index": int(nem.group(4)),
+                      "not_equals": nem.group(2), "argc_min": int(nem.group(3)),
+                      "empty": "emit"})
+            fields.append(f)
+            seen.add(name)
+            continue
+
         if re.fullmatch(r"argv\[(\d+)\]", val or ""):
             idx = int(re.fullmatch(r"argv\[(\d+)\]", val).group(1))
+            cross = re.search(
+                rf'strcmp\(argv\[(\d+)\], "[^"]+"\) == 0\)\s*\n\s*'
+                rf'cJSON_AddStringToObject\(req, "{re.escape(name)}", argv\[{idx}\]',
+                body)
+            if cross and int(cross.group(1)) != idx:
+                return None, (f"{name} is gated on argv[{cross.group(1)}] but reads "
+                              f"argv[{idx}]: another field's value")
             f.update({"from": "argv_index", "index": idx})
             # Read the guard, exactly as the positional branch does. provider.set
             # tests argv[0][0] and DROPS an empty word; mcp.recheck also tests

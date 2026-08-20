@@ -68,9 +68,16 @@
  * and none of them makes a spec a program. What would is a rule consulting
  * ANOTHER FIELD's value, or computing one.
  *
+ * `equals`/`not_equals` test the field's own source value against a literal.
+ * skill.lint never calls cli_args_parse: it compares raw argv[0] against
+ * "--all" and sends `all` or `name` accordingly. That is the same kind of rule
+ * as skip_if_dash, which tests the same value against a prefix.
+ *
  * So: a field's rule may depend on its own value, its own flags, named client
  * facts the SERVER asked for, and the invocation's ARITY. It may not depend on
- * another field's value, and it may not compute.
+ * another field's value, and it may not compute one. That still forbids things:
+ * skill.archive gates a field read from argv[2] on argv[1] matching a literal,
+ * and is refused for exactly that reason.
  *
  * What it deliberately CANNOT express: reading the client's filesystem or
  * environment, composing prompts, or cross-field rules like "either --task or
