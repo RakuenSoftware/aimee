@@ -507,19 +507,26 @@ func (c *Client) WorkItemCountRecentBySubmitter(ctx context.Context, submitter s
 	return recent, nil
 }
 
-func (c *Client) WorkItemSubmitCapped(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, submitter string, maxActive int, rateMax int, rateSecs int) error {
+func (c *Client) WorkItemSubmitCapped(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, submitter string, maxActive int, rateMax int, rateSecs int) (int, error) {
 	if c == nil || c.caller == nil {
-		return ErrConfig
+		return 0, ErrConfig
 	}
 	fields := []string{workItemID, repo, proposalPath, workflowName, workflowVersion, startStage, submitter, Itoa(maxActive), Itoa(rateMax), Itoa(rateSecs)}
-	status, _, err := c.callFields(ctx, opWorkItemSubmitCapped, fields)
+	status, reply, err := c.callFields(ctx, opWorkItemSubmitCapped, fields)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if status != statusOK {
-		return &StatusError{Op: "work_item_submit_capped", Status: status}
+		return 0, &StatusError{Op: "work_item_submit_capped", Status: status}
 	}
-	return nil
+	if len(reply) < 1 {
+		return 0, ErrMalformed
+	}
+	outcome, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return outcome, nil
 }
 
 func (c *Client) WorkItemSetTerminal(ctx context.Context, workItemID string, state string) error {
@@ -641,19 +648,26 @@ func (c *Client) WorkItemSetCostCap(ctx context.Context, workItemID string, cap 
 	return nil
 }
 
-func (c *Client) WorkItemIncOverride(ctx context.Context, workItemID string) error {
+func (c *Client) WorkItemIncOverride(ctx context.Context, workItemID string) (int, error) {
 	if c == nil || c.caller == nil {
-		return ErrConfig
+		return 0, ErrConfig
 	}
 	fields := []string{workItemID}
-	status, _, err := c.callFields(ctx, opWorkItemIncOverride, fields)
+	status, reply, err := c.callFields(ctx, opWorkItemIncOverride, fields)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if status != statusOK {
-		return &StatusError{Op: "work_item_inc_override", Status: status}
+		return 0, &StatusError{Op: "work_item_inc_override", Status: status}
 	}
-	return nil
+	if len(reply) < 1 {
+		return 0, ErrMalformed
+	}
+	overrideCount, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return overrideCount, nil
 }
 
 func (c *Client) WorkItemDelete(ctx context.Context, workItemID string) error {

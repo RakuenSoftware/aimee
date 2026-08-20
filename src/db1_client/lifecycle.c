@@ -399,7 +399,13 @@ int db1_work_item_submit_capped(const char *work_item_id, const char *repo, cons
    char arg9[32];
    snprintf(arg9, sizeof arg9, "%d", rate_secs);
    const char *fields[] = {work_item_id, repo ? repo : "", proposal_path ? proposal_path : "", workflow_name ? workflow_name : "", workflow_version ? workflow_version : "", start_stage ? start_stage : "", submitter ? submitter : "", arg7, arg8, arg9};
-   return write_result(call_stage(AIMEE_DB1_OP_WORK_ITEM_SUBMIT_CAPPED, fields, 10, NULL, NULL, 0, NULL));
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WORK_ITEM_SUBMIT_CAPPED, fields, 10, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_work_item_set_terminal(const char *work_item_id, const char *state)
@@ -479,7 +485,13 @@ int db1_work_item_inc_override(const char *work_item_id)
    if (!work_item_id || !work_item_id[0])
       return -1;
    const char *fields[] = {work_item_id};
-   return write_result(call_stage(AIMEE_DB1_OP_WORK_ITEM_INC_OVERRIDE, fields, 1, NULL, NULL, 0, NULL));
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_WORK_ITEM_INC_OVERRIDE, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_work_item_delete(const char *work_item_id)

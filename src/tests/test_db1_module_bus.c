@@ -2040,6 +2040,164 @@ static void test_the_whole_work_item_row_survives_the_wire(void)
    printf("  PASS: the whole work-item row survives the wire\n");
 }
 
+/* The daemon's own work-item operations, over the bus.
+ *
+ * These are older than the workflow engine's port and were covered only by C
+ * unit tests that call them in-process. That leaves the crossing untested: a
+ * stage that validated the wrong field count, or a client that packed arguments
+ * in the wrong order, would be invisible to an in-process test and would fail
+ * only in the daemon. They are the operations behind /v1/workflow, so "fails
+ * only in the daemon" means "fails only in production".
+ *
+ * Each assertion below is about the operation's CONTRACT rather than its
+ * plumbing -- what it refuses, what it counts, what it leaves alone.
+ */
+static void test_the_daemons_work_item_operations_cross_the_bus(void)
+{
+   char found[128];
+
+   /* Lookup by proposal, and by PR ref once one is set. Both answer found/miss
+      rather than erroring on a miss, which is what the daemon's 404 depends on. */
+   must(db1_work_item_create("dw-1", "repo/dw", "p/dw", "build", "1", "plan", "autonomous") == 0,
+        "a run");
+   must(db1_work_item_id_by_proposal("repo/dw", "p/dw", found, sizeof found) == 1,
+        "found by proposal");
+   must(strcmp(found, "dw-1") == 0, "and it is the right run");
+   must(db1_work_item_id_by_proposal("repo/dw", "nope", found, sizeof found) == 0,
+        "a miss is a miss, not an error");
+   must(db1_work_item_id_by_pr_ref("pr-dw-9", found, sizeof found) == 0, "no pr ref yet");
+   must(db1_work_item_set_pr_ref("dw-1", "pr-dw-9") == 0, "set one");
+   must(db1_work_item_id_by_pr_ref("pr-dw-9", found, sizeof found) == 1, "now it resolves");
+   must(strcmp(found, "dw-1") == 0, "to the same run");
+
+   /* Stage and submitter are plain setters, but they are what the daemon writes
+      when a gate advances, so the values have to survive the crossing intact. */
+   must(db1_work_item_set_stage("dw-1", "review", "hash-dw") == 0, "set the stage");
+   must(db1_work_item_set_submitter("dw-1", "operator-dw") == 0, "set the submitter");
+   db1_work_item_t item;
+   must(db1_work_item_get("dw-1", &item) == 1, "read it back");
+   must(strcmp(item.current_stage, "review") == 0, "the stage crossed");
+   must(strcmp(item.content_hash, "hash-dw") == 0, "with its content hash");
+   must(strcmp(item.submitter, "operator-dw") == 0, "and the submitter crossed");
+
+   /* Per-submitter counts, which the intake cap is computed from. A count that
+      crossed as the wrong number would let a submitter past their cap. */
+   must(db1_work_item_count_active_by_submitter("operator-dw") == 1,
+        "one active for this submitter");
+   must(db1_work_item_count_active_by_submitter("nobody-dw") == 0, "and none for another");
+   must(db1_work_item_count_recent_by_submitter("operator-dw", 3600) == 1, "recent counts it too");
+   /* A non-positive window is refused rather than treated as an empty one: the
+      caller asking "how many in the last zero seconds" has a bug, and answering
+      0 would let a rate cap be bypassed by passing a window of zero. */
+   must(db1_work_item_count_recent_by_submitter("operator-dw", 0) == -1,
+        "a non-positive window is refused, not answered with zero");
+
+   /* The capped submit refuses past the cap rather than admitting and hoping,
+      and it says WHICH cap refused it: 1 for concurrency, 2 for rate. The
+      daemon turns those into different messages, so flattening them to "not 0"
+      would tell a submitter to wait for capacity when they are rate limited. */
+   must(db1_work_item_submit_capped("dw-cap-1", "repo/dw", "p/cap1", "build", "1", "plan",
+                                    "capped-dw", 1, 10, 3600) == 0,
+        "the first submit fits under a concurrency cap of one");
+   int capped_rc = db1_work_item_submit_capped("dw-cap-2", "repo/dw", "p/cap2", "build", "1",
+                                               "plan", "capped-dw", 1, 10, 3600);
+   must(capped_rc == 1, "the second is refused by the CONCURRENCY cap");
+   must(db1_work_item_get("dw-cap-2", &item) == 0, "and the refused run was not created");
+
+   /* The rate limit is a separate bound, and it refuses even when nothing is
+      still active -- which is what makes it a rate limit rather than a second
+      concurrency cap. */
+   must(db1_work_item_submit_capped("dw-rate-1", "repo/dw", "p/rate1", "build", "1", "plan",
+                                    "rate-dw", 10, 1, 3600) == 0,
+        "the first submit fits under a rate cap of one");
+   must(db1_work_item_set_terminal("dw-rate-1", "accepted") == 0,
+        "finish it, so concurrency cannot be what refuses the next one");
+   must(db1_work_item_submit_capped("dw-rate-2", "repo/dw", "p/rate2", "build", "1", "plan",
+                                    "rate-dw", 10, 1, 3600) == 2,
+        "the second is refused by the RATE cap, distinctly from the concurrency one");
+   must(db1_work_item_get("dw-rate-2", &item) == 0, "and it was not created either");
+
+   /* Pause clearing, conditional and unconditional. clear_pause_if is the
+      compare-and-clear the daemon uses so a stale view cannot unpark a run that
+      has since moved. */
+   must(db1_work_item_set_pause("dw-1", "ci_pending", "review") == 0, "park it");
+   must(db1_work_item_clear_pause_if("dw-1", "merge_pending", "review") == 0,
+        "clearing on the wrong reason does nothing");
+   must(db1_work_item_get("dw-1", &item) == 1 && strcmp(item.pause_reason, "ci_pending") == 0,
+        "and the run is still parked");
+   must(db1_work_item_clear_pause_if("dw-1", "ci_pending", "review") == 1,
+        "clearing on the right reason and stage works");
+   must(db1_work_item_get("dw-1", &item) == 1 && item.pause_reason[0] == '\0', "the pause is gone");
+   must(db1_work_item_set_pause("dw-1", "stuck", "review") == 0, "park again");
+   must(db1_work_item_clear_pause("dw-1") == 0, "and clear unconditionally");
+   must(db1_work_item_get("dw-1", &item) == 1 && item.pause_reason[0] == '\0', "cleared");
+
+   /* The human gate: guarded on the stage AND the hash the caller saw, so a
+      decision made against a stale view is refused rather than applied. */
+   must(db1_work_item_set_pause("dw-1", "pending_human", "review") == 0, "park at a human gate");
+   must(db1_work_item_gate_apply("dw-1", "review", "wrong-hash", "merge", "") == 0,
+        "a gate decision against the wrong hash is refused");
+   must(db1_work_item_gate_apply("dw-1", "review", "hash-dw", "merge", "") == 1,
+        "and accepted against the right one");
+   must(db1_work_item_get("dw-1", &item) == 1, "read");
+   must(strcmp(item.current_stage, "merge") == 0, "the gate moved the stage");
+
+   /* Attempt counters: increment returns the new value, reset re-arms. */
+   must(db1_stage_attempt_inc("dw-1", "merge") == 1, "first attempt");
+   must(db1_stage_attempt_inc("dw-1", "merge") == 2, "second");
+   must(db1_stage_attempt_get("dw-1", "merge") == 2, "and the getter agrees");
+   must(db1_stage_attempt_reset("dw-1", "merge") == 0, "reset");
+   must(db1_stage_attempt_get("dw-1", "merge") == 0, "back to zero");
+
+   /* Override count, which bounds how many times a cap may be waived. */
+   must(db1_work_item_inc_override("dw-1") == 1, "first override");
+   must(db1_work_item_inc_override("dw-1") == 2, "second");
+
+   /* Abandoning children is what a parent does when it gives up on its fan-out. */
+   must(db1_work_item_create("dw-kid-a", "repo/dw", "p/ka", "slice", "1", "work", "autonomous") ==
+            0,
+        "a child");
+   must(db1_work_item_create("dw-kid-b", "repo/dw", "p/kb", "slice", "1", "work", "autonomous") ==
+            0,
+        "another");
+   must(db1_work_item_set_parent("dw-kid-a", "dw-1") == 0, "link a");
+   must(db1_work_item_set_parent("dw-kid-b", "dw-1") == 0, "link b");
+   must(db1_work_item_abandon_children("dw-1") == 2, "both children were abandoned");
+   must(db1_work_item_get("dw-kid-a", &item) == 1 && strcmp(item.state, "abandoned") == 0,
+        "and they say so");
+
+   /* Reaping stale parks. The grace period is measured by the store, not the
+      caller, and the reaper is deliberately narrow: it only ends runs parked in
+      a BACKSTOP reason (stuck / cap / budget), because those have nobody coming.
+      A park that a person or a sweep is expected to clear is left alone however
+      old it gets, so the two kinds are asserted separately -- collapsing them
+      would let the backstop abandon runs that were legitimately waiting. */
+   must(db1_work_item_create("dw-stale", "repo/dw", "p/stale", "build", "1", "plan",
+                             "autonomous") == 0,
+        "a run parked on a backstop reason");
+   must(db1_work_item_set_pause("dw-stale", "stuck", "plan") == 0, "park it");
+   must(db1_work_item_create("dw-waiting", "repo/dw", "p/waiting", "build", "1", "plan",
+                             "autonomous") == 0,
+        "a run parked on a self-clearing reason");
+   must(db1_work_item_set_pause("dw-waiting", "panel_unreachable", "plan") == 0, "park it too");
+   must(db1_work_item_reap_stale_parks(3600) == 0, "neither is stale inside the grace period");
+   sleep(2);
+   must(db1_work_item_reap_stale_parks(1) == 1,
+        "past the grace exactly one is reaped -- the backstop park");
+   must(db1_work_item_get("dw-stale", &item) == 1 && strcmp(item.state, "abandoned") == 0,
+        "and it is the one that had nobody coming");
+   must(db1_work_item_get("dw-waiting", &item) == 1 && strcmp(item.state, "active") == 0,
+        "the run still waiting on a person or a sweep is untouched");
+   must(db1_work_item_reap_stale_parks(0) == 0,
+        "a grace of zero reaps nothing: the caller must name a real window");
+
+   /* And delete, which is the daemon's own single-item removal. */
+   must(db1_work_item_delete("dw-kid-b") == 0, "delete one");
+   must(db1_work_item_get("dw-kid-b", &item) == 0, "it is gone");
+
+   printf("  PASS: the daemon's work-item operations cross the bus\n");
+}
+
 static void test_a_first_user_claim_says_how_it_went(void)
 {
    /* The claim validates its inputs: a webuser principal, and a bearer that is
@@ -2375,6 +2533,7 @@ int main(int argc, char **argv)
    test_recovery_never_releases_money_it_cannot_account_for();
    test_convergence_distinguishes_no_progress_from_too_many_rounds();
    test_the_whole_work_item_row_survives_the_wire();
+   test_the_daemons_work_item_operations_cross_the_bus();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();

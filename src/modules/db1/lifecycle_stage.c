@@ -473,7 +473,12 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      rc = db1_work_item_submit_capped(field[0], field[1], field[2], field[3], field[4], field[5], field[6], parsed7, parsed8, parsed9);
+      int produced = db1_work_item_submit_capped(field[0], field[1], field[2], field[3], field[4], field[5], field[6], parsed7, parsed8, parsed9);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
       break;
    }
    case AIMEE_DB1_OP_WORK_ITEM_SET_TERMINAL:
@@ -598,6 +603,7 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       break;
    }
    case AIMEE_DB1_OP_WORK_ITEM_INC_OVERRIDE:
+   {
       if (count != 1u)
       {
          free(scratch);
@@ -608,8 +614,14 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      rc = db1_work_item_inc_override(field[0]);
+      int produced = db1_work_item_inc_override(field[0]);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
       break;
+   }
    case AIMEE_DB1_OP_WORK_ITEM_DELETE:
       if (count != 1u)
       {
