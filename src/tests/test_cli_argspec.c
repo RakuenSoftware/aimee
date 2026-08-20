@@ -417,6 +417,41 @@ static const sample_t SAMPLES[] = {
     {"session.get", {"p0", NULL}},
     {"session.get", {"p0", "p1", NULL}},
 
+    /* Generated candidates, sampled at every arity the spec implies. */
+
+    {"index.blast_radius", {NULL}},
+    {"index.blast_radius", {"p0", NULL}},
+    {"index.blast_radius", {"p0", "p1", NULL}},
+    {"index.blast_radius", {"p0", "p1", "p2", NULL}},
+    {"index.blast_radius", {"", NULL}},
+    {"index.blast_radius", {"", "", NULL}},
+    {"index.blast_radius", {"--unknown-flag", "x", NULL}},
+    {"index.hybrid", {NULL}},
+    {"index.hybrid", {"--scope", "v", NULL}},
+    {"index.hybrid", {"--scope", "v", NULL}},
+    {"index.hybrid", {"--scope", "", NULL}},
+    {"index.hybrid", {"--scope", "12x", NULL}},
+    {"index.hybrid", {"p0", NULL}},
+    {"index.hybrid", {"p0", "p1", NULL}},
+    {"index.hybrid", {"", NULL}},
+    {"index.hybrid", {"--unknown-flag", "x", NULL}},
+    {"index.investigate", {NULL}},
+    {"index.investigate", {"p0", NULL}},
+    {"index.investigate", {"p0", "p1", NULL}},
+    {"index.investigate", {"", NULL}},
+    {"index.investigate", {"--unknown-flag", "x", NULL}},
+    {"index.structure", {NULL}},
+    {"index.structure", {"p0", NULL}},
+    {"index.structure", {"p0", "p1", NULL}},
+    {"index.structure", {"p0", "p1", "p2", NULL}},
+    {"index.structure", {"", NULL}},
+    {"index.structure", {"", "", NULL}},
+    {"index.structure", {"--unknown-flag", "x", NULL}},
+    {"skill.pin", {NULL}},
+    {"skill.pin", {"--unknown-flag", "x", NULL}},
+    {"skill.unpin", {NULL}},
+    {"skill.unpin", {"--unknown-flag", "x", NULL}},
+
     /* delegate.log -- an ARITY rule, so the samples that matter are the ones
        that must be REFUSED. The test treats both sides refusing as agreement
        and flags a one-sided refusal, which is exactly the assertion wanted

@@ -17,78 +17,113 @@
  * vocabulary general enough to ask for one is general enough to ask for a
  * credential. See the note below on the 26 methods this distinction cost.
  *
- * WHY THE REST ARE NOT HERE YET. 149 of the 181 CLI-reachable methods are
- * served (36 no-argument, 113 specs) -- 85% of the set that CAN be served.
+ * WHY THE REST ARE NOT HERE YET. 153 of the 181 CLI-reachable methods are
+ * served. The 28 that are not are listed BY NAME below, with what each would
+ * take. None of them is "not looked at", and none is blocked by the spec
+ * language being small -- they are blocked by what the marshaller does.
  *
- * THE BIGGEST ENTRY IN THIS LIST USED TO BE A MISTAKE. It said 43 methods were
- * NEVER serveable because they read the client's own state, and called that the
- * point rather than a gap. The argument conflated two things: the client
- * DECIDING that a field needs getcwd() (client-side knowledge, and exactly what
- * forces a rebuild), and the client SUPPLYING getcwd() because a served spec
- * asked for it (the server deciding, the client providing the one value it
- * holds). Only the first is a problem. Under the old reading a new cwd-taking
- * command still needed a new client, which is the failure this work removes.
- * 26 methods sat behind that error, and the genuinely client-only set is SIX.
+ * TWO CLAIMS IN THIS FILE TURNED OUT TO BE MISTAKES, and both had the same
+ * shape: a line drawn on convenience and then defended as principle.
  *
- * `cwd` and `session` are NAMED, FIXED facts. There is deliberately no
- * {"from": "env", "name": <anything>}: a vocabulary general enough to say "read
- * $X" is general enough to say "read $AWS_SECRET_ACCESS_KEY", and the client
- * would oblige.
+ *   1. "43 methods must never be served, they read the client's own state."
+ *      That conflated the client DECIDING a field needs getcwd() -- client-side
+ *      knowledge, and exactly what forces a rebuild -- with the client
+ *      SUPPLYING it because a served spec asked. Only the first is a problem.
+ *      Cost: 26 methods. The genuinely client-only set is SIX.
  *
- * WHAT IS LEFT, and none of it is "not looked at":
+ *   2. "No branch may decide which fields exist." Stated that way it forbade
+ *      index.hybrid, which sends "query" for one positional and "queries" for
+ *      several. But this vocabulary is FULL of conditionals -- empty:"drop",
+ *      omit_if_nonpositive, omit_below, max_positionals, the first_of cascade
+ *      -- and none of them makes a spec a program. What would is a rule that
+ *      consults ANOTHER FIELD's value, or computes. An arity gate consults the
+ *      invocation's shape, which max_positionals already does one level up.
+ *      count_min/count_max/argc_min are that gate. Cost: 6 methods.
  *
- *    6  genuinely client-only: file CONTENTS go in the body (delegate.launch,
- *       roundtable.review, skill.create, skill.edit), or vault key material
- *       does (vault.unlock), or an arbitrary environment variable does.
- *    5  a nested MCP tool-call envelope: get_help, git.cli, git.verify,
- *       index.ast_grep, tool.call.
- *    4  the memory.user_capture family: join the positionals, prefix the key,
- *       refuse one over 512 characters. String surgery, not a source.
- *    3  parse argv themselves in a loop, with a grammar of their own.
- *   14  field-SET branches, which is the half of the line that actually forbids
- *       something: index.hybrid sends "query" for one positional and "queries"
- *       for several; cron.enable/disable send job_id OR all:true; skill.pin
- *       reaches its constant only past an early return, so with no arguments
- *       the field is absent. Which fields EXIST must not depend on the input.
+ * THE LINE, restated so it is judgeable: a field's rule may depend on its own
+ * value, its own flags, named client facts the SERVER asked for, and the
+ * invocation's ARITY. It may not depend on another field's value, and it may
+ * not compute.
  *
- * THE LINE: a field's rule may depend on ITS OWN value, its own flags, and
- * named client facts the SERVER asked for, and nothing else. No field's
- * presence may depend on another field, and no branch may decide which fields
- * exist.
+ * WHAT REMAINS, and what each would take:
+ *
+ *   SIX are genuinely client-only. The file CONTENTS or key material go into
+ *   the request body, so the client must read them, and a spec that could say
+ *   "read this path" could say "read ~/.ssh/id_rsa":
+ *     delegate, delegate.launch, roundtable.review, skill.create, skill.edit,
+ *     vault.unlock
+ *
+ *   FIVE wear the MCP tool-call envelope -- method "mcp.call" or "help.get", a
+ *   constant `tool`, a nested `arguments`, no protocol_version. Serving them
+ *   needs an envelope-suppression escape hatch that every other served spec
+ *   currently makes unnecessary, and four of the five read $AIMEE_SESSION_ID or
+ *   the cwd or parse argv themselves anyway:
+ *     get_help, git.cli, git.verify, index.ast_grep, tool.call
+ *
+ *   FOUR derive a value rather than source one: the memory.user_capture family
+ *   joins the positionals from index 1, prefixes the key, and refuses one over
+ *   512 characters. That is string surgery, and encoding it would make the spec
+ *   a program:
+ *     memory.archive, memory.identity, memory.prefer, memory.store
+ *
+ *   THREE parse argv with a grammar of their own, in a loop, without
+ *   cli_args_parse -- memory.supersede accepts only the inline --flag=value
+ *   form. Describing them means describing a second PARSER:
+ *     memory.supersede, skill.autostub, skill.lifecycle
+ *
+ *   TEN need a CROSS-FIELD rule, which is the half of the line that still
+ *   forbids something. Each would be served by a marshaller change, not a
+ *   vocabulary change, and that change alters what the CLI sends:
+ *     cron.enable, cron.disable  -- job_id OR all:true, and a refusal when
+ *                                  NEITHER is given: a required rule that
+ *                                  consults two fields at once.
+ *     trigger.fire               -- --source AND (--task OR --proposal).
+ *     primary.set                -- --show / --clear / a positional select
+ *                                  three different METHODS, not three fields.
+ *     delegate.status            -- job_ids (array) or job_id (scalar), and the
+ *                                  array is built from a nested shape.
+ *     catalog.show               -- splits "provider:model" on a colon and
+ *                                  truncates at 64 bytes.
+ *     index.span                 -- the positional INDEX depends on whether an
+ *                                  earlier argument parses as a number.
+ *     skill.lint, skill.patch    -- argv[0] is compared against a literal flag
+ *                                  to choose which field is sent.
+ *     init.run                   -- a custom body inside marshal_request rather
+ *                                  than a named marshaller.
  *
  * AND NOTE WHAT THE TEST CANNOT SEE. Its samples are generated FROM the spec, so
- * a rule the spec omits is invisible. Everything below was found that way, and
- * every one is a case of reading PART of a rule:
+ * a rule the spec omits is invisible. Every defect below was found that way, and
+ * every one is the same shape -- reading PART of a rule:
  *
  *   - memory.delete SHIPPED saying number_lenient (atoi) where the marshaller
  *     calls atoll(). atoi() keeps the LOW 32 BITS AS A SIGNED INT, measured on a
- *     real appliance against the shipped binary: 2147483648 -> -2147483648,
- *     4294967296 -> 0, and 4294967297 -> 1. So `aimee memory delete 4294967297`
- *     deleted memory 1 -- a low-numbered, early row, because the wrap lands near
- *     zero. A JSON number is a double, so ids above 2^53 cannot round-trip
- *     whatever parse the spec names; that ceiling is shared with the marshaller.
- *   - insights.overview: the interpreter conflated "flag absent" with "flag
- *     present but empty", silently dropping a default.
- *   - kb.search reuses one scratch variable for four flags. Reading the FIRST
+ *     real appliance: 2147483648 -> -2147483648, 4294967296 -> 0, 4294967297 ->
+ *     1. `aimee memory delete 4294967297` deleted memory 1. A JSON number is a
+ *     double, so ids above 2^53 cannot round-trip whatever parse is named.
+ *   - index.structure sent the file as a PROJECT. Two positionals mean
+ *     <project> <file_path>, one means <file_path>; the spec assumed two. The
+ *     samples generated two and three, never ONE -- the way the command is used.
+ *     Found by running the real command against a real server.
+ *   - kb.search reuses one scratch variable for four flags; reading the FIRST
  *     assignment gave scope, fusion_mode and embedding_command all --project.
  *   - memory.recall is a four-step cascade; reading the NEAREST assignment gave
  *     the last step and dropped --task and the positional.
  *   - worktree.gc clamps after reading, and a clamp is itself an assignment, so
- *     "nearest" landed on `days = 365` and found no source at all.
- *   - provider.list guards `available_only` with --available; deriving the flag
+ *     "nearest" landed on `days = 365` and resolved nothing.
+ *   - provider.list guards available_only with --available; deriving the flag
  *     from the FIELD name produced a spec that never set it.
- *   - marshal_skill_request serves thirteen methods in one function. Judging the
- *     whole body refused all thirteen because two of them read a file.
+ *   - skill.pin guards on argc, not on pos_count: `skill pin --x y` has argc 2
+ *     and pos_count 0, and the marshaller sends name="--x".
  *   - the session precedence plant PASSED once, undetected, because no spec used
  *     the source and $AIMEE_SESSION_ID was unset. The test sets it now.
  *
  * Hence: adversarial samples, both-sources samples, numeric samples straddling
- * 2^31, cascade samples supplying two steps at once, and
- * scripts/check_argspec_numeric_parity.py, which compares each spec's numeric
- * type against the parse its marshaller calls rather than hoping an input lands
- * on the boundary. Each check was plant-tested: a deliberate violation was
- * introduced and the check confirmed to FAIL on it, because a check that has
- * never failed is decoration.
+ * 2^31, cascade samples supplying two steps at once, ARITY samples at every
+ * count from one to n+1, and scripts/check_argspec_numeric_parity.py, which
+ * compares each spec's numeric type against the parse its marshaller calls
+ * rather than hoping an input lands on the boundary. Each was plant-tested: a
+ * deliberate violation introduced and the check confirmed to FAIL on it,
+ * because a check that has never failed is decoration.
  */
 
 /* No fields at all, and a refusal if anything positional is typed: `aimee
@@ -108,9 +143,9 @@
    ship without a new client, which is the exact failure this work removes. */
 {"index.find",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"identifier\","
- "\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":"
- "\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"},{"
- "\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
+ "},{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":"
+ "\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"memory.list",
  "{\"fields\":[{\"json\":\"tier\",\"from\":\"flag\",\"flag\":\"tier\","
@@ -130,27 +165,29 @@
  "\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"index.find_callers",
- "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"symbol\",\"from\":"
- "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"project\","
- "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
- "\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"},{"
- "\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"symbol\","
+ "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
+ "},{\"json\":\"project\",\"count_min\":2,\"from\":\"positional\","
+ "\"index\":1,\"empty\":\"emit\"},{\"json\":\"scope\",\"from\":\"flag\","
+ "\"flag\":\"scope\",\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":"
+ "\"cwd\"}]}"},
 
 {"kb.search",
- "{\"fields\":[{\"json\":\"query\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"flag\",\"flag\":"
- "\"project\",\"empty\":\"emit\"},{\"json\":\"scope\",\"from\":\"flag\","
- "\"flag\":\"scope\",\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":"
- "\"cwd\"},{\"json\":\"max_results\",\"from\":\"flag\",\"flag\":\"max\","
- "\"type\":\"number_lenient\",\"default\":10,\"empty\":\"emit\"},{"
- "\"json\":\"fusion_mode\",\"from\":\"flag\",\"flag\":\"fusion-mode\","
- "\"empty\":\"emit\"},{\"json\":\"embedding_command\",\"from\":\"flag\","
- "\"flag\":\"embed\",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"query\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"project\","
+ "\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"},{\"json\":"
+ "\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"},{"
+ "\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"max_results\",\"from\":"
+ "\"flag\",\"flag\":\"max\",\"type\":\"number_lenient\",\"default\":10,"
+ "\"empty\":\"emit\"},{\"json\":\"fusion_mode\",\"from\":\"flag\","
+ "\"flag\":\"fusion-mode\",\"empty\":\"emit\"},{\"json\":"
+ "\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\",\"empty\":"
+ "\"emit\"}]}"},
 
 {"wm.get",
- "{\"fields\":[{\"json\":\"key\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"session_id\",\"from\":\"session\","
- "\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"key\",\"count_min\":1,\"from\":\"positional\""
+ ",\"index\":0,\"empty\":\"emit\"},{\"json\":\"session_id\",\"from\":"
+ "\"session\",\"empty\":\"emit\"}]}"},
 
 {"wm.list",
  "{\"fields\":[{\"json\":\"session_id\",\"from\":\"session\",\"empty\":"
@@ -158,13 +195,14 @@
  "\"category\",\"empty\":\"emit\"}]}"},
 
 {"wm.set",
- "{\"fields\":[{\"json\":\"key\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"value\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"},{\"json\":\"session_id\",\"from\":"
- "\"session\",\"empty\":\"emit\"},{\"json\":\"category\",\"from\":"
- "\"flag\",\"flag\":\"category\",\"empty\":\"emit\"},{\"json\":\"ttl\","
- "\"from\":\"flag\",\"flag\":\"ttl\",\"type\":\"number_lenient\","
- "\"default\":0,\"empty\":\"emit\",\"omit_if_nonpositive\":true}]}"},
+ "{\"fields\":[{\"json\":\"key\",\"count_min\":1,\"from\":\"positional\""
+ ",\"index\":0,\"empty\":\"emit\"},{\"json\":\"value\",\"count_min\":2,"
+ "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
+ "\"session_id\",\"from\":\"session\",\"empty\":\"emit\"},{\"json\":"
+ "\"category\",\"from\":\"flag\",\"flag\":\"category\",\"empty\":"
+ "\"emit\"},{\"json\":\"ttl\",\"from\":\"flag\",\"flag\":\"ttl\","
+ "\"type\":\"number_lenient\",\"default\":0,\"empty\":\"emit\","
+ "\"omit_if_nonpositive\":true}]}"},
 
 /* task_hint is a four-step cascade: --task, then positional[0], then --query,
    then the literal "session start". --query feeds the SAME field rather than a
@@ -221,20 +259,21 @@
  "\"default\":\"\",\"sources\":[{\"from\":\"flag\",\"flag\":\"attach-id\"}]}]}"},
 
 {"eval.run",
- "{\"fields\":[{\"json\":\"suite_dir\",\"from\":\"positional\",\"index\""
- ":0,\"empty\":\"emit\"},{\"json\":\"ablation\",\"from\":\"flag\","
- "\"flag\":\"ablation\",\"empty\":\"emit\"},{\"json\":\"runs\",\"from\":"
- "\"flag\",\"flag\":\"runs\",\"empty\":\"emit\",\"type\":"
- "\"number_lenient\"},{\"json\":\"seed\",\"type\":"
+ "{\"fields\":[{\"json\":\"suite_dir\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"ablation\","
+ "\"from\":\"flag\",\"flag\":\"ablation\",\"empty\":\"emit\"},{\"json\":"
+ "\"runs\",\"from\":\"flag\",\"flag\":\"runs\",\"empty\":\"emit\","
+ "\"type\":\"number_lenient\"},{\"json\":\"seed\",\"type\":"
  "\"number_lenient_ulong\",\"from\":\"flag\",\"flag\":\"seed\",\"empty\""
  ":\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"identity.diff",
- "{\"fields\":[{\"json\":\"a\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"b\",\"from\":\"positional\",\"index\":"
- "1,\"empty\":\"emit\"},{\"json\":\"flip_threshold\",\"type\":"
- "\"number_lenient_real\",\"from\":\"flag\",\"flag\":\"flip-threshold\","
- "\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "{\"fields\":[{\"json\":\"a\",\"count_min\":1,\"from\":\"positional\","
+ "\"index\":0,\"empty\":\"emit\"},{\"json\":\"b\",\"count_min\":2,"
+ "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
+ "\"flip_threshold\",\"type\":\"number_lenient_real\",\"from\":\"flag\","
+ "\"flag\":\"flip-threshold\",\"empty\":\"emit\"},{\"json\":\"cwd\","
+ "\"from\":\"cwd\"}]}"},
 
 /* suite is `pos_count >= 1 ? positional[0] : "code-graph-fusion"`. The guard is
    on the COUNT, so an empty positional is the value and does NOT fall back --
@@ -279,9 +318,9 @@
 
 {"skill.archive",
  "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
- "\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"},{\"json\":"
- "\"absorbed_into\",\"from\":\"argv_index\",\"index\":2,\"empty\":\"emit\"}]"
- "}"},
+ "\"argc_min\":1,\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}"
+ ",{\"json\":\"absorbed_into\",\"argc_min\":1,\"from\":\"argv_index\","
+ "\"index\":2,\"empty\":\"emit\"}]}"},
 
 {"skill.eval",
  "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
@@ -289,8 +328,50 @@
 
 {"skill.show",
  "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
- "\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"},{\"json\":"
- "\"file_path\",\"from\":\"argv_index\",\"index\":2,\"empty\":\"emit\"}]}"},
+ "\"argc_min\":1,\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}"
+ ",{\"json\":\"file_path\",\"argc_min\":1,\"from\":\"argv_index\","
+ "\"index\":2,\"empty\":\"emit\"}]}"},
+
+{"index.blast_radius",
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"project\","
+ "\"count_min\":2,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
+ "},{\"json\":\"file_path\",\"count_min\":2,\"from\":\"positional\","
+ "\"index\":1,\"empty\":\"emit\"},{\"json\":\"file_path\",\"count_min\":"
+ "1,\"count_max\":1,\"from\":\"positional\",\"index\":0,\"empty\":"
+ "\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+
+{"index.hybrid",
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"queries\",\"from\":"
+ "\"positional_array\",\"count_min\":2},{\"json\":\"query\","
+ "\"count_min\":1,\"count_max\":1,\"from\":\"positional\",\"index\":0,"
+ "\"empty\":\"emit\"},{\"json\":\"scope\",\"from\":\"flag\",\"flag\":"
+ "\"scope\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+
+{"index.investigate",
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"queries\",\"from\":"
+ "\"positional_array\",\"count_min\":2},{\"json\":\"query\","
+ "\"count_min\":1,\"count_max\":1,\"from\":\"positional\",\"index\":0,"
+ "\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+
+{"index.structure",
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"project\","
+ "\"count_min\":2,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
+ "},{\"json\":\"file_path\",\"count_min\":2,\"from\":\"positional\","
+ "\"index\":1,\"empty\":\"emit\"},{\"json\":\"file_path\",\"count_min\":"
+ "1,\"count_max\":1,\"from\":\"positional\",\"index\":0,\"empty\":"
+ "\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+
+{"skill.pin",
+ "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
+ "\"argc_min\":1,\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}"
+ ",{\"json\":\"pinned\",\"argc_min\":1,\"from\":\"const\",\"type\":"
+ "\"const_bool\",\"value\":true}]}"},
+
+{"skill.unpin",
+ "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
+ "\"argc_min\":1,\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}"
+ ",{\"json\":\"pinned\",\"argc_min\":1,\"from\":\"const\",\"type\":"
+ "\"const_bool\",\"value\":false}]}"},
 
 {"delegate.log",
  "{\"usage\":\"usage: aimee delegate log [--json]; for a background job log, "
@@ -366,8 +447,8 @@
  "\"index\":0,\"flag\":\"agent\"}]}"},
 
 {"graph.sync_code",
- "{\"fields\":[{\"json\":\"project\",\"from\":\"positional\",\"index\":0"
- ",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"project\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 
 {"dogfood.report",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"month\",\"from\":"
@@ -379,34 +460,38 @@
    it could, each of these disagreed with its marshaller on exactly one sample. */
 
 {"eval.results",
- "{\"fields\":[{\"json\":\"suite\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"suite\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 
 {"cert.revoke",
- "{\"fields\":[{\"json\":\"serial\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"serial\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 
 {"vault.capability",
- "{\"fields\":[{\"json\":\"action\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"principal\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"action\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"principal\""
+ ",\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":"
+ "\"emit\"}]}"},
 
 {"vault.delete",
- "{\"fields\":[{\"json\":\"agent\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"cred\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"agent\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"cred\","
+ "\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":\"emit\""
+ "}]}"},
 
 {"vault.set",
- "{\"fields\":[{\"json\":\"agent\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"cred\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"},{\"json\":\"secret\",\"from\":"
- "\"positional\",\"index\":2,\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"agent\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"cred\","
+ "\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":\"emit\""
+ "},{\"json\":\"secret\",\"count_min\":3,\"from\":\"positional\","
+ "\"index\":2,\"empty\":\"emit\"}]}"},
 
 {"vault.set_server",
- "{\"fields\":[{\"json\":\"agent\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"cred\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"},{\"json\":\"secret\",\"from\":"
- "\"positional\",\"index\":2,\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"agent\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"cred\","
+ "\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":\"emit\""
+ "},{\"json\":\"secret\",\"count_min\":3,\"from\":\"positional\","
+ "\"index\":2,\"empty\":\"emit\"}]}"},
 
 /* The lenient-number family. Each parses with atoi()/cli_args_get_int(), so a
    non-numeric argument becomes 0 rather than a refusal -- described with
@@ -414,16 +499,17 @@
    proven rather than assumed. */
 
 {"graph.explain",
- "{\"fields\":[{\"json\":\"entity\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"limit\",\"from\":\"flag\",\"flag\":"
- "\"limit\",\"type\":\"number_lenient\",\"default\":40,\"empty\":"
- "\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"entity\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"limit\","
+ "\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\","
+ "\"default\":40,\"empty\":\"emit\"}]}"},
 
 {"aux.test",
- "{\"fields\":[{\"json\":\"task\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"prompt\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"},{\"json\":\"max_tokens\",\"from\":"
- "\"positional\",\"index\":2,\"type\":\"number_lenient\"}]}"},
+ "{\"fields\":[{\"json\":\"task\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"prompt\","
+ "\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":\"emit\""
+ "},{\"json\":\"max_tokens\",\"count_min\":3,\"from\":\"positional\","
+ "\"index\":2,\"type\":\"number_lenient\"}]}"},
 
 {"dogfood.review",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"month\",\"from\":"
@@ -435,54 +521,56 @@
 /* Generated from each marshaller and proven against it; see the test. */
 
 {"config.get",
- "{\"fields\":[{\"json\":\"key\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"key\",\"count_min\":1,\"from\":\"positional\""
+ ",\"index\":0,\"empty\":\"emit\"}]}"},
 {"config.set",
- "{\"fields\":[{\"json\":\"key\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"value\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"key\",\"count_min\":1,\"from\":\"positional\""
+ ",\"index\":0,\"empty\":\"emit\"},{\"json\":\"value\",\"count_min\":2,"
+ "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"}]}"},
 {"delegate.aggregate",
- "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"prompt\",\"from\":"
- "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"prompt\","
+ "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
+ "}]}"},
 {"evidence.fidelity_retrieval_event",
- "{\"fields\":[{\"json\":\"turn_id\",\"from\":\"positional\",\"index\":0"
- ",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"turn_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 {"evidence.provenance_retrieval_event",
- "{\"fields\":[{\"json\":\"turn_id\",\"from\":\"positional\",\"index\":0"
- ",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"turn_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 {"evidence.trace_retrieval_event",
- "{\"fields\":[{\"json\":\"turn_id\",\"from\":\"positional\",\"index\":0"
- ",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"turn_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 {"index.scan",
- "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"name\",\"from\":"
- "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"root\","
- "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
- "\"force\",\"from\":\"flag\",\"type\":\"true_if_set\",\"flag\":"
- "\"force\"}]}"},
+ "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"name\","
+ "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
+ "},{\"json\":\"root\",\"count_min\":2,\"from\":\"positional\",\"index\""
+ ":1,\"empty\":\"emit\"},{\"json\":\"force\",\"from\":\"flag\",\"type\":"
+ "\"true_if_set\",\"flag\":\"force\"}]}"},
 {"kb.build",
  "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"path\",\"from\":\"flag_or_positional\",\"flag\":\"path\",\"index\":0},{\"json\":\"project\",\"from\":\"flag_or_positional\",\"flag\":\"project\",\"index\":1},{\"json\":\"force\",\"from\":\"flag\",\"flag\":\"force\",\"type\":\"true_if_set\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\",\"empty\":\"emit\"}]}"},
 {"kb.ingest",
  "{\"bool_flags\":[\"force\"],\"fields\":[{\"json\":\"workspace\","
- "\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":"
- "\"force\",\"from\":\"flag\",\"type\":\"true_if_set\",\"flag\":"
- "\"force\"},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":"
- "\"embed\",\"empty\":\"emit\"}]}"},
+ "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
+ "},{\"json\":\"force\",\"from\":\"flag\",\"type\":\"true_if_set\","
+ "\"flag\":\"force\"},{\"json\":\"embedding_command\",\"from\":\"flag\","
+ "\"flag\":\"embed\",\"empty\":\"emit\"}]}"},
 {"kb.status",
- "{\"fields\":[{\"json\":\"project\",\"from\":\"positional\",\"index\":0"
- ",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"project\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 {"kb.update",
- "{\"fields\":[{\"json\":\"path\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"},{\"json\":\"embedding_command\","
- "\"from\":\"flag\",\"flag\":\"embed\",\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"path\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"project\","
+ "\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":\"emit\""
+ "},{\"json\":\"embedding_command\",\"from\":\"flag\",\"flag\":\"embed\""
+ ",\"empty\":\"emit\"}]}"},
 
 {"curator.implements",
- "{\"fields\":[{\"json\":\"topic\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"topic\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 
 {"curator.synthesize",
- "{\"fields\":[{\"json\":\"topic\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"}]}"},
+ "{\"fields\":[{\"json\":\"topic\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 
 {"provider.quota",
  "{\"fields\":[{\"json\":\"name\",\"from\":\"positional\",\"index\":0}]}"},
@@ -527,9 +615,9 @@
  "{\"fields\":[{\"json\":\"args\",\"from\":\"argv_array\"}]}"},
 
 {"cert.issue",
- "{\"fields\":[{\"json\":\"cn\",\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"days\",\"from\":\"flag\",\"flag\":"
- "\"days\",\"type\":\"number_lenient\"}]}"},
+ "{\"fields\":[{\"json\":\"cn\",\"count_min\":1,\"from\":\"positional\","
+ "\"index\":0,\"empty\":\"emit\"},{\"json\":\"days\",\"from\":\"flag\","
+ "\"flag\":\"days\",\"type\":\"number_lenient\"}]}"},
 
 {"job.cancel",
  "{\"fields\":[{\"json\":\"job_id\",\"from\":\"positional_or_flag\","
@@ -622,65 +710,65 @@
    method falls through to a shared tail, so each has a fixed shape of its own. */
 
 {"pipeline.advance",
- "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\","
- "\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\","
- "\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\","
- "\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\","
- "\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\","
- "\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\","
- "\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":"
+ "\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":"
+ "\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{"
+ "\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{"
+ "\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":"
+ "\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
  "\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
 
 {"pipeline.cancel",
- "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\","
- "\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\","
- "\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\","
- "\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\","
- "\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\","
- "\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\","
- "\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":"
+ "\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":"
+ "\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{"
+ "\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{"
+ "\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":"
+ "\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
  "\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
 
 {"pipeline.gate",
- "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\","
- "\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"verdict\","
- "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":"
- "\"reason\",\"from\":\"flag\",\"flag\":\"reason\"},{\"json\":"
- "\"operator_principal\",\"from\":\"flag\",\"flag\":"
- "\"operator-principal\"}]}"},
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":"
+ "\"verdict\",\"count_min\":2,\"from\":\"positional\",\"index\":1,"
+ "\"empty\":\"emit\"},{\"json\":\"reason\",\"from\":\"flag\",\"flag\":"
+ "\"reason\"},{\"json\":\"operator_principal\",\"from\":\"flag\","
+ "\"flag\":\"operator-principal\"}]}"},
 
 {"pipeline.list",
  "{\"fields\":[{\"json\":\"state\",\"from\":\"flag\",\"flag\":\"state\"}"
  "]}"},
 
 {"pipeline.resume",
- "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\","
- "\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\","
- "\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\","
- "\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\","
- "\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\","
- "\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\","
- "\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":"
+ "\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":"
+ "\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{"
+ "\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{"
+ "\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":"
+ "\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
  "\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
 
 {"pipeline.show",
- "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\","
- "\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\","
- "\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\","
- "\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\","
- "\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\","
- "\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\","
- "\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":"
+ "\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":"
+ "\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{"
+ "\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{"
+ "\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":"
+ "\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
  "\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
 
 {"pipeline.status",
- "{\"fields\":[{\"json\":\"pipeline_id\",\"from\":\"positional\","
- "\"index\":0,\"type\":\"number_lenient\"},{\"json\":\"artifact\","
- "\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":\"artifact_hash\","
- "\"from\":\"flag\",\"flag\":\"artifact-hash\"},{\"json\":\"repo_root\","
- "\"from\":\"flag\",\"flag\":\"repo-root\"},{\"json\":\"remote\","
- "\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":\"head_branch\","
- "\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
+ "{\"fields\":[{\"json\":\"pipeline_id\",\"count_min\":1,\"from\":"
+ "\"positional\",\"index\":0,\"type\":\"number_lenient\"},{\"json\":"
+ "\"artifact\",\"from\":\"flag\",\"flag\":\"artifact\"},{\"json\":"
+ "\"artifact_hash\",\"from\":\"flag\",\"flag\":\"artifact-hash\"},{"
+ "\"json\":\"repo_root\",\"from\":\"flag\",\"flag\":\"repo-root\"},{"
+ "\"json\":\"remote\",\"from\":\"flag\",\"flag\":\"remote\"},{\"json\":"
+ "\"head_branch\",\"from\":\"flag\",\"flag\":\"head-branch\"},{\"json\":"
  "\"worktree_path\",\"from\":\"flag\",\"flag\":\"worktree-path\"}]}"},
 
 {"api.enable",
@@ -709,13 +797,14 @@
 
 {"index.deps",
  "{\"bool_flags\":[\"review\",\"reverse\",\"dry-run\"],\"fields\":[{"
- "\"json\":\"project\",\"from\":\"positional\",\"index\":0,\"empty\":"
- "\"emit\"},{\"json\":\"min_tier\",\"from\":\"flag\",\"flag\":\"tier\","
- "\"empty\":\"emit\"},{\"json\":\"status\",\"from\":\"flag\",\"flag\":"
- "\"review\",\"type\":\"const_if_set\",\"value\":\"ambiguous\"},{"
- "\"json\":\"direction\",\"from\":\"flag\",\"flag\":\"reverse\",\"type\""
- ":\"const_if_set\",\"value\":\"in\"},{\"json\":\"dry_run\",\"from\":"
- "\"flag\",\"flag\":\"dry-run\",\"type\":\"true_if_set\"}]}"},
+ "\"json\":\"project\",\"count_min\":1,\"from\":\"positional\",\"index\""
+ ":0,\"empty\":\"emit\"},{\"json\":\"min_tier\",\"from\":\"flag\","
+ "\"flag\":\"tier\",\"empty\":\"emit\"},{\"json\":\"status\",\"from\":"
+ "\"flag\",\"flag\":\"review\",\"type\":\"const_if_set\",\"value\":"
+ "\"ambiguous\"},{\"json\":\"direction\",\"from\":\"flag\",\"flag\":"
+ "\"reverse\",\"type\":\"const_if_set\",\"value\":\"in\"},{\"json\":"
+ "\"dry_run\",\"from\":\"flag\",\"flag\":\"dry-run\",\"type\":"
+ "\"true_if_set\"}]}"},
 
 /* The inverted-flag pair: `compress` is true unless --no-compress was given. */
 
@@ -755,7 +844,8 @@
 /* Raw argv that refuses a flag-looking word. */
 
 {"mcp.recheck",
- "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0,\"skip_if_dash\":true}]}"},
+ "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0,"
+ "\"skip_if_dash\":true}]}"},
 
 /* Reachable only since the served consult moved above marshal_request's
    custom-body block; before that a spec for these could never be reached. */

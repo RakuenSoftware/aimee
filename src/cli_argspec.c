@@ -467,6 +467,37 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
                      int argc, char **argv)
 {
    const char *json_name = field_str(field, "json");
+
+   /* `count_min` / `count_max` gate a field on how many POSITIONALS were typed.
+    * index.hybrid sends "query" for exactly one and "queries" (an array) for
+    * more; skill.pin reaches its constant only past `if (argc < 1) return`.
+    *
+    * I refused this shape for most of this work as "a branch decides which
+    * fields exist". That was the wrong line, in the same way "the client must
+    * never read its own cwd" was: this vocabulary is FULL of conditionals --
+    * empty:"drop", omit_if_nonpositive, omit_below, max_positionals, the
+    * first_of cascade -- and none of them made a spec into a program. What
+    * would is a rule that consults ANOTHER FIELD's value, or computes. An arity
+    * gate consults the invocation's shape, which is exactly what
+    * max_positionals already does one level up, and it is bounded, declarative
+    * and inspectable.
+    *
+    * The differential test is what keeps this honest: with the arity samples it
+    * now carries, a spec that gates on the wrong count disagrees with the
+    * marshaller on the count it got wrong. */
+   /* `argc_min` gates on the RAW argv count, which is not the same number as
+    * the positional count and not interchangeable with it: skill.pin guards on
+    * `argc < 1` and then reads argv[0], so `aimee skill pin --x y` has argc 2,
+    * pos_count 0, and sends name="--x". A count_min gate would have dropped it. */
+   const cJSON *amin = cJSON_GetObjectItemCaseSensitive(field, "argc_min");
+   if (cJSON_IsNumber(amin) && argc < (int)amin->valuedouble)
+      return 0;
+   const cJSON *cmin = cJSON_GetObjectItemCaseSensitive(field, "count_min");
+   const cJSON *cmax = cJSON_GetObjectItemCaseSensitive(field, "count_max");
+   if (cJSON_IsNumber(cmin) && opts->pos_count < (int)cmin->valuedouble)
+      return 0;
+   if (cJSON_IsNumber(cmax) && opts->pos_count > (int)cmax->valuedouble)
+      return 0;
    const char *type = field_str(field, "type");
    int required = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(field, "required"));
 

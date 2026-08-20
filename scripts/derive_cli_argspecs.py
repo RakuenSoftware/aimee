@@ -280,9 +280,6 @@ def spec_for(method):
     # reaches `AddBool(req, "pinned", ...)` only when `if (argc < 1) return req;`
     # did not fire, so with no arguments the field is absent -- its presence
     # depends on another argument, which is the half of the line that forbids.
-    if re.search(r"if \(argc < \d+\)\s*\n\s*return req;", body) and re.search(
-            r'cJSON_AddBoolToObject\(req, "\w+",\s*strcmp\(method', body):
-        return None, "constant guarded by an early return"
 
     judged = re.sub(r'cJSON_AddBoolToObject\(req, "\w+",\s*'
                     r'strcmp\(method, "[a-z0-9_.]+"\) == 0\);', "", body)
@@ -307,13 +304,9 @@ def spec_for(method):
     # The differential test did not catch it, because samples are built from the
     # spec: with two fields it generated two positionals and three, never ONE.
     # Found by driving the real command against a real server.
-    # Judge the EXPANDED body: index.structure is a two-line wrapper around
-    # marshal_index_file_request, so the branch lives in the callee and checking
-    # only the direct body saw nothing at all.
-    if re.search(r"pos_count (?:==|>) \d+", expanded) and re.search(
-            r"else if \(opts\.pos_count > \d+\)|"
-            r"pos_count == \d+[^\n]*\n[^\n]*AddArrayToObject", expanded):
-        return None, "field-set branch: which fields exist depends on the count"
+    # The count branch is DESCRIBED now, via count_min/count_max, not refused.
+    # See the note in cli_argspec.c: an arity gate consults the invocation's
+    # shape, which max_positionals already does, and not another field's value.
     if re.search(r"else if \(cli_args_get", body):
         return None, "conditional: exclusive flags"
     if re.search(r"for \(int \w+ = 0; \w+ < argc", body) or "argv[i]" in body:
@@ -374,13 +367,98 @@ def spec_for(method):
 
     body = _inline(body)
 
+    def count_gate(pos_in_body):
+        """The positional-count condition ENCLOSING the statement at this offset.
+
+        Brace-aware on purpose. Taking "the last `if (opts.pos_count ...)` seen
+        before this point" gated index.hybrid's scope and cwd on the branch they
+        come AFTER, because a branch that has closed is not a branch you are in.
+        """
+        head = body[:pos_in_body]
+        gate = {}
+        # An early `argc < N` return gates on RAW argv, not on positionals.
+        for m in re.finditer(r"if \(argc < (\d+)\)\s*\n\s*return req;", head):
+            gate["argc_min"] = max(gate.get("argc_min", 0), int(m.group(1)))
+
+        # Walk back to the innermost block still open at pos_in_body.
+        depth, i = 0, len(head) - 1
+        while i >= 0:
+            c = head[i]
+            if c == "}":
+                depth += 1
+            elif c == "{":
+                if depth == 0:
+                    m = re.search(
+                        r"(else\s+)?if \(opts\.pos_count\s*(==|>=|>)\s*(\d+)\)\s*$",
+                        head[:i].rstrip())
+                    if m:
+                        op, n = m.group(2), int(m.group(3))
+                        if op == "==":
+                            gate["count_min"] = max(gate.get("count_min", 0), n)
+                            gate["count_max"] = n
+                        elif op == ">":
+                            gate["count_min"] = max(gate.get("count_min", 0), n + 1)
+                        else:
+                            gate["count_min"] = max(gate.get("count_min", 0), n)
+                        if m.group(1):  # else if: exclude the earlier siblings
+                            prev = re.findall(
+                                r"if \(opts\.pos_count\s*(==|>=|>)\s*(\d+)\)",
+                                head[:m.start()])
+                            lows = []
+                            for pop, pn in prev:
+                                pn = int(pn)
+                                lows.append(pn + 1 if pop == ">" else pn)
+                            # Only a sibling whose threshold is HIGHER than
+                            # this branch's constrains it. `if (== 1) ... else
+                            # if (> 1)` is already disjoint and needs no upper
+                            # bound; `if (> 1) ... else if (> 0)` covers exactly
+                            # one and does.
+                            mine = gate.get("count_min", 0)
+                            higher = [l for l in lows if l > mine]
+                            if higher:
+                                gate["count_max"] = min(
+                                    gate.get("count_max", 1 << 30), min(higher) - 1)
+                    break
+                depth -= 1
+            i -= 1
+
+        # A braceless branch: `if (pos_count == 1)\n   Add(...);` with no block.
+        if not any(k in gate for k in ("count_max", "count_min")):
+            m = re.search(r"(else\s+)?if \(opts\.pos_count\s*(==|>=|>)\s*(\d+)\)\s*\n\s*$",
+                          head)
+            if m:
+                op, n = m.group(2), int(m.group(3))
+                if op == "==":
+                    gate["count_min"], gate["count_max"] = n, n
+                elif op == ">":
+                    gate["count_min"] = n + 1
+                else:
+                    gate["count_min"] = n
+                # A BRACELESS else-if needs the same sibling exclusion as the
+                # braced one. index.structure writes `else if (pos_count > 0)`
+                # with a single statement and no block, so without this the
+                # one-positional file_path had no upper bound and fired
+                # alongside the two-positional one, sending the key twice.
+                if m.group(1):
+                    prev = re.findall(
+                        r"if \(opts\.pos_count\s*(==|>=|>)\s*(\d+)\)", head[:m.start()])
+                    mine = gate.get("count_min", 0)
+                    higher = [(int(pn) + 1 if pop == ">" else int(pn)) for pop, pn in prev]
+                    higher = [h for h in higher if h > mine]
+                    if higher:
+                        gate["count_max"] = min(gate.get("count_max", 1 << 30),
+                                                min(higher) - 1)
+        return gate
+
     fields, seen = [], set()
     # An array field is added with AddItemToObject, which the value-shaped
     # pattern below does not match at all -- so memory.search's keywords were
     # not merely mis-sourced, they were invisible.
-    for stmt in re.finditer(
-            r'cJSON_AddItemToObject\(req, "(\w+)", (\w+)\);', body):
-        name, arrvar = stmt.groups()
+    array_stmts = [(m.group(1), m.group(2), m.start()) for m in re.finditer(
+        r'cJSON_AddItemToObject\(req, "(\w+)", (\w+)\);', body)]
+    array_stmts += [(m.group(2), m.group(1), m.start()) for m in re.finditer(
+        r'cJSON \*(\w+) = cJSON_AddArrayToObject\(req, "(\w+)"\);', body)]
+    for name, arrvar, at in array_stmts:
         if name in seen:
             continue
         built = re.search(
@@ -389,16 +467,19 @@ def spec_for(method):
             body)
         if not built:
             return None, f"nested shape for {name}"
-        fields.append({"json": name, "from": "positional_array"})
+        arrf = {"json": name, "from": "positional_array"}
+        arrf.update(count_gate(at))
+        fields.append(arrf)
         seen.add(name)
 
     for stmt in re.finditer(
             r'cJSON_Add(String|Number|True|Bool)ToObject\(req, "(\w+)"(?:, ([^;]*))?\);', body):
         kind, name, val = stmt.groups()
-        if name in ("method", "protocol_version") or name in seen:
+        if name in ("method", "protocol_version"):
             continue
         val = (val or "").strip()
         f = {"json": name}
+        f.update(count_gate(stmt.start()))
         var = re.split(r"[,)\s]", val)[0].strip() if val else ""
 
         # The two client facts a spec may NAME. Both are recognised by the value
@@ -424,9 +505,17 @@ def spec_for(method):
             continue
 
         if re.fullmatch(r"argv\[(\d+)\]", val or ""):
-            f.update({"from": "argv_index",
-                      "index": int(re.fullmatch(r"argv\[(\d+)\]", val).group(1)),
-                      "empty": "emit"})
+            idx = int(re.fullmatch(r"argv\[(\d+)\]", val).group(1))
+            f.update({"from": "argv_index", "index": idx})
+            # Read the guard, exactly as the positional branch does. provider.set
+            # tests argv[0][0] and DROPS an empty word; mcp.recheck also tests
+            # argv[0][0] != '-' and skips a flag-shaped one. Assuming emit here
+            # sent name:"" and name:"--json" where the marshaller sends nothing.
+            if not re.search(rf"argv\[{idx}\]\s*&&\s*argv\[{idx}\]\[0\]|"
+                             rf"argv\[{idx}\]\[0\]\s*(?:&&|\))", body):
+                f["empty"] = "emit"
+            if re.search(rf"argv\[{idx}\]\[0\]\s*!=\s*'-'", body):
+                f["skip_if_dash"] = True
             fields.append(f)
             seen.add(name)
             continue

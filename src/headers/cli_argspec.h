@@ -55,10 +55,22 @@
  * field's presence depends on another field, and no branch decides which fields
  * exist.
  *
- * All of these are rules about ONE field's own value and its own flags, or
- * about the invocation's shape, which is the line this vocabulary holds: no
- * field's presence may depend on another field, and no branch may decide which
- * fields exist.
+ * `count_min`/`count_max` gate a field on how many POSITIONALS were typed, and
+ * `argc_min` on the raw argv count -- which is a different number: `skill pin
+ * --x y` has argc 2 and pos_count 0, and the marshaller reads argv[0]. These
+ * describe index.hybrid, which sends "query" for exactly one positional and
+ * "queries" (an array) for more, and index.structure, which reads <project>
+ * <file_path> for two and <file_path> alone for one.
+ *
+ * I refused that shape for most of this work as "a branch decides which fields
+ * exist". That was the wrong line: this vocabulary is full of conditionals --
+ * empty:"drop", omit_if_nonpositive, omit_below, max_positionals, first_of --
+ * and none of them makes a spec a program. What would is a rule consulting
+ * ANOTHER FIELD's value, or computing one.
+ *
+ * So: a field's rule may depend on its own value, its own flags, named client
+ * facts the SERVER asked for, and the invocation's ARITY. It may not depend on
+ * another field's value, and it may not compute.
  *
  * What it deliberately CANNOT express: reading the client's filesystem or
  * environment, composing prompts, or cross-field rules like "either --task or
