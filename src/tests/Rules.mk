@@ -458,6 +458,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-rel-types-store \
                $(TESTPREFIX)/unit-test-entity-registry \
                $(TESTPREFIX)/unit-test-fact-lifecycle \
+               $(TESTPREFIX)/unit-test-mcp-memory-gate \
                $(TESTPREFIX)/unit-test-embedding-dim \
                $(TESTPREFIX)/unit-test-embedder-probe-register \
                $(TESTPREFIX)/unit-test-ontology-evolution \
@@ -4700,6 +4701,15 @@ $(TESTPREFIX)/unit-test-entity-registry: $(OBJDIR)/tests/test_entity_registry.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # typed-fact P3: confidence classes (§5) + correction/retraction (§4), shim.
+# The capability grading behind the MCP `mutate` and `memory_maintain` gates.
+# server_mcp_memory_gate.o is pure (macros + strcmp), so this links with only
+# server_auth.o for server_capability_for_method -- deliberately, so the
+# security-critical decisions are testable without linking the MCP call table.
+$(TESTPREFIX)/unit-test-mcp-memory-gate: $(OBJDIR)/tests/test_mcp_memory_gate.o \
+                               $(OBJDIR)/server/server_mcp_memory_gate.o \
+                               $(OBJDIR)/server/server_auth.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-fact-lifecycle: $(OBJDIR)/tests/test_fact_lifecycle.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

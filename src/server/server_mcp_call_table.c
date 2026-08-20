@@ -3,6 +3,7 @@
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "server_mcp_internal.h"
 #include "server.h"
+#include "server_mcp_memory_gate.h"  /* capability grading for `mutate` / `memory_maintain` */
 #include <aimee/tools/agent_tools.h> /* the native surface this table registers into */
 #include "toolset.h"                 /* toolset_register_native_tool */
 #include "aimee.h"
@@ -77,30 +78,9 @@ static cJSON *mcph_search_memory(struct mcp_call *c)
 {
    return tool_search_memory(c->jargs);
 }
-/* The RPC method each mutate verb is equivalent to, so the MCP door is graded by
- * the same capability table as the NDJSON/HTTP door. Without this, `mutate` was
- * a second, ungated entrance to memory.delete: the RPC method required a
- * capability while the MCP tool required none, and the model used the ungated
- * one. Unknown verbs fall through to tool_memory_mutate's own error. */
-static const char *mcp_mutate_verb_method(const char *verb)
-{
-   if (!verb)
-      return NULL;
-   if (strcmp(verb, "store") == 0)
-      return "memory.store";
-   if (strcmp(verb, "update") == 0)
-      return "memory.update";
-   if (strcmp(verb, "supersede") == 0)
-      return "memory.supersede";
-   if (strcmp(verb, "forget") == 0)
-      return "memory.delete";
-   if (strcmp(verb, "affirm") == 0)
-      return "memory.touch";
-   if (strcmp(verb, "reject") == 0)
-      return "memory.reject";
-   return NULL;
-}
-
+/* mcp_mutate_verb_method / mcp_memory_maintain_required_cap live in
+ * server_mcp_memory_gate.c: they are the security-critical half of these two
+ * gates, and no test links this TU. See that header. */
 static cJSON *mcph_mutate(struct mcp_call *c)
 {
    cJSON *jv = cJSON_GetObjectItemCaseSensitive(c->jargs, "verb");
@@ -589,14 +569,10 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
     * KB-service method the server never dispatches — so this tool was the ONLY
     * door to bulk memory destruction, and it was ungated.
     *
-    * `modes` of 0 means MEMORY_MAINTENANCE_MODES_DEFAULT, which INCLUDES prune,
-    * so a bare `memory_maintain {}` destroys; it must grade as destructive too.
-    * The grade follows the modes requested and not `dry_run`: dry_run is a flag
-    * the same caller controls, so letting it lower the gate would just move the
-    * bypass rather than close it. */
-   unsigned int effective_modes = modes ? modes : (unsigned int)MEMORY_MAINTENANCE_MODES_DEFAULT;
-   uint32_t required =
-       (effective_modes & MEMORY_MAINTENANCE_MODE_PRUNE) ? CAP_MEMORY_ADMIN : CAP_MEMORY_WRITE;
+    * The grade itself (including the modes-of-0 defaulting, which INCLUDES
+    * prune, so a bare `memory_maintain {}` grades as destructive) is
+    * mcp_memory_maintain_required_cap. */
+   uint32_t required = mcp_memory_maintain_required_cap(modes);
    if (!c->conn || (c->conn->capabilities & required) == 0)
       return text_content("error: forbidden: insufficient capabilities for memory maintenance "
                           "(the prune mode permanently deletes memories)");
