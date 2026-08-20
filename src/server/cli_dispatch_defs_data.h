@@ -58,7 +58,14 @@
     {"graph", "sync-code", "graph.sync_code", NULL, NULL, 300000},
     {"graph", "explain", "graph.explain", NULL, NULL, 60000},
     {"notes", "search", "notes.search", NULL, "notes", 0},
-    {"notes", NULL, "notes.list", NULL, "notes", 0},
+    /* "" not NULL: notes.list takes no arguments (marshal_no_args), so a NULL
+       row -- which matches ANY subcommand and then discards it -- turned every
+       unrecognised word into a listing. `aimee notes add "a thing worth
+       keeping"` printed the notes and added nothing, with no hint that `add`
+       is not a subcommand. The empty form still matches the bare command and
+       its flags, and lets anything else fall through to the "not a subcommand
+       of 'notes'; try: search" that every other command already gives. */
+    {"notes", "", "notes.list", NULL, "notes", 0},
     {"session", "list", "session.list", NULL, "sessions", 0},
     {"session", "show", "session.get", NULL, NULL, 0},
     {"session", "get", "session.get", NULL, NULL, 0},
