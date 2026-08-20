@@ -5,9 +5,12 @@
 #include "config.h"         /* config_default_dir, config_load */
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
+#include "db1.h"            /* db1_store_probe — the mTLS ramp needs a live store */
 #include "log.h"
 #include "cJSON.h"
 #include <aimee/core/connection/tls_openssl.h>
+
+#include <time.h>
 
 #include <openssl/bn.h>
 #include <openssl/err.h>
@@ -958,6 +961,12 @@ SSL *server_tls_accept(int fd)
    return tls_accept_with_ssl(fd, ssl);
 }
 
+/* How long server_tls_init_default waits for the store before giving up on the
+   mTLS ramp. The module attaches in well under a second when it is coming at
+   all, and this is paid once, at startup. */
+#define TLS_STORE_WAIT_MS 5000
+#define TLS_STORE_POLL_MS 50
+
 static SSL *server_tls_management_accept(int fd)
 {
    if (fd < 0)
@@ -973,6 +982,32 @@ int server_tls_init_default(void)
    char cert[MAX_PATH_LEN], key[MAX_PATH_LEN];
    snprintf(cert, sizeof(cert), "%s/tls/server.crt", config_default_dir());
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
+   /* The ramp reads and writes the store, and the store lives in a module that
+    * attaches on its own schedule -- it connects to the bus socket this daemon
+    * owns, so it cannot even begin until we are listening. Racing it here is
+    * permanent: pki_mtls_ramp_init fails, this returns -1, and TLS stays
+    * DISABLED for the life of the process even though the module attaches a
+    * moment later. Observed as "tls_port set but TLS cert/key not loadable"
+    * with a healthy module running beside it.
+    *
+    * So wait for the store rather than assume it. The bound is short because a
+    * module that is coming attaches in well under a second; a module that is
+    * not coming leaves TLS disabled exactly as before, having cost that second
+    * once at startup. */
+   if (config_server_api_mtls() > 0)
+   {
+      for (int waited_ms = 0; waited_ms < TLS_STORE_WAIT_MS && !db1_store_probe();
+           waited_ms += TLS_STORE_POLL_MS)
+      {
+         struct timespec ts = {0, TLS_STORE_POLL_MS * 1000000L};
+         nanosleep(&ts, NULL);
+      }
+      if (!db1_store_probe())
+         aimee_log(LOG_WARN, "server.tls",
+                   "the store did not answer within %dms; the mTLS ramp needs it, so TLS "
+                   "will be refused below",
+                   TLS_STORE_WAIT_MS);
+   }
    int effective_mtls = pki_mtls_ramp_init(config_server_api_mtls());
    if (effective_mtls < 0)
       return -1;
