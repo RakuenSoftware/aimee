@@ -2231,3 +2231,175 @@ aimee_module_call_result_t aimee_db2_prospective_by_trigger_terms_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_relations_for_entity_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *entity, uint32_t limit, aimee_db2_relations_for_entity_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RELATIONS_FOR_ENTITY_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_RELATIONS_FOR_ENTITY_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_RELATIONS_FOR_ENTITY_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_relations_for_entity_request_encode(entity, limit, request, sizeof(request),
+                                                     &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RELATIONS_FOR_ENTITY,
+            AIMEE_DB2_STAGE_RELATIONS_FOR_ENTITY, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_relations_for_entity_reply_decode(response, response_len, rows, capacity, count) !=
+       0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_relations_search_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *relation_query, uint32_t limit, aimee_db2_relations_search_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RELATIONS_SEARCH_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_RELATIONS_SEARCH_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_RELATIONS_SEARCH_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_relations_search_request_encode(relation_query, limit, request, sizeof(request),
+                                                 &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RELATIONS_SEARCH, AIMEE_DB2_STAGE_RELATIONS_SEARCH,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_relations_search_reply_decode(response, response_len, rows, capacity, count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_relations_search_as_of_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *relation_query, const char *as_of, uint32_t limit,
+    aimee_db2_relations_search_as_of_row_t *rows, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_relations_search_as_of_request_encode(relation_query, as_of, limit, request,
+                                                       sizeof(request), &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RELATIONS_SEARCH_AS_OF,
+            AIMEE_DB2_STAGE_RELATIONS_SEARCH_AS_OF, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_relations_search_as_of_reply_decode(response, response_len, rows, capacity,
+                                                     count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_relations_supporting_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *entity_token, uint32_t limit, aimee_db2_relations_supporting_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RELATIONS_SUPPORTING_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_RELATIONS_SUPPORTING_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_RELATIONS_SUPPORTING_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_relations_supporting_request_encode(entity_token, limit, request, sizeof(request),
+                                                     &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RELATIONS_SUPPORTING,
+            AIMEE_DB2_STAGE_RELATIONS_SUPPORTING, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_relations_supporting_reply_decode(response, response_len, rows, capacity, count) !=
+       0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}

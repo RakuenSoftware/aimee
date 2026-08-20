@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "b56dda7a92b6651f438b34b67018215e274b3c752a9c3fe95074fd36b9e60160"
+const ContractSHA256 = "4b999764042e75e6331c00de98d16d547e3b2d3bc4dbe97058fb1e2d9aaca144"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1250,6 +1250,249 @@ func DecodeProspectiveByTriggerTermsRequest(request []byte) (string, uint32, err
 		return "", 0, ErrMalformedEnvelope
 	}
 	return turnText, limit, nil
+}
+
+const EventRelationsForEntity = EventMemory
+const StageRelationsForEntity = FamilyMemory
+const OperationRelationsForEntity uint32 = 77
+const RelationsForEntityEntityMin = 1
+const RelationsForEntityEntityMax = 127
+const RelationsForEntityLimitMin uint32 = 0
+const RelationsForEntityLimitMax uint32 = 256
+
+// EncodeRelationsForEntityRequest writes the schema relations_for_entity declares, in order.
+func EncodeRelationsForEntityRequest(entity string, limit uint32) ([]byte, error) {
+	if len(entity) < RelationsForEntityEntityMin || len(entity) > RelationsForEntityEntityMax || hasNUL(entity) ||
+		limit < RelationsForEntityLimitMin || limit > RelationsForEntityLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, RelationsForEntityEntityMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRelationsForEntity, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRelationsForEntityRequest reads it back, checking each field against its own bound.
+func DecodeRelationsForEntityRequest(request []byte) (string, uint32, error) {
+	var entity string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRelationsForEntity || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, RelationsForEntityEntityMax); err != nil ||
+		len(entity) < RelationsForEntityEntityMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < RelationsForEntityLimitMin || limit > RelationsForEntityLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entity, limit, nil
+}
+
+const EventRelationsSearch = EventMemory
+const StageRelationsSearch = FamilyMemory
+const OperationRelationsSearch uint32 = 78
+const RelationsSearchRelationQueryMin = 1
+const RelationsSearchRelationQueryMax = 255
+const RelationsSearchLimitMin uint32 = 0
+const RelationsSearchLimitMax uint32 = 256
+
+// EncodeRelationsSearchRequest writes the schema relations_search declares, in order.
+func EncodeRelationsSearchRequest(relationQuery string, limit uint32) ([]byte, error) {
+	if len(relationQuery) < RelationsSearchRelationQueryMin || len(relationQuery) > RelationsSearchRelationQueryMax || hasNUL(relationQuery) ||
+		limit < RelationsSearchLimitMin || limit > RelationsSearchLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, relationQuery, RelationsSearchRelationQueryMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRelationsSearch, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRelationsSearchRequest reads it back, checking each field against its own bound.
+func DecodeRelationsSearchRequest(request []byte) (string, uint32, error) {
+	var relationQuery string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRelationsSearch || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if relationQuery, err = takeRowText(payload, &cursor, RelationsSearchRelationQueryMax); err != nil ||
+		len(relationQuery) < RelationsSearchRelationQueryMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < RelationsSearchLimitMin || limit > RelationsSearchLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return relationQuery, limit, nil
+}
+
+const EventRelationsSearchAsOf = EventMemory
+const StageRelationsSearchAsOf = FamilyMemory
+const OperationRelationsSearchAsOf uint32 = 79
+const RelationsSearchAsOfRelationQueryMin = 1
+const RelationsSearchAsOfRelationQueryMax = 255
+const RelationsSearchAsOfAsOfMin = 1
+const RelationsSearchAsOfAsOfMax = 31
+const RelationsSearchAsOfLimitMin uint32 = 0
+const RelationsSearchAsOfLimitMax uint32 = 256
+
+// EncodeRelationsSearchAsOfRequest writes the schema relations_search_as_of declares, in order.
+func EncodeRelationsSearchAsOfRequest(relationQuery string, asOf string, limit uint32) ([]byte, error) {
+	if len(relationQuery) < RelationsSearchAsOfRelationQueryMin || len(relationQuery) > RelationsSearchAsOfRelationQueryMax || hasNUL(relationQuery) ||
+		len(asOf) < RelationsSearchAsOfAsOfMin || len(asOf) > RelationsSearchAsOfAsOfMax || hasNUL(asOf) ||
+		limit < RelationsSearchAsOfLimitMin || limit > RelationsSearchAsOfLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, relationQuery, RelationsSearchAsOfRelationQueryMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, asOf, RelationsSearchAsOfAsOfMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRelationsSearchAsOf, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRelationsSearchAsOfRequest reads it back, checking each field against its own bound.
+func DecodeRelationsSearchAsOfRequest(request []byte) (string, string, uint32, error) {
+	var relationQuery string
+	var asOf string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRelationsSearchAsOf || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if relationQuery, err = takeRowText(payload, &cursor, RelationsSearchAsOfRelationQueryMax); err != nil ||
+		len(relationQuery) < RelationsSearchAsOfRelationQueryMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if asOf, err = takeRowText(payload, &cursor, RelationsSearchAsOfAsOfMax); err != nil ||
+		len(asOf) < RelationsSearchAsOfAsOfMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < RelationsSearchAsOfLimitMin || limit > RelationsSearchAsOfLimitMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return relationQuery, asOf, limit, nil
+}
+
+const EventRelationsSupporting = EventMemory
+const StageRelationsSupporting = FamilyMemory
+const OperationRelationsSupporting uint32 = 80
+const RelationsSupportingEntityTokenMin = 1
+const RelationsSupportingEntityTokenMax = 127
+const RelationsSupportingLimitMin uint32 = 0
+const RelationsSupportingLimitMax uint32 = 256
+
+// EncodeRelationsSupportingRequest writes the schema relations_supporting declares, in order.
+func EncodeRelationsSupportingRequest(entityToken string, limit uint32) ([]byte, error) {
+	if len(entityToken) < RelationsSupportingEntityTokenMin || len(entityToken) > RelationsSupportingEntityTokenMax || hasNUL(entityToken) ||
+		limit < RelationsSupportingLimitMin || limit > RelationsSupportingLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entityToken, RelationsSupportingEntityTokenMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRelationsSupporting, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRelationsSupportingRequest reads it back, checking each field against its own bound.
+func DecodeRelationsSupportingRequest(request []byte) (string, uint32, error) {
+	var entityToken string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRelationsSupporting || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entityToken, err = takeRowText(payload, &cursor, RelationsSupportingEntityTokenMax); err != nil ||
+		len(entityToken) < RelationsSupportingEntityTokenMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < RelationsSupportingLimitMin || limit > RelationsSupportingLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entityToken, limit, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -2888,6 +3131,273 @@ func DecodeEntityNeighborsWeightedRequest(request []byte) (string, uint32, uint3
 		return "", 0, 0, ErrMalformedEnvelope
 	}
 	return entity, limit, utilityScoringEnabled, nil
+}
+
+const EventEntityEdgesForEntity = EventIndex
+const StageEntityEdgesForEntity = FamilyIndex
+const OperationEntityEdgesForEntity uint32 = 43
+const EntityEdgesForEntityEntityMin = 1
+const EntityEdgesForEntityEntityMax = 127
+const EntityEdgesForEntityLimitMin uint32 = 0
+const EntityEdgesForEntityLimitMax uint32 = 256
+
+// EncodeEntityEdgesForEntityRequest writes the schema entity_edges_for_entity declares, in order.
+func EncodeEntityEdgesForEntityRequest(entity string, limit uint32) ([]byte, error) {
+	if len(entity) < EntityEdgesForEntityEntityMin || len(entity) > EntityEdgesForEntityEntityMax || hasNUL(entity) ||
+		limit < EntityEdgesForEntityLimitMin || limit > EntityEdgesForEntityLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityEdgesForEntityEntityMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityEdgesForEntity, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityEdgesForEntityRequest reads it back, checking each field against its own bound.
+func DecodeEntityEdgesForEntityRequest(request []byte) (string, uint32, error) {
+	var entity string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityEdgesForEntity || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityEdgesForEntityEntityMax); err != nil ||
+		len(entity) < EntityEdgesForEntityEntityMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < EntityEdgesForEntityLimitMin || limit > EntityEdgesForEntityLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entity, limit, nil
+}
+
+const EventEntityEdgesByToken = EventIndex
+const StageEntityEdgesByToken = FamilyIndex
+const OperationEntityEdgesByToken uint32 = 44
+const EntityEdgesByTokenTokenMin = 1
+const EntityEdgesByTokenTokenMax = 127
+const EntityEdgesByTokenLimitMin uint32 = 0
+const EntityEdgesByTokenLimitMax uint32 = 256
+
+// EncodeEntityEdgesByTokenRequest writes the schema entity_edges_by_token declares, in order.
+func EncodeEntityEdgesByTokenRequest(token string, limit uint32) ([]byte, error) {
+	if len(token) < EntityEdgesByTokenTokenMin || len(token) > EntityEdgesByTokenTokenMax || hasNUL(token) ||
+		limit < EntityEdgesByTokenLimitMin || limit > EntityEdgesByTokenLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, token, EntityEdgesByTokenTokenMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityEdgesByToken, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityEdgesByTokenRequest reads it back, checking each field against its own bound.
+func DecodeEntityEdgesByTokenRequest(request []byte) (string, uint32, error) {
+	var token string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityEdgesByToken || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if token, err = takeRowText(payload, &cursor, EntityEdgesByTokenTokenMax); err != nil ||
+		len(token) < EntityEdgesByTokenTokenMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < EntityEdgesByTokenLimitMin || limit > EntityEdgesByTokenLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return token, limit, nil
+}
+
+const EventEntityTopTriples = EventIndex
+const StageEntityTopTriples = FamilyIndex
+const OperationEntityTopTriples uint32 = 45
+
+
+// EncodeEntityTopTriplesRequest writes the schema entity_top_triples declares, in order.
+func EncodeEntityTopTriplesRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationEntityTopTriples, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityTopTriplesRequest reads it back, checking each field against its own bound.
+func DecodeEntityTopTriplesRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityTopTriples || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventProjectionEdges = EventIndex
+const StageProjectionEdges = FamilyIndex
+const OperationProjectionEdges uint32 = 46
+const ProjectionEdgesProjectMin = 1
+const ProjectionEdgesProjectMax = 127
+const ProjectionEdgesLimitMin uint32 = 0
+const ProjectionEdgesLimitMax uint32 = 256
+
+// EncodeProjectionEdgesRequest writes the schema projection_edges declares, in order.
+func EncodeProjectionEdgesRequest(project string, limit uint32) ([]byte, error) {
+	if len(project) < ProjectionEdgesProjectMin || len(project) > ProjectionEdgesProjectMax || hasNUL(project) ||
+		limit < ProjectionEdgesLimitMin || limit > ProjectionEdgesLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, ProjectionEdgesProjectMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProjectionEdges, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectionEdgesRequest reads it back, checking each field against its own bound.
+func DecodeProjectionEdgesRequest(request []byte) (string, uint32, error) {
+	var project string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectionEdges || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, ProjectionEdgesProjectMax); err != nil ||
+		len(project) < ProjectionEdgesProjectMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < ProjectionEdgesLimitMin || limit > ProjectionEdgesLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return project, limit, nil
+}
+
+const EventProjectionEdgesForGeneration = EventIndex
+const StageProjectionEdgesForGeneration = FamilyIndex
+const OperationProjectionEdgesForGeneration uint32 = 47
+const ProjectionEdgesForGenerationProjectionGenerationMin uint64 = 0
+const ProjectionEdgesForGenerationProjectionGenerationMax uint64 = 9223372036854775807
+const ProjectionEdgesForGenerationLimitMin uint32 = 0
+const ProjectionEdgesForGenerationLimitMax uint32 = 256
+
+// EncodeProjectionEdgesForGenerationRequest writes the schema projection_edges_for_generation declares, in order.
+func EncodeProjectionEdgesForGenerationRequest(projectionGeneration uint64, limit uint32) ([]byte, error) {
+	if projectionGeneration < ProjectionEdgesForGenerationProjectionGenerationMin || projectionGeneration > ProjectionEdgesForGenerationProjectionGenerationMax ||
+		limit < ProjectionEdgesForGenerationLimitMin || limit > ProjectionEdgesForGenerationLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var projectionGenerationBytes [8]byte
+	binary.LittleEndian.PutUint64(projectionGenerationBytes[:], projectionGeneration)
+	payload = append(payload, projectionGenerationBytes[:]...)
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProjectionEdgesForGeneration, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectionEdgesForGenerationRequest reads it back, checking each field against its own bound.
+func DecodeProjectionEdgesForGenerationRequest(request []byte) (uint64, uint32, error) {
+	var projectionGeneration uint64
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectionEdgesForGeneration || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	projectionGeneration = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if projectionGeneration < ProjectionEdgesForGenerationProjectionGenerationMin || projectionGeneration > ProjectionEdgesForGenerationProjectionGenerationMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < ProjectionEdgesForGenerationLimitMin || limit > ProjectionEdgesForGenerationLimitMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return projectionGeneration, limit, nil
 }
 
 const EventTraceMiningRecord = EventLearning
@@ -6027,6 +6537,68 @@ func DecodeDocumentChunkIdsRequest(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return project, filePath, nil
+}
+
+const EventTaskEdges = EventOrganization
+const StageTaskEdges = FamilyOrganization
+const OperationTaskEdges uint32 = 26
+const TaskEdgesTaskIDMin uint64 = 0
+const TaskEdgesTaskIDMax uint64 = 9223372036854775807
+const TaskEdgesLimitMin uint32 = 0
+const TaskEdgesLimitMax uint32 = 256
+
+// EncodeTaskEdgesRequest writes the schema task_edges declares, in order.
+func EncodeTaskEdgesRequest(taskID uint64, limit uint32) ([]byte, error) {
+	if taskID < TaskEdgesTaskIDMin || taskID > TaskEdgesTaskIDMax ||
+		limit < TaskEdgesLimitMin || limit > TaskEdgesLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var taskIDBytes [8]byte
+	binary.LittleEndian.PutUint64(taskIDBytes[:], taskID)
+	payload = append(payload, taskIDBytes[:]...)
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationTaskEdges, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTaskEdgesRequest reads it back, checking each field against its own bound.
+func DecodeTaskEdgesRequest(request []byte) (uint64, uint32, error) {
+	var taskID uint64
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskEdges || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	taskID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if taskID < TaskEdgesTaskIDMin || taskID > TaskEdgesTaskIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < TaskEdgesLimitMin || limit > TaskEdgesLimitMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return taskID, limit, nil
 }
 
 const EventEnrollmentActive = EventCustody

@@ -2003,6 +2003,98 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(directive_lexical_count == 0);
 
+   /* Ten more listings, against tables with nothing in them. Each proves its
+    * own decoder, handler and reply encoder rather than a value: the rows are
+    * wide enough that all ten allocate their buffers on both sides.
+    */
+   static aimee_db2_relations_for_entity_row_t
+       relations_for_entity_rows[AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS];
+   uint32_t relations_for_entity_count = 99;
+   assert(aimee_db2_relations_for_entity_call(
+              call_client, &client, 9301, 0, "replay-entity", 8u, relations_for_entity_rows,
+              AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS, &relations_for_entity_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(relations_for_entity_count == 0);
+
+   static aimee_db2_relations_search_row_t
+       relations_search_rows[AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS];
+   uint32_t relations_search_count = 99;
+   assert(aimee_db2_relations_search_call(
+              call_client, &client, 9302, 0, "replay", 8u, relations_search_rows,
+              AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS, &relations_search_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(relations_search_count == 0);
+
+   static aimee_db2_relations_search_as_of_row_t
+       relations_search_as_of_rows[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_MAX_ROWS];
+   uint32_t relations_search_as_of_count = 99;
+   assert(aimee_db2_relations_search_as_of_call(
+              call_client, &client, 9303, 0, "replay", "2026-01-01T00:00:00Z", 8u,
+              relations_search_as_of_rows, AIMEE_DB2_RELATIONS_SEARCH_AS_OF_MAX_ROWS,
+              &relations_search_as_of_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(relations_search_as_of_count == 0);
+
+   static aimee_db2_relations_supporting_row_t
+       relations_supporting_rows[AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS];
+   uint32_t relations_supporting_count = 99;
+   assert(aimee_db2_relations_supporting_call(
+              call_client, &client, 9304, 0, "replay-entity", 8u, relations_supporting_rows,
+              AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS, &relations_supporting_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(relations_supporting_count == 0);
+
+   static aimee_db2_entity_edges_for_entity_row_t
+       entity_edges_for_entity_rows[AIMEE_DB2_ENTITY_EDGES_FOR_ENTITY_MAX_ROWS];
+   uint32_t entity_edges_for_entity_count = 99;
+   assert(aimee_db2_entity_edges_for_entity_call(
+              call_client, &client, 9305, 0, "replay-entity", 8u, entity_edges_for_entity_rows,
+              AIMEE_DB2_ENTITY_EDGES_FOR_ENTITY_MAX_ROWS, &entity_edges_for_entity_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(entity_edges_for_entity_count == 0);
+
+   static aimee_db2_entity_edges_by_token_row_t
+       entity_edges_by_token_rows[AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS];
+   uint32_t entity_edges_by_token_count = 99;
+   assert(aimee_db2_entity_edges_by_token_call(
+              call_client, &client, 9306, 0, "replay-token", 8u, entity_edges_by_token_rows,
+              AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS, &entity_edges_by_token_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(entity_edges_by_token_count == 0);
+
+   static aimee_db2_entity_top_triples_row_t
+       entity_top_triples_rows[AIMEE_DB2_ENTITY_TOP_TRIPLES_MAX_ROWS];
+   uint32_t entity_top_triples_count = 99;
+   assert(aimee_db2_entity_top_triples_call(call_client, &client, 9307, 0, entity_top_triples_rows,
+                                            AIMEE_DB2_ENTITY_TOP_TRIPLES_MAX_ROWS,
+                                            &entity_top_triples_count, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(entity_top_triples_count == 0);
+
+   static aimee_db2_projection_edges_row_t
+       projection_edges_rows[AIMEE_DB2_PROJECTION_EDGES_MAX_ROWS];
+   uint32_t projection_edges_count = 99;
+   assert(aimee_db2_projection_edges_call(
+              call_client, &client, 9308, 0, "demo", 8u, projection_edges_rows,
+              AIMEE_DB2_PROJECTION_EDGES_MAX_ROWS, &projection_edges_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(projection_edges_count == 0);
+
+   static aimee_db2_projection_edges_for_generation_row_t
+       projection_edges_for_generation_rows[AIMEE_DB2_PROJECTION_EDGES_FOR_GENERATION_MAX_ROWS];
+   uint32_t projection_edges_for_generation_count = 99;
+   assert(aimee_db2_projection_edges_for_generation_call(
+              call_client, &client, 9309, 0, 4242, 8u, projection_edges_for_generation_rows,
+              AIMEE_DB2_PROJECTION_EDGES_FOR_GENERATION_MAX_ROWS,
+              &projection_edges_for_generation_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(projection_edges_for_generation_count == 0);
+
+   static aimee_db2_task_edges_row_t task_edges_rows[AIMEE_DB2_TASK_EDGES_MAX_ROWS];
+   uint32_t task_edges_count = 99;
+   assert(aimee_db2_task_edges_call(call_client, &client, 9310, 0, 4242, 8u, task_edges_rows,
+                                    AIMEE_DB2_TASK_EDGES_MAX_ROWS, &task_edges_count, NULL,
+                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(task_edges_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

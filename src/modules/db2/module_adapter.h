@@ -313,6 +313,16 @@ typedef struct
    int (*directive_by_entity)(const char *entity_lowered, memory_directive_t *out, int max);
    int (*directive_by_file)(const char *file_anchor, memory_directive_t *out, int max);
    int (*directive_by_lexical)(const char *match_clause, memory_directive_t *out, int max);
+   int (*relations_for_entity)(const char *entity, int limit, memory_relation_t *out, int max);
+   int (*relations_search)(const char *relation_query, int limit, memory_relation_t *out, int max);
+   int (*relations_search_as_of)(const char *relation_query, const char *as_of, int limit, memory_relation_t *out, int max);
+   int (*relations_supporting)(const char *entity_token, int limit, memory_relation_t *out, int max);
+   int (*entity_edges_for_entity)(const char *entity, edge_t *out, int max);
+   int (*entity_edges_by_token)(const char *token, edge_t *out, int max, int limit_sql);
+   int (*entity_top_triples)(edge_t *out, int max);
+   int (*projection_edges)(const char *project, code_projection_edge_t *out, int max);
+   int (*projection_edges_for_generation)(int64_t generation, code_projection_edge_t *out, int max);
+   int (*task_edges)(int64_t task_id, task_edge_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

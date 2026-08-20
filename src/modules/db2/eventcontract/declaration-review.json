@@ -444,6 +444,22 @@
       "reason": "The typed index.projection_generations_list operation lists a project's projection generations, newest first. Unlike the reads beside it nothing here is narrowed to what is current: pending, visible and superseded generations all appear, and the project is matched by name without asking whether it is still current. That is what makes it useful for telling a caller which generations it could have asked for."
     },
     {
+      "symbol": "db2_code_projection_list_edges",
+      "signature_sha256": "a693521ec01955722923f89fb36d797dfe6a5fd9ae66a73fc155884fd2ba2cc3",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.projection_edges operation lists a project's visible code projection edges. The structural weight is not a column: the module derives it from the relation name, so an unrecognised relation weighs one and a caller cannot tell that from a relation genuinely worth one. Only the visible generation of a current project is listed, so a project mid-projection has no edges here."
+    },
+    {
+      "symbol": "db2_code_projection_list_edges_for_gen",
+      "signature_sha256": "a4c9bdc6e52fe2487f4948846e7372ab9753ed5e79a5039f4b4e9e46ec5c9906",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.projection_edges_for_generation operation lists one generation's edges by identifier. Unlike index.projection_edges beside it nothing here asks whether the generation is visible or the project current, which is what makes it usable for comparing two generations -- and what makes it able to return edges no reader should treat as the truth. The structural weight is derived from the relation name, not stored."
+    },
+    {
       "symbol": "db2_code_projection_project_fingerprint",
       "signature_sha256": "38a9655ba772d8e8079d09264d5e0fd771ff3fe8e0a11281c01878f5220243fa",
       "disposition": "wire-operation",
@@ -772,6 +788,14 @@
       "reason": "The typed index.entity_edge_bump_utility operation adjusts the utility of every edge touching an entity -- at either end, by the same amount, in one statement, with no bound on how many rows that is. Each result is clamped into the range the column keeps, so a delta past it moves an edge to the limit rather than being refused, and repeating the call stops changing anything once every edge is pinned. The reply says the statement ran and never how many edges moved."
     },
     {
+      "symbol": "db2_entity_edge_list_by_entity",
+      "signature_sha256": "fa2b9ca7023769e1f8707f7519f66960095e02d375ca5b5bf9ad5f5160f70d18",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_edges_for_entity operation lists the edges touching an entity, with the identifier and endpoints of each. Both directions are unioned without an ORDER BY, so when the limit bites, which edges come back is whatever the database returned first. Semantic edges are excluded, and the endpoints are matched exactly rather than case-insensitively."
+    },
+    {
       "symbol": "db2_entity_edge_neighbors",
       "signature_sha256": "2b46618b7faf8b37b8172eded2ba685bd08a1bbec39d710c09643d1dae982429",
       "disposition": "wire-operation",
@@ -818,6 +842,22 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_edge_prune_orphans operation replaces the maintenance pass that drops entity edges no surviving memory references. The tiers that count as a reference are fixed policy behind the handler, so a caller cannot widen or narrow what counts as orphaned."
+    },
+    {
+      "symbol": "db2_entity_edge_search_by_token",
+      "signature_sha256": "c7ccaf29cb21b2d9cc8367a28f3a7bf802c9d18269fd88a62918aa18e250c24d",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_edges_by_token operation finds the edges where a token is either endpoint or the relation itself. That third comparison is what separates it from index.entity_edges_for_entity beside it: a token naming a relation matches every edge of that kind. The comparison is case-insensitive, unlike that operation's, and the heaviest edges come first."
+    },
+    {
+      "symbol": "db2_entity_edge_top_distinct_triples",
+      "signature_sha256": "d6cb9c874d4e32249888d960abbd31a18816558bae8904a1a712c0aa10fe3249",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_top_triples operation lists the heaviest distinct source-relation-target triples across the whole graph. The identifier is selected as a literal zero, because a distinct triple may stand for several edges -- so unlike every other edge listing, no row here names an edge a caller could read back. The row shape is shared with those listings, which is the only reason the field is present at all."
     },
     {
       "symbol": "db2_entity_edge_top_partners_by_relation",
@@ -3124,6 +3164,38 @@
       "reason": "Private first half of memory_refresh_episode_relations: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
     },
     {
+      "symbol": "db2_memory_relations_for_entity",
+      "signature_sha256": "3756de5f189a6fd0785f09462d7dbf153b78ea3dd6c6c067cf21412130c9ca8e",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.relations_for_entity operation lists the relations an entity takes part in. Either end matches, and both are compared case-insensitively, so the reply's own source and target say which way each relation points rather than repeating the argument. The order is newest memory first, then heaviest, so the limit keeps the most recent rather than the strongest."
+    },
+    {
+      "symbol": "db2_memory_relations_search",
+      "signature_sha256": "4deb28bf4b4981390df87a2d6d399e105555a633ef0b819b079f4ec3b261b508",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.relations_search operation searches relations by substring across both endpoints, the relation name and the fact text. The query is wrapped in wildcards rather than matched as one, so a short query matches almost every row and the limit decides what a caller sees. Nothing escapes the query, so a percent or underscore in it widens the match further."
+    },
+    {
+      "symbol": "db2_memory_relations_search_as_of",
+      "signature_sha256": "0dc7cfbe860b1e50471c6313acc1a63e23f630b325fbf6f7e660dc858f0cc615",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.relations_search_as_of operation searches relations as they stood at an instant. A relation with an empty start stamp counts as valid before the instant and one with an empty end stamp as valid after it, so a relation with neither is returned for every instant -- absence reads as always rather than never. The stamps are compared as text, so a differently formatted instant compares wrongly rather than failing."
+    },
+    {
+      "symbol": "db2_memory_relations_supporting",
+      "signature_sha256": "154e60eced5830c53dc410ca1522de7ab5806749d3d2760de74d01a91a1328bc",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.relations_supporting operation finds the relations that carry a stated fact about an entity. It differs from memory.relations_for_entity twice over: the token matches either endpoint as a substring rather than exactly, and a relation whose fact text is empty is skipped, because a relation with nothing written on it supports nothing."
+    },
+    {
       "symbol": "db2_memory_row_insert_ex",
       "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
       "disposition": "private-db2",
@@ -3674,6 +3746,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.task_delete operation removes a task and its edges. It runs two statements with no transaction and ignores whether the edge delete succeeded, so a caller can be told the task is gone while its edges remain. The schema's foreign key cascades the edges anyway, which is why the explicit delete looked safe to ignore; the catalog records that the pair is not atomic instead of leaving that reasoning in a comment."
+    },
+    {
+      "symbol": "db2_task_get_edges",
+      "signature_sha256": "6023e3af0fb1f29570fe8401fc7bb4474daee77db47b72ebdfa2f3416dc0ad36",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_edges operation lists the edges touching a task. The task may be either end, so the reply's own source and target say which way each edge points. Nothing orders the result, so which edges survive the limit is whatever the database returned first, and a task with no edges and a task that does not exist both answer with nothing."
     },
     {
       "symbol": "db2_task_update_state",

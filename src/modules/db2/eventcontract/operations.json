@@ -4761,6 +4761,448 @@
       }
     },
     {
+      "family": "memory",
+      "id": 77,
+      "name": "relations_for_entity",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_memory_relations_for_entity"
+      ],
+      "request": {
+        "policy": {
+          "reads": "either end of the relation may be the entity, and both are compared case-insensitively"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "relation_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "episode_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_weight",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "src_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "relation_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "dst_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "fact_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "valid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "invalid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "relation_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 78,
+      "name": "relations_search",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_memory_relations_search"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the query is a substring of any of four columns, so a short query matches almost everything"
+        },
+        "fields": [
+          {
+            "name": "relation_query",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "relation_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "episode_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_weight",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "src_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "relation_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "dst_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "fact_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "valid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "invalid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "relation_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 79,
+      "name": "relations_search_as_of",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_memory_relations_search_as_of"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a relation with no validity stamp is treated as valid at every instant, not as invalid"
+        },
+        "fields": [
+          {
+            "name": "relation_query",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "as_of",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "relation_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "episode_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_weight",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "src_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "relation_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "dst_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "fact_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "valid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "invalid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "relation_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 80,
+      "name": "relations_supporting",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_memory_relations_supporting"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the token is matched as a substring of either endpoint, and a relation with no fact text is skipped"
+        },
+        "fields": [
+          {
+            "name": "entity_token",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "relation_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "episode_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "relation_weight",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "src_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "relation_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "dst_entity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "fact_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "valid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "invalid_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "relation_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -6696,6 +7138,346 @@
           ]
         },
         "maximum_rows": 64
+      }
+    },
+    {
+      "family": "index",
+      "id": 43,
+      "name": "entity_edges_for_entity",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_entity_edge_list_by_entity"
+      ],
+      "request": {
+        "policy": {
+          "reads": "both directions are unioned and nothing orders the result, so which edges survive the limit is arbitrary"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "edge_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "edge_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "edge_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "edge_relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "edge_target",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "index",
+      "id": 44,
+      "name": "entity_edges_by_token",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_entity_edge_search_by_token"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the token is compared case-insensitively against both endpoints and the relation, and the heaviest edges come first"
+        },
+        "fields": [
+          {
+            "name": "token",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "edge_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "edge_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "edge_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "edge_relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "edge_target",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "index",
+      "id": 45,
+      "name": "entity_top_triples",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_entity_edge_top_distinct_triples"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the identifier is selected as a constant zero, so no row in this reply names an edge that could be read again"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "edge_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "edge_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "edge_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "edge_relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "edge_target",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "index",
+      "id": 46,
+      "name": "projection_edges",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_code_projection_list_edges"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only the project's visible generation is listed, and the weight is derived from the relation name rather than stored"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "structural_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "projection_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "projection_relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "projection_target",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "index",
+      "id": 47,
+      "name": "projection_edges_for_generation",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_code_projection_list_edges_for_gen"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the generation is read by identifier whatever its state, so a pending or superseded one lists just as a visible one does"
+        },
+        "fields": [
+          {
+            "name": "projection_generation",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "structural_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "projection_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "projection_relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "projection_target",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            }
+          ]
+        },
+        "maximum_rows": 256
       }
     },
     {
@@ -9502,6 +10284,73 @@
           ]
         },
         "maximum_rows": 1024
+      }
+    },
+    {
+      "family": "organization",
+      "id": 26,
+      "name": "task_edges",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_task_get_edges"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an edge is returned whichever end the task is, and nothing orders the result"
+        },
+        "fields": [
+          {
+            "name": "task_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "task_edge_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "source_task_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "target_task_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "task_relation",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
       }
     },
     {

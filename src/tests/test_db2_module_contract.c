@@ -2347,6 +2347,93 @@ int db2_directive_match_by_lexical(const char *match_clause, memory_directive_t 
    return 0;
 }
 
+int db2_memory_relations_for_entity(const char *entity, int limit, memory_relation_t *out, int max)
+{
+   (void)entity;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_relations_search(const char *query, int limit, memory_relation_t *out, int max)
+{
+   (void)query;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_relations_search_as_of(const char *query, const char *as_of, int limit,
+                                      memory_relation_t *out, int max)
+{
+   (void)query;
+   (void)as_of;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_relations_supporting(const char *entity_token, int limit, memory_relation_t *out,
+                                    int max)
+{
+   (void)entity_token;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_edge_list_by_entity(const char *entity, edge_t *out, int max)
+{
+   (void)entity;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_edge_search_by_token(const char *token, edge_t *out, int max, int limit_sql)
+{
+   (void)token;
+   (void)out;
+   (void)max;
+   (void)limit_sql;
+   return 0;
+}
+
+int db2_entity_edge_top_distinct_triples(edge_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_code_projection_list_edges(const char *project, code_projection_edge_t *out, int max)
+{
+   (void)project;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_code_projection_list_edges_for_gen(int64_t gen_id, code_projection_edge_t *out, int max)
+{
+   (void)gen_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_task_get_edges(int64_t task_id, task_edge_t *out, int max)
+{
+   (void)task_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

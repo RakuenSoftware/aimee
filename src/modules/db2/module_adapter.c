@@ -895,6 +895,16 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .directive_by_entity = db2_directive_match_by_entity,
        .directive_by_file = db2_directive_match_by_file,
        .directive_by_lexical = db2_directive_match_by_lexical,
+       .relations_for_entity = db2_memory_relations_for_entity,
+       .relations_search = db2_memory_relations_search,
+       .relations_search_as_of = db2_memory_relations_search_as_of,
+       .relations_supporting = db2_memory_relations_supporting,
+       .entity_edges_for_entity = db2_entity_edge_list_by_entity,
+       .entity_edges_by_token = db2_entity_edge_search_by_token,
+       .entity_top_triples = db2_entity_edge_top_distinct_triples,
+       .projection_edges = db2_code_projection_list_edges,
+       .projection_edges_for_generation = db2_code_projection_list_edges_for_gen,
+       .task_edges = db2_task_get_edges,
    };
    return &backend;
 }
@@ -2419,6 +2429,273 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_prospective_by_trigger_terms_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char entity[AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_relations_for_entity_request_decode(request_body, request_len, entity,
+                                                           sizeof(entity), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RELATIONS_FOR_ENTITY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->relations_for_entity)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_relations_for_entity_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_relation_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->relations_for_entity(entity, (int)limit, found,
+                                                           AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].relation_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].relation_memory_id =
+                      found[index].memory_id < 0 ? 0u : (uint64_t)found[index].memory_id;
+                  rows[index].episode_id =
+                      found[index].episode_id < 0 ? 0u : (uint64_t)found[index].episode_id;
+                  rows[index].relation_weight = found[index].weight;
+                  snprintf(rows[index].src_entity, sizeof(rows[index].src_entity), "%s",
+                           found[index].src_entity);
+                  snprintf(rows[index].relation_name, sizeof(rows[index].relation_name), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].dst_entity, sizeof(rows[index].dst_entity), "%s",
+                           found[index].dst_entity);
+                  snprintf(rows[index].fact_text, sizeof(rows[index].fact_text), "%s",
+                           found[index].fact_text);
+                  snprintf(rows[index].valid_at, sizeof(rows[index].valid_at), "%s",
+                           found[index].valid_at);
+                  snprintf(rows[index].invalid_at, sizeof(rows[index].invalid_at), "%s",
+                           found[index].invalid_at);
+                  snprintf(rows[index].relation_created_at, sizeof(rows[index].relation_created_at),
+                           "%s", found[index].created_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_relations_for_entity_reply_encode(rows, count, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char relation_query[AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_relations_search_request_decode(request_body, request_len, relation_query,
+                                                       sizeof(relation_query), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RELATIONS_SEARCH_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->relations_search)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_relations_search_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_relation_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->relations_search(relation_query, (int)limit, found,
+                                                       AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].relation_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].relation_memory_id =
+                      found[index].memory_id < 0 ? 0u : (uint64_t)found[index].memory_id;
+                  rows[index].episode_id =
+                      found[index].episode_id < 0 ? 0u : (uint64_t)found[index].episode_id;
+                  rows[index].relation_weight = found[index].weight;
+                  snprintf(rows[index].src_entity, sizeof(rows[index].src_entity), "%s",
+                           found[index].src_entity);
+                  snprintf(rows[index].relation_name, sizeof(rows[index].relation_name), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].dst_entity, sizeof(rows[index].dst_entity), "%s",
+                           found[index].dst_entity);
+                  snprintf(rows[index].fact_text, sizeof(rows[index].fact_text), "%s",
+                           found[index].fact_text);
+                  snprintf(rows[index].valid_at, sizeof(rows[index].valid_at), "%s",
+                           found[index].valid_at);
+                  snprintf(rows[index].invalid_at, sizeof(rows[index].invalid_at), "%s",
+                           found[index].invalid_at);
+                  snprintf(rows[index].relation_created_at, sizeof(rows[index].relation_created_at),
+                           "%s", found[index].created_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_relations_search_reply_encode(rows, count, response_body,
+                                                        response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char relation_query[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MAX + 1] = "";
+         char as_of[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_relations_search_as_of_request_decode(request_body, request_len,
+                                                             relation_query, sizeof(relation_query),
+                                                             as_of, sizeof(as_of), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->relations_search_as_of)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_relations_search_as_of_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_RELATIONS_SEARCH_AS_OF_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_relation_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_RELATIONS_SEARCH_AS_OF_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written =
+                   backend->relations_search_as_of(relation_query, as_of, (int)limit, found,
+                                                   AIMEE_DB2_RELATIONS_SEARCH_AS_OF_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].relation_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].relation_memory_id =
+                      found[index].memory_id < 0 ? 0u : (uint64_t)found[index].memory_id;
+                  rows[index].episode_id =
+                      found[index].episode_id < 0 ? 0u : (uint64_t)found[index].episode_id;
+                  rows[index].relation_weight = found[index].weight;
+                  snprintf(rows[index].src_entity, sizeof(rows[index].src_entity), "%s",
+                           found[index].src_entity);
+                  snprintf(rows[index].relation_name, sizeof(rows[index].relation_name), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].dst_entity, sizeof(rows[index].dst_entity), "%s",
+                           found[index].dst_entity);
+                  snprintf(rows[index].fact_text, sizeof(rows[index].fact_text), "%s",
+                           found[index].fact_text);
+                  snprintf(rows[index].valid_at, sizeof(rows[index].valid_at), "%s",
+                           found[index].valid_at);
+                  snprintf(rows[index].invalid_at, sizeof(rows[index].invalid_at), "%s",
+                           found[index].invalid_at);
+                  snprintf(rows[index].relation_created_at, sizeof(rows[index].relation_created_at),
+                           "%s", found[index].created_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_relations_search_as_of_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char entity_token[AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_relations_supporting_request_decode(request_body, request_len, entity_token,
+                                                           sizeof(entity_token), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RELATIONS_SUPPORTING_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->relations_supporting)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_relations_supporting_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_relation_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->relations_supporting(entity_token, (int)limit, found,
+                                                           AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].relation_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].relation_memory_id =
+                      found[index].memory_id < 0 ? 0u : (uint64_t)found[index].memory_id;
+                  rows[index].episode_id =
+                      found[index].episode_id < 0 ? 0u : (uint64_t)found[index].episode_id;
+                  rows[index].relation_weight = found[index].weight;
+                  snprintf(rows[index].src_entity, sizeof(rows[index].src_entity), "%s",
+                           found[index].src_entity);
+                  snprintf(rows[index].relation_name, sizeof(rows[index].relation_name), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].dst_entity, sizeof(rows[index].dst_entity), "%s",
+                           found[index].dst_entity);
+                  snprintf(rows[index].fact_text, sizeof(rows[index].fact_text), "%s",
+                           found[index].fact_text);
+                  snprintf(rows[index].valid_at, sizeof(rows[index].valid_at), "%s",
+                           found[index].valid_at);
+                  snprintf(rows[index].invalid_at, sizeof(rows[index].invalid_at), "%s",
+                           found[index].invalid_at);
+                  snprintf(rows[index].relation_created_at, sizeof(rows[index].relation_created_at),
+                           "%s", found[index].created_at);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_relations_supporting_reply_encode(rows, count, response_body,
+                                                            response_capacity, response_len) != 0)
             {
                free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
@@ -4031,6 +4308,273 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char entity[AIMEE_DB2_ENTITY_EDGES_FOR_ENTITY_ENTITY_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_entity_edges_for_entity_request_decode(request_body, request_len, entity,
+                                                              sizeof(entity), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_EDGES_FOR_ENTITY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_edges_for_entity)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_edges_for_entity_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_EDGES_FOR_ENTITY_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               edge_t *found = malloc(sizeof(*found) * AIMEE_DB2_ENTITY_EDGES_FOR_ENTITY_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->entity_edges_for_entity(entity, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].edge_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].edge_weight =
+                      found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
+                  snprintf(rows[index].edge_source, sizeof(rows[index].edge_source), "%s",
+                           found[index].source);
+                  snprintf(rows[index].edge_relation, sizeof(rows[index].edge_relation), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].edge_target, sizeof(rows[index].edge_target), "%s",
+                           found[index].target);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_edges_for_entity_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char token[AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_TOKEN_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_entity_edges_by_token_request_decode(request_body, request_len, token,
+                                                            sizeof(token), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_edges_by_token)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_edges_by_token_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               edge_t *found = malloc(sizeof(*found) * AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->entity_edges_by_token(
+                   token, found, AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].edge_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].edge_weight =
+                      found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
+                  snprintf(rows[index].edge_source, sizeof(rows[index].edge_source), "%s",
+                           found[index].source);
+                  snprintf(rows[index].edge_relation, sizeof(rows[index].edge_relation), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].edge_target, sizeof(rows[index].edge_target), "%s",
+                           found[index].target);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_edges_by_token_reply_encode(rows, count, response_body,
+                                                             response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_entity_top_triples_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_TOP_TRIPLES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_top_triples)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_top_triples_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_TOP_TRIPLES_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               edge_t *found = malloc(sizeof(*found) * AIMEE_DB2_ENTITY_TOP_TRIPLES_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written =
+                   backend->entity_top_triples(found, AIMEE_DB2_ENTITY_TOP_TRIPLES_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].edge_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].edge_weight =
+                      found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
+                  snprintf(rows[index].edge_source, sizeof(rows[index].edge_source), "%s",
+                           found[index].source);
+                  snprintf(rows[index].edge_relation, sizeof(rows[index].edge_relation), "%s",
+                           found[index].relation);
+                  snprintf(rows[index].edge_target, sizeof(rows[index].edge_target), "%s",
+                           found[index].target);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_top_triples_reply_encode(rows, count, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_PROJECTION_EDGES_PROJECT_MAX + 1] = "";
+         uint32_t limit = 0u;
+         if (aimee_db2_projection_edges_request_decode(request_body, request_len, project,
+                                                       sizeof(project), &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROJECTION_EDGES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->projection_edges)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_projection_edges_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_PROJECTION_EDGES_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               code_projection_edge_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_PROJECTION_EDGES_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->projection_edges(project, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].structural_weight = found[index].structural_weight < 0
+                                                      ? 0u
+                                                      : (uint32_t)found[index].structural_weight;
+                  snprintf(rows[index].projection_source, sizeof(rows[index].projection_source),
+                           "%s", found[index].source);
+                  snprintf(rows[index].projection_relation, sizeof(rows[index].projection_relation),
+                           "%s", found[index].relation);
+                  snprintf(rows[index].projection_target, sizeof(rows[index].projection_target),
+                           "%s", found[index].target);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_projection_edges_reply_encode(rows, count, response_body,
+                                                        response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t projection_generation = 0u;
+         uint32_t limit = 0u;
+         if (aimee_db2_projection_edges_for_generation_request_decode(
+                 request_body, request_len, &projection_generation, &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROJECTION_EDGES_FOR_GENERATION_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->projection_edges_for_generation)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_projection_edges_for_generation_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_PROJECTION_EDGES_FOR_GENERATION_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               code_projection_edge_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_PROJECTION_EDGES_FOR_GENERATION_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->projection_edges_for_generation(
+                   (int64_t)projection_generation, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].structural_weight = found[index].structural_weight < 0
+                                                      ? 0u
+                                                      : (uint32_t)found[index].structural_weight;
+                  snprintf(rows[index].projection_source, sizeof(rows[index].projection_source),
+                           "%s", found[index].source);
+                  snprintf(rows[index].projection_relation, sizeof(rows[index].projection_relation),
+                           "%s", found[index].relation);
+                  snprintf(rows[index].projection_target, sizeof(rows[index].projection_target),
+                           "%s", found[index].target);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_projection_edges_for_generation_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -4714,6 +5258,47 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_db2_document_chunk_ids_reply_encode(rows, count, response_body,
                                                           response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t task_id = 0u;
+         uint32_t limit = 0u;
+         if (aimee_db2_task_edges_request_decode(request_body, request_len, &task_id, &limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TASK_EDGES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->task_edges)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_task_edges_row_t rows[AIMEE_DB2_TASK_EDGES_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               task_edge_t *found = malloc(sizeof(*found) * AIMEE_DB2_TASK_EDGES_MAX_ROWS);
+               if (!found)
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               int written = backend->task_edges((int64_t)task_id, found, (int)limit);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].task_edge_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
+                  rows[index].source_task_id =
+                      found[index].source_id < 0 ? 0u : (uint64_t)found[index].source_id;
+                  rows[index].target_task_id =
+                      found[index].target_id < 0 ? 0u : (uint64_t)found[index].target_id;
+                  snprintf(rows[index].task_relation, sizeof(rows[index].task_relation), "%s",
+                           found[index].relation);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_task_edges_reply_encode(rows, count, response_body, response_capacity,
+                                                  response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
             return AIMEE_MODULE_STATUS_OK;
          }
       }

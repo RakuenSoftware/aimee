@@ -12863,6 +12863,66 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_directive_match_by_lexical",
         "policy": {"reads": 200},
     },
+    "relations_for_entity": {
+        "key": ("memory", 77),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_relations_for_entity",
+        "policy": {"reads": 200},
+    },
+    "relations_search": {
+        "key": ("memory", 78),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_relations_search",
+        "policy": {"reads": 200},
+    },
+    "relations_search_as_of": {
+        "key": ("memory", 79),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_relations_search_as_of",
+        "policy": {"reads": 200},
+    },
+    "relations_supporting": {
+        "key": ("memory", 80),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_relations_supporting",
+        "policy": {"reads": 200},
+    },
+    "entity_edges_for_entity": {
+        "key": ("index", 43),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_list_by_entity",
+        "policy": {"reads": 200},
+    },
+    "entity_edges_by_token": {
+        "key": ("index", 44),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_search_by_token",
+        "policy": {"reads": 200},
+    },
+    "entity_top_triples": {
+        "key": ("index", 45),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_top_distinct_triples",
+        "policy": {"reads": 200},
+    },
+    "projection_edges": {
+        "key": ("index", 46),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_list_edges",
+        "policy": {"reads": 200},
+    },
+    "projection_edges_for_generation": {
+        "key": ("index", 47),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_list_edges_for_gen",
+        "policy": {"reads": 200},
+    },
+    "task_edges": {
+        "key": ("organization", 26),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_task_get_edges",
+        "policy": {"reads": 200},
+    },
 }
 
 
