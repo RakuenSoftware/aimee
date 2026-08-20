@@ -1,4 +1,5 @@
 #include <assert.h>
+#include "cJSON.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -873,9 +874,16 @@ static void test_semantic_profile_duplicate_keeps_single_active_entry(void)
    assert(first.id == second.id);
 
    char dup_err[128] = "";
-   aimee_pg_stmt_t *dup_st = aimee_pg_prepare(
-       db2_conn(), "SELECT COUNT(*), use_count, content FROM memories WHERE id = ?1", dup_err,
-       sizeof(dup_err));
+   /* MAX() rather than bare columns beside COUNT(*): sqlite tolerates selecting
+    * ungrouped columns alongside an aggregate, postgres rejects it outright
+    * ("must appear in the GROUP BY clause"). id is the primary key, so the
+    * aggregate is over at most one row and MAX() reads back exactly that row's
+    * value -- same assertion, valid SQL on both engines. */
+   aimee_pg_stmt_t *dup_st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT COUNT(*), COALESCE(MAX(use_count), 0),"
+                        " COALESCE(MAX(content), '') FROM memories WHERE id = ?1",
+                        dup_err, sizeof(dup_err));
    assert(dup_st != NULL);
    aimee_pg_bind_int64(dup_st, "?1", first.id);
    assert(aimee_pg_step(dup_st, dup_err, sizeof(dup_err)) == AIMEE_PG_ROW);
@@ -2380,13 +2388,45 @@ static void test_audit_provenance_emit_captures_version(void)
    char read_id[64] = "", payload[8192] = "";
    assert(db2_demotion_retrieval_event_by_turn("p2-emit-turn", read_id, sizeof read_id, payload,
                                                sizeof payload) == 1);
-   assert(strstr(payload, "\"surfaced_items\"") != NULL);
-   char id_needle[48];
-   snprintf(id_needle, sizeof id_needle, "\"id\":%lld", (long long)id);
-   assert(strstr(payload, id_needle) != NULL);
-   assert(strstr(payload, "\"v\":\"") != NULL); /* a point-in-time version was captured */
-   /* back-compat: surfaced_ids is still present. */
-   assert(strstr(payload, "\"surfaced_ids\"") != NULL);
+   /* Parse rather than substring-match. artifacts.payload is jsonb, and postgres
+    * normalises jsonb on the way back out -- it reorders keys and prints a space
+    * after every colon, so a needle like "\"id\":7" never matches what the server
+    * returns. Against the sqlite shim, where the column is plain text holding the
+    * exact bytes cJSON emitted, the same needle matched; the assertion was
+    * testing the serializer's formatting rather than the payload's content. */
+   cJSON *doc = cJSON_Parse(payload);
+   assert(doc != NULL);
+
+   cJSON *items = cJSON_GetObjectItemCaseSensitive(doc, "surfaced_items");
+   assert(cJSON_IsArray(items));
+
+   int seen_id = 0, seen_version = 0;
+   for (int i = 0; i < cJSON_GetArraySize(items); i++)
+   {
+      cJSON *it = cJSON_GetArrayItem(items, i);
+      cJSON *idj = cJSON_GetObjectItemCaseSensitive(it, "id");
+      if (!cJSON_IsNumber(idj) || (int64_t)idj->valuedouble != id)
+         continue;
+      seen_id = 1;
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
+      /* a point-in-time version was captured */
+      seen_version = cJSON_IsString(v) && v->valuestring && v->valuestring[0];
+   }
+   assert(seen_id);
+   assert(seen_version);
+
+   /* back-compat: surfaced_ids is still present, and still carries the id. */
+   cJSON *ids_json = cJSON_GetObjectItemCaseSensitive(doc, "surfaced_ids");
+   assert(cJSON_IsArray(ids_json));
+   int seen_back_compat_id = 0;
+   for (int i = 0; i < cJSON_GetArraySize(ids_json); i++)
+   {
+      cJSON *n = cJSON_GetArrayItem(ids_json, i);
+      if (cJSON_IsNumber(n) && (int64_t)n->valuedouble == id)
+         seen_back_compat_id = 1;
+   }
+   assert(seen_back_compat_id);
+   cJSON_Delete(doc);
 
    teardown();
    printf("  audit provenance emit captures point-in-time version OK\n");
