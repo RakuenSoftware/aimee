@@ -1863,8 +1863,13 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
        mcp_tool_new(
            "mutate",
            "Perform a typed memory mutation. Verbs: store (write new fact), update "
-           "(replace content in place), supersede (replace with version lineage), "
-           "forget (retire/delete), affirm (positive reinforcement), reject (reduce confidence).",
+           "(replace content, keeping the previous value as a version), supersede "
+           "(replace with version lineage), forget (retire: the memory stops "
+           "answering recall but stays in fact history), affirm (positive "
+           "reinforcement), reject (reduce confidence). No verb here destroys a "
+           "stored value — update and forget both preserve the prior content, which "
+           "stays readable via fact history. Permanently erasing a memory is an "
+           "operator action outside this tool.",
            cJSON_Parse(
                "{\"type\":\"object\",\"properties\":{"
                "\"verb\":{\"type\":\"string\","

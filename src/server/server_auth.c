@@ -41,8 +41,16 @@ const method_policy_t method_registry[] = {
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
-    {"memory.delete", CAP_MEMORY_WRITE, "delete a memory"},
+    /* Destructive: hard-deletes the row and its provenance, and the audit event
+     * carries only the id — the content is not recoverable afterwards. Graded
+     * memory:admin, not memory:write, for the same reason rules.delete is graded
+     * rules:admin below: writing and destroying are different privileges. */
+    {"memory.delete", CAP_MEMORY_ADMIN, "delete a memory"},
     {"memory.supersede", CAP_MEMORY_WRITE, "supersede a memory"},
+    /* update overwrites content with no prior value kept, so it is a write and
+     * must not fall through to the memory.* read prefix below. */
+    {"memory.update", CAP_MEMORY_WRITE, "update memory content"},
+    {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */

@@ -3,6 +3,7 @@
 
 #include "vector_index_ops.h"
 #include "cJSON.h"
+#include "memory_authority.h" /* memory_authority_t: destructive-edit authority on the memory ops */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -252,9 +253,14 @@ extern "C"
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,
                                                      const char *session_id);
-   cJSON *db2_kb_service_memory_delete_json(int64_t id);
+   /* `authority` decides destructiveness, not permission — the caller's
+    * capability was already checked at the entry point. MEMORY_AUTHORITY_MODEL
+    * (the default for a request that omits the field) retires/versions the old
+    * value; MEMORY_AUTHORITY_USER destroys it. */
+   cJSON *db2_kb_service_memory_delete_json(int64_t id, memory_authority_t authority);
    cJSON *db2_kb_service_memory_touch_json(int64_t id);
-   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content);
+   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content,
+                                            memory_authority_t authority);
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
    cJSON *db2_kb_service_memory_stats_json(void);
    cJSON *db2_kb_service_memory_list_conflicts_json(int max);

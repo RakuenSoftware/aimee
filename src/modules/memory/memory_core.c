@@ -239,6 +239,17 @@ int memory_touch(int64_t id)
    return -1;
 }
 
+int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
+                             int64_t *new_id_out)
+{
+   (void)id;
+   (void)content;
+   (void)authority;
+   if (new_id_out)
+      *new_id_out = 0;
+   return -1;
+}
+
 int memory_update_content(int64_t id, const char *content)
 {
    (void)id;
@@ -261,6 +272,13 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
    (void)out;
    (void)max;
    return 0;
+}
+
+int memory_delete_as(int64_t id, memory_authority_t authority)
+{
+   (void)id;
+   (void)authority;
+   return -1;
 }
 
 int memory_delete(int64_t id)

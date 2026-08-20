@@ -146,14 +146,22 @@ typedef struct cJSON cJSON;
  * any capability check. kb then independently requires admin or team-lead authority. */
 #define CAP_GRANT_ADMIN (1u << 18)
 
+/* Destructive memory administration: memory.delete — the ONLY memory operation
+ * that can destroy a stored value rather than version it. Deliberately separate
+ * from CAP_MEMORY_WRITE, mirroring rules.delete/CAP_RULES_ADMIN vs rules.*: a
+ * grant that lets an agent remember must not, by itself, let it forget. It sits
+ * inside CAPS_AUTHENTICATED (an operator-grade bearer may still administer its
+ * own store) but outside the narrower memory:write grants handed to delegates. */
+#define CAP_MEMORY_ADMIN (1u << 19)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x7FFFFu
+#define CAPS_ALL 0xFFFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
 #define CAPS_AUTHENTICATED                                                                         \
    (CAPS_READ_ONLY | CAP_DELEGATE | CAP_TOOL_EXECUTE | CAP_TOOL_BASH | CAP_TOOL_WRITE |            \
-    CAP_MEMORY_WRITE | CAP_RULES_ADMIN | CAP_SESSION_ADMIN)
+    CAP_MEMORY_WRITE | CAP_MEMORY_ADMIN | CAP_RULES_ADMIN | CAP_SESSION_ADMIN)
 
 /* aimee.api.remote_writes levels: how far an authorized TCP bearer may go. The
  * UDS path is always full (CAPS_ALL); these gate the optional TCP listener.

@@ -77,8 +77,46 @@ static cJSON *mcph_search_memory(struct mcp_call *c)
 {
    return tool_search_memory(c->jargs);
 }
+/* The RPC method each mutate verb is equivalent to, so the MCP door is graded by
+ * the same capability table as the NDJSON/HTTP door. Without this, `mutate` was
+ * a second, ungated entrance to memory.delete: the RPC method required a
+ * capability while the MCP tool required none, and the model used the ungated
+ * one. Unknown verbs fall through to tool_memory_mutate's own error. */
+static const char *mcp_mutate_verb_method(const char *verb)
+{
+   if (!verb)
+      return NULL;
+   if (strcmp(verb, "store") == 0)
+      return "memory.store";
+   if (strcmp(verb, "update") == 0)
+      return "memory.update";
+   if (strcmp(verb, "supersede") == 0)
+      return "memory.supersede";
+   if (strcmp(verb, "forget") == 0)
+      return "memory.delete";
+   if (strcmp(verb, "affirm") == 0)
+      return "memory.touch";
+   if (strcmp(verb, "reject") == 0)
+      return "memory.reject";
+   return NULL;
+}
+
 static cJSON *mcph_mutate(struct mcp_call *c)
 {
+   cJSON *jv = cJSON_GetObjectItemCaseSensitive(c->jargs, "verb");
+   const char *verb = cJSON_IsString(jv) ? jv->valuestring : NULL;
+   const char *method = mcp_mutate_verb_method(verb);
+   if (method)
+   {
+      uint32_t required = server_capability_for_method(method);
+      /* No conn means no capabilities to check against (the native surface calls
+       * with conn == NULL). `mutate` is deliberately NOT marked native, so this
+       * is unreachable today — and it denies rather than allows precisely so it
+       * stays that way: an unattributable caller must not be the third ungated
+       * door into the same destructive call. */
+      if (required && (!c->conn || (c->conn->capabilities & required) == 0))
+         return text_content("error: forbidden: insufficient capabilities for this memory verb");
+   }
    return tool_memory_mutate(c->jargs);
 }
 static cJSON *mcph_memory_ask(struct mcp_call *c)

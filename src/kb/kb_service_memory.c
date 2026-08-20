@@ -562,12 +562,24 @@ int kb_handle_memory_effectiveness_stats(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to compute effectiveness stats");
 }
 
+/* Read the request's destructive-edit authority. Only the exact string "user"
+ * grants it: an absent, misspelled, or non-string field means MODEL, so a caller
+ * that does not know about this field cannot destroy anything by accident. */
+static memory_authority_t kb_memory_authority(cJSON *req)
+{
+   cJSON *a = cJSON_GetObjectItemCaseSensitive(req, "authority");
+   if (cJSON_IsString(a) && a->valuestring && strcmp(a->valuestring, "user") == 0)
+      return MEMORY_AUTHORITY_USER;
+   return MEMORY_AUTHORITY_MODEL;
+}
+
 int kb_handle_memory_delete(int fd, cJSON *req)
 {
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "missing id");
-   cJSON *resp = db2_kb_service_memory_delete_json((int64_t)id_j->valuedouble);
+   cJSON *resp =
+       db2_kb_service_memory_delete_json((int64_t)id_j->valuedouble, kb_memory_authority(req));
    return kb_reply_or_error(fd, resp, "failed to delete memory");
 }
 
@@ -586,8 +598,8 @@ int kb_handle_memory_update(int fd, cJSON *req)
    cJSON *content_j = cJSON_GetObjectItemCaseSensitive(req, "content");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(content_j))
       return kb_send_error(fd, "missing id or content");
-   cJSON *resp =
-       db2_kb_service_memory_update_json((int64_t)id_j->valuedouble, content_j->valuestring);
+   cJSON *resp = db2_kb_service_memory_update_json(
+       (int64_t)id_j->valuedouble, content_j->valuestring, kb_memory_authority(req));
    return kb_reply_or_error(fd, resp, "failed to update memory");
 }
 

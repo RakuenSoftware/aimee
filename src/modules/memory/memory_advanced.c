@@ -62,6 +62,13 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    return -1;
 }
 
+int memory_retire(int64_t id, const char *session_id)
+{
+   (void)id;
+   (void)session_id;
+   return -1;
+}
+
 int memory_fact_history(const char *key, memory_t *out, int max)
 {
    (void)key;
@@ -311,6 +318,34 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
       memory_link_create(out->id, old_id, "supersedes");
    }
 
+   return 0;
+}
+
+int memory_retire(int64_t id, const char *session_id)
+{
+   if (id <= 0)
+      return -1;
+
+   memory_t old_mem;
+   if (memory_get(id, &old_mem) != 0)
+      return -1;
+
+   /* Same versioning move as the first half of memory_supersede(), minus the
+    * replacement insert: the row keeps its content but is renamed out of the
+    * live key and stamped valid_until, so recall for `key` no longer returns it
+    * while memory_fact_history() still does. */
+   int version = db2_memory_count_versions(old_mem.key) + 1;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+
+   char versioned_key[560];
+   snprintf(versioned_key, sizeof(versioned_key), "%s#v%d", old_mem.key, version);
+   if (db2_memory_set_versioned_key(id, versioned_key, ts) != 0)
+      return -1;
+
+   add_provenance(id, session_id, "retire", "retired without replacement");
+   memory_audit_emit("memory.retire", id, NULL, NULL, NULL, 0.0, session_id);
    return 0;
 }
 

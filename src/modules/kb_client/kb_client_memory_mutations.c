@@ -553,13 +553,18 @@ int kb_client_memory_touch(int64_t id)
    return rc;
 }
 
-int kb_client_memory_update(int64_t id, const char *content)
+int kb_client_memory_update_as(int64_t id, const char *content, memory_authority_t authority,
+                               int64_t *new_id_out)
 {
+   if (new_id_out)
+      *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "id", (double)id);
    cJSON_AddStringToObject(req, "content", content);
+   if (authority == MEMORY_AUTHORITY_USER)
+      cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.update", req);
    if (!json)
       return -1;
@@ -569,9 +574,19 @@ int kb_client_memory_update(int64_t id, const char *content)
       return -1;
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
+   if (rc == 0 && new_id_out)
+   {
+      cJSON *nid = cJSON_GetObjectItemCaseSensitive(resp, "id");
+      *new_id_out = cJSON_IsNumber(nid) ? (int64_t)nid->valuedouble : id;
+   }
    cJSON_Delete(resp);
    kb_client_memory_audit_note("memory.update", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
+}
+
+int kb_client_memory_update(int64_t id, const char *content)
+{
+   return kb_client_memory_update_as(id, content, MEMORY_AUTHORITY_USER, NULL);
 }
 
 int kb_client_memory_reject(int64_t id, const char *reason)
