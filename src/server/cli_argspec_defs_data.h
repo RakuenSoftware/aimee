@@ -62,10 +62,24 @@
  *   conservatism. cwd and session are two FIXED facts. A file_contents source
  *   would let the server choose WHICH argv slot becomes a file read, so a
  *   server -- or anyone able to answer as one -- could turn a value argument
- *   into a path and have the client post its contents back. That escalation
- *   does not exist for a fact the client already sends:
+ *   into a path and have the client post its contents back. Today the set of
+ *   commands that read a file is fixed in the client binary; served, the server
+ *   would pick it, and `aimee kb search /etc/passwd` could read that file
+ *   instead of searching for it. That escalation does not exist for a fact the
+ *   client already sends:
  *     delegate, delegate.launch, roundtable.review, skill.create, skill.edit,
  *     vault.unlock
+ *
+ *   DO NOT ADD file_contents TO GET THESE SIX. The intended resolution is the
+ *   other direction and it is strictly better: the server and the kb already
+ *   have to keep up with file contents, and the plan is to index and embed
+ *   EVERY tree rather than main alone, with pruning for the ones that go away.
+ *   Once the server holds every tree, these commands send a REF -- a path, a
+ *   tree id -- and the server reads its own copy. The client stops carrying
+ *   bytes at all, which is a smaller client than a file_contents source would
+ *   give and removes the exfiltration path rather than accepting it. Serving
+ *   them the risky way now would be work thrown away, and a capability granted
+ *   that the real design never needs.
  *
  *   SEVEN parse argv themselves, in a loop, without cli_args_parse. They take
  *   `--snapshot X` but NOT `--snapshot=X`, which cli_args_parse accepts and
