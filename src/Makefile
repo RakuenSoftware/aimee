@@ -1534,7 +1534,8 @@ oidc-login-live: ../oidc-login-live
                             $(OBJDIR)/server/oauth_pkce.o \
                             $(OBJDIR)/modules/vault/vault_crypto.o \
                             $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db.o \
-                            $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/cJSON.o
+                            $(OBJDIR)/modules/db1/db_schema.o \
+                            $(OBJDIR)/modules/db1/mgmt_jwks_cache.o $(OBJDIR)/cJSON.o
 	$(CC) -o $@ $^ $(L_SERVER)
 
 .PHONY: write-tier-enforce-live
