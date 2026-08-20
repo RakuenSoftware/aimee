@@ -35,6 +35,7 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
+#include "model_registry.h"                  /* configured/catalog context for model discovery */
 #include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
 #include "http_retry.h"
 #include "wire_fence.h"
@@ -64,6 +65,19 @@
 /* Cap on the running /v1/responses transcript carried between turns via
  * previous_response_id. Bounds memory and the prompt we feed back to the agent. */
 #define OPENAI_RESP_TRANSCRIPT_MAX (32 * 1024)
+
+/* Responses API names this field `max_output_tokens`; `max_tokens` belongs to
+ * Chat Completions. Keep the old spelling as a compatibility fallback, but let
+ * the standard field win when both are present. */
+static int responses_request_max_tokens(const char *body)
+{
+   /* Omitted means "derive from the selected agent/model", not the legacy
+    * 2k Chat Completions default. Pinning every ordinary Responses client to
+    * 2048 made capable delegates truncate even when the client asked for no
+    * such limit. */
+   int legacy = openai_request_int(body, "max_tokens", 0, 32768);
+   return openai_request_int(body, "max_output_tokens", legacy, 32768);
+}
 
 /* Record a dedup cache hit as a non-billable usage_kind=avoided audit row: the
  * provider call was skipped, so the avoided estimated cost is logged separately
@@ -146,6 +160,41 @@ static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
+static int openai_request_has_assistant(const char *body)
+{
+   cJSON *root = body ? cJSON_Parse(body) : NULL;
+   cJSON *items = root ? cJSON_GetObjectItemCaseSensitive(root, "messages") : NULL;
+   if (!cJSON_IsArray(items))
+      items = root ? cJSON_GetObjectItemCaseSensitive(root, "input") : NULL;
+   int found = 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, items)
+   {
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "role"));
+      if (role && strcmp(role, "assistant") == 0)
+      {
+         found = 1;
+         break;
+      }
+   }
+   cJSON_Delete(root);
+   return found;
+}
+
+/* Persona for the LEGACY chat path only.
+ *
+ * When the IR path is live it owns persona placement (ir_stage_persona_instructions
+ * puts it on the first user message), and both share one per-session delivery
+ * claim -- so calling this unguarded would let the flat path win the claim and
+ * silently move placement off the IR on the DEFAULT path. Guarding keeps each
+ * mode delivering through its own seam, still exactly once. */
+static char *legacy_persona_text(const char *text, int conversation_established)
+{
+   if (aimee_ir_path_enabled())
+      return NULL;
+   return aimee_ir_prepend_active_persona_text(text, conversation_established);
+}
+
 static int run_completion(int chat, const char *body, char *resp, int cap)
 {
    char model[64] = "";
@@ -172,7 +221,14 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * so the §4 dedup key must hash it (a stale reply must not be replayed after
     * the injected memory/context changes). On a cache miss it is reused for the
     * provider call below; on a hit it is freed unused. */
+   int first_turn = !chat || !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
 
    /* Resolve the backend BEFORE dedup so the key carries the resolved
     * provider/model — two requests resolving to a different backend must not
@@ -181,27 +237,16 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * agent by name, and is rejected with model_not_found when it matches none
     * (never silently falls back to a different model). */
    agent_t agbuf;
-   agent_t *ag = NULL;
-   if (model[0] && strcmp(model, "aimee") != 0)
-   {
-      /* An explicitly requested model must match a configured agent — never
-       * silently fall back to the default (that would run a different model than
-       * the client asked for and echo the wrong name back). */
-      if (agent_registry_find(model, &agbuf) != 0)
-      {
-         free(pi_env);
-         free(prompt);
-         openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
-         return 404;
-      }
-      ag = &agbuf;
-   }
-   if (!ag && agent_registry_default_primary(&agbuf) == 0)
-      ag = &agbuf;
+   agent_t *ag = agent_registry_resolve_ingress_model(model, &agbuf) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       free(pi_env);
       free(prompt);
+      if (model[0] && strcmp(model, "aimee") != 0)
+      {
+         openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
+         return 404;
+      }
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
@@ -231,14 +276,14 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
              openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
              openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed);
          free(instructions);
-         cJSON_Delete(messages);
-         cJSON_Delete(tools);
          free(pi_env);
          free(prompt);
 
          if (trc != 0)
          {
             agent_free_parsed_response(&parsed);
+            cJSON_Delete(messages);
+            cJSON_Delete(tools);
             openai_format_error(resp, cap, "upstream_error", "completion failed");
             return 502;
          }
@@ -271,6 +316,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
                                                  tcreated, parsed.prompt_tokens,
                                                  parsed.completion_tokens, resp, cap);
          agent_free_parsed_response(&parsed);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
          if (tlen < 0)
          {
             openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
@@ -484,7 +531,27 @@ static void codex_add_model(cJSON *models, const char *slug, const char *descrip
  * registered primary-agent models, alongside the OpenAI `{object,data}` list for
  * other clients. One `models` entry per agent (plus the default "aimee"); the
  * slug is the id Codex puts in the request `model` field to switch models. */
-#define CODEX_DEFAULT_CONTEXT_WINDOW 272000
+#define CODEX_FALLBACK_CONTEXT_WINDOW 32768
+
+/* Codex uses this advertised value to budget and truncate the ordinary API
+ * session.  It therefore has to describe the selected delegate, not Codex's own
+ * historical default.  Prefer the operator's per-agent override, then the model
+ * catalog, and finally a conservative compatibility fallback. */
+static int codex_agent_context_window(const agent_t *agent)
+{
+   if (agent && agent->middleware.context_window > 0)
+      return agent->middleware.context_window;
+   if (agent)
+   {
+      model_capability_t cap;
+      memset(&cap, 0, sizeof cap);
+      if (model_capability_get(agent_catalog_provider(agent), agent->model, &cap) &&
+          cap.context_window > 0)
+         return cap.context_window;
+   }
+   return CODEX_FALLBACK_CONTEXT_WINDOW;
+}
+
 static int codex_models_raw(char *resp, int cap)
 {
    agent_config_t acfg;
@@ -505,7 +572,8 @@ static int codex_models_raw(char *resp, int cap)
 
    /* Always advertise the default "aimee" model, then each named agent. */
    int seen_aimee = 0;
-   codex_add_model(models, "aimee", "Aimee primary agent.", CODEX_DEFAULT_CONTEXT_WINDOW);
+   agent_t *primary = agent_default_primary(&acfg);
+   codex_add_model(models, "aimee", "Aimee primary agent.", codex_agent_context_window(primary));
    cJSON *de = cJSON_CreateObject();
    cJSON_AddStringToObject(de, "id", "aimee");
    cJSON_AddStringToObject(de, "object", "model");
@@ -521,7 +589,8 @@ static int codex_models_raw(char *resp, int cap)
             seen_aimee = 1;
          continue;
       }
-      codex_add_model(models, nm, acfg.agents[i].model, CODEX_DEFAULT_CONTEXT_WINDOW);
+      codex_add_model(models, nm, acfg.agents[i].model,
+                      codex_agent_context_window(&acfg.agents[i]));
       cJSON *e = cJSON_CreateObject();
       cJSON_AddStringToObject(e, "id", nm);
       cJSON_AddStringToObject(e, "object", "model");
@@ -669,30 +738,22 @@ static int responses_handler(const char *body, char *resp, int cap)
    }
 
    agent_t agbuf;
-   agent_t *ag = NULL;
-   if (model[0] && strcmp(model, "aimee") != 0)
-   {
-      /* Explicit model must match a configured agent — no silent fallback. */
-      if (agent_registry_find(model, &agbuf) != 0)
-      {
-         free(prompt);
-         openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
-         return 404;
-      }
-      ag = &agbuf;
-   }
-   if (!ag && agent_registry_default_primary(&agbuf) == 0)
-      ag = &agbuf;
+   agent_t *ag = agent_registry_resolve_ingress_model(model, &agbuf) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       free(prompt);
+      if (model[0] && strcmp(model, "aimee") != 0)
+      {
+         openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
+         return 404;
+      }
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
+   int max_tokens = responses_request_max_tokens(body);
 
    /* Continuation: if previous_response_id names a stored conversation, prepend
     * its transcript so this turn continues it. `full` points at either the bare
@@ -715,10 +776,17 @@ static int responses_handler(const char *body, char *resp, int cap)
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   int first_turn = !prev_id[0] && !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(full);
-   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, full, max_tokens, temperature,
-                                0 /* use_tools: plain chat completion */, &result);
+   /* `full` aliases `prompt` or `combined`, both freed on the exit paths below,
+    * so it must NOT be freed here. Pass the persona-prefixed copy when there is
+    * one and free only that. */
+   char *persona_txt = legacy_persona_text(full, !first_turn);
+   int erc =
+       agent_dispatch_one(ag, NULL, NULL, pi_env, persona_txt ? persona_txt : full, max_tokens,
+                          temperature, 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
+   free(persona_txt);
 
    if (erc != 0 || !result.response)
    {
@@ -787,12 +855,7 @@ static void emit_text_chunk(server_http_sse_emit emit, void *ctx, const char *id
  * 16,720-byte agent. It now asks the registry for just that agent. */
 static int stream_pick_agent(agent_t *out, const char *model)
 {
-   /* An explicitly requested model must match a configured agent. Failing
-    * (rather than falling back to the default) makes callers refuse instead of
-    * silently streaming a different model than the client asked for. */
-   if (model[0] && strcmp(model, "aimee") != 0)
-      return agent_registry_find(model, out);
-   return agent_registry_default_primary(out);
+   return agent_registry_resolve_ingress_model(model, out);
 }
 
 static int chat_stream_handler(const char *body, server_http_sse_emit emit, void *ctx)
@@ -839,8 +902,6 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
          int trc = agent_execute_messages(ag, messages, tools, instructions, max_tokens,
                                           temperature, &parsed);
          free(instructions);
-         cJSON_Delete(messages);
-         cJSON_Delete(tools);
          free(prompt);
 
          emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
@@ -849,6 +910,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
             emit_chunk(emit, ctx, id, model, created, 0, "completion failed", 0);
             emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
             agent_free_parsed_response(&parsed);
+            cJSON_Delete(messages);
+            cJSON_Delete(tools);
             return 0;
          }
 
@@ -884,6 +947,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
             emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
          }
          agent_free_parsed_response(&parsed);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
          return 0;
       }
       free(instructions);
@@ -895,7 +960,14 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   int first_turn = !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
    int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
                                 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
@@ -914,15 +986,17 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
       snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
       if (agent_ingress_accounting_enabled())
          agent_record_token_audit(&result, "", "openai-ingress");
+      text_sanitize_utf8(result.response);
       const char *txt = result.response;
       size_t n = strlen(txt);
-      for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+      for (size_t off = 0; off < n;)
       {
          char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
+         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
          memcpy(seg, txt + off, take);
          seg[take] = '\0';
          emit_chunk(emit, ctx, id, model, created, 0, seg, 0);
+         off += take;
       }
    }
    emit_chunk(emit, ctx, id, model, created, 0, NULL, 1); /* finish frame */
@@ -967,6 +1041,12 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, 0);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
    int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
                                 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
@@ -983,15 +1063,17 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
       snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
       if (agent_ingress_accounting_enabled())
          agent_record_token_audit(&result, "", "openai-ingress");
+      text_sanitize_utf8(result.response);
       const char *txt = result.response;
       size_t n = strlen(txt);
-      for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+      for (size_t off = 0; off < n;)
       {
          char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
+         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
          memcpy(seg, txt + off, take);
          seg[take] = '\0';
          emit_text_chunk(emit, ctx, id, model, created, seg, 0);
+         off += take;
       }
    }
    emit_text_chunk(emit, ctx, id, model, created, "", 1); /* finish frame */
@@ -1040,8 +1122,8 @@ static char *openai_build_body(const agent_t *agent, const delegate_driver_t *dr
 {
    cJSON *req = NULL;
    if (aimee_ir_path_enabled())
-      req =
-          aimee_ir_build_from_chat(agent->model, eff_messages, eff_tools, eff_system, driver->name);
+      req = aimee_ir_build_from_chat(agent->model, eff_messages, eff_tools, eff_system,
+                                     driver->name, tok, temperature);
    if (!req)
       req = driver->build_request(agent, eff_messages, eff_tools, eff_system, tok, temperature);
    if (!req)
@@ -1353,9 +1435,12 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    {
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
          emit(ctx, "response.created", frame);
-      if (openai_format_responses_completed(id, model, "no agent configured", created, 0, 0, 0,
-                                            frame, sizeof(frame)) > 0)
-         emit(ctx, "response.completed", frame);
+      const int explicit_model = model[0] && strcmp(model, "aimee") != 0;
+      if (openai_format_responses_failed(
+              id, model, created, explicit_model ? "model_not_found" : "server_error",
+              explicit_model ? "the requested model is not available" : "no agent configured",
+              frame, sizeof(frame)) > 0)
+         emit(ctx, "response.failed", frame);
       free(instructions);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
@@ -1363,7 +1448,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    }
 
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
+   int max_tokens = responses_request_max_tokens(body);
 
    /* Heal orphaned tool calls/results — each Codex turn is stateless full-history. */
    message_history_repair(messages);
@@ -1456,6 +1541,9 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
          LOG_INFO("completion.gate", "continued incomplete OpenAI Responses repair");
    }
 
+   if (erc == 0 && gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+      LOG_INFO("completion.gate", "continued incomplete OpenAI Responses repair");
+
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
    {
       /* P2c streaming: when gateway_prevent_subagents is ON, run the police
@@ -1486,6 +1574,8 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
 
    {
       /* Text turn: a single assistant message item carrying the content. */
+      if (erc == 0 && parsed.content)
+         text_sanitize_utf8(parsed.content);
       const char *txt =
           (erc == 0 && parsed.content) ? parsed.content : "the model returned no content";
       char item_id[72];
@@ -1495,15 +1585,16 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
          emit(ctx, "response.output_item.added", frame);
 
       size_t n = strlen(txt);
-      for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+      for (size_t off = 0; off < n;)
       {
          char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
+         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
          memcpy(seg, txt + off, take);
          seg[take] = '\0';
          char dframe[OPENAI_STREAM_CHUNK * 6 + 256];
          if (openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe)) > 0)
             emit(ctx, "response.output_text.delta", dframe);
+         off += take;
       }
 
       size_t icap = n * 6 + 512;
@@ -1770,7 +1861,7 @@ static int runs_handler(const char *body, char *resp, int cap)
    }
 
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
+   int max_tokens = responses_request_max_tokens(body);
 
    long created = (long)time(NULL);
    static atomic_ulong g_run_seq = 0; /* connections run concurrently; atomic */

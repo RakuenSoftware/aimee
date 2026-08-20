@@ -961,6 +961,10 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "wfe_proposals_autoscan_enabled", 1);
    if (!cfg->client_integrations_enabled) /* default-on: persist only the opt-out (disable) */
       cJSON_AddBoolToObject(root, "client_integrations_enabled", 0);
+   if (cfg->client_tool_transport_preference[0] &&
+       strcmp(cfg->client_tool_transport_preference, "cli-first") != 0)
+      cJSON_AddStringToObject(root, "client_tool_transport_preference",
+                              cfg->client_tool_transport_preference);
    if (!cfg->audit_action_enabled) /* default-on: persist only the opt-out (disable) */
       cJSON_AddBoolToObject(root, "audit_action_enabled", 0);
    if (cfg->audit_worm_enabled) /* default-off: persist only the opt-in (enable) */

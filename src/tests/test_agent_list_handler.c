@@ -248,6 +248,35 @@ static void test_populated_config_lists_agents(void)
    printf("  PASS: a populated config lists its agents\n");
 }
 
+static void test_delegate_default_is_independent_and_persists(void)
+{
+   set_home_empty();
+   write_agents("{\"default_agent\":\"a1\",\"agents\":["
+                "{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m1\","
+                "\"roles\":[\"code\"]},"
+                "{\"name\":\"qwen\",\"provider\":\"openai\",\"model\":\"qwen\","
+                "\"roles\":[\"all\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   cJSON_AddItemToArray(args, cJSON_CreateString("qwen"));
+   cJSON_AddItemToArray(args, cJSON_CreateString("--delegate-default"));
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0');
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   assert(strcmp(cJSON_GetStringValue(
+                     cJSON_GetObjectItemCaseSensitive(g_last_response, "default_agent")),
+                 "a1") == 0);
+   assert(strcmp(cJSON_GetStringValue(
+                     cJSON_GetObjectItemCaseSensitive(g_last_response, "default_delegate")),
+                 "qwen") == 0);
+   printf("  PASS: preferred delegate is independent from primary and persists\n");
+}
+
 /* primary_only survives parse -> agent_load_config -> server_agent_to_json (the
  * /v1/model/list surface the Web GUI reads to render the checkbox). An agent that
  * omits the field defaults to false. */
@@ -709,6 +738,7 @@ int main(void)
    test_load_failure_is_an_error_not_empty();
    test_empty_config_is_ok_with_empty_array();
    test_populated_config_lists_agents();
+   test_delegate_default_is_independent_and_persists();
    test_primary_only_round_trips();
    test_cli_probe_uses_backend_executor_and_config_discovery();
    test_cli_probe_failure_and_no_run_are_observable();

@@ -307,4 +307,26 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
  * catalogs so the transform stays config-free. */
 void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled);
 
+/* Detect unproductive tool-use loops from the protocol-neutral transcript and
+ * append a neutral recovery suggestion at the threshold where it first becomes
+ * useful.  This is applied to every normal OpenAI/Anthropic session. */
+/* Prepend persona instructions to the first user message, once per conversation.
+ * Returns 1 when placed, 0 otherwise. */
+int aimee_ir_prepend_persona_instructions(aimee_request_t *request, const char *instructions);
+
+char *aimee_ir_prepend_persona_text(const char *text, const char *instructions);
+
+int aimee_ir_stage_session_assist(aimee_request_t *request, void *unused);
+
+typedef struct
+{
+   int tool_calls;
+   int redundant_tool_calls;
+   char intervention[40];
+} aimee_ir_session_metrics_t;
+
+/* Cumulative metrics derivable from an ordinary API transcript.  Evaluation
+ * quality remains external; these are runtime cost/behavior observations. */
+void aimee_ir_session_measure(const aimee_request_t *request, aimee_ir_session_metrics_t *out);
+
 #endif /* DEC_AIMEE_IR_H */

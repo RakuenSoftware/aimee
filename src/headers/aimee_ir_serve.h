@@ -53,9 +53,15 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
  * translation. Assembles a chat request, parses it to the IR, overrides the served
  * model, and builds for the backend named by `driver_name` ("chatgpt" -> Responses,
  * else OpenAI). Returns a new cJSON the caller owns, or NULL to fall back. */
+/* Flat-text persona delivery for the legacy (non-IR) chat path. Claims the
+ * once-per-session delivery, prepends when this is a first turn, and releases the
+ * claim. Returns NULL when the claim state is unreadable so the caller keeps the
+ * original text and stays retry-eligible. */
+char *aimee_ir_prepend_active_persona_text(const char *text, int conversation_established);
+
 struct cJSON *aimee_ir_build_from_chat(const char *agent_model, const struct cJSON *messages,
                                        const struct cJSON *tools, const char *system,
-                                       const char *driver_name);
+                                       const char *driver_name, int max_tokens, double temperature);
 
 /* Slice 3 gate (AIMEE_IR_RESP_PATH env, DEFAULT-OFF): route the OPENAI-WIRE buffered
  * response parse through the IR. Per-wire; anthropic + responses stay on legacy. */

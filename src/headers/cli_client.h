@@ -289,7 +289,7 @@ void cli_v1_manifest_set_for_test(struct cJSON *doc);
  * `detached` workspace, and pushes the file contents to POST /v1/index/ingest;
  * `aimee index scan [path]` re-pushes (all detached workspaces when no path).
  * Return 0 on success. POSIX only (no-op error on Windows). */
-int cli_workspace_add_remote(const char *path);
+int cli_workspace_add_remote(const char *path, int prepare, int json_output);
 int cli_index_scan_remote(int argc, char **argv);
 
 /* Ensure a local repository is present in a remote server's code index. This
@@ -314,6 +314,12 @@ typedef struct
  * Returns 1 if launch metadata was found and parsed, 0 otherwise. */
 int parse_launch_meta(const char *output, launch_meta_t *meta);
 /* Bind one session id and worktree, then exec the client in place. */
+int client_launch_exec(int argc, char **argv);
+
+/* Start any interactive client inside an Aimee-owned session worktree. The
+ * command after an optional `--` is exec'd in place, inheriting one stable
+ * AIMEE_SESSION_ID. This is the client-neutral cwd boundary; SessionStart hooks
+ * only rehydrate context and cannot mutate their parent process directory. */
 int client_launch_exec(int argc, char **argv);
 
 /* Client-local command handlers (run in the client so they see its working

@@ -450,7 +450,7 @@ static cJSON *marshal_agent_args(const char *method, int argc, char **argv)
  * the thin client routes over a remote /v1 endpoint. The route's response is the
  * raw dispatch result (ws_dispatch_args -> loopback_rpc), so it parses identically
  * to the socket path. */
-static cJSON *marshal_workspace_add(int argc, char **argv)
+cJSON *marshal_workspace_add(int argc, char **argv)
 {
    cJSON *req = marshal_agent_args("workspace.add", argc, argv);
    if (!req)
@@ -1508,6 +1508,7 @@ static const struct
     {"wm.list", marshal_wm_list},
     {"wm.set", marshal_wm_set},
     {"workspace.add", marshal_workspace_add},
+    {"workspace.prepare", marshal_workspace_prepare},
     {"workspace.mirror-sync", marshal_workspace_mirror_sync},
     {"worktree.gc", marshal_worktree_gc},
 };

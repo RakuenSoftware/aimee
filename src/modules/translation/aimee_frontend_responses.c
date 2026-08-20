@@ -94,9 +94,26 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       b->text = dupstr(instr);
    }
 
-   /* input items */
+   /* A Responses input can be the shorthand string form or the full flat item
+    * array. Normalize the shorthand to the same user/text IR used by a message
+    * item so protocol-neutral transforms (including first-message persona
+    * placement) cannot depend on which equivalent client shape was chosen. */
    const cJSON *input = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "input");
-   if (input && cJSON_IsArray(input))
+   if (input && cJSON_IsString(input))
+   {
+      int mi = new_message(out, "user");
+      if (mi < 0)
+         goto oom;
+      aimee_message_t *m = &out->messages[mi];
+      aimee_block_t *b = grow1((void **)&m->blocks, &m->n_blocks, sizeof(aimee_block_t));
+      if (!b)
+         goto oom;
+      b->type = AIMEE_BLK_TEXT;
+      b->text = dupstr(input->valuestring);
+      if (!b->text)
+         goto oom;
+   }
+   else if (input && cJSON_IsArray(input))
    {
       int tool_run = -1; /* index of a pending user msg accumulating tool_result blocks */
       const cJSON *item = NULL;

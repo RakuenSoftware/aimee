@@ -461,7 +461,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    }
 
    if (!out->error[0])
-      snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
+      agent_route_failure_message(role, out->error, sizeof(out->error));
    return -1;
 }
 
@@ -640,7 +640,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    agent_t *ag = agent_route(cfg, role);
    if (!ag)
    {
-      snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
+      agent_route_failure_message(role, out->error, sizeof(out->error));
       return -1;
    }
    agent_apply_runtime_config(ag);
@@ -1228,6 +1228,16 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
                   int max_tokens, double temperature, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+   /* A refused route arrives here as NULL, and the three reads below would fault
+    * on it. Routing can now refuse (a routing-module outage is not silently
+    * replaced by a local pick), so callers that used to be handed an agent by
+    * luck reach this with nothing. Say so instead of dying. */
+   if (!agent)
+   {
+      snprintf(out->error, sizeof(out->error), "%s",
+               "no agent was selected for this run; refusing to execute without one");
+      return -1;
+   }
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);

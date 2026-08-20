@@ -486,6 +486,10 @@ static int bootstrap_db2_try_url(const char *url, int save_config, cJSON *resp)
    if (!url || !url[0])
       return -1;
 
+   /* Supply the width BEFORE db2_init, as the daemon and doctor do; bootstrap
+    * was the one path that skipped it, so first provisioning refused. */
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_embedder_dims_current());
    if (db2_init(url) != 0)
       return -1;
 
@@ -592,22 +596,17 @@ static int kb_bootstrap_db2_resolve(cJSON *resp)
 {
    cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
 
-   /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
-    * cached in aimee.yaml from a previous boot. In a container deploy the
-    * runtime injects the current Postgres address every start; a service it
-    * depends on can be recreated onto a NEW bridge IP, so a db2_url persisted on
-    * an earlier boot goes stale. Preferring the cached value (as before) made
-    * the kb connect to the old/wrong address forever — even though the correct
-    * URL was right there in the environment. The successful bootstrap below
-    * re-persists this URL (config_set inside bootstrap_db2_try_url), refreshing
-    * the cache. The cached value is used only as a fallback when AIMEE_DB2_URL is
-    * unset (manual / non-container setups). That precedence now lives in
-    * config_db2_url_effective() rather than being applied to a struct here.
+   /* AIMEE_DB2_URL, when set, overrides any db2_url cached in aimee.yaml from a
+    * previous boot: a container deploy injects the current Postgres address every
+    * start, and a dependency recreated onto a NEW bridge IP makes the cached
+    * value stale, so preferring the cache connected the kb to the wrong address
+    * forever. The cache is only a fallback when the env is unset (manual setups);
+    * the successful bootstrap below re-persists and refreshes it. That precedence
+    * lives in config_db2_url_effective().
     *
-    * `url` is a stable copy for the same reason it always was: try_url used to
-    * write the winner back through the same buffer it was reading, and
-    * snprintf'ing a buffer onto itself is undefined -- on glibc it truncated the
-    * destination to empty, leaving db2_init() with an empty URL. */
+    * `url` is a stable copy because try_url used to write the winner back through
+    * the buffer it was reading, and snprintf onto itself is undefined -- glibc
+    * truncated it to empty, leaving db2_init() with an empty URL. */
    char url[CONFIG_DB2_URL_LEN];
    int have_url = config_db2_url_effective(url, sizeof(url));
 

@@ -155,6 +155,35 @@ static void test_sanitize_utf8(void)
    printf("  PASS: test_sanitize_utf8\n");
 }
 
+static void test_utf8_chunk_len(void)
+{
+   const char *source = "1234567\xe2\x80\x94 XYZ \xf0\x9f\x98\x80 done";
+   char rebuilt[64] = "";
+   size_t total = strlen(source);
+   size_t used = 0;
+
+   while (used < total)
+   {
+      size_t take = text_utf8_chunk_len(source + used, total - used, 8);
+      assert(take > 0 && take <= 8);
+      char chunk[9];
+      memcpy(chunk, source + used, take);
+      chunk[take] = '\0';
+      assert(text_is_valid_utf8(chunk));
+      strncat(rebuilt, chunk, sizeof(rebuilt) - strlen(rebuilt) - 1);
+      used += take;
+   }
+   assert(strcmp(rebuilt, source) == 0);
+
+   assert(text_utf8_chunk_len("ascii", 5, 80) == 5);
+   assert(text_utf8_chunk_len("\xf0\x9f\x98\x80!", 5, 4) == 4);
+   assert(text_utf8_chunk_len("\xf0\x9f\x98\x80!", 5, 3) == 0);
+   assert(text_utf8_chunk_len(NULL, 1, 8) == 0);
+   assert(text_utf8_chunk_len("x", 1, 0) == 0);
+
+   printf("  PASS: test_utf8_chunk_len\n");
+}
+
 static void test_normalize_key(void)
 {
    char buf[256];
@@ -516,6 +545,7 @@ int main(void)
    test_is_likely_path();
    test_trim_partial_utf8();
    test_sanitize_utf8();
+   test_utf8_chunk_len();
    test_split_reasoning_prefix();
    test_shlex_split();
    test_split_camel_case();

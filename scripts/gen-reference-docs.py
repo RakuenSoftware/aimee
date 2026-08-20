@@ -1404,6 +1404,9 @@ AGENT_FIELD_DESC = {
     "enabled": "Whether the agent is active.",
     "provider": "Provider name.",
     "model": "Model name.",
+    "default_delegate": "Delegate this agent hands work to when a task arrives with no "
+    "explicit delegate. Lets a project pin its own worker without every caller passing "
+    "--delegate.",
     "endpoint": "Provider endpoint URL.",
     "backend": "Execution backend (http / cli / ssh / docker).",
     "api_key": "Inline API key (prefer `api_key_env` or the vault).",

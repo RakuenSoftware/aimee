@@ -1571,15 +1571,23 @@ static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "missing root_hint");
    }
+   /* `aimee workspace prepare` marshals prepare:true onto the same method as
+    * `workspace add`. Forward it, or the HTTP route silently performs a plain
+    * add and the two commands become indistinguishable over the wire. */
+   int prepare = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(body, "prepare"));
    if (provider[0])
    {
-      const char *extra[WS_ADD_FLAG_ARGS_MAX];
+      const char *extra[WS_ADD_FLAG_ARGS_MAX + 1];
       int extra_n = workspace_add_flag_args(provider, remote, head, extra, WS_ADD_FLAG_ARGS_MAX);
+      if (prepare)
+         extra[extra_n++] = "--prepare";
       rc = ws_dispatch_args("workspace.add", root, extra, extra_n, resp, cap);
    }
    else
    {
-      rc = ws_dispatch_args("workspace.add", root, NULL, 0, resp, cap);
+      const char *extra[] = {"--prepare"};
+      rc = ws_dispatch_args("workspace.add", root, prepare ? extra : NULL, prepare ? 1 : 0, resp,
+                            cap);
    }
    cJSON_Delete(body);
    return rc;

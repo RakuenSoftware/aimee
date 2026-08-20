@@ -223,7 +223,13 @@ def main() -> int:
             reachable = (
                 ["hooks", "pre"],
                 ["hooks", "post"],
-                ["session-start"],
+                # session-start is deliberately NOT here. It no longer dispatches
+                # to the server: the launcher owns session id, worktree and cwd
+                # before the host starts, and session guidance is prepended at
+                # model ingress instead of being assembled per client. What is
+                # left is a local publish of the host session id, so "must reach
+                # the remote" no longer describes it. The exclusivity half still
+                # holds trivially -- it contacts nothing.
                 ["optimize", "points"],
                 ["optimize", "baseline", "--point", "router"],
             )
@@ -232,6 +238,16 @@ def main() -> int:
                 special = run_client(binary, home, f"tcp:127.0.0.1:{port}", command)
                 assert RemoteHandler.count() > before, (command, special.stderr)
                 assert sentinel.contacts_after_settle() == 0, f"{command} contacted local UDS"
+
+            # session-start is now local-only, and that is a contract in its own
+            # right: it must reach NEITHER the remote nor the local socket. A
+            # regression that reintroduced per-client assembly here would show
+            # up as a request to one of the two.
+            before = RemoteHandler.count()
+            local_only = run_client(binary, home, f"tcp:127.0.0.1:{port}", ["session-start"])
+            assert local_only.returncode == 0, (local_only.stdout, local_only.stderr)
+            assert RemoteHandler.count() == before, "session-start contacted the remote"
+            assert sentinel.contacts_after_settle() == 0, "session-start contacted local UDS"
 
             for command in reachable:
                 failed = run_client(binary, home, f"tcp:127.0.0.1:{unused_tcp_port()}", command)

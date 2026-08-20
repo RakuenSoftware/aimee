@@ -862,6 +862,52 @@ aimee_module_status_t aimee_db1_stage_sessions(const uint8_t *request_body, uint
       found = 1;
       break;
    }
+   case AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int produced = db1_server_session_persona_delivery_claim(field[0]);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_FINISH:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_server_session_persona_delivery_finish(field[0], parsed1);
+      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

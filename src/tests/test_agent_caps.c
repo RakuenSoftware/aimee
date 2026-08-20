@@ -36,9 +36,19 @@ void test_agent_route_with_caps_honors_tools_enabled(void)
    strcpy(cfg.agents[1].roles[0], "review");
    cfg.agents[1].role_count = 1;
    cfg.agents[1].enabled = 1;
+   strcpy(cfg.agents[1].api_key, "test-mistral-key");
 
    agent_t *routed = agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0);
    assert(routed == &cfg.agents[0]);
+
+   /* A configured delegate preference is soft under the capability gate: it is
+    * selected when eligible, and transparently skipped when it cannot satisfy
+    * the packet. */
+   strcpy(cfg.default_delegate, "no-tools");
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == &cfg.agents[0]);
+   cfg.agents[1].tools_enabled = 1;
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == &cfg.agents[1]);
+   cfg.agents[1].tools_enabled = 0;
 
    cfg.agents[0].tools_enabled = 0;
    assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == NULL);

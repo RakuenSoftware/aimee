@@ -6,6 +6,7 @@
  * byte-identical engineer); this file owns built-in METADATA and loads custom
  * single-file persona definitions. */
 #include "persona.h"
+#include "aimee_session_guidance.h"
 #include "aimee.h"   /* MAX_PATH_LEN */
 #include "prompts.h" /* aimee_mode_t, prompt_persona_text, prompt_principles_text */
 #include "config.h"  /* config_default_dir */
@@ -275,9 +276,23 @@ static void rtrim(char *s)
       s[--n] = '\0';
 }
 
-/* Extract the body of a "## <header>" section: text after the header line up
- * to (but not including) the next "## " header or EOF. Returns a heap copy
- * (trailing whitespace trimmed) or NULL if the section is absent. */
+static int is_persona_sibling_section(const char *line)
+{
+   static const char *const sections[] = {"## Persona", "## Principles", "## Brief", NULL};
+   for (int i = 0; sections[i]; i++)
+   {
+      size_t n = strlen(sections[i]);
+      if (strncmp(line, sections[i], n) == 0 &&
+          (line[n] == '\n' || line[n] == '\r' || line[n] == '\0'))
+         return 1;
+   }
+   return 0;
+}
+
+/* Extract one editable persona section. Only the three format-level sibling
+ * headings terminate it. User-authored headings such as `## Workflow` and
+ * `## Rules` are content, not delimiters; treating every level-two heading as
+ * a delimiter silently discarded most seeded personas on reload. */
 static char *extract_section(const char *body, const char *header)
 {
    char needle[64];
@@ -295,11 +310,11 @@ static char *extract_section(const char *body, const char *header)
          if (!start)
             return NULL;
          start++;
-         /* find next "## " at beginning of a line */
+         /* Find the next format-level sibling section at beginning of a line. */
          const char *end = start;
          while (*end)
          {
-            if ((end == start || end[-1] == '\n') && strncmp(end, "## ", 3) == 0)
+            if ((end == start || end[-1] == '\n') && is_persona_sibling_section(end))
                break;
             end++;
          }
@@ -507,6 +522,11 @@ char *persona_identity_prose(const persona_t *p, const char *cwd)
 {
    if (!p)
       return NULL;
+   /* A seeded or user-edited built-in is still labelled builtin, but its file
+    * content is authoritative. Only fall back to compiled prose when no file
+    * supplied a Persona section. */
+   if (p->persona_text && p->persona_text[0])
+      return persona_apply_cwd(p->persona_text, cwd);
    /* Return the persona's COMPLETE identity prose. Built-ins keep their full
     * block in code (prompts.c) — a built-in's file `## Persona` may be only a
     * thin one-liner, with the rest of the framing in sibling sections that
@@ -547,9 +567,33 @@ char *persona_identity_prose(const persona_t *p, const char *cwd)
       }
       return out;
    }
-   if (p->persona_text && p->persona_text[0])
-      return persona_apply_cwd(p->persona_text, cwd);
    return NULL;
+}
+
+char *persona_compose_primary_instructions(const char *name, const char *cwd)
+{
+   persona_t p;
+   if (persona_load(NULL, name && name[0] ? name : "engineer", &p) != 0)
+      return NULL;
+
+   aimee_mode_t mode = aimee_mode_from_string(p.name);
+   const char *principles = p.principles_text ? p.principles_text : prompt_principles_text(mode);
+   char *identity = persona_identity_prose(&p, cwd);
+   const char *brief = p.brief_text ? p.brief_text : "";
+   const char *format = "<aimee-persona schema=\"1\" name=\"%s\">\n%s%s%s%s%s\n# Aimee Tools\n%s"
+                        "</aimee-persona>\n";
+   const char *identity_header = identity && identity[0] ? "\n# Persona\n" : "";
+   const char *identity_body = identity && identity[0] ? identity : "";
+   const char *brief_header = brief[0] ? "\n# Aimee Context\n" : "";
+   int rendered = snprintf(NULL, 0, format, p.name, principles, identity_header, identity_body,
+                           brief_header, brief, AIMEE_GUIDANCE_BLOCK);
+   char *out = rendered >= 0 ? malloc((size_t)rendered + 1) : NULL;
+   if (out)
+      snprintf(out, (size_t)rendered + 1, format, p.name, principles, identity_header,
+               identity_body, brief_header, brief, AIMEE_GUIDANCE_BLOCK);
+   free(identity);
+   persona_free(&p);
+   return out;
 }
 
 char *persona_compose_delegate_prompt(const char *name, const char *cwd, const char *base_prompt)

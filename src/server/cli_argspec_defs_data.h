@@ -170,7 +170,7 @@
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"identifier\","
  "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
  "},{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":"
- "\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "\"drop\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"memory.list",
  "{\"fields\":[{\"json\":\"tier\",\"from\":\"flag\",\"flag\":\"tier\","
@@ -194,7 +194,7 @@
  "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
  "},{\"json\":\"project\",\"count_min\":2,\"from\":\"positional\","
  "\"index\":1,\"empty\":\"emit\"},{\"json\":\"scope\",\"from\":\"flag\","
- "\"flag\":\"scope\",\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":"
+ "\"flag\":\"scope\",\"empty\":\"drop\"},{\"json\":\"cwd\",\"from\":"
  "\"cwd\"}]}"},
 
 {"kb.search",
@@ -919,7 +919,7 @@
  "\"ambiguous\"},{\"json\":\"direction\",\"from\":\"flag\",\"flag\":"
  "\"reverse\",\"type\":\"const_if_set\",\"value\":\"in\"},{\"json\":"
  "\"dry_run\",\"from\":\"flag\",\"flag\":\"dry-run\",\"type\":"
- "\"true_if_set\"}]}"},
+ "\"true_if_set\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 /* The inverted-flag pair: `compress` is true unless --no-compress was given. */
 

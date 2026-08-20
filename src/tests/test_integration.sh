@@ -504,6 +504,22 @@ RESP=$(srv_req '{"method":"server.health"}') || true
 check_output "server.health status" '"status":"ok"' echo "$RESP"
 check_output "server.health uptime" '"uptime"' echo "$RESP"
 
+# index.investigate refuses rather than guessing when no project is in scope:
+# an unscoped investigation would silently search the wrong repository.
+RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper"}') || true
+check_output "index.investigate refuses without a project scope" 'scope_required' echo "$RESP"
+
+# With a scope, it must distinguish an OUTAGE from an index with no evidence.
+# The integration server runs without a reachable knowledge service, so this is
+# exactly the condition that used to answer "no evidence" and send the agent off
+# to search the tree by hand. It is the call the session guidance tells every
+# agent to make FIRST, so a silent outage costs the whole opening move.
+RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper","project":"integration-scope"}') || true
+check_output "index.investigate names the dependency that failed" '"dependency":"kb"' echo "$RESP"
+check_output "index.investigate reports an outage, not empty evidence" \
+    'not an index with no evidence' echo "$RESP"
+check_output "index.investigate marks the outage retryable" '"retryable":true' echo "$RESP"
+
 # The /v1 HTTP surface is the only transport now (the NDJSON RPC socket was
 # removed). Confirm the local /v1 UDS is bound and an allowlisted read returns a
 # well-formed dispatch response over its first-class /v1 route.

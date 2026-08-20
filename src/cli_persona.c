@@ -8,6 +8,7 @@
  * so no markdown parser is needed client-side. */
 #include "http_uds_client.h"
 #include "cJSON.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,18 @@ static int persona_server_down(int status)
       return 1;
    }
    return 0;
+}
+
+/* Keep untrusted names out of URL and temporary-path construction. The server
+ * repeats this validation at the authority boundary. */
+static int persona_client_name_valid(const char *name)
+{
+   if (!name || !name[0] || strlen(name) >= 64 || name[0] == '.')
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)name; *p; p++)
+      if (!(isalnum(*p) || *p == '.' || *p == '_' || *p == '-'))
+         return 0;
+   return 1;
 }
 
 /* GET a path and return the parsed JSON (caller cJSON_Delete), or NULL. Sets
@@ -192,10 +205,13 @@ static int persona_edit_cmd(const char *name)
       return 1;
 
    char tmp[256];
-   snprintf(tmp, sizeof(tmp), "/tmp/aimee-persona-%s-%d.json", name, (int)getpid());
-   FILE *f = fopen(tmp, "w");
+   snprintf(tmp, sizeof(tmp), "/tmp/aimee-persona-%s-XXXXXX", name);
+   int fd = mkstemp(tmp);
+   FILE *f = fd >= 0 ? fdopen(fd, "w") : NULL;
    if (!f)
    {
+      if (fd >= 0)
+         close(fd);
       free(pretty);
       fprintf(stderr, "aimee: cannot create temp file %s\n", tmp);
       return 1;
@@ -298,6 +314,11 @@ int cmd_persona_client_run(int argc, char **argv, int json_output)
    const char *sub = argv[0];
    if (strcmp(sub, "list") == 0)
       return persona_list_cmd(json_output);
+   if (argc >= 2 && !persona_client_name_valid(argv[1]))
+   {
+      fprintf(stderr, "aimee: invalid persona name '%s'\n", argv[1]);
+      return 1;
+   }
    if (strcmp(sub, "show") == 0)
    {
       if (argc < 2)

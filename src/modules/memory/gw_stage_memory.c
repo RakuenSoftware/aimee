@@ -175,6 +175,12 @@ int ir_stage_memory(aimee_request_t *ir, void *ud)
    return 1; /* changed typed fields -> runner sets ir->mutated */
 }
 
+/* Place the caller-resolved persona payload on the first user message. */
+int ir_stage_persona_instructions(aimee_request_t *ir, void *ud)
+{
+   return aimee_ir_prepend_persona_instructions(ir, (const char *)ud);
+}
+
 char *gw_memory_system_prompt(const char *query)
 {
    /* The four plain-chat handlers are the last callers that are not on the IR.

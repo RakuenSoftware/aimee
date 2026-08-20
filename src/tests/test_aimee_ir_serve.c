@@ -23,6 +23,9 @@ static const char *REQ =
     "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}],"
     "\"tools\":[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}]}";
 
+void ir_seam_test_session(const char *session_id);
+void ir_seam_test_persona(const char *instructions);
+
 int main(void)
 {
    printf("ir-serve: ");
@@ -150,7 +153,8 @@ int main(void)
    cJSON *cm = cJSON_Parse("[{\"role\":\"user\",\"content\":\"hi\"}]");
    cJSON *ct = cJSON_Parse("[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":"
                            "{\"type\":\"object\"}}}]");
-   cJSON *fc = aimee_ir_build_from_chat("gpt-5.5-codex", cm, ct, "be helpful", "chatgpt");
+   cJSON *fc =
+       aimee_ir_build_from_chat("gpt-5.5-codex", cm, ct, "be helpful", "chatgpt", 1024, 0.2);
    assert(fc);
    assert(strcmp(cJSON_GetObjectItem(fc, "model")->valuestring, "gpt-5.5-codex") == 0);
    assert(cJSON_IsFalse(cJSON_GetObjectItem(fc, "store"))); /* codex req shape */
@@ -210,6 +214,32 @@ int main(void)
       parsed_response_t p3;
       aimee_ir_response_to_parsed(NULL, &p3);
       assert(p3.call_count == 0 && p3.content == NULL && p3.is_tool_call == 0);
+   }
+
+   /* LEGACY FLAT PATH: an already-established conversation must be terminal in
+    * the durable delivery state. Otherwise a later compacted request, whose
+    * assistant history has disappeared, looks like a fresh session and receives
+    * a persona midway through it after a restart. */
+   {
+      ir_seam_test_session("legacy-established");
+      ir_seam_test_persona("PERSONA-BODY <aimee-persona name=x>");
+
+      char *established = aimee_ir_prepend_active_persona_text("follow-up", 1);
+      assert(established && !strstr(established, "aimee-persona"));
+      free(established);
+
+      char *compacted = aimee_ir_prepend_active_persona_text("compacted follow-up", 0);
+      assert(compacted && !strstr(compacted, "aimee-persona"));
+      free(compacted);
+
+      /* A genuinely fresh session does receive it, exactly once. */
+      ir_seam_test_session("legacy-fresh");
+      char *first = aimee_ir_prepend_active_persona_text("hello", 0);
+      assert(first && strstr(first, "aimee-persona"));
+      free(first);
+      char *second = aimee_ir_prepend_active_persona_text("hello again", 0);
+      assert(second && !strstr(second, "aimee-persona"));
+      free(second);
    }
 
    printf("ok\n");

@@ -100,6 +100,10 @@ static void print_agent_list(cJSON *resp)
       printf("No agents configured.\n");
       return;
    }
+   cJSON *preferred = cJSON_GetObjectItemCaseSensitive(resp, "default_delegate");
+   if (cJSON_IsString(preferred) && preferred->valuestring[0])
+      printf("Preferred delegate: %s (soft preference; normal routing is fallback)\n",
+             preferred->valuestring);
    cJSON *ag;
    cJSON_ArrayForEach(ag, agents)
    {
@@ -1156,7 +1160,13 @@ void pt_print_index_investigate(const char *method, cJSON *resp)
          if (raw && raw[0] && strcmp(raw, "-") != 0)
             printf("%s\n", raw);
          else
-            printf("(no answer; error_status %s)\n", json_str(row, "error_status"));
+         {
+            cJSON *status = cJSON_GetObjectItemCaseSensitive(row, "error_status");
+            if (cJSON_IsNumber(status))
+               printf("(no answer; error_status %d)\n", status->valueint);
+            else
+               printf("(no answer; error_status unknown)\n");
+         }
       }
    }
 }

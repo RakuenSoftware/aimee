@@ -3,7 +3,8 @@
  * Registered into the server_http dispatch via server_http_set_messages_*
  * handlers at startup (anthropic_http_register). Lets Claude Code — which speaks
  * only the Anthropic Messages API and picks its endpoint from ANTHROPIC_BASE_URL
- * — drive aimee's configured primary model.
+ * — drive the registered agent named by the standard `model` field. `aimee` or
+ * an omitted model selects the configured primary.
  *
  * This is a STATELESS wire-format proxy: it does NOT run aimee's agent loop,
  * memory, persona, or toolset (those would corrupt the context Claude Code
@@ -47,19 +48,11 @@
 #include <string.h>
 #include <time.h>
 
-/* Resolve aimee's primary agent (the configured default, else the first enabled
- * agent — see agent_default_primary). Claude Code's requested model is
- * intentionally ignored — switching models is `aimee primary`. Non-zero when no
- * usable agent exists → caller reports 503.
- *
- * Fills `out` with the primary agent; returns 0 on success.
- *
- * Took an agent_config_t* purely so it could hand back a pointer into it, which
- * put 350,968 bytes on the stack of every /v1/messages request to obtain one
- * 16,720-byte agent. */
-static int resolve_primary(agent_t *out)
+/* Apply the same standard `model` selector as OpenAI ingress. A concrete value
+ * names one registered agent exactly; only `aimee`/empty uses the default. */
+static int resolve_requested_agent(agent_t *out, const char *model)
 {
-   return agent_registry_default_primary(out);
+   return agent_registry_resolve_ingress_model(model, out);
 }
 
 /* Mint a "msg_<epoch>" id for the response/stream. */
@@ -488,10 +481,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * AIMEE_IR_SHADOW is set; never affects the response. */
    aimee_ir_shadow_observe_request(req, AIMEE_WIRE_ANTHROPIC);
 
-   ag = resolve_primary(&agbuf) == 0 ? &agbuf : NULL;
+   ag = resolve_requested_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       cJSON_Delete(req);
+      if (model && model[0] && strcmp(model, "aimee") != 0)
+         return write_error(resp, cap, 404, "not_found_error",
+                            "the requested model is not available", 0);
       return write_error(resp, cap, 503, "api_error", "no primary agent configured",
                          AIMEE_ERR_NO_PRIMARY);
    }
@@ -1288,14 +1284,14 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
    aimee_ir_shadow_observe_request(req, AIMEE_WIRE_ANTHROPIC); /* shadow (Slice 3), gated no-op */
    agent_t agbuf;
-   agent_t *ag = (req && resolve_primary(&agbuf) == 0) ? &agbuf : NULL;
+   const char *model = req ? jo_cstr(req, "model") : "";
+   agent_t *ag = (req && resolve_requested_agent(&agbuf, model) == 0) ? &agbuf : NULL;
    cJSON *messages = NULL, *tools = NULL;
    char *system_text = NULL, *prov_body = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
    char auth[MAX_API_KEY_LEN + 32];
    char extra[512];
    char msg_id[48];
-   const char *model = req ? jo_cstr(req, "model") : "";
    const delegate_driver_t *driver;
    anthropic_stream_xlate_t *xl;
    int input_est;
@@ -1315,10 +1311,21 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    mint_msg_id(msg_id, sizeof(msg_id));
 
-   /* On any setup failure still emit a well-formed (empty) Anthropic stream so
-    * the client's SSE reader terminates cleanly rather than hanging. */
+   /* An explicit unknown model is an error. If the default is unavailable,
+    * preserve the prior well-formed empty stream so a committed SSE response
+    * still terminates cleanly rather than hanging. */
    if (!req || !ag)
    {
+      if (req && model[0] && strcmp(model, "aimee") != 0)
+      {
+         char err[512];
+         snprintf(err, sizeof(err),
+                  "{\"type\":\"error\",\"error\":{\"type\":\"not_found_error\","
+                  "\"message\":\"the requested model is not available\"}}");
+         emit(ctx, "error", err);
+         cJSON_Delete(req);
+         return 0;
+      }
       xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
       if (xl)
       {
@@ -1422,7 +1429,13 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * NON-streaming body for the non-responses wires -- asking for SSE and then
     * cJSON_Parse'ing it is the "unparseable reply" bug. This applies to the ANTHROPIC
     * parity build too, not only the IR/openai build below. */
-   int buffered_replay = gateway_prevent_subagents_enabled() || responses_wire;
+   /* Any provider may need the response completion stage after an edit. Buffer
+    * only armed turns so the bounded completion behavior is independent of the
+    * client/provider protocol pairing. Unarmed native Anthropic turns retain the
+    * byte-for-byte streaming relay. */
+   int completion_buffered = gw_response_completion_armed(messages, tools);
+   int buffered_replay =
+       gateway_prevent_subagents_enabled() || responses_wire || completion_buffered;
    int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
 
    if (driver_is_anthropic(driver))
@@ -1494,7 +1507,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * response.output_* / response.completed, not the OpenAI chat chunk
     * shape that today's incremental translator understands. Off (the
     * default) falls through to today's incremental relay/translator. */
-   if (gateway_prevent_subagents_enabled() || responses_wire)
+   if (buffered_replay)
    {
       messages_stream_buffered_replay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,
                                       driver, model, msg_id, responses_wire, messages, tools, emit,
@@ -1545,6 +1558,7 @@ cleanup:
 static int count_tokens(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
+   const char *model = req ? jo_cstr(req, "model") : "";
 
    /* Proxy to Anthropic's real /v1/messages/count_tokens so Claude Code's
     * context-budget math matches api.anthropic.com, not a local estimate — only
@@ -1552,7 +1566,7 @@ static int count_tokens(const char *body, char *resp, int cap)
     * estimate. */
    {
       agent_t agbuf;
-      agent_t *ag = resolve_primary(&agbuf) == 0 ? &agbuf : NULL;
+      agent_t *ag = resolve_requested_agent(&agbuf, model) == 0 ? &agbuf : NULL;
       const delegate_driver_t *driver;
       delegate_drivers_init();
       driver = ag ? delegate_driver_get(ag->provider) : NULL;

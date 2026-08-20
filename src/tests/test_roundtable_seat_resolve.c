@@ -3,6 +3,7 @@
  * pinned model resolves to that EXACT agent with no substitution, reporting
  * PINNED_UNAVAILABLE when it is absent, disabled, or lacks the role. */
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -13,6 +14,17 @@
 /* Build a plain HTTP agent that is enabled, serves `role`, and is routable (a
  * literal api_key gives resolvable credentials, so agent_is_available_for_routing
  * short-circuits before touching the vault). */
+/* Only ever used to DECLARE the selection authority before it is dropped, so
+ * the resolver sees an authority with no provider behind it. */
+static int seat_route_selector(int randomized, uint32_t candidate_count, uint32_t *selected_index)
+{
+   (void)randomized;
+   (void)candidate_count;
+   if (selected_index)
+      *selected_index = 0;
+   return 0;
+}
+
 static void mk_agent(agent_t *a, const char *name, const char *role, int enabled)
 {
    memset(a, 0, sizeof *a);
@@ -105,6 +117,24 @@ int main(void)
    /* Bad args. */
    assert(rt_resolve_seat_model(NULL, "agentA", "review", NULL, 0, &idx) == RT_SEAT_INVALID);
    assert(rt_resolve_seat_model(&cfg, "agentA", "review", NULL, 0, NULL) == RT_SEAT_INVALID);
+
+   /* --- a routing-module outage is NOT an exhausted roster ---
+    * Both arrive as a -1 from the role picker, and reporting the outage as
+    * exhaustion tells an operator to add agents to a roster that is already
+    * full while the routing module is what is down. The panel also retries a
+    * $random seat with a smaller exclusion set on exhaustion, which cannot
+    * possibly help here. */
+   agent_set_route_selection_provider(seat_route_selector);
+   agent_set_route_selection_provider(NULL); /* authority declared, provider lost */
+   assert(rt_resolve_seat_model(&cfg, "$random", "review", NULL, 0, &idx) ==
+          RT_SEAT_ROUTING_UNAVAILABLE);
+   agent_reset_route_selection_authority();
+   /* With the authority gone the same call resolves again, so the verdict above
+    * was about the outage and not about this roster. */
+   assert(rt_resolve_seat_model(&cfg, "$random", "review", NULL, 0, &idx) == RT_SEAT_OK);
+   /* And a genuinely exhausted pool still reports exhaustion, not an outage. */
+   assert(rt_resolve_seat_model(&cfg, "$random", "review", used3, 3, &idx) ==
+          RT_SEAT_RANDOM_EXHAUSTED);
 
    /* --- a "$random" seat prefers an agent with a free concurrency slot ---
     * Routing checks health/policy/structure but not capacity, so a saturated

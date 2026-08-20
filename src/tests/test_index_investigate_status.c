@@ -49,10 +49,20 @@ static char *scripted(const char *query, int *status_out)
    return strdup(EVIDENCE);
 }
 
+/* "rescued" is the case the fallback exists for: the context pass has nothing,
+ * the scoped hybrid pass does. Scripting the two retrievals differently is what
+ * proves the fallback actually re-asks rather than just relabelling the row. */
 char *kb_client_code_context(const char *q, const char *s, const char *p, int *st)
 {
    (void)s;
    (void)p;
+   if (strstr(q, "rescued"))
+   {
+      g_last = KB_CLIENT_RESULT_EMPTY;
+      if (st)
+         *st = 200;
+      return strdup(NO_EVIDENCE);
+   }
    return scripted(q, st);
 }
 
@@ -63,6 +73,13 @@ char *kb_client_code_hybrid_scoped(const char *q, const char *s, const char *p, 
    (void)p;
    (void)all_projects;
    (void)max_results;
+   if (strstr(q, "rescued"))
+   {
+      g_last = KB_CLIENT_RESULT_OK;
+      if (st)
+         *st = 200;
+      return strdup(EVIDENCE);
+   }
    return scripted(q, st);
 }
 
@@ -250,6 +267,13 @@ static cJSON *req_one(const char *query)
    return r;
 }
 
+static cJSON *req_one_fallback(const char *query, int fallback)
+{
+   cJSON *r = req_one(query);
+   cJSON_AddBoolToObject(r, "fallback", fallback);
+   return r;
+}
+
 static cJSON *req_batch(const char *a, const char *b)
 {
    cJSON *r = cJSON_CreateObject();
@@ -300,6 +324,42 @@ int main(void)
    assert(strcmp(str_field(resp, "result_status"), "empty") == 0);
    assert(strcmp(row_status(resp, 0), "empty") == 0);
    assert(strcmp(row_status(resp, 1), "unavailable") == 0);
+
+   /* RETRIEVAL PATH: a row records which retrieval answered it. The context
+    * pass alone is the ordinary case and must not claim a fallback it never
+    * ran -- otherwise every row looks like a degraded one. */
+   resp = investigate(req_one("who calls the loader"));
+   {
+      cJSON *row = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(resp, "results"), 0);
+      cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "retrieval_path");
+      assert(cJSON_IsArray(path) && cJSON_GetArraySize(path) == 1);
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(path, 0)), "context") == 0);
+      assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(row, "fallback_used")));
+   }
+
+   /* FALLBACK RESCUES: context had nothing, hybrid did. The row must answer ok,
+    * say it fell back, and show both retrievals in the order they were tried. */
+   resp = investigate(req_one("rescued by the hybrid pass"));
+   assert(strcmp(str_field(resp, "result_status"), "ok") == 0);
+   assert(strcmp(row_status(resp, 0), "ok") == 0);
+   {
+      cJSON *row = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(resp, "results"), 0);
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "fallback_used")));
+      cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "retrieval_path");
+      assert(cJSON_IsArray(path) && cJSON_GetArraySize(path) == 2);
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(path, 0)), "context") == 0);
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(path, 1)), "hybrid") == 0);
+   }
+
+   /* fallback:false must actually suppress the second retrieval, or the caller
+    * cannot ask for the cheap single-pass answer. Same query, no rescue. */
+   resp = investigate(req_one_fallback("rescued by the hybrid pass", 0));
+   assert(strcmp(str_field(resp, "result_status"), "empty") == 0);
+   {
+      cJSON *row = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(resp, "results"), 0);
+      assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(row, "fallback_used")));
+      assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(row, "retrieval_path")) == 1);
+   }
 
    cJSON_Delete(g_sent);
    printf("test_index_investigate_status: ok\n");
