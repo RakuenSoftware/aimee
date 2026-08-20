@@ -21,6 +21,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AIMEE="$REPO_ROOT/aimee"
 AIMEE_SERVER="$REPO_ROOT/aimee-server"
 export PATH="$REPO_ROOT:$PATH"
+# Keep the real HOME's Go caches. HOME is about to become a temp dir, and a Go
+# build under it would re-download the module graph on every run and then leave
+# a read-only module cache behind that the teardown cannot remove.
+INTEG_REAL_HOME="$HOME"
+export GOCACHE="${GOCACHE:-$INTEG_REAL_HOME/.cache/go-build}"
+export GOMODCACHE="${GOMODCACHE:-$INTEG_REAL_HOME/go/pkg/mod}"
+export GOFLAGS="${GOFLAGS:--mod=mod}"
 export HOME=$(mktemp -d /tmp/aimee-integ-XXXXXX)
 export AIMEE_HOME="$HOME/.config/aimee"
 unset AIMEE_PROFILE
@@ -47,6 +54,7 @@ HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 # Without this every client assertion below fails as "aimee-server unavailable"
 # while the server it started is running perfectly well two lines away.
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
+
 
 # ---------------------------------------------------------------
 # The DB1 module.
@@ -157,7 +165,85 @@ stop_db1_module() {
     fi
 }
 
+
+# ---------------------------------------------------------------
+# The workflow control module. Every /v1/workflow route and /v1/dev/submit is
+# dispatched to it over the bus -- the daemon holds no workflow logic and
+# answers 503 when nothing is attached -- so without this the entire workflow
+# surface is untested, which is exactly how it went untested until now.
+#
+# It is the Go binary (deployed as aimee-wfe) and it needs TWO grants for the
+# same executable: one serving identity for the control kinds it answers, and a
+# separate outbound identity for the store kinds it calls. A module's serving
+# grant requests nothing, so a single grant cannot do both.
+# ---------------------------------------------------------------
+WFE_MODULE_SRC="$REPO_ROOT/server-go"
+WFE_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-wfe"
+WFE_MODULE="$AIMEE_HOME/aimee-wfe"
+WFE_MODULE_PID=""
+WORKFLOW_MODULE_READY=0
+
+install_workflow_module() {
+    [ -d "$WFE_MODULE_SRC" ] || return 1
+    command -v go >/dev/null 2>&1 || return 1
+    ( cd "$WFE_MODULE_SRC" && go build -buildvcs=false -o "$WFE_MODULE_BUILT" ./cmd/aimee-server ) \
+        >/dev/null 2>&1 || return 1
+    cp "$WFE_MODULE_BUILT" "$WFE_MODULE"
+    chmod 0755 "$WFE_MODULE"
+    # The definitions a deployment ships. Without them the engine starts with an
+    # empty registry, and every submit fails to resolve its workflow -- which
+    # looks like a broken intake rather than an empty install.
+    mkdir -p "$AIMEE_HOME/workflows"
+    cp "$REPO_ROOT"/config/workflows/*.yaml "$AIMEE_HOME/workflows/" 2>/dev/null || return 1
+    mkdir -p "$MODULE_POLICY_DIR"
+    # Same rule as the DB1 grant: take the generated one so the serve/request
+    # lists cannot drift from what the module actually serves, and rewrite only
+    # the executable, because a grant pins a resolved path and this one is
+    # installed beside the socket rather than at its deployed location.
+    local bundle="$REPO_ROOT/src/build/obj/module-bundle/grants/server"
+    local g
+    for g in wfe workflows; do
+        [ -r "$bundle/$g.grant" ] || return 1
+        sed "s|^executable=.*|executable=$WFE_MODULE|" "$bundle/$g.grant" \
+            >"$MODULE_POLICY_DIR/$g.grant"
+    done
+    return 0
+}
+
+start_workflow_module() {
+    [ -x "$WFE_MODULE" ] || return 1
+    stop_workflow_module
+    "$WFE_MODULE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
+        --module-bus-socket "$MODULE_BUS_SOCK" >"$HOME/aimee-wfe.log" 2>&1 &
+    WFE_MODULE_PID=$!
+    # Attachment is what matters, not the process: poll the seam itself until it
+    # stops answering "not attached". A fixed sleep here would be a flake.
+    local i
+    for i in $(seq 1 100); do
+        [ "$(http_status GET /v1/workflow/defs 2>/dev/null)" = "200" ] && return 0
+        kill -0 "$WFE_MODULE_PID" 2>/dev/null || break
+        sleep 0.1
+    done
+    return 1
+}
+
+stop_workflow_module() {
+    if [ -n "$WFE_MODULE_PID" ]; then
+        kill "$WFE_MODULE_PID" 2>/dev/null || true
+        wait "$WFE_MODULE_PID" 2>/dev/null || true
+        WFE_MODULE_PID=""
+    fi
+}
+
 install_db1_module
+# Grants are read by the daemon at startup, so this has to happen BEFORE the
+# server is started even though the module itself is not launched until the
+# workflow section. Installing it later produced a module that ran, attached to
+# nothing, and left the whole workflow surface answering 503.
+WORKFLOW_MODULE_INSTALLED=0
+if install_workflow_module; then
+    WORKFLOW_MODULE_INSTALLED=1
+fi
 
 PASS=0
 FAIL=0
@@ -250,6 +336,39 @@ require_binary "$AIMEE_SERVER"
 # kept as thin aliases over the http_rpc helper (defined below), which maps each
 # {method} to its dedicated route, so the existing assertions keep working — the
 # local HTTP UDS is filesystem-trusted, so no separate auth step is needed.
+# Speak a verb and a path directly, and report the STATUS as well as the body.
+# The workflow control plane answers with distinct codes for distinct outcomes
+# -- 429 for a capped principal, 503 for a store that could not answer -- and a
+# helper that returned only the body could not tell those apart, which is the
+# one distinction that section is there to check.
+http_call() {
+    python3 -c "
+import socket, sys
+verb, path, body = sys.argv[1], sys.argv[2], sys.argv[3]
+req = ('%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n'
+       'Content-Length: %d\r\nConnection: close\r\n\r\n%s' % (verb, path, len(body), body))
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect('$HTTP_SOCK')
+s.settimeout(20)
+s.sendall(req.encode())
+data = b''
+while True:
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    data += chunk
+s.close()
+head, _, payload = data.partition(b'\r\n\r\n')
+status = head.split(b'\r\n')[0].split(b' ')[1].decode() if head else '000'
+sys.stdout.write(status + ' ' + payload.decode(errors='replace').strip())
+" "$1" "$2" "${3:-}"
+}
+
+# The status alone, for checks that care only about the outcome code.
+http_status() {
+    http_call "$1" "$2" "${3:-}" | cut -d' ' -f1
+}
+
 srv_req() {
     http_rpc "$1"
 }
@@ -464,6 +583,7 @@ ABORT_CMD=""
 trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
 cleanup() {
+    stop_workflow_module
     stop_db1_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
@@ -1117,7 +1237,133 @@ check "clean snapshot worktree remains clean" test -z \
 fi  # MIRROR_SHA256
 
 # ============================================================
-# 10. Server shutdown
+# 10. Workflow control plane
+# ============================================================
+# The daemon no longer owns lifecycle state -- every read and write below
+# crosses the module bus and is answered by aimee-module-db. That makes these
+# checks the end-to-end proof of the migration: not "the store works" (the unit
+# suite covers that in isolation) but "the routes a client actually calls still
+# behave when their state lives in another process".
+
+WF_STEP=""
+if [ "$WORKFLOW_MODULE_INSTALLED" -ne 1 ]; then
+    WF_STEP="install (go toolchain, build, or generated grants)"
+elif ! start_workflow_module; then
+    WF_STEP="attach (the module did not answer /v1/workflow/defs with 200; last: $(http_call GET /v1/workflow/defs))"
+else
+    WORKFLOW_MODULE_READY=1
+fi
+
+if [ "$WORKFLOW_MODULE_READY" -ne 1 ]; then
+    echo "SKIP: the workflow control module could not be started here: $WF_STEP"
+    echo "      (needs a Go toolchain and the generated wfe/workflows grants);"
+    echo "      the workflow surface is covered by the full-stack E2E instead."
+    if [ -s "$HOME/aimee-wfe.log" ]; then
+        echo "      what the module said:"
+        tail -15 "$HOME/aimee-wfe.log" | sed 's/^/      /'
+    else
+        echo "      the module wrote nothing to its log at $HOME/aimee-wfe.log"
+    fi
+    SKIP=$((SKIP + 32))
+else
+
+check_output "workflow defs list" '"defs"' echo "$(http_call GET /v1/workflow/defs)"
+check_output "the shipped definitions are served" 'build' echo "$(http_call GET /v1/workflow/defs)"
+check_output "workflow items list answers" '200' echo "$(http_status GET /v1/workflow/items)"
+check_output "workflow triggers list answers" '200' echo "$(http_status GET /v1/workflow/triggers)"
+check_output "workflow blocks list answers" '200' echo "$(http_status GET /v1/workflow/blocks)"
+
+# Intake refuses before it records. Both halves are required: a run with nothing
+# to work on, and a run with nowhere to do it, are equally unstartable.
+check_output "submit without a proposal is refused" '400' \
+    echo "$(http_status POST /v1/dev/submit '{"repo":"integ/repo"}')"
+check_output "submit without a repo is refused too" '400' \
+    echo "$(http_status POST /v1/dev/submit '{"proposal_md":"# no repo"}')"
+
+WF_SUB1=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ one\n\ndo the first thing","workflow":"build","repo":"integ/repo"}')
+check_output "a submit is admitted" '200' echo "${WF_SUB1%% *}"
+check_output "and it names the run it started" '"work_item_id"' echo "$WF_SUB1"
+WI1=$(echo "$WF_SUB1" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
+check "the submit returned an id" test -n "$WI1"
+
+WF_SUB2=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ two\n\ndo the second thing","workflow":"build","repo":"integ/repo"}')
+check_output "a second submit is admitted" '200' echo "${WF_SUB2%% *}"
+WI2=$(echo "$WF_SUB2" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
+check "the two runs are distinct" test -n "$WI2" -a "$WI1" != "$WI2"
+
+# Each run owns its proposal. Two runs sharing one artifact would mean the later
+# submit silently replaced the earlier one's instructions, and the first run
+# would then execute work nobody asked for -- a wrong answer, not an error.
+check "the first run's proposal was stored" test -s "$AIMEE_HOME/wfe-artifacts/$WI1/proposal.md"
+check "the second run's proposal was stored separately" \
+    test -s "$AIMEE_HOME/wfe-artifacts/$WI2/proposal.md"
+check_output "and the first still says what it said" 'do the first thing' \
+    cat "$AIMEE_HOME/wfe-artifacts/$WI1/proposal.md"
+check_output "while the second says its own thing" 'do the second thing' \
+    cat "$AIMEE_HOME/wfe-artifacts/$WI2/proposal.md"
+
+# Admission is capped. Submit until something refuses rather than assuming which
+# attempt crosses the line -- the cap is a policy value, and a test that hard-codes
+# "the third one" fails for the wrong reason the day the default moves.
+WF_CAP_CODE="" ; WF_CAP_BODY=""
+for i in 1 2 3 4 5 6 7 8; do
+    WF_C=$(http_call POST /v1/dev/submit "{\"proposal_md\":\"# cap probe $i\",\"workflow\":\"build\",\"repo\":\"integ/repo\"}")
+    WF_CAP_CODE="${WF_C%% *}"
+    WF_CAP_BODY="$WF_C"
+    [ "$WF_CAP_CODE" != "200" ] && break
+done
+check_output "admission is capped, and refuses rather than admitting forever" '409' echo "$WF_CAP_CODE"
+check_output "and the refusal says the cap refused it" 'admission full' echo "$WF_CAP_BODY"
+
+# The read side. Written through the bus, read back through the bus.
+check_output "the run is listed" "$WI1" echo "$(http_call GET /v1/workflow/items)"
+check_output "the run can be fetched by id" "$WI1" echo "$(http_call GET /v1/workflow/items/$WI1)"
+check_output "the run reports a stage" '"stage"' echo "$(http_call GET /v1/workflow/items/$WI1)"
+check_output "the run reports its submitter" '"submitter"' echo "$(http_call GET /v1/workflow/items/$WI1)"
+check_output "the run's events are served" '200' echo "$(http_status GET /v1/workflow/items/$WI1/events)"
+check_output "the run's proposal is served" '200' echo "$(http_status GET /v1/workflow/items/$WI1/proposal)"
+check_output "an unknown run is not found" '404' echo "$(http_status GET /v1/workflow/items/wi_no_such_run)"
+
+# How far a run gets with no runner configured, which is the state of this
+# harness: it is admitted, it is driven, and it PARKS naming what it lacked. That
+# is the behaviour worth pinning -- an intake that admitted a run and then left it
+# silently "active" forever would look identical from the outside on the day the
+# runner really was broken.
+WF_PARKED=0
+for i in $(seq 1 50); do
+    case "$(http_call GET /v1/workflow/items/$WI1)" in
+        *runner_unavailable*) WF_PARKED=1; break ;;
+    esac
+    sleep 0.2
+done
+check "with no runner configured the run parks instead of stalling silently" \
+    test "$WF_PARKED" -eq 1
+check_output "and it parks naming what it was waiting for" 'runner_unavailable' \
+    echo "$(http_call GET /v1/workflow/items/$WI1)"
+
+# Resume is not a blanket override. A park the operator did not cause, and cannot
+# clear by deciding, is refused rather than quietly re-arming a run whose blocker
+# is still there.
+check_output "resuming a park the operator cannot clear is refused" '409' \
+    echo "$(http_status POST /v1/workflow/items/$WI1/resume '{}')"
+
+# Stopping ends the run and frees the admission slot it held -- the observable
+# consequence that matters, since a cap that never released would wedge intake.
+check_output "the run can be stopped" '200' \
+    echo "$(http_status POST /v1/workflow/items/$WI1/stop '{}')"
+WF_SUB4=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ four\n\nafter a slot freed","workflow":"build","repo":"integ/repo"}')
+check_output "stopping a run frees the admission slot it held" '200' echo "${WF_SUB4%% *}"
+
+check_output "a run can be deleted" '200' echo "$(http_status DELETE /v1/workflow/items/$WI2)"
+check_output "and it is gone from the read side" '404' \
+    echo "$(http_status GET /v1/workflow/items/$WI2)"
+
+stop_workflow_module
+
+fi  # WORKFLOW_MODULE_READY
+
+# ============================================================
+# 11. Server shutdown
 # ============================================================
 
 kill "$SERVER_PID" 2>/dev/null
