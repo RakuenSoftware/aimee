@@ -1494,6 +1494,54 @@ int db2_kb_async_count_kind_pending(const char *kind)
    return 0;
 }
 
+int db2_artifact_stamp_reflected(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_failed_query_bump(const char *query_norm)
+{
+   (void)query_norm;
+   return 0;
+}
+
+int db2_kb_purge_fence_active(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int db2_kb_runtime_state_set_now(const char *state_key)
+{
+   (void)state_key;
+   return 0;
+}
+
+int db2_synth_enqueue(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_synth_mark_done(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_kb_service_mark_reembed_finished(const char *finished_at)
+{
+   (void)finished_at;
+   return 0;
+}
+
+int db2_mining_job_try_lock(const char *job_id)
+{
+   (void)job_id;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

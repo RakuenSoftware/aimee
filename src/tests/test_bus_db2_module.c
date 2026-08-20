@@ -93,6 +93,14 @@ typedef struct
    int (*fidelity_attribution_count)(const char *turn_id);
    int (*blob_referenced)(const char *blob_ref);
    int (*async_pending_count)(const char *kind);
+   int (*artifact_stamp_reflected)(const char *artifact_id);
+   int (*failed_query_bump)(const char *query_norm);
+   int (*fence_active)(const char *project);
+   int (*runtime_state_touch)(const char *state_key);
+   int (*synth_enqueue)(const char *artifact_id);
+   int (*synth_mark_done)(const char *artifact_id);
+   int (*reembed_mark_finished)(const char *finished_at);
+   int (*mining_job_try_lock)(const char *job_id);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -314,6 +322,7 @@ static int64_t probe_identifier_seen;
 static int mining_calls;
 static int string_read_calls[4];
 static int cross_family_calls[4];
+static int batch8_calls[8];
 static char string_read_argument_seen[64];
 static int64_t mining_watermark_seen;
 static int corpus_limit_seen;
@@ -755,6 +764,59 @@ static int cross_family_impl(int which, const char *argument)
    return which == 2 ? 9 : which + 11;
 }
 
+/* An acknowledging backend reports success as zero and anything else as a
+ * failure, so those answer zero; the counting ones answer a number that
+ * identifies which of them ran. */
+static const int BATCH8_ACKNOWLEDGES[8] = {1, 0, 0, 1, 1, 1, 1, 0};
+
+static int batch8_impl(int which, const char *argument)
+{
+   batch8_calls[which]++;
+   snprintf(string_read_argument_seen, sizeof(string_read_argument_seen), "%s",
+            argument ? argument : "");
+   return BATCH8_ACKNOWLEDGES[which] ? 0 : which;
+}
+
+static int artifact_stamp_reflected(const char *artifact_id)
+{
+   return batch8_impl(0, artifact_id);
+}
+
+static int failed_query_bump(const char *query_norm)
+{
+   return batch8_impl(1, query_norm);
+}
+
+static int fence_active(const char *project)
+{
+   return batch8_impl(2, project);
+}
+
+static int runtime_state_touch(const char *state_key)
+{
+   return batch8_impl(3, state_key);
+}
+
+static int synth_enqueue(const char *artifact_id)
+{
+   return batch8_impl(4, artifact_id);
+}
+
+static int synth_mark_done(const char *artifact_id)
+{
+   return batch8_impl(5, artifact_id);
+}
+
+static int reembed_mark_finished(const char *finished_at)
+{
+   return batch8_impl(6, finished_at);
+}
+
+static int mining_job_try_lock(const char *job_id)
+{
+   return batch8_impl(7, job_id);
+}
+
 static int entity_observation_count(const char *entity_id)
 {
    return cross_family_impl(0, entity_id);
@@ -1150,6 +1212,54 @@ int db2_kb_blob_ref_referenced(const char *blob_ref)
 int db2_kb_async_count_kind_pending(const char *kind)
 {
    (void)kind;
+   return 0;
+}
+
+int db2_artifact_stamp_reflected(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_failed_query_bump(const char *query_norm)
+{
+   (void)query_norm;
+   return 0;
+}
+
+int db2_kb_purge_fence_active(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int db2_kb_runtime_state_set_now(const char *state_key)
+{
+   (void)state_key;
+   return 0;
+}
+
+int db2_synth_enqueue(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_synth_mark_done(const char *artifact_id)
+{
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_kb_service_mark_reembed_finished(const char *finished_at)
+{
+   (void)finished_at;
+   return 0;
+}
+
+int db2_mining_job_try_lock(const char *job_id)
+{
+   (void)job_id;
    return 0;
 }
 
@@ -2484,6 +2594,14 @@ int main(void)
        .fidelity_attribution_count = fidelity_attribution_count,
        .blob_referenced = blob_referenced,
        .async_pending_count = async_pending_count,
+       .artifact_stamp_reflected = artifact_stamp_reflected,
+       .failed_query_bump = failed_query_bump,
+       .fence_active = fence_active,
+       .runtime_state_touch = runtime_state_touch,
+       .synth_enqueue = synth_enqueue,
+       .synth_mark_done = synth_mark_done,
+       .reembed_mark_finished = reembed_mark_finished,
+       .mining_job_try_lock = mining_job_try_lock,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -3039,6 +3157,44 @@ int main(void)
                                              &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(string_answer == 14 && cross_family_calls[3] == 1 &&
           strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   /* Eight more on the two single-string formats, spread across three families.
+    * The acknowledging ones carry nothing back, so what they prove is that the
+    * request reached the family and backend that owns it. */
+   assert(aimee_db2_artifact_stamp_reflected_call(call_client, &client, 7180, 0, "probe-argument",
+                                                  NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(batch8_calls[0] == 1 && strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_failed_query_bump_call(call_client, &client, 7181, 0, "probe-argument",
+                                           &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && batch8_calls[1] == 1);
+
+   string_answer = 99;
+   assert(aimee_db2_fence_active_call(call_client, &client, 7182, 0, "probe-argument",
+                                      &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && batch8_calls[2] == 1);
+
+   assert(aimee_db2_runtime_state_touch_call(call_client, &client, 7183, 0, "probe-argument", NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(batch8_calls[3] == 1 && strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   assert(aimee_db2_synth_enqueue_call(call_client, &client, 7184, 0, "probe-argument", NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(batch8_calls[4] == 1 && strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   assert(aimee_db2_synth_mark_done_call(call_client, &client, 7185, 0, "probe-argument", NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(batch8_calls[5] == 1 && strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   assert(aimee_db2_reembed_mark_finished_call(call_client, &client, 7186, 0, "probe-argument",
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(batch8_calls[6] == 1 && strcmp(string_read_argument_seen, "probe-argument") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_mining_job_try_lock_call(call_client, &client, 7187, 0, "probe-argument",
+                                             &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && batch8_calls[7] == 1);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

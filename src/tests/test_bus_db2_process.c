@@ -504,6 +504,41 @@ int main(int argc, char **argv)
                                              &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(string_answer == 0);
 
+   /* Eight statements against real tables. The values they answer with depend on
+    * an empty schema and are not asserted here; what matters is that each
+    * statement prepared and ran, which only a real database can say. */
+   assert(aimee_db2_artifact_stamp_reflected_call(call_client, &client, 9140, 0, "replay-argument",
+                                                  NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
+   string_answer = 99;
+   assert(aimee_db2_failed_query_bump_call(call_client, &client, 9141, 0, "replay-argument",
+                                           &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
+   string_answer = 99;
+   assert(aimee_db2_fence_active_call(call_client, &client, 9142, 0, "replay-argument",
+                                      &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
+   assert(aimee_db2_runtime_state_touch_call(call_client, &client, 9143, 0, "replay-argument", NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+
+   /* The queue's column references artifacts, so this names one that does not
+    * exist and the database refuses it. The operation has one result, so the
+    * refusal arrives as an internal failure -- which is the point: a caller
+    * cannot tell it from the statement having gone wrong. */
+   assert(aimee_db2_synth_enqueue_call(call_client, &client, 9144, 0, "replay-argument", NULL,
+                                       NULL) == AIMEE_MODULE_CALL_INTERNAL);
+
+   assert(aimee_db2_synth_mark_done_call(call_client, &client, 9145, 0, "replay-argument", NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+
+   assert(aimee_db2_reembed_mark_finished_call(call_client, &client, 9146, 0,
+                                               "2026-01-01T00:00:00Z", NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+
+   string_answer = 99;
+   assert(aimee_db2_mining_job_try_lock_call(call_client, &client, 9147, 0, "replay-argument",
+                                             &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

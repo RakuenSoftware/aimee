@@ -681,6 +681,14 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .fidelity_attribution_count = db2_fidelity_attribution_count_by_turn,
        .blob_referenced = db2_kb_blob_ref_referenced,
        .async_pending_count = db2_kb_async_count_kind_pending,
+       .artifact_stamp_reflected = db2_artifact_stamp_reflected,
+       .failed_query_bump = db2_failed_query_bump,
+       .fence_active = db2_kb_purge_fence_active,
+       .runtime_state_touch = db2_kb_runtime_state_set_now,
+       .synth_enqueue = db2_synth_enqueue,
+       .synth_mark_done = db2_synth_mark_done,
+       .reembed_mark_finished = db2_kb_service_mark_reembed_finished,
+       .mining_job_try_lock = db2_mining_job_try_lock,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -822,6 +830,44 @@ db2_dispatch_string_count(const db2_string_count_binding_t *bindings, size_t cou
       if (value > binding->bound)
          value = binding->bound;
       if (binding->encode(value, response_body, response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+   return AIMEE_MODULE_STATUS_OK;
+}
+
+/* db2-envelope-string-ack-v1: one bounded string in, an acknowledgement out. */
+typedef struct
+{
+   int (*decode)(const uint8_t *input, size_t input_len, char *argument, size_t capacity);
+   int (*encode)(uint8_t *output, size_t capacity, uint32_t *output_len);
+   int (*write)(const char *argument);
+} db2_string_ack_binding_t;
+
+static aimee_module_status_t
+db2_dispatch_string_ack(const db2_string_ack_binding_t *bindings, size_t count,
+                        const uint8_t *request_body, uint32_t request_len, uint8_t *response_body,
+                        size_t response_capacity, uint32_t *response_len,
+                        const aimee_module_invocation_t *invocation, int *handled)
+{
+   char argument[DB2_STRING_COUNT_ARGUMENT_MAX + 1];
+   *handled = 0;
+   for (size_t index = 0; index < count; index++)
+   {
+      const db2_string_ack_binding_t *binding = &bindings[index];
+      if (binding->decode(request_body, request_len, argument, sizeof(argument)) != 0)
+         continue;
+      *handled = 1;
+      if (response_capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!binding->write)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int written = binding->write(argument);
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (written != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      if (binding->encode(response_body, response_capacity, response_len) != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       return AIMEE_MODULE_STATUS_OK;
    }
@@ -2625,6 +2671,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          const db2_string_count_binding_t bindings[] = {
              {aimee_db2_blob_referenced_request_decode, aimee_db2_blob_referenced_reply_encode,
               backend ? backend->blob_referenced : NULL, AIMEE_DB2_BLOB_REFERENCED_MAX},
+             {aimee_db2_fence_active_request_decode, aimee_db2_fence_active_reply_encode,
+              backend ? backend->fence_active : NULL, AIMEE_DB2_FENCE_ACTIVE_MAX},
          };
          int handled = 0;
          aimee_module_status_t status = db2_dispatch_string_count(
@@ -2837,6 +2885,8 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
               aimee_db2_fidelity_attribution_count_reply_encode,
               backend ? backend->fidelity_attribution_count : NULL,
               AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_MAX},
+             {aimee_db2_failed_query_bump_request_decode, aimee_db2_failed_query_bump_reply_encode,
+              backend ? backend->failed_query_bump : NULL, AIMEE_DB2_FAILED_QUERY_BUMP_MAX},
          };
          int handled = 0;
          aimee_module_status_t status = db2_dispatch_string_count(
@@ -2854,6 +2904,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          };
          int handled = 0;
          aimee_module_status_t status = db2_dispatch_u64_ack(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
+      {
+         /* Every db2-envelope-string-ack-v1 operation this family owns. */
+         const db2_string_ack_binding_t bindings[] = {
+             {aimee_db2_artifact_stamp_reflected_request_decode,
+              aimee_db2_artifact_stamp_reflected_reply_encode,
+              backend ? backend->artifact_stamp_reflected : NULL},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_ack(
              bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
              response_body, response_capacity, response_len, invocation, &handled);
          if (handled)
@@ -2958,9 +3022,33 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
              {aimee_db2_async_pending_count_request_decode,
               aimee_db2_async_pending_count_reply_encode,
               backend ? backend->async_pending_count : NULL, AIMEE_DB2_ASYNC_PENDING_COUNT_MAX},
+             {aimee_db2_mining_job_try_lock_request_decode,
+              aimee_db2_mining_job_try_lock_reply_encode,
+              backend ? backend->mining_job_try_lock : NULL, AIMEE_DB2_MINING_JOB_TRY_LOCK_MAX},
          };
          int handled = 0;
          aimee_module_status_t status = db2_dispatch_string_count(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
+      {
+         /* Every db2-envelope-string-ack-v1 operation this family owns. */
+         const db2_string_ack_binding_t bindings[] = {
+             {aimee_db2_runtime_state_touch_request_decode,
+              aimee_db2_runtime_state_touch_reply_encode,
+              backend ? backend->runtime_state_touch : NULL},
+             {aimee_db2_synth_enqueue_request_decode, aimee_db2_synth_enqueue_reply_encode,
+              backend ? backend->synth_enqueue : NULL},
+             {aimee_db2_synth_mark_done_request_decode, aimee_db2_synth_mark_done_reply_encode,
+              backend ? backend->synth_mark_done : NULL},
+             {aimee_db2_reembed_mark_finished_request_decode,
+              aimee_db2_reembed_mark_finished_reply_encode,
+              backend ? backend->reembed_mark_finished : NULL},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_ack(
              bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
              response_body, response_capacity, response_len, invocation, &handled);
          if (handled)

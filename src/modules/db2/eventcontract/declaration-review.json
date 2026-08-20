@@ -156,6 +156,14 @@
       "reason": "Generates a random artifact identifier in the caller's buffer, touching no database. It stays private, and one property is worth recording while looking at it: when the platform random source fails the bytes are zeroed rather than the failure reported, so every caller in that state generates the same all-zero identifier."
     },
     {
+      "symbol": "db2_artifact_stamp_reflected",
+      "signature_sha256": "a7da3057cbd990cbf240f21db0985b847c801a0e9ca2868dcae205e9bef98602",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_stamp_reflected operation replaces the reflection stamp. The time written is DB2's own clock and never crosses, so a caller can record that an artifact was reflected on but not when. An identifier naming nothing updates no row and is acknowledged the same as one that did, which the wire cannot show."
+    },
+    {
       "symbol": "db2_calibration_profile_read",
       "signature_sha256": "09fd9b5b0790dea3a0610b8dda7fc523d8afd38d972b402183476df37c607c46",
       "disposition": "private-db2",
@@ -404,6 +412,14 @@
       "reason": "The typed maintenance.evidence_reembed_all operation replaces the reset that requeues every evidence index row after an embedder version change. Its reach is total and deliberately so: it takes no predicate, resets the attempt count and discards the last error on every row. Recording that as fixed policy is the point of the entry -- the reach cannot be narrowed or widened by a caller, and the discarded failure history is stated rather than left to be discovered by someone wondering where the errors went."
     },
     {
+      "symbol": "db2_failed_query_bump",
+      "signature_sha256": "9fa08d98aab55734434755cbc24c8580d93ac826bdce3babb7999b6192c47a9d",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.failed_query_bump operation replaces the failure tally. It is two statements with no transaction around them -- an upsert and then a read -- so the count it answers with can include a bump another caller made in between. That is the backend's behaviour and is on the record because a single number cannot show it."
+    },
+    {
       "symbol": "db2_fidelity_attribution_count_by_turn",
       "signature_sha256": "00d594b46960adac6cc676ef7e879c2638327cb267f6e7e09ce8fcabb878a3dd",
       "disposition": "wire-operation",
@@ -484,12 +500,28 @@
       "reason": "The typed maintenance.ingest_queue_reset_running operation replaces the startup recovery that returns queue rows abandoned by a dead worker to the pending pool. The two states and the clearing of started_at are fixed policy. Clearing the claim instant is the part that matters: a row left marked as claimed by a process that no longer exists is work that never runs again, and a caller able to skip the clear would hand back a row that still looks taken."
     },
     {
+      "symbol": "db2_kb_purge_fence_active",
+      "signature_sha256": "ecdd5c8d8d8620b81e3dab1fb8c81319548431fae50b873fd0b1ad92f6f39d3d",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.fence_active operation replaces the fence probe. It composes two runtime-state reads and fails closed: an identity row with no heartbeat reads as active, so a partially written fence is never reported inactive. That rule is the whole point of the probe and is not visible in the Boolean it answers with."
+    },
+    {
       "symbol": "db2_kb_release_get_active",
       "signature_sha256": "174c8fc20cfe27ee08cbe7b325ee00ebd5a82ac9f350a08e47334c48ff99adf2",
       "disposition": "wire-operation",
       "family": "custody",
       "db3_placement": "retained-db2",
       "reason": "The typed custody.release_get_active operation reads the pointer to the release the system currently answers as. Zero covers three different situations: no key, a value that does not parse, and a value that is not positive. The parse happens through atoll, which returns zero for garbage without saying so, and the catalog records both collapses rather than letting a zero read as a confident no release."
+    },
+    {
+      "symbol": "db2_kb_runtime_state_set_now",
+      "signature_sha256": "e0f46a9169cf841d36a68202bdf0343a3f7d69c7ef4d8f85e78ceffcfa8cb35f",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.runtime_state_touch operation replaces the timestamp upsert. The value written is DB2's clock rather than anything the caller supplies, so this records that something happened and never when a caller says it did."
     },
     {
       "symbol": "db2_kb_runtime_state_vector_rebuild_lock_release",
@@ -866,6 +898,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
+    },
+    {
+      "symbol": "db2_kb_service_mark_reembed_finished",
+      "signature_sha256": "d050bfc0893be8970cb9523ef6ed43fe408140eeb1c55330a7b7b14d774c395a",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.reembed_mark_finished operation replaces the completion stamp. Its statement only touches a run that has not finished, so marking a finished run again is acknowledged and changes nothing. The caller supplies the stamp here, unlike the other writes in this family, because it is recording when a run it watched ended."
     },
     {
       "symbol": "db2_kb_service_memory_alerts_json",
@@ -2620,6 +2660,14 @@
       "reason": "The typed memory.workspace_tag_insert operation replaces the workspace attribution insert, bounded to DB2's own workspace identifier width. The backend returns void and its statement is ON CONFLICT DO NOTHING, so the acknowledgement carries no count: a repeat is a no-op rather than a failure and there is nothing to report either way."
     },
     {
+      "symbol": "db2_mining_job_try_lock",
+      "signature_sha256": "88acd043065f20c6f345f368a8d3d2ba401e13dc849a222bb30de19185c3cd29",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.mining_job_try_lock operation replaces the advisory lock. It is keyed by a hash of the job identifier rather than the identifier, so two different jobs can collide on one lock and the second will be refused as though its own job were already running. That is a property of the backend, not of this boundary, and it is recorded here because the Boolean cannot show it."
+    },
+    {
       "symbol": "db2_mining_seed_job_defaults",
       "signature_sha256": "c4dd151558efec998a2733b0153b163e876a4589be5715318001f9fe6f4200ba",
       "disposition": "wire-operation",
@@ -2754,6 +2802,22 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "Connection and pool teardown belongs to supervised process termination; callers cannot remotely shut down the required DB2 capability."
+    },
+    {
+      "symbol": "db2_synth_enqueue",
+      "signature_sha256": "345bfd29a9c1b332b4ae772e8a80cd8e512c7b562e23a070aeb29d763f73daca",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.synth_enqueue operation replaces the queue insert. Its column references artifacts, so an artifact that does not exist is refused by the database -- and because this operation has one result, that refusal reaches the caller as an internal failure rather than as something it can act on. Enqueuing one already queued does nothing and is acknowledged, so a repeat is indistinguishable from a new job."
+    },
+    {
+      "symbol": "db2_synth_mark_done",
+      "signature_sha256": "c4b7e6ab6b7eec423718a1aedd8f0820b5c1939eafdf5a21406bfcef3f8a42e3",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.synth_mark_done operation replaces the completion update. Marking something already done, or never queued at all, updates nothing and is acknowledged just the same; the reply says the statement ran, not that it changed anything."
     },
     {
       "symbol": "db2_synth_reenqueue_all",

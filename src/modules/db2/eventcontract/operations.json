@@ -2807,6 +2807,57 @@
       }
     },
     {
+      "family": "learning",
+      "id": 14,
+      "name": "artifact_stamp_reflected",
+      "wire_format": "db2-envelope-string-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifacts and the stamp recording that one has been reflected on are both relational DB2 state.",
+      "c_symbols": ["db2_artifact_stamp_reflected"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "policy": {"stamps": "the reflection stamp is DB2's own clock and never crosses; an artifact that does not exist is acknowledged rather than reported"},
+        "field": {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "learning",
+      "id": 15,
+      "name": "failed_query_bump",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The failed-query tally is relational DB2 state keyed by DB2's own normalisation of the query.",
+      "c_symbols": ["db2_failed_query_bump"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 539,
+        "policy": {"counts": "the tally after this call, read by a second statement with no transaction around the pair, so a concurrent bump can be included in it"},
+        "field": {"name": "query_norm", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 511}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0,
+                  "maximum": 2147483647}
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -2983,6 +3034,32 @@
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
         "field": {"name": "referenced", "type": "u32", "minimum": 0, "maximum": 1}
+      }
+    },
+    {
+      "family": "organization",
+      "id": 8,
+      "name": "fence_active",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The purge fence is relational DB2 runtime state, so whether one is holding is DB2 authority.",
+      "c_symbols": ["db2_kb_purge_fence_active"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 283,
+        "policy": {"counts": "whether a fence is holding; an identity row with no heartbeat reads as active, so a partially written fence is never reported inactive"},
+        "field": {"name": "project", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 255}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "active", "type": "u32", "minimum": 0,
+                  "maximum": 1}
       }
     },
     {
@@ -3337,6 +3414,132 @@
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
         "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 12,
+      "name": "runtime_state_touch",
+      "wire_format": "db2-envelope-string-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Runtime state keys and their stamps are relational DB2 bookkeeping.",
+      "c_symbols": ["db2_kb_runtime_state_set_now"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 283,
+        "policy": {"stamps": "the value written is DB2's own clock, so a caller can record that something happened but not when"},
+        "field": {"name": "state_key", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 255}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 13,
+      "name": "synth_enqueue",
+      "wire_format": "db2-envelope-string-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The synthesis queue is relational DB2 state keyed by the artifact it will read.",
+      "c_symbols": ["db2_synth_enqueue"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "policy": {"conflict": "the artifact must already exist, because the column references it; enqueuing one already queued does nothing and is acknowledged"},
+        "field": {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 14,
+      "name": "synth_mark_done",
+      "wire_format": "db2-envelope-string-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The synthesis queue and the status of its rows are relational DB2 state.",
+      "c_symbols": ["db2_synth_mark_done"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "policy": {"conflict": "marking something already done, or never queued, updates nothing and is acknowledged just the same"},
+        "field": {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 127}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 15,
+      "name": "reembed_mark_finished",
+      "wire_format": "db2-envelope-string-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The reembed progress row is relational DB2 bookkeeping over DB2's own vector state.",
+      "c_symbols": ["db2_kb_service_mark_reembed_finished"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 59,
+        "policy": {"conflict": "the statement only touches a run that has not finished, so marking a finished run again is acknowledged and changes nothing"},
+        "field": {"name": "finished_at", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 31}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 16,
+      "name": "mining_job_try_lock",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The advisory lock is held in DB2's own session state, so whether this caller has it is DB2 authority.",
+      "c_symbols": ["db2_mining_job_try_lock"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 283,
+        "policy": {"counts": "whether the lock was taken; it is keyed by a hash of the job id, so two different jobs can contend for one lock"},
+        "field": {"name": "job_id", "type": "utf8", "minimum_bytes": 1,
+                  "maximum_bytes": 255}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "acquired", "type": "u32", "minimum": 0,
+                  "maximum": 1}
       }
     }
   ]

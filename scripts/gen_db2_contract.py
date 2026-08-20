@@ -221,6 +221,11 @@ def validate_catalog(value: object) -> dict[str, object]:
         order.append(position)
         expected_transaction = ("single-statement" if name in ("reembed_clear",
                                                                 "trace_mining_record",
+                                                                "artifact_stamp_reflected",
+                                                                "runtime_state_touch",
+                                                                "synth_enqueue",
+                                                                "synth_mark_done",
+                                                                "reembed_mark_finished",
                                                                 "effectiveness_update",
                                                                 "effectiveness_demote",
                                                                 "health_record",
@@ -269,6 +274,9 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 # so a concurrent reader can see between them.
                                 "multi-statement"
                                 if name in ("curator_reenqueue_extract_all",
+                                            # An upsert and then a read, with
+                                            # nothing holding them together.
+                                            "failed_query_bump",
                                             "task_delete", "clear_project",
                                             "clear_current_project",
                                             "rules_decay",
@@ -291,6 +299,14 @@ def validate_catalog(value: object) -> dict[str, object]:
                                             "anti_pattern_delete",
                                             "doc_delete",
                                             "task_delete",
+                                            # The tally it answers with is the
+                                            # one this call produced, so a
+                                            # replay produces a different one.
+                                            "failed_query_bump",
+                                            # Taking a lock is not neutral: the
+                                            # second call is refused by the row
+                                            # the first one wrote.
+                                            "mining_job_try_lock",
                                             # The watermark accumulates: each
                                             # call appends a row rather than
                                             # replacing the last one.
@@ -3570,7 +3586,7 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 118 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 126 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -3601,17 +3617,22 @@ def validate_catalog(value: object) -> dict[str, object]:
             "proposals_archive_expired", "trace_mining_last_id", "anti_pattern_bump",
             "anti_pattern_delete", "trace_mining_record", "anti_pattern_exists_exact",
             "anti_pattern_exists_by_source_ref", "artifact_citation_count",
-            "commits_in_last_7_days", "fidelity_attribution_count", "rel_types_ensure_seed",
+            "commits_in_last_7_days", "fidelity_attribution_count",
+            "artifact_stamp_reflected", "failed_query_bump",
+            "rel_types_ensure_seed",
             "doc_delete", "task_delete",
             "clear_project", "clear_current_project", "document_exists", "blob_referenced",
+            "fence_active",
             "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
             "release_get_active", "prospective_sweep_expired",
             "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
             "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
             "curator_reenqueue_extract_all", "directive_suppress",
-            "directive_record_surface", "async_pending_count"]:
+            "directive_record_surface", "async_pending_count",
+            "runtime_state_touch", "synth_enqueue", "synth_mark_done",
+            "reembed_mark_finished", "mining_job_try_lock"]:
         fail("unsupported-operation",
-             "the partial generator requires the one hundred and eighteen supported operations exactly once")
+             "the partial generator requires the one hundred and twenty-six supported operations exactly once")
     return catalog
 
 
@@ -12172,6 +12193,57 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "argument_max": 63, "reply": "count", "reply_max": 0x7fffffff,
         "policy": {"counts": 160},
     },
+    "artifact_stamp_reflected": {
+        "key": ("learning", 14), "format": "db2-envelope-string-ack-v1",
+        "symbol": "db2_artifact_stamp_reflected", "argument": "artifact_id",
+        "argument_max": 127,
+        "policy": {"stamps": 200},
+    },
+    "failed_query_bump": {
+        "key": ("learning", 15), "format": "db2-envelope-string-u32-v1",
+        "symbol": "db2_failed_query_bump", "argument": "query_norm",
+        "argument_max": 511,
+        "reply": "count", "reply_max": 2147483647,
+        "policy": {"counts": 200},
+    },
+    "fence_active": {
+        "key": ("organization", 8), "format": "db2-envelope-string-u32-v1",
+        "symbol": "db2_kb_purge_fence_active", "argument": "project",
+        "argument_max": 255,
+        "reply": "active", "reply_max": 1,
+        "policy": {"counts": 200},
+    },
+    "runtime_state_touch": {
+        "key": ("maintenance", 12), "format": "db2-envelope-string-ack-v1",
+        "symbol": "db2_kb_runtime_state_set_now", "argument": "state_key",
+        "argument_max": 255,
+        "policy": {"stamps": 200},
+    },
+    "synth_enqueue": {
+        "key": ("maintenance", 13), "format": "db2-envelope-string-ack-v1",
+        "symbol": "db2_synth_enqueue", "argument": "artifact_id",
+        "argument_max": 127,
+        "policy": {"conflict": 200},
+    },
+    "synth_mark_done": {
+        "key": ("maintenance", 14), "format": "db2-envelope-string-ack-v1",
+        "symbol": "db2_synth_mark_done", "argument": "artifact_id",
+        "argument_max": 127,
+        "policy": {"conflict": 200},
+    },
+    "reembed_mark_finished": {
+        "key": ("maintenance", 15), "format": "db2-envelope-string-ack-v1",
+        "symbol": "db2_kb_service_mark_reembed_finished", "argument": "finished_at",
+        "argument_max": 31,
+        "policy": {"conflict": 200},
+    },
+    "mining_job_try_lock": {
+        "key": ("maintenance", 16), "format": "db2-envelope-string-u32-v1",
+        "symbol": "db2_mining_job_try_lock", "argument": "job_id",
+        "argument_max": 255,
+        "reply": "acquired", "reply_max": 1,
+        "policy": {"counts": 200},
+    },
 }
 
 
@@ -12216,7 +12288,7 @@ def _check_derived(operation: dict[str, object], name: str, key: tuple[str, int]
                           "maximum_bytes": row["argument_max"]}):
             fail(f"{rule}-request", "request must carry one non-empty bounded string")
 
-    if row["format"] == "db2-envelope-u64-ack-v1":
+    if row["format"] in ("db2-envelope-u64-ack-v1", "db2-envelope-string-ack-v1"):
         reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
                       f"{name}.reply")
         if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
@@ -12248,6 +12320,8 @@ def _derived_constants(catalog: dict[str, object]) -> list[tuple[str, str]]:
         wire = DERIVED_OPERATIONS[str(operation["name"])]["format"]
         if wire == "db2-envelope-u64-u32-v1":
             rows += _u64_probe_constants(operation)
+        elif wire == "db2-envelope-string-ack-v1":
+            rows += _string_ack_constants(operation)
         elif wire == "db2-envelope-u64-ack-v1":
             rows += _u64_ack_constants(operation)
         else:
@@ -12262,6 +12336,8 @@ def _derived_codecs(catalog: dict[str, object]) -> str:
         wire = DERIVED_OPERATIONS[str(operation["name"])]["format"]
         if wire == "db2-envelope-u64-u32-v1":
             emitted.append(_u64_probe_codecs(operation))
+        elif wire == "db2-envelope-string-ack-v1":
+            emitted.append(_string_ack_codecs(operation))
         elif wire == "db2-envelope-u64-ack-v1":
             emitted.append(_u64_ack_codecs(operation))
         else:
@@ -12276,6 +12352,8 @@ def _derived_vectors(catalog: dict[str, object]) -> list[dict[str, object]]:
         wire = DERIVED_OPERATIONS[str(operation["name"])]["format"]
         if wire == "db2-envelope-u64-u32-v1":
             emitted.append(_u64_probe_vectors(catalog, operation))
+        elif wire == "db2-envelope-string-ack-v1":
+            emitted.append(_string_ack_vectors(catalog, operation))
         elif wire == "db2-envelope-u64-ack-v1":
             emitted.append(_u64_ack_vectors(catalog, operation))
         else:
@@ -12290,6 +12368,8 @@ def _derived_go(catalog: dict[str, object]) -> str:
         wire = DERIVED_OPERATIONS[str(operation["name"])]["format"]
         if wire == "db2-envelope-u64-u32-v1":
             emitted.append(_u64_probe_go(operation))
+        elif wire == "db2-envelope-string-ack-v1":
+            emitted.append(_string_ack_go(operation))
         elif wire == "db2-envelope-u64-ack-v1":
             emitted.append(_u64_ack_go(operation))
         else:
@@ -12312,6 +12392,38 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
         upper = name.upper()
         wire = row["format"]
         argument = str(row["argument"])
+        if wire == "db2-envelope-string-ack-v1":
+            declarations.append(f"""   aimee_module_call_result_t aimee_db2_{name}_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *{argument}, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+""")
+            definitions.append(f"""aimee_module_call_result_t aimee_db2_{name}_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *{argument}, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{{
+   if (!call || !{argument})
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_{upper}_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_{upper}_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_{name}_request_encode({argument}, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_{upper}, AIMEE_DB2_STAGE_{upper}, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_{name}_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}}
+
+""")
+            continue
         if wire == "db2-envelope-u64-ack-v1":
             declarations.append(f"""   aimee_module_call_result_t aimee_db2_{name}_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
@@ -12394,6 +12506,219 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
 
 """)
     return "".join(declarations), "".join(definitions)
+
+
+
+def _string_ack_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-string-ack-v1."""
+    upper = str(operation["name"]).upper()
+    family = str(operation["family"]).upper()
+    request, reply = operation["request"], operation["reply"]
+    return [
+        (f"AIMEE_DB2_EVENT_{upper}", f"AIMEE_DB2_EVENT_{family}"),
+        (f"AIMEE_DB2_STAGE_{upper}", f"AIMEE_DB2_FAMILY_{family}"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MIN_LEN", f"{request['encoded_size_min']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MAX_LEN", f"{request['encoded_size_max']}u"),
+        (f"AIMEE_DB2_{upper}_ARGUMENT_MIN", f"{request['field']['minimum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_ARGUMENT_MAX", f"{request['field']['maximum_bytes']}u"),
+        (f"AIMEE_DB2_{upper}_RESPONSE_LEN", f"{reply['encoded_size_ok']}u"),
+        (f"AIMEE_DB2_{upper}_ERROR_LEN", f"{reply['encoded_size_error']}u"),
+    ]
+
+
+def _string_ack_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for db2-envelope-string-ack-v1."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    argument = str(operation["request"]["field"]["name"])
+    return f"""
+static inline int aimee_db2_{lower}_request_encode(const char *{argument}, uint8_t *output,
+                                                   size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!{argument} || !output || !output_len)
+      return -1;
+   size_t argument_len = 0u;
+   while (argument_len <= AIMEE_DB2_{upper}_ARGUMENT_MAX && {argument}[argument_len])
+      ++argument_len;
+   size_t payload_len = 4u + argument_len;
+   if (argument_len < AIMEE_DB2_{upper}_ARGUMENT_MIN ||
+       argument_len > AIMEE_DB2_{upper}_ARGUMENT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, (uint32_t)payload_len,
+                                       output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)argument_len);
+   memcpy(payload + 4u, {argument}, argument_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *{argument}, size_t argument_capacity)
+{{
+   if ({argument} && argument_capacity)
+      {argument}[0] = '\\0';
+   if (!{argument} || argument_capacity < (size_t)AIMEE_DB2_{upper}_ARGUMENT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       input_len < AIMEE_DB2_{upper}_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_{upper}_REQUEST_MAX_LEN || header.payload_len < 5u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, header.payload_len, &cursor, {argument},
+                                 AIMEE_DB2_{upper}_ARGUMENT_MAX) != 0 ||
+       cursor != header.payload_len || {argument}[0] == '\\0')
+      return -1;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_encode(uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || capacity < AIMEE_DB2_{upper}_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK, 0u, output,
+                                     capacity) != 0)
+      return -1;
+   *output_len = AIMEE_DB2_{upper}_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_{upper}_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_{upper} &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+"""
+
+
+def _string_ack_vectors(catalog: dict[str, object],
+                        operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for one db2-envelope-string-ack-v1 operation."""
+    identifier = int(operation["id"])
+    argument = str(operation["request"]["field"]["name"])
+    value = b"probe-argument"
+
+    def request_bytes(text: bytes) -> bytes:
+        return _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0,
+                         _put_u32(len(text)) + text)
+
+    request = request_bytes(value)
+    acknowledged = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, b"")
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {
+            "positive": request.hex(),
+            argument: value.decode("ascii"),
+            "negative": [
+                {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+                {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+                {"mutation": "argument_empty", "hex": request_bytes(b"").hex()},
+                {"mutation": "argument_length_exceeds_payload", "hex":
+                 _mutate_u32(request, ENVELOPE_HEADER_LEN, len(value) + 1).hex()},
+                {"mutation": "argument_embedded_nul", "hex":
+                 request_bytes(b"probe\0argument").hex()},
+                {"mutation": "short", "hex": request[:-1].hex()},
+                {"mutation": "long", "hex": (request + b"\0").hex()},
+            ],
+        },
+        "reply": {
+            "positive": [{"result": 0, "hex": acknowledged.hex()}],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(acknowledged, 8, 0).hex()},
+                {"mutation": "unsupported_result", "hex":
+                 _mutate_u32(acknowledged, 12, 5).hex()},
+                {"mutation": "ok_with_payload", "hex":
+                 _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0)).hex()},
+                {"mutation": "short", "hex": acknowledged[:-1].hex()},
+                {"mutation": "long", "hex": (acknowledged + b"\0").hex()},
+            ],
+        },
+    }
+
+
+def _string_ack_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for db2-envelope-string-ack-v1."""
+    name = _go_name(str(operation["name"]))
+    family = _go_name(str(operation["family"]))
+    request = operation["request"]
+    argument = _go_name(str(request["field"]["name"]))
+    argument = argument[0].lower() + argument[1:]
+    return f"""const Event{name} = Event{family}
+const Stage{name} = Family{family}
+const Operation{name} uint32 = {operation['id']}
+const {name}ArgumentMin = {request['field']['minimum_bytes']}
+const {name}ArgumentMax = {request['field']['maximum_bytes']}
+
+// Encode{name}Request carries one non-empty bounded string.
+func Encode{name}Request({argument} string) ([]byte, error) {{
+	if len({argument}) < {name}ArgumentMin || len({argument}) > {name}ArgumentMax ||
+		hasNUL({argument}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	var payload []byte
+	if err := putRowText(&payload, {argument}, {name}ArgumentMax); err != nil {{
+		return nil, err
+	}}
+	header, err := EncodeRequestHeader(Operation{name}, 0, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Request rejects an empty argument as well as an oversized one.
+func Decode{name}Request(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		header.PayloadLen < 5 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	{argument}, err := takeRowText(payload, &cursor, {name}ArgumentMax)
+	if err != nil || cursor != len(payload) || len({argument}) < {name}ArgumentMin {{
+		return "", ErrMalformedEnvelope
+	}}
+	return {argument}, nil
+}}
+
+// Encode{name}Reply acknowledges the write without a payload.
+func Encode{name}Reply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// Decode{name}Reply requires the exact empty acknowledgement.
+func Decode{name}Reply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+"""
 
 
 def header_bytes(catalog: dict[str, object]) -> bytes:

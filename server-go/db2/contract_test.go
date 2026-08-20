@@ -80,6 +80,10 @@ type wireBaseline struct {
 			EntityID                   string   `json:"entity_id"`
 			TurnID                     string   `json:"turn_id"`
 			BlobRef                    string   `json:"blob_ref"`
+			QueryNorm                  string   `json:"query_norm"`
+			StateKey                   string   `json:"state_key"`
+			FinishedAt                 string   `json:"finished_at"`
+			JobID                      string   `json:"job_id"`
 			Project                    string   `json:"project"`
 			StaleL1Tier                string   `json:"stale_l1_tier"`
 			MaximumKinds               uint32   `json:"maximum_kinds"`
@@ -181,6 +185,7 @@ type wireBaseline struct {
 				ReclassifiedCount     uint32            `json:"reclassified_count"`
 				Exists                uint32            `json:"exists"`
 				Referenced            uint32            `json:"referenced"`
+				FenceActive           uint32            `json:"active"`
 				Found                 uint32            `json:"found"`
 				ID                    uint64            `json:"id"`
 				Size                  uint32            `json:"size"`
@@ -313,7 +318,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 118 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 126 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -410,27 +415,35 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[94].Name != "artifact_citation_count" ||
 		baseline.Operations[95].Name != "commits_in_last_7_days" ||
 		baseline.Operations[96].Name != "fidelity_attribution_count" ||
-		baseline.Operations[97].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[98].Name != "doc_delete" ||
-		baseline.Operations[99].Name != "task_delete" ||
-		baseline.Operations[100].Name != "clear_project" ||
-		baseline.Operations[101].Name != "clear_current_project" ||
-		baseline.Operations[102].Name != "document_exists" ||
-		baseline.Operations[103].Name != "blob_referenced" ||
-		baseline.Operations[104].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[105].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[106].Name != "release_get_active" ||
-		baseline.Operations[107].Name != "prospective_sweep_expired" ||
-		baseline.Operations[108].Name != "directive_sweep_expired" ||
-		baseline.Operations[109].Name != "mark_revisit_due" ||
-		baseline.Operations[110].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[111].Name != "evidence_reembed_all" ||
-		baseline.Operations[112].Name != "curator_reembed_all" ||
-		baseline.Operations[113].Name != "synth_reenqueue_all" ||
-		baseline.Operations[114].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[115].Name != "directive_suppress" ||
-		baseline.Operations[116].Name != "directive_record_surface" ||
-		baseline.Operations[117].Name != "async_pending_count" {
+		baseline.Operations[98].Name != "failed_query_bump" ||
+		baseline.Operations[99].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[100].Name != "doc_delete" ||
+		baseline.Operations[101].Name != "task_delete" ||
+		baseline.Operations[102].Name != "clear_project" ||
+		baseline.Operations[103].Name != "clear_current_project" ||
+		baseline.Operations[104].Name != "document_exists" ||
+		baseline.Operations[105].Name != "blob_referenced" ||
+		baseline.Operations[106].Name != "fence_active" ||
+		baseline.Operations[107].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[108].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[109].Name != "release_get_active" ||
+		baseline.Operations[110].Name != "prospective_sweep_expired" ||
+		baseline.Operations[111].Name != "directive_sweep_expired" ||
+		baseline.Operations[112].Name != "mark_revisit_due" ||
+		baseline.Operations[113].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[114].Name != "evidence_reembed_all" ||
+		baseline.Operations[115].Name != "curator_reembed_all" ||
+		baseline.Operations[116].Name != "synth_reenqueue_all" ||
+		baseline.Operations[117].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[118].Name != "directive_suppress" ||
+		baseline.Operations[119].Name != "directive_record_surface" ||
+		baseline.Operations[120].Name != "async_pending_count" ||
+		baseline.Operations[97].Name != "artifact_stamp_reflected" ||
+		baseline.Operations[121].Name != "runtime_state_touch" ||
+		baseline.Operations[122].Name != "synth_enqueue" ||
+		baseline.Operations[123].Name != "synth_mark_done" ||
+		baseline.Operations[124].Name != "reembed_mark_finished" ||
+		baseline.Operations[125].Name != "mining_job_try_lock" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -673,7 +686,7 @@ func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
 
 func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	operation := baseline.Operations[113]
+	operation := baseline.Operations[116]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -987,9 +1000,9 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 			EncodeAntiPatternBumpRequest, DecodeAntiPatternBumpRequest, DecodeAntiPatternBumpReply},
 		{90, "anti_pattern_delete", "learning", 42,
 			EncodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteReply},
-		{98, "doc_delete", "organization", 43,
+		{100, "doc_delete", "organization", 43,
 			EncodeDocDeleteRequest, DecodeDocDeleteRequest, DecodeDocDeleteReply},
-		{99, "task_delete", "organization", 44,
+		{101, "task_delete", "organization", 44,
 			EncodeTaskDeleteRequest, DecodeTaskDeleteRequest, DecodeTaskDeleteReply},
 	} {
 		entry := baseline.Operations[operation.index]
@@ -1023,8 +1036,8 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 
 func TestDirectiveIDOperationsMatchEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	suppress := baseline.Operations[115]
-	surface := baseline.Operations[116]
+	suppress := baseline.Operations[118]
+	surface := baseline.Operations[119]
 	if suppress.Family != "maintenance" || surface.Family != "maintenance" {
 		t.Fatalf("families = %q/%q, want maintenance", suppress.Family, surface.Family)
 	}
@@ -1196,8 +1209,8 @@ func TestReleaseGetActiveMatchesEverySharedCVector(t *testing.T) {
 
 func TestVectorRebuildLockMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	acquire := baseline.Operations[104]
-	release := baseline.Operations[105]
+	acquire := baseline.Operations[107]
+	release := baseline.Operations[108]
 	if acquire.Family != "custody" || release.Family != "custody" {
 		t.Fatalf("families = %q/%q, want custody", acquire.Family, release.Family)
 	}
@@ -2440,6 +2453,12 @@ func singleStringCountVectors(t *testing.T, index int, want string,
 		if answer == 0 {
 			answer = vector.Referenced
 		}
+		if answer == 0 {
+			answer = vector.FenceActive
+		}
+		if answer == 0 {
+			answer = vector.Acquired
+		}
 		reply, err := encodeReply(answer)
 		if err != nil || hex.EncodeToString(reply) != vector.Hex {
 			t.Fatalf("reply encode: %v %x", err, reply)
@@ -2481,6 +2500,102 @@ func TestAsyncPendingCountMatchesEverySharedCVector(t *testing.T) {
 		loadWireBaseline(t).Operations[operationIndex(t, "async_pending_count")].Request.Kind,
 		EncodeAsyncPendingCountRequest, DecodeAsyncPendingCountRequest,
 		EncodeAsyncPendingCountReply, DecodeAsyncPendingCountReply)
+}
+
+func TestArtifactStampReflectedMatchesEverySharedCVector(t *testing.T) {
+	singleStringAckVectors(t, operationIndex(t, "artifact_stamp_reflected"),
+		loadWireBaseline(t).Operations[operationIndex(t, "artifact_stamp_reflected")].Request.ArtifactID,
+		EncodeArtifactStampReflectedRequest, DecodeArtifactStampReflectedRequest,
+		EncodeArtifactStampReflectedReply, DecodeArtifactStampReflectedReply)
+}
+
+func TestFailedQueryBumpMatchesEverySharedCVector(t *testing.T) {
+	singleStringCountVectors(t, operationIndex(t, "failed_query_bump"),
+		loadWireBaseline(t).Operations[operationIndex(t, "failed_query_bump")].Request.QueryNorm,
+		EncodeFailedQueryBumpRequest, DecodeFailedQueryBumpRequest,
+		EncodeFailedQueryBumpReply, DecodeFailedQueryBumpReply)
+}
+
+func TestFenceActiveMatchesEverySharedCVector(t *testing.T) {
+	singleStringCountVectors(t, operationIndex(t, "fence_active"),
+		loadWireBaseline(t).Operations[operationIndex(t, "fence_active")].Request.Project,
+		EncodeFenceActiveRequest, DecodeFenceActiveRequest,
+		EncodeFenceActiveReply, DecodeFenceActiveReply)
+}
+
+func TestRuntimeStateTouchMatchesEverySharedCVector(t *testing.T) {
+	singleStringAckVectors(t, operationIndex(t, "runtime_state_touch"),
+		loadWireBaseline(t).Operations[operationIndex(t, "runtime_state_touch")].Request.StateKey,
+		EncodeRuntimeStateTouchRequest, DecodeRuntimeStateTouchRequest,
+		EncodeRuntimeStateTouchReply, DecodeRuntimeStateTouchReply)
+}
+
+func TestSynthEnqueueMatchesEverySharedCVector(t *testing.T) {
+	singleStringAckVectors(t, operationIndex(t, "synth_enqueue"),
+		loadWireBaseline(t).Operations[operationIndex(t, "synth_enqueue")].Request.ArtifactID,
+		EncodeSynthEnqueueRequest, DecodeSynthEnqueueRequest,
+		EncodeSynthEnqueueReply, DecodeSynthEnqueueReply)
+}
+
+func TestSynthMarkDoneMatchesEverySharedCVector(t *testing.T) {
+	singleStringAckVectors(t, operationIndex(t, "synth_mark_done"),
+		loadWireBaseline(t).Operations[operationIndex(t, "synth_mark_done")].Request.ArtifactID,
+		EncodeSynthMarkDoneRequest, DecodeSynthMarkDoneRequest,
+		EncodeSynthMarkDoneReply, DecodeSynthMarkDoneReply)
+}
+
+func TestReembedMarkFinishedMatchesEverySharedCVector(t *testing.T) {
+	singleStringAckVectors(t, operationIndex(t, "reembed_mark_finished"),
+		loadWireBaseline(t).Operations[operationIndex(t, "reembed_mark_finished")].Request.FinishedAt,
+		EncodeReembedMarkFinishedRequest, DecodeReembedMarkFinishedRequest,
+		EncodeReembedMarkFinishedReply, DecodeReembedMarkFinishedReply)
+}
+
+func TestMiningJobTryLockMatchesEverySharedCVector(t *testing.T) {
+	singleStringCountVectors(t, operationIndex(t, "mining_job_try_lock"),
+		loadWireBaseline(t).Operations[operationIndex(t, "mining_job_try_lock")].Request.JobID,
+		EncodeMiningJobTryLockRequest, DecodeMiningJobTryLockRequest,
+		EncodeMiningJobTryLockReply, DecodeMiningJobTryLockReply)
+}
+
+// singleStringAckVectors drives one db2-envelope-string-ack-v1 operation through
+// every vector. The reply carries nothing, so what the positive proves is that
+// the acknowledgement is the exact empty envelope and not merely a short one.
+func singleStringAckVectors(t *testing.T, index int, want string,
+	encodeRequest func(string) ([]byte, error),
+	decodeRequest func([]byte) (string, error),
+	encodeReply func() ([]byte, error),
+	decodeReply func([]byte) error) {
+	t.Helper()
+	operation := loadWireBaseline(t).Operations[index]
+
+	request, err := encodeRequest(want)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	if got, err := decodeRequest(request); err != nil || got != want {
+		t.Fatalf("request decode: %v %q", err, got)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := decodeRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+
+	for _, vector := range operation.Reply.Positive {
+		reply, err := encodeReply()
+		if err != nil || hex.EncodeToString(reply) != vector.Hex {
+			t.Fatalf("reply encode: %v %x", err, reply)
+		}
+		if err := decodeReply(reply); err != nil {
+			t.Fatalf("reply decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := decodeReply(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("reply %s decoded", vector.Mutation)
+		}
+	}
 }
 
 func TestEntityEdgePruneOrphansMatchesEverySharedCVector(t *testing.T) {

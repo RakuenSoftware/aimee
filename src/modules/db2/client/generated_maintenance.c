@@ -275,3 +275,136 @@ aimee_db2_async_pending_count_call(aimee_db2_call_fn call, void *call_context, u
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_runtime_state_touch_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *state_key,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !state_key)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RUNTIME_STATE_TOUCH_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RUNTIME_STATE_TOUCH_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_runtime_state_touch_request_encode(state_key, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RUNTIME_STATE_TOUCH, AIMEE_DB2_STAGE_RUNTIME_STATE_TOUCH,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_runtime_state_touch_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_synth_enqueue_call(aimee_db2_call_fn call, void *call_context,
+                                                        uint64_t trace_id, uint64_t deadline_ns,
+                                                        const char *artifact_id,
+                                                        aimee_module_cancelled_fn cancelled,
+                                                        void *cancel_context)
+{
+   if (!call || !artifact_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_SYNTH_ENQUEUE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SYNTH_ENQUEUE_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_synth_enqueue_request_encode(artifact_id, request, sizeof(request),
+                                              &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SYNTH_ENQUEUE, AIMEE_DB2_STAGE_SYNTH_ENQUEUE, trace_id,
+            deadline_ns, request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_synth_enqueue_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_synth_mark_done_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                               uint64_t deadline_ns, const char *artifact_id,
+                               aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !artifact_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_SYNTH_MARK_DONE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SYNTH_MARK_DONE_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_synth_mark_done_request_encode(artifact_id, request, sizeof(request),
+                                                &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SYNTH_MARK_DONE, AIMEE_DB2_STAGE_SYNTH_MARK_DONE,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_synth_mark_done_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_reembed_mark_finished_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, const char *finished_at,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call || !finished_at)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_REEMBED_MARK_FINISHED_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_REEMBED_MARK_FINISHED_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_reembed_mark_finished_request_encode(finished_at, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_REEMBED_MARK_FINISHED,
+            AIMEE_DB2_STAGE_REEMBED_MARK_FINISHED, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reembed_mark_finished_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_mining_job_try_lock_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *job_id, uint32_t *acquired,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (acquired)
+      *acquired = 0u;
+   if (!call || !acquired || !job_id)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MINING_JOB_TRY_LOCK_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_MINING_JOB_TRY_LOCK_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_mining_job_try_lock_request_encode(job_id, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MINING_JOB_TRY_LOCK, AIMEE_DB2_STAGE_MINING_JOB_TRY_LOCK,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_mining_job_try_lock_reply_decode(response, response_len, acquired) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}

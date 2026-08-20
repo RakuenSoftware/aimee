@@ -84,6 +84,14 @@ typedef struct
    int (*fidelity_attribution_count)(const char *turn_id);
    int (*blob_referenced)(const char *blob_ref);
    int (*async_pending_count)(const char *kind);
+   int (*artifact_stamp_reflected)(const char *artifact_id);
+   int (*failed_query_bump)(const char *query_norm);
+   int (*fence_active)(const char *project);
+   int (*runtime_state_touch)(const char *state_key);
+   int (*synth_enqueue)(const char *artifact_id);
+   int (*synth_mark_done)(const char *artifact_id);
+   int (*reembed_mark_finished)(const char *finished_at);
+   int (*mining_job_try_lock)(const char *job_id);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
