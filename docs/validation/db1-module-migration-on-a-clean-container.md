@@ -252,6 +252,32 @@ broken store, and a found retry detail reported as a miss. Each is named in the
 commit that fixed it. Reading SQL out of a function is not the same as reading
 the function.
 
+### `scripts/validation/db1-module-wfe-lifecycle.sh` -- 16 checks, all passing
+
+Every other script here proves something about the store: who holds it, what it
+creates, whether it survives an upgrade. The coexistence script even starts the
+engine, but only to see whether it opens the file. None of them drives the
+engine's own API, so none of them proved the thing the port was actually for.
+
+This one submits a real run over the deployed engine's socket and checks each
+answer against the module's store read independently with sqlite3 -- the API
+agreeing with itself is not evidence; the API agreeing with the file the module
+owns is. It covers submit, list, fetch by id, event history, pause, resume and
+stop, and re-checks after every mutation that the engine holds no descriptor and
+the module is the only process that does.
+
+Two things it made explicit that the unit tests could not:
+
+- the engine's per-run access check resolves the owner by walking parent links
+  **through the module**, so calling with an identity exercises that lookup as
+  well as the operation.
+- a park is guarded on `pause_reason=''`, so re-parking an already-parked run is
+  refused and the original reason stands. With no runner configured the
+  scheduler parks the run on its own, at a moment the test cannot control, so
+  the assertion is derived from the outcome rather than from a pre-read: an
+  acceptance must leave a reason behind, a refusal must find one already there,
+  and the inconsistent pairs are what fail. Three consecutive runs: 16/0 each.
+
 ## Reproducing
 
 Install the three binaries as above, then inside the container:
@@ -260,6 +286,13 @@ Install the three binaries as above, then inside the container:
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-explore.sh
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-readiness-probe.sh
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-write-contention.sh
+
+The lifecycle script additionally needs `aimee-wfe`, the WFE grant and the
+shipped workflow definitions:
+
+    AIMEE_DB1_GRANT=/path/to/db1.grant AIMEE_WFE_GRANT=/path/to/wfe.grant \
+      AIMEE_WORKFLOWS_DIR=/path/to/config/workflows \
+      scripts/validation/db1-module-wfe-lifecycle.sh
 
 The coexistence script additionally needs `aimee-wfe` and the WFE grant, and is
 expected to fail until the Go WFE stops opening the store:
