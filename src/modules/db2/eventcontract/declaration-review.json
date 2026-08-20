@@ -644,6 +644,22 @@
       "reason": "The typed index.entity_observation_count operation replaces the observation count. It counts distinct memories rather than observation rows and matches the entity case-insensitively, so a memory naming an entity twice counts once and a differently cased spelling still matches. Neither is visible in a bare number, so both are policy."
     },
     {
+      "symbol": "db2_entity_edge_neighbors",
+      "signature_sha256": "2b46618b7faf8b37b8172eded2ba685bd08a1bbec39d710c09643d1dae982429",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_neighbors operation lists an entity's graph neighbours. Edges are followed in both directions and the two halves are unioned without an ORDER BY, so when the limit bites, which neighbours come back is whatever the database returned first. Semantic edges are excluded. The weight column is a BIGINT and the row narrows it to a 32-bit number, so a weight past that range is already truncated before it reaches this boundary."
+    },
+    {
+      "symbol": "db2_entity_edge_neighbors_filtered",
+      "signature_sha256": "294311338aa4895373f6cf2f1f24dc42d8e2d9023de69e08939d7d0b72f64e05",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_neighbors_filtered operation lists an entity's neighbours through one or two named relations. An empty second relation narrows the query to the first rather than being an error. A limit of zero is quietly replaced with twenty, so a caller asking for no limit gets one. The weight ordering is optional and off by default, and without it the limit keeps whichever rows came back first, which is not the strongest ones."
+    },
+    {
       "symbol": "db2_entity_edge_normalize_weights",
       "signature_sha256": "085de3b769fda5eb2c35fb0b9ba2177f2fd502d72c39aa5253bf9ed88f6d5331",
       "disposition": "wire-operation",
@@ -652,12 +668,36 @@
       "reason": "The typed index.entity_edge_normalize_weights operation replaces the per-relation weight rescale. The statement already skips rows that would be rewritten to the value they hold, so a converged graph reports zero rather than rewriting every edge, and the scale stays fixed policy behind the handler."
     },
     {
+      "symbol": "db2_entity_edge_outbound_neighbors",
+      "signature_sha256": "e1318b0ebff692801e6a79b80eeb5cbeb3347ac44137153d871839b136eb0715",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_outbound_neighbors operation lists the entities an entity points at. It differs from index.entity_neighbors in exactly one way that the identical reply cannot show: this one follows edges leaving the entity and that one follows edges in both directions. A caller that wants the graph treated as undirected and reaches for this name gets half the answer and no indication of it."
+    },
+    {
       "symbol": "db2_entity_edge_prune_orphans",
       "signature_sha256": "6e92ee40b63006fa5a26953c963aaf0a78c1acb76dded6d8dc1f60c1b5faeea1",
       "disposition": "wire-operation",
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_edge_prune_orphans operation replaces the maintenance pass that drops entity edges no surviving memory references. The tiers that count as a reference are fixed policy behind the handler, so a caller cannot widen or narrow what counts as orphaned."
+    },
+    {
+      "symbol": "db2_entity_edge_top_partners_by_relation",
+      "signature_sha256": "0aa4ba979dd1c10dd7e61a7dd8e30c71f3a9ee5338e105ab73f79bdb5fefe9f2",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_top_partners operation ranks the entities most connected to one entity through a relation. Unlike the neighbour listings beside it the endpoint is matched case-insensitively, so two spellings of a name are one entity here and two entities there. Both directions are summed per partner, so the weight is a total rather than any single edge's, and it can exceed what a single edge's weight column could hold."
+    },
+    {
+      "symbol": "db2_entity_edge_top_targets_by_relation",
+      "signature_sha256": "b430ffcf2e9b33eba4e8f6d8c95e5b23893f1a5d82db3f42406e65d100daafe0",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_top_targets operation ranks the entities one entity points at through a relation. It is index.entity_top_partners with one direction instead of two, and the reply is identical, so the names are the only thing distinguishing a directed ranking from an undirected one. Like its partner it matches the endpoint case-insensitively, unlike the plain neighbour listings which do not."
     },
     {
       "symbol": "db2_entity_node_key_file",

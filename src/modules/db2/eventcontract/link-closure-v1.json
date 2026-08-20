@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "87e736d165103973c3651180a56601223c750b1c",
+  "source_revision": "d6f6698873523cc1180256f88f03377367b1b0ad",
   "source_fingerprint": "3c7935d994aac4469fba57d21b3d91ccc383879ad1358a9aee33c98e2fcad3f3",
   "probe": {
     "compile_driver": "src/Makefile",
@@ -3190,5 +3190,5 @@
       "system-link": 139
     }
   },
-  "fingerprint": "c6ba928ab624b5a0c38f2611e8196c20c4583dcc0f8c331629513c799bc1aacf"
+  "fingerprint": "7ba169ace9a3fdefa2c64943976e51df55b84aa36ebda88763c83fd4a6912790"
 }

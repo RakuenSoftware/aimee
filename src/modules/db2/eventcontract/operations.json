@@ -5231,6 +5231,299 @@
       }
     },
     {
+      "family": "index",
+      "id": 30,
+      "name": "entity_neighbors",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their endpoints and weights are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_neighbors"
+      ],
+      "request": {
+        "policy": {
+          "reads": "edges are followed in both directions and returned unordered, so which neighbours survive the limit is arbitrary"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1024
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "node",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
+      "family": "index",
+      "id": 31,
+      "name": "entity_neighbors_filtered",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their relations and weights are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_neighbors_filtered"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty second relation narrows to one, a limit of zero becomes twenty, and without the weight ordering the surviving rows are arbitrary"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "relation_a",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "relation_b",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "order_by_weight",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1024
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "node",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
+      "family": "index",
+      "id": 32,
+      "name": "entity_outbound_neighbors",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their endpoints and weights are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_outbound_neighbors"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only edges leaving the entity are followed, which is the opposite of the neighbour listing beside it"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1024
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "node",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
+      "family": "index",
+      "id": 33,
+      "name": "entity_top_partners",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their relations and weights are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_top_partners_by_relation"
+      ],
+      "request": {
+        "policy": {
+          "reads": "endpoints are matched case-insensitively and the weights of both directions are summed per partner"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "relation",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "node",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
+      "family": "index",
+      "id": 34,
+      "name": "entity_top_targets",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their relations and weights are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_top_targets_by_relation"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only edges leaving the entity are summed, and the endpoint is matched case-insensitively"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "relation",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "node",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",

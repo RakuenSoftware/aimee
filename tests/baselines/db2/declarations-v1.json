@@ -7882,9 +7882,15 @@
           "line": 65
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_neighbors operation lists an entity's graph neighbours. Edges are followed in both directions and the two halves are unioned without an ORDER BY, so when the limit bites, which neighbours come back is whatever the database returned first. Semantic edges are excluded. The weight column is a BIGINT and the row narrows it to a 32-bit number, so a weight past that range is already truncated before it reaches this boundary."
+      },
       "signature": "int db2_entity_edge_neighbors ( const char * entity , db2_entity_neighbor_t * out , int max , int limit_sql )",
       "signature_sha256": "2b46618b7faf8b37b8172eded2ba685bd08a1bbec39d710c09643d1dae982429",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_neighbors"
     },
     {
@@ -7897,9 +7903,15 @@
           "line": 72
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_neighbors_filtered operation lists an entity's neighbours through one or two named relations. An empty second relation narrows the query to the first rather than being an error. A limit of zero is quietly replaced with twenty, so a caller asking for no limit gets one. The weight ordering is optional and off by default, and without it the limit keeps whichever rows came back first, which is not the strongest ones."
+      },
       "signature": "int db2_entity_edge_neighbors_filtered ( const char * entity , const char * rel_a , const char * rel_b , int order_by_weight , db2_entity_neighbor_t * out , int max , int limit_sql )",
       "signature_sha256": "294311338aa4895373f6cf2f1f24dc42d8e2d9023de69e08939d7d0b72f64e05",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_neighbors_filtered"
     },
     {
@@ -7949,9 +7961,15 @@
           "line": 122
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_outbound_neighbors operation lists the entities an entity points at. It differs from index.entity_neighbors in exactly one way that the identical reply cannot show: this one follows edges leaving the entity and that one follows edges in both directions. A caller that wants the graph treated as undirected and reaches for this name gets half the answer and no indication of it."
+      },
       "signature": "int db2_entity_edge_outbound_neighbors ( const char * source , db2_entity_neighbor_t * out , int max , int limit_sql )",
       "signature_sha256": "e1318b0ebff692801e6a79b80eeb5cbeb3347ac44137153d871839b136eb0715",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_outbound_neighbors"
     },
     {
@@ -8031,9 +8049,15 @@
           "line": 104
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_top_partners operation ranks the entities most connected to one entity through a relation. Unlike the neighbour listings beside it the endpoint is matched case-insensitively, so two spellings of a name are one entity here and two entities there. Both directions are summed per partner, so the weight is a total rather than any single edge's, and it can exceed what a single edge's weight column could hold."
+      },
       "signature": "int db2_entity_edge_top_partners_by_relation ( const char * entity , const char * relation , db2_entity_neighbor_t * out , int max )",
       "signature_sha256": "0aa4ba979dd1c10dd7e61a7dd8e30c71f3a9ee5338e105ab73f79bdb5fefe9f2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_top_partners_by_relation"
     },
     {
@@ -8046,9 +8070,15 @@
           "line": 99
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_top_targets operation ranks the entities one entity points at through a relation. It is index.entity_top_partners with one direction instead of two, and the reply is identical, so the names are the only thing distinguishing a directed ranking from an undirected one. Like its partner it matches the endpoint case-insensitively, unlike the plain neighbour listings which do not."
+      },
       "signature": "int db2_entity_edge_top_targets_by_relation ( const char * source , const char * relation , db2_entity_neighbor_t * out , int max )",
       "signature_sha256": "b430ffcf2e9b33eba4e8f6d8c95e5b23893f1a5d82db3f42406e65d100daafe0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_top_targets_by_relation"
     },
     {
@@ -27036,15 +27066,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4e135225d547cc6a3f64c8ca97ea8ef8fb24665fb7a7a2e1824fc8944ae9a9c1",
+  "fingerprint": "83b3f2a7f5ce67c6a9733b81b6a9032931b015d6e197772ad6af9255376297e3",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 456,
+    "audit_pending": 451,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 502
+    "reviewed": 507
   }
 }

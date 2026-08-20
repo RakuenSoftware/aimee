@@ -1711,6 +1711,60 @@ int main(int argc, char **argv)
                                                   NULL) == AIMEE_MODULE_CALL_OK);
    assert(retry_count == 0);
 
+   /* The five entity-graph listings, against a graph with no edges. These are
+    * the first row replies carrying a string field, so what they prove here is
+    * the encoder and the decoder agreeing on an empty list; the populated case
+    * is in the hosted bus test, where the backend can be told what to return. */
+   static aimee_db2_entity_neighbors_row_t neighbor_rows[AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS];
+   uint32_t neighbor_count = 99;
+   assert(aimee_db2_entity_neighbors_call(call_client, &client, 9267, 0, "replay-entity", 8u,
+                                          neighbor_rows, AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS,
+                                          &neighbor_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(neighbor_count == 0);
+
+   static aimee_db2_entity_neighbors_filtered_row_t
+       filtered_rows[AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS];
+   uint32_t filtered_count = 99;
+   assert(aimee_db2_entity_neighbors_filtered_call(
+              call_client, &client, 9268, 0, "replay-entity", "mentions", "", 1u, 8u, filtered_rows,
+              AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS, &filtered_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(filtered_count == 0);
+   /* An empty second relation narrows the query rather than failing, and a
+    * zero limit is replaced with twenty inside the module. Both edges of the
+    * request are replayed because neither is visible in the reply. */
+   filtered_count = 99;
+   assert(aimee_db2_entity_neighbors_filtered_call(
+              call_client, &client, 9269, 0, "replay-entity", "mentions", "cites", 0u, 0u,
+              filtered_rows, AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS, &filtered_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(filtered_count == 0);
+
+   static aimee_db2_entity_outbound_neighbors_row_t
+       outbound_rows[AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS];
+   uint32_t outbound_count = 99;
+   assert(aimee_db2_entity_outbound_neighbors_call(
+              call_client, &client, 9270, 0, "replay-entity", 8u, outbound_rows,
+              AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS, &outbound_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(outbound_count == 0);
+
+   static aimee_db2_entity_top_partners_row_t partner_rows[AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS];
+   uint32_t partner_count = 99;
+   assert(aimee_db2_entity_top_partners_call(call_client, &client, 9271, 0, "replay-entity",
+                                             "mentions", partner_rows,
+                                             AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS, &partner_count,
+                                             NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(partner_count == 0);
+
+   static aimee_db2_entity_top_targets_row_t target_rows[AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS];
+   uint32_t target_count = 99;
+   assert(aimee_db2_entity_top_targets_call(call_client, &client, 9272, 0, "replay-entity",
+                                            "mentions", target_rows,
+                                            AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS, &target_count,
+                                            NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(target_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -12692,6 +12692,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_list_retryable_index_failures",
         "policy": {"reads": 200},
     },
+    "entity_neighbors": {
+        "key": ("index", 30),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_neighbors",
+        "policy": {"reads": 200},
+    },
+    "entity_neighbors_filtered": {
+        "key": ("index", 31),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_neighbors_filtered",
+        "policy": {"reads": 200},
+    },
+    "entity_outbound_neighbors": {
+        "key": ("index", 32),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_outbound_neighbors",
+        "policy": {"reads": 200},
+    },
+    "entity_top_partners": {
+        "key": ("index", 33),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_top_partners_by_relation",
+        "policy": {"reads": 200},
+    },
+    "entity_top_targets": {
+        "key": ("index", 34),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_top_targets_by_relation",
+        "policy": {"reads": 200},
+    },
 }
 
 
@@ -13951,6 +13981,11 @@ def _generic_c_parameters(operation: dict[str, object], fields: list[dict[str, o
     return ", ".join(parts)
 
 
+def _indented(block: str) -> str:
+    """One more level of indentation on every non-empty line."""
+    return "\n".join(f"   {line}" if line.strip() else line for line in block.splitlines())
+
+
 def _generic_c_encode_body(operation: dict[str, object], fields: list[dict[str, object]],
                            source: str) -> tuple[str, str]:
     """Validation and writing for one field list.
@@ -14124,6 +14159,12 @@ static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t 
             operation, row_fields, "rows[index].")
         row_reads = _generic_c_decode_body(operation, row_fields, "rows[index].",
                                            capacities=False)
+        # These bodies are written for a function body; inside the row loop
+        # they are one level short, and a length scan's `while` would then line
+        # up with the `if` that follows it.
+        row_lengths = _indented(row_lengths)
+        row_writes = _indented(row_writes)
+        row_reads = _indented(row_reads)
         text += f"""{_generic_row_struct(operation)}
 static inline int aimee_db2_{lower}_reply_encode(const aimee_db2_{lower}_row_t *rows,
                                                  uint32_t count, uint8_t *output, size_t capacity,

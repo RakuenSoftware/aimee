@@ -1746,6 +1746,74 @@ int db2_memory_list_retryable_index_failures(int max_attempts, int limit, int64_
    return 0;
 }
 
+/* Returns rows so a row reply carrying a string field is exercised with
+ * something in it. The replay only ever sees the empty list: seeding a graph
+ * there would be visible to the fresh-schema counts it also asserts. */
+static char entity_neighbors_seen[512] = "";
+static int entity_neighbors_limit_seen = -1;
+static int entity_neighbors_calls;
+
+int db2_entity_edge_neighbors(const char *entity, db2_entity_neighbor_t *out, int max,
+                              int limit_sql)
+{
+   entity_neighbors_calls++;
+   entity_neighbors_limit_seen = limit_sql;
+   snprintf(entity_neighbors_seen, sizeof(entity_neighbors_seen), "%s", entity ? entity : "");
+   if (!out || max < 2)
+      return 0;
+   snprintf(out[0].node, sizeof(out[0].node), "%s", "alpha");
+   out[0].weight = 7;
+   /* An empty node and a zero weight are both inside the schema's bounds, and
+    * a codec that treated either as absent would lose this row. */
+   out[1].node[0] = '\0';
+   out[1].weight = 0;
+   return 2;
+}
+
+int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, const char *rel_b,
+                                       int order_by_weight, db2_entity_neighbor_t *out, int max,
+                                       int limit_sql)
+{
+   (void)entity;
+   (void)rel_a;
+   (void)rel_b;
+   (void)order_by_weight;
+   (void)out;
+   (void)max;
+   (void)limit_sql;
+   return 0;
+}
+
+int db2_entity_edge_outbound_neighbors(const char *source, db2_entity_neighbor_t *out, int max,
+                                       int limit_sql)
+{
+   (void)source;
+   (void)out;
+   (void)max;
+   (void)limit_sql;
+   return 0;
+}
+
+int db2_entity_edge_top_partners_by_relation(const char *entity, const char *relation,
+                                             db2_entity_neighbor_t *out, int max)
+{
+   (void)entity;
+   (void)relation;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_edge_top_targets_by_relation(const char *source, const char *relation,
+                                            db2_entity_neighbor_t *out, int max)
+{
+   (void)source;
+   (void)relation;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
@@ -3185,6 +3253,7 @@ int main(void)
        .reembed_clear_maintenance = db2_reembed_clear_maintenance,
        .embedder_serving_id = db2_embedder_serving_id,
        .dimension_reset = dimension_reset,
+       .entity_neighbors = db2_entity_edge_neighbors,
        .match_error_keys = db2_memory_promotion_match_error_keys,
    };
    process_thread_t process = {
@@ -3309,6 +3378,21 @@ int main(void)
    assert(matched_count == 3 && matched[0].memory_id == 11 && matched[1].memory_id == 22 &&
           matched[2].memory_id == 9007199254740993 && match_error_keys_calls == 1 &&
           strcmp(match_error_keys_seen, "boom: alpha not found") == 0);
+
+   /* A row reply with a string field in it, carrying two rows: one ordinary,
+    * one whose node is empty and whose weight is zero. Both are inside the
+    * schema's bounds, so a codec that read either as the end of the list would
+    * come back with one row. The limit travels as its own argument, separate
+    * from the number of rows the caller can hold. */
+   static aimee_db2_entity_neighbors_row_t neighbor_rows[AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS];
+   uint32_t neighbor_count = 99;
+   assert(aimee_db2_entity_neighbors_call(call_client, &client, 7044, 0, "alpha-entity", 12u,
+                                          neighbor_rows, AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS,
+                                          &neighbor_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(neighbor_count == 2 && strcmp(neighbor_rows[0].node, "alpha") == 0 &&
+          neighbor_rows[0].weight == 7 && neighbor_rows[1].node[0] == '\0' &&
+          neighbor_rows[1].weight == 0 && entity_neighbors_calls == 1 &&
+          entity_neighbors_limit_seen == 12 && strcmp(entity_neighbors_seen, "alpha-entity") == 0);
 
    uint64_t scoped_ids[AIMEE_DB2_TOP_L2_FACTS_MAX];
    uint32_t scoped_count = 99;

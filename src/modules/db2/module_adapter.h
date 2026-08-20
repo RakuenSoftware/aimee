@@ -4,6 +4,17 @@
 #include <aimee/core/event_bus/module_runtime.h>
 #include <aimee/db2/module_api.h>
 
+/* The vtable binds backends directly, so it names the row types they fill.
+ * aimee.h and memory.h come first because the DB2 headers that declare those
+ * rows are written to be included after them -- entity_edges.h uses edge_t,
+ * which lives in memory.h, which in turn needs aimee.h. Naming the real types is what keeps this header and the backends from
+ * drifting: a copy of a row struct here would be a second definition to keep
+ * in step, which is the defect the hosted bus test had. */
+#include "aimee.h"
+#include "memory.h"
+
+#include "entity_edges.h"
+
 typedef struct
 {
    int (*is_initialized)(void);
@@ -272,6 +283,11 @@ typedef struct
    int (*memory_ids_by_updated)(int limit, int64_t *ids, int max_ids);
    int (*unit_ids_for_memory)(int64_t memory_id, int64_t *out, int max);
    int (*retryable_index_failures)(int max_attempts, int limit, int64_t *out, int max);
+   int (*entity_neighbors)(const char *entity, db2_entity_neighbor_t *out, int max, int limit_sql);
+   int (*entity_neighbors_filtered)(const char *entity, const char *relation_a, const char *relation_b, int order_by_weight, db2_entity_neighbor_t *out, int max, int limit_sql);
+   int (*entity_outbound_neighbors)(const char *entity, db2_entity_neighbor_t *out, int max, int limit_sql);
+   int (*entity_top_partners)(const char *entity, const char *relation, db2_entity_neighbor_t *out, int max);
+   int (*entity_top_targets)(const char *entity, const char *relation, db2_entity_neighbor_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "d9d6fd38b2a65ca16750d06910fe31f9f6792aef07225ab6a3366e7f4b38a98f"
+const ContractSHA256 = "baf140b10fbfa8a69bdd486943a63c9cf56f565340176cee1f6a83b7312b8115"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1817,6 +1817,325 @@ func DecodeUniqueFileBasenameRequest(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return project, basename, nil
+}
+
+const EventEntityNeighbors = EventIndex
+const StageEntityNeighbors = FamilyIndex
+const OperationEntityNeighbors uint32 = 30
+const EntityNeighborsEntityMin = 1
+const EntityNeighborsEntityMax = 511
+const EntityNeighborsLimitMin uint32 = 0
+const EntityNeighborsLimitMax uint32 = 1024
+
+// EncodeEntityNeighborsRequest writes the schema entity_neighbors declares, in order.
+func EncodeEntityNeighborsRequest(entity string, limit uint32) ([]byte, error) {
+	if len(entity) < EntityNeighborsEntityMin || len(entity) > EntityNeighborsEntityMax || hasNUL(entity) ||
+		limit < EntityNeighborsLimitMin || limit > EntityNeighborsLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityNeighborsEntityMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityNeighbors, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityNeighborsRequest reads it back, checking each field against its own bound.
+func DecodeEntityNeighborsRequest(request []byte) (string, uint32, error) {
+	var entity string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityNeighbors || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityNeighborsEntityMax); err != nil ||
+		len(entity) < EntityNeighborsEntityMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < EntityNeighborsLimitMin || limit > EntityNeighborsLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entity, limit, nil
+}
+
+const EventEntityNeighborsFiltered = EventIndex
+const StageEntityNeighborsFiltered = FamilyIndex
+const OperationEntityNeighborsFiltered uint32 = 31
+const EntityNeighborsFilteredEntityMin = 1
+const EntityNeighborsFilteredEntityMax = 511
+const EntityNeighborsFilteredRelationAMin = 1
+const EntityNeighborsFilteredRelationAMax = 127
+const EntityNeighborsFilteredRelationBMin = 0
+const EntityNeighborsFilteredRelationBMax = 127
+const EntityNeighborsFilteredOrderByWeightMin uint32 = 0
+const EntityNeighborsFilteredOrderByWeightMax uint32 = 1
+const EntityNeighborsFilteredLimitMin uint32 = 0
+const EntityNeighborsFilteredLimitMax uint32 = 1024
+
+// EncodeEntityNeighborsFilteredRequest writes the schema entity_neighbors_filtered declares, in order.
+func EncodeEntityNeighborsFilteredRequest(entity string, relationA string, relationB string, orderByWeight uint32, limit uint32) ([]byte, error) {
+	if len(entity) < EntityNeighborsFilteredEntityMin || len(entity) > EntityNeighborsFilteredEntityMax || hasNUL(entity) ||
+		len(relationA) < EntityNeighborsFilteredRelationAMin || len(relationA) > EntityNeighborsFilteredRelationAMax || hasNUL(relationA) ||
+		len(relationB) < EntityNeighborsFilteredRelationBMin || len(relationB) > EntityNeighborsFilteredRelationBMax || hasNUL(relationB) ||
+		orderByWeight < EntityNeighborsFilteredOrderByWeightMin || orderByWeight > EntityNeighborsFilteredOrderByWeightMax ||
+		limit < EntityNeighborsFilteredLimitMin || limit > EntityNeighborsFilteredLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityNeighborsFilteredEntityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, relationA, EntityNeighborsFilteredRelationAMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, relationB, EntityNeighborsFilteredRelationBMax); err != nil {
+		return nil, err
+	}
+	var orderByWeightBytes [4]byte
+	binary.LittleEndian.PutUint32(orderByWeightBytes[:], orderByWeight)
+	payload = append(payload, orderByWeightBytes[:]...)
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityNeighborsFiltered, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityNeighborsFilteredRequest reads it back, checking each field against its own bound.
+func DecodeEntityNeighborsFilteredRequest(request []byte) (string, string, string, uint32, uint32, error) {
+	var entity string
+	var relationA string
+	var relationB string
+	var orderByWeight uint32
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityNeighborsFiltered || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityNeighborsFilteredEntityMax); err != nil ||
+		len(entity) < EntityNeighborsFilteredEntityMin {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	if relationA, err = takeRowText(payload, &cursor, EntityNeighborsFilteredRelationAMax); err != nil ||
+		len(relationA) < EntityNeighborsFilteredRelationAMin {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	if relationB, err = takeRowText(payload, &cursor, EntityNeighborsFilteredRelationBMax); err != nil ||
+		len(relationB) < EntityNeighborsFilteredRelationBMin {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	orderByWeight = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if orderByWeight < EntityNeighborsFilteredOrderByWeightMin || orderByWeight > EntityNeighborsFilteredOrderByWeightMax {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < EntityNeighborsFilteredLimitMin || limit > EntityNeighborsFilteredLimitMax {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", 0, 0, ErrMalformedEnvelope
+	}
+	return entity, relationA, relationB, orderByWeight, limit, nil
+}
+
+const EventEntityOutboundNeighbors = EventIndex
+const StageEntityOutboundNeighbors = FamilyIndex
+const OperationEntityOutboundNeighbors uint32 = 32
+const EntityOutboundNeighborsEntityMin = 1
+const EntityOutboundNeighborsEntityMax = 511
+const EntityOutboundNeighborsLimitMin uint32 = 0
+const EntityOutboundNeighborsLimitMax uint32 = 1024
+
+// EncodeEntityOutboundNeighborsRequest writes the schema entity_outbound_neighbors declares, in order.
+func EncodeEntityOutboundNeighborsRequest(entity string, limit uint32) ([]byte, error) {
+	if len(entity) < EntityOutboundNeighborsEntityMin || len(entity) > EntityOutboundNeighborsEntityMax || hasNUL(entity) ||
+		limit < EntityOutboundNeighborsLimitMin || limit > EntityOutboundNeighborsLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityOutboundNeighborsEntityMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityOutboundNeighbors, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityOutboundNeighborsRequest reads it back, checking each field against its own bound.
+func DecodeEntityOutboundNeighborsRequest(request []byte) (string, uint32, error) {
+	var entity string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityOutboundNeighbors || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityOutboundNeighborsEntityMax); err != nil ||
+		len(entity) < EntityOutboundNeighborsEntityMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < EntityOutboundNeighborsLimitMin || limit > EntityOutboundNeighborsLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entity, limit, nil
+}
+
+const EventEntityTopPartners = EventIndex
+const StageEntityTopPartners = FamilyIndex
+const OperationEntityTopPartners uint32 = 33
+const EntityTopPartnersEntityMin = 1
+const EntityTopPartnersEntityMax = 511
+const EntityTopPartnersRelationMin = 1
+const EntityTopPartnersRelationMax = 127
+
+// EncodeEntityTopPartnersRequest writes the schema entity_top_partners declares, in order.
+func EncodeEntityTopPartnersRequest(entity string, relation string) ([]byte, error) {
+	if len(entity) < EntityTopPartnersEntityMin || len(entity) > EntityTopPartnersEntityMax || hasNUL(entity) ||
+		len(relation) < EntityTopPartnersRelationMin || len(relation) > EntityTopPartnersRelationMax || hasNUL(relation) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityTopPartnersEntityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, relation, EntityTopPartnersRelationMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityTopPartners, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityTopPartnersRequest reads it back, checking each field against its own bound.
+func DecodeEntityTopPartnersRequest(request []byte) (string, string, error) {
+	var entity string
+	var relation string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityTopPartners || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityTopPartnersEntityMax); err != nil ||
+		len(entity) < EntityTopPartnersEntityMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if relation, err = takeRowText(payload, &cursor, EntityTopPartnersRelationMax); err != nil ||
+		len(relation) < EntityTopPartnersRelationMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return entity, relation, nil
+}
+
+const EventEntityTopTargets = EventIndex
+const StageEntityTopTargets = FamilyIndex
+const OperationEntityTopTargets uint32 = 34
+const EntityTopTargetsEntityMin = 1
+const EntityTopTargetsEntityMax = 511
+const EntityTopTargetsRelationMin = 1
+const EntityTopTargetsRelationMax = 127
+
+// EncodeEntityTopTargetsRequest writes the schema entity_top_targets declares, in order.
+func EncodeEntityTopTargetsRequest(entity string, relation string) ([]byte, error) {
+	if len(entity) < EntityTopTargetsEntityMin || len(entity) > EntityTopTargetsEntityMax || hasNUL(entity) ||
+		len(relation) < EntityTopTargetsRelationMin || len(relation) > EntityTopTargetsRelationMax || hasNUL(relation) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityTopTargetsEntityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, relation, EntityTopTargetsRelationMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityTopTargets, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityTopTargetsRequest reads it back, checking each field against its own bound.
+func DecodeEntityTopTargetsRequest(request []byte) (string, string, error) {
+	var entity string
+	var relation string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityTopTargets || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityTopTargetsEntityMax); err != nil ||
+		len(entity) < EntityTopTargetsEntityMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if relation, err = takeRowText(payload, &cursor, EntityTopTargetsRelationMax); err != nil ||
+		len(relation) < EntityTopTargetsRelationMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return entity, relation, nil
 }
 
 const EventTraceMiningRecord = EventLearning

@@ -2090,6 +2090,60 @@ int db2_memory_list_retryable_index_failures(int max_attempts, int limit, int64_
    return 0;
 }
 
+int db2_entity_edge_neighbors(const char *entity, db2_entity_neighbor_t *out, int max,
+                              int limit_sql)
+{
+   (void)entity;
+   (void)out;
+   (void)max;
+   (void)limit_sql;
+   return 0;
+}
+
+int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, const char *rel_b,
+                                       int order_by_weight, db2_entity_neighbor_t *out, int max,
+                                       int limit_sql)
+{
+   (void)entity;
+   (void)rel_a;
+   (void)rel_b;
+   (void)order_by_weight;
+   (void)out;
+   (void)max;
+   (void)limit_sql;
+   return 0;
+}
+
+int db2_entity_edge_outbound_neighbors(const char *source, db2_entity_neighbor_t *out, int max,
+                                       int limit_sql)
+{
+   (void)source;
+   (void)out;
+   (void)max;
+   (void)limit_sql;
+   return 0;
+}
+
+int db2_entity_edge_top_partners_by_relation(const char *entity, const char *relation,
+                                             db2_entity_neighbor_t *out, int max)
+{
+   (void)entity;
+   (void)relation;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_edge_top_targets_by_relation(const char *source, const char *relation,
+                                            db2_entity_neighbor_t *out, int max)
+{
+   (void)source;
+   (void)relation;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
