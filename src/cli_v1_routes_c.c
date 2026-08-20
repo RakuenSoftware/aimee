@@ -2254,7 +2254,42 @@ void pt_print_roundtable_review(const char *method, cJSON *resp)
    (void)method;
    cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
    if (cJSON_IsString(art) && art->valuestring[0])
+   {
       printf("%s\n", art->valuestring);
+      /* An artifact is not the same as an answer. A panel whose every seat
+       * failed still renders one -- "Roundtable did not approve the artifact and
+       * returned no usable findings." -- and printing only that hid the reason
+       * the SAME response was carrying: pause_reason, detail, and a
+       * participant_failures entry naming each seat's persona and its error.
+       * Measured against a real panel: three seats failed with "unsupported
+       * delegate cli_kind", the --json caller saw all three, and the operator
+       * reading the terminal saw one sentence that named nothing. Say the rest
+       * whenever the panel did not approve. */
+      if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "approved")))
+      {
+         cJSON *reason = cJSON_GetObjectItemCaseSensitive(resp, "pause_reason");
+         cJSON *failures = cJSON_GetObjectItemCaseSensitive(resp, "participant_failures");
+         cJSON *total = cJSON_GetObjectItemCaseSensitive(resp, "participants_total");
+         cJSON *failed = cJSON_GetObjectItemCaseSensitive(resp, "participants_failed");
+         if (cJSON_IsString(reason) && reason->valuestring[0])
+            fprintf(stderr, "  reason: %s\n", reason->valuestring);
+         if (cJSON_IsNumber(total) && cJSON_IsNumber(failed) && (int)failed->valuedouble > 0)
+            fprintf(stderr, "  seats: %d of %d failed\n", (int)failed->valuedouble,
+                    (int)total->valuedouble);
+         if (cJSON_IsArray(failures))
+         {
+            cJSON *f = NULL;
+            cJSON_ArrayForEach(f, failures)
+            {
+               cJSON *persona = cJSON_GetObjectItemCaseSensitive(f, "persona");
+               cJSON *detail = cJSON_GetObjectItemCaseSensitive(f, "detail");
+               fprintf(stderr, "    %s: %s\n",
+                       cJSON_IsString(persona) ? persona->valuestring : "seat",
+                       cJSON_IsString(detail) ? detail->valuestring : "failed");
+            }
+         }
+      }
+   }
    else
    {
       /* A review that produced no artifact is the case that matters most, and it
