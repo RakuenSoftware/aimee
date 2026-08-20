@@ -908,7 +908,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS
 # nothing is stale when nothing exists.
 DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
-.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check module-bus-boundary-check cleanup-ledger-check repository-lock-check db2-contract-check db3-contract-check db2-declaration-ledger-check db2-activation-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests go-unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
+.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check module-bus-boundary-check cleanup-ledger-check repository-lock-check db2-contract-check db3-contract-check db2-declaration-ledger-check db2-activation-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests go-unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
 
 all: retire-obsolete-binaries $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
 
@@ -969,12 +969,35 @@ go-unit-tests:
 # `main`, and verify-local runs on branches whose whole job is to move the
 # vendored source ahead of it. `make repository-lock-check` still runs it on
 # demand, and the c-repository-pins workflow runs it for `main`.
+# NOT the same set CI runs. build-integrity and integration-tests are the two
+# heavy ones left out, deliberately -- they build the full shipped artifact set
+# and stand up servers, which is too slow for the edit/verify loop this target
+# exists for.
+#
+# The omission is named in the output because "verify-local: ok" reads as "this
+# would pass CI", and it does not. A branch that added a client help entry
+# passed this target and then failed build-integrity in CI, because the banned
+# term it introduced is only visible once the shipped client is inspected.
+# The set a branch is actually judged by. verify-local deliberately omits the
+# two heavy gates; this one includes them, so there is a command that means
+# "this would pass CI" rather than a command that only looks like it does.
+# Opt-in, so the fast loop stays fast.
+.PHONY: verify-ci
+verify-ci: all
+	@$(MAKE) verify-local
+	@$(MAKE) build-integrity
+	@$(MAKE) integration-tests
+	@$(MAKE) docs-gen-check
+	@echo "verify-ci: ok (verify-local + build-integrity + integration-tests + docs-gen-check)"
+
 verify-local: all
 	@$(MAKE) check-linking
 	@$(MAKE) lint
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@$(MAKE) go-unit-tests
-	@echo "verify-local: ok"
+	@echo "verify-local: ok (lint, unit, go-unit, linking)"
+	@echo "verify-local: NOT run here -- build-integrity, integration-tests;" \
+	      "use 'make verify-ci' before pushing a change to the shipped surface"
 
 server: retire-obsolete-binaries $(SERVER) $(KB) $(KB_RESOLVER) $(FORWARDER)
 
@@ -1779,6 +1802,15 @@ cli-v1-routes-check:
 manifest-emitter-linkage-check:
 	@python3 ../scripts/check-manifest-emitter-linkage.py
 
+# CI gate: a served spec's numeric TYPE must match the parse its marshaller
+# actually calls. memory.delete shipped saying number_lenient (atoi) where the
+# marshaller used atoll(), so a memory id above 2^31 would have been truncated
+# by the thin client and addressed a different row. The differential test could
+# not see it: its samples come from the spec, and every generated id was small.
+# This compares the two directly instead of hoping a sample straddles the edge.
+argspec-numeric-parity-check:
+	@python3 ../scripts/check_argspec_numeric_parity.py
+
 # CI gate: a handler bound to an async (rh_dispatch_op_async) /v1 route must write
 # its reply before returning. A detached-thread reply lands after the op-run bridge
 # has read and closed its socketpair, so the run fails with "rpc produced no
@@ -1946,7 +1978,7 @@ lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
 # the lock, so running it in lint just demands a lock refresh after each edit
 # under src/core|modules/**. The c-repository-pins workflow runs it for `main`
 # and for PRs into `main`.
-LINT_CHECKS = subject-corpus-check native-tool-parity-check guidance-tool-parity-check optional-tool-ownership-check module-source-ownership-check module-bus-boundary-check cleanup-ledger-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check db2-contract-check db3-contract-check db2-declaration-ledger-check db2-activation-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check
+LINT_CHECKS = subject-corpus-check native-tool-parity-check guidance-tool-parity-check optional-tool-ownership-check module-source-ownership-check module-bus-boundary-check cleanup-ledger-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check db2-contract-check db3-contract-check db2-declaration-ledger-check db2-activation-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check
 
 lint:
 	@fail=""; n=0; \

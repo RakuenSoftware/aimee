@@ -992,8 +992,7 @@ static cJSON *marshal_dogfood_tag(int argc, char **argv)
    static const char *bool_flags[] = {"surprise", "no-surprise", NULL};
    cli_args_t opts;
    cli_args_parse(argc, argv, bool_flags, &opts);
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "dogfood.tag");
+   cJSON *req = marshal_no_args("dogfood.tag");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "record_id", opts.positional[0]);
    const char *outcome = cli_args_get(&opts, "outcome");
@@ -1017,8 +1016,7 @@ static cJSON *marshal_dogfood_report(int argc, char **argv)
    static const char *bool_flags[] = {"json", NULL};
    cli_args_t opts;
    cli_args_parse(argc, argv, bool_flags, &opts);
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "dogfood.report");
+   cJSON *req = marshal_no_args("dogfood.report");
    const char *month = cli_args_get(&opts, "month");
    if (month)
       cJSON_AddStringToObject(req, "month", month);
@@ -1033,8 +1031,7 @@ static cJSON *marshal_dogfood_review(int argc, char **argv)
    static const char *bool_flags[] = {"json", NULL};
    cli_args_t opts;
    cli_args_parse(argc, argv, bool_flags, &opts);
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "dogfood.review");
+   cJSON *req = marshal_no_args("dogfood.review");
    const char *month = cli_args_get(&opts, "month");
    if (month)
       cJSON_AddStringToObject(req, "month", month);
@@ -1051,8 +1048,7 @@ static cJSON *marshal_eval_run(int argc, char **argv)
 {
    cli_args_t opts;
    cli_args_parse(argc, argv, NULL, &opts);
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "eval.run");
+   cJSON *req = marshal_no_args("eval.run");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "suite_dir", opts.positional[0]);
    const char *ablation = cli_args_get(&opts, "ablation");
@@ -1074,8 +1070,7 @@ static cJSON *marshal_eval_results(int argc, char **argv)
 {
    cli_args_t opts;
    cli_args_parse(argc, argv, NULL, &opts);
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "eval.results");
+   cJSON *req = marshal_no_args("eval.results");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "suite", opts.positional[0]);
    return req;
@@ -1085,8 +1080,7 @@ static cJSON *marshal_identity_snapshot(int argc, char **argv)
 {
    cli_args_t opts;
    cli_args_parse(argc, argv, NULL, &opts);
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "identity.snapshot");
+   cJSON *req = marshal_no_args("identity.snapshot");
    const char *out = cli_args_get(&opts, "out");
    if (out)
       cJSON_AddStringToObject(req, "out", out);
@@ -1100,8 +1094,7 @@ static cJSON *marshal_identity_diff(int argc, char **argv)
 {
    cli_args_t opts;
    cli_args_parse(argc, argv, NULL, &opts);
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "identity.diff");
+   cJSON *req = marshal_no_args("identity.diff");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "a", opts.positional[0]);
    if (opts.pos_count > 1)
@@ -1576,7 +1569,27 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    /* Cleared on entry so a previous command's flag cannot suppress this one's message. */
    g_marshal_reported = 0;
-   /* Custom-body cases (handled before the tables). */
+
+   /* What the SERVER says the body is, BEFORE anything this build compiled in --
+    * including the custom bodies below.
+    *
+    * This consult used to sit under them, which made a served spec for
+    * init.run, kb.grant.* or toolset.show/resolve dead code: the compiled body
+    * answered first and the server could never override it. That contradicts
+    * the property the whole exercise rests on -- a served row wins, which is
+    * what lets the server change a command without a new client. It held for
+    * every other method and silently did not for these.
+    *
+    * Safe at the top: cli_argspec_try_served returns 0 unless a spec exists AND
+    * this build can interpret it, so anything unserved falls through to exactly
+    * the code that ran before. */
+   {
+      cJSON *served = NULL;
+      if (cli_argspec_try_served(method, argc, argv, &served))
+         return served;
+   }
+
+   /* Custom-body cases (handled before the compiled tables). */
    if (strcmp(method, "init.run") == 0)
    {
       (void)argc;
@@ -1688,15 +1701,6 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
     * preferring its own list here would reintroduce exactly that. */
    if (cli_v1_manifest_method_takes_no_args(method))
       return marshal_no_args(method);
-
-   /* And what the server says the ARGUMENTS are, before this build's own
-    * marshallers — see cli_argspec_try_served for why that is both the point
-    * and safe. */
-   {
-      cJSON *served = NULL;
-      if (cli_argspec_try_served(method, argc, argv, &served))
-         return served;
-   }
 
    /* Exact-method tables (before the prefix fallbacks). */
    for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)

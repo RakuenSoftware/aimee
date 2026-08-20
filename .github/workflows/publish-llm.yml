@@ -73,6 +73,7 @@ jobs:
   # multi-arch build skip it and find nothing to copy for arm64.
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

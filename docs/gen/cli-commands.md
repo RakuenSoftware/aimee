@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 69
+Total commands: 75
 
 ## Core commands
 
@@ -45,6 +45,28 @@ Subcommands:
   status <job_id> [job_id...]  Check background delegate status
 
 Use `aimee jobs list|status|logs|cancel` for durable background delegate jobs.
+```
+
+### `aimee get-help`
+
+Explain how aimee itself works.
+
+Subcommands:
+
+```
+  <topic>          Explain a topic -- work queue, delegation, memory,
+                   git, build, conventions. The words are joined, so
+                   `aimee get-help work queue` is one topic.
+```
+
+### `aimee get_help`
+
+Explain how aimee itself works.
+
+Subcommands:
+
+```
+  Underscore spelling of `aimee get-help`; both route to help.get.
 ```
 
 ### `aimee help`
@@ -157,6 +179,29 @@ Subcommands:
   rm <name>        Reset a built-in or remove a custom persona
 ```
 
+### `aimee presence`
+
+Show who and what is currently active.
+
+Subcommands:
+
+```
+  --owner <who>    Limit the listing to one owner
+```
+
+### `aimee primary`
+
+Session's active primary agent.
+
+Subcommands:
+
+```
+  <name>           Set the session's primary agent
+  --show           Print the current primary (also the default with no
+                   argument)
+  --clear          Clear the session's primary agent
+```
+
 ### `aimee rules`
 
 Rule management (list, generate, delete).
@@ -221,6 +266,19 @@ Subcommands:
   list             List named toolsets
   show <name>      Show a toolset definition
   resolve <name>   Print the resolved tool list
+```
+
+### `aimee use`
+
+Select the active model provider.
+
+Subcommands:
+
+```
+  <name>           Make <name> the active provider
+  Same command as `aimee provider set`; both spellings route to
+  provider.set, so `aimee use ollama` and `aimee provider set ollama`
+  do the same thing.
 ```
 
 ### `aimee vault`
@@ -831,4 +889,14 @@ Subcommands:
 
 ```
   trust            Set per-repo cross-repo trust
+```
+
+### `aimee verify`
+
+Verify the working tree against its remote.
+
+Subcommands:
+
+```
+  Same command as `aimee git verify`; both spellings route to git.verify.
 ```
