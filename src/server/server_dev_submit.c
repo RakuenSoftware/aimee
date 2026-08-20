@@ -16,7 +16,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 
 /* Parse a positive-integer env cap value. Returns `defval` for unset/empty/
@@ -115,7 +114,6 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
    char dir[1024];
    snprintf(dir, sizeof dir, "%s/workflows/proposals", home ? home : "/tmp");
    char ppath[1152];
-   snprintf(ppath, sizeof ppath, "%s/wi-%ld-%d.md", dir, (long)time(NULL), (int)getpid());
 
    /* Resolve the workflow (no DB write), then create + cap-check + submitter-bind +
     * audit ATOMICALLY under one BEGIN IMMEDIATE so concurrent submits from one
@@ -129,6 +127,12 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
       snprintf(err, errlen, "%s", rerr[0] ? rerr : "failed to resolve workflow");
       return 500;
    }
+   /* Name the artifact after the RUN, not after the clock. Keyed on time+pid,
+    * two submits landing in the same second from one server shared a path: the
+    * second overwrote the first's proposal, both rows pointed at it, and the
+    * first run then executed instructions nobody gave it. The work item id is
+    * already unique, which is exactly the property the filename needs. */
+   snprintf(ppath, sizeof ppath, "%s/%s.md", dir, id);
    int sr = db1_work_item_submit_capped(id, wf_repo, ppath, wf_name, wf_ver, wf_start, submitter,
                                         max_active, rate_max, rate_secs);
    if (sr == 1)
