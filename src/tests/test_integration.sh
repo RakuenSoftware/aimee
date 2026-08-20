@@ -1258,11 +1258,14 @@ if [ "$WORKFLOW_MODULE_READY" -ne 1 ]; then
     echo "SKIP: the workflow control module could not be started here: $WF_STEP"
     echo "      (needs a Go toolchain and the generated wfe/workflows grants);"
     echo "      the workflow surface is covered by the full-stack E2E instead."
+    # Only ask what the module SAID when it actually ran. On the install path it
+    # never started, and "the module wrote nothing" would report silence from a
+    # process that was never there -- which is the reader's next hour wasted.
     if [ -s "$HOME/aimee-wfe.log" ]; then
         echo "      what the module said:"
         tail -15 "$HOME/aimee-wfe.log" | sed 's/^/      /'
-    else
-        echo "      the module wrote nothing to its log at $HOME/aimee-wfe.log"
+    elif [ -f "$HOME/aimee-wfe.log" ]; then
+        echo "      the module started and wrote nothing to $HOME/aimee-wfe.log"
     fi
     SKIP=$((SKIP + 32))
 else
