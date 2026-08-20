@@ -61,10 +61,49 @@ against. It is the next project, not the tail of this one.
 
 ## What was verified, and what was not
 
-Verified by reading the build and the entrypoint: the binary is built, launched,
-given no `--db`, and defaults to the module's path; the store opens that path;
-the tables are the ones listed above.
+Originally: verified by reading the build and the entrypoint, with the
+concurrent-writer behaviour explicitly NOT verified, on the grounds that the
+claim did not depend on it.
 
-NOT verified: the two processes writing the same row concurrently under load.
-That would want a running appliance, and the claim here does not depend on it --
-the point is that a second writer exists, not how often it collides.
+It has since been measured. `scripts/validation/db1-module-wfe-coexistence.sh`
+runs the three-process topology on a clean container -- C daemon, DB1 module,
+and `aimee-wfe` started the way `server-entrypoint.sh` starts it, with the
+`wfe.grant` the bundle generates. Results:
+
+**Two processes hold the store.** With all three up, `/proc/*/fd` shows
+`aimee-module-db` and `aimee-wfe` both holding `aimee.db`. This is the doctrine
+claim failing in the shipped configuration, stated as a measurement rather than
+an inference: the module is not the store's sole owner in the appliance.
+
+**The Go side amends the module's schema.** Starting the WFE against a store the
+module had already created took it from 102 tables to 105, and added five
+columns to `lifecycle_work_item` -- `source_path`, `reserved_cost_usd`,
+`reservation_state`, `reservation_owner`, `reservation_lease_until`. The C
+module references none of the five, so this is additive rather than conflicting,
+but the ALTER ladder that produced them belongs to a different codebase than the
+one that created the table.
+
+**It happens even when the WFE cannot work.** The first run had no `wfe.grant`
+installed, so the WFE died on `bus: attach denied` -- after opening the store
+and running its migrations. A WFE that fails to start still rewrites the schema.
+
+**Either process will create the store.** Started first on an empty home, the Go
+WFE creates seven tables on its own; the module then joins and completes the
+schema to the same 105. The store works in both orders and
+`lifecycle_work_item` ends up with the same column *set* -- but in a different
+column *order*, which is a fair summary of the situation: two authorities, and
+which one got there first is visible in the file afterwards.
+
+**Contention did not bite at the rates tested.** Both sides are configured for
+multi-process access deliberately -- the module uses `journal_mode=WAL` with
+busy timeouts of 5s and 15s, the Go store uses WAL with a 5s busy timeout,
+`MaxOpenConns(1)` and `_txlock=immediate`. `db1-module-write-contention.sh`
+drives external writers against `lifecycle_work_item` while the module takes
+writes through the daemon, and checks for lost rows, lock failures and
+`PRAGMA integrity_check`. This is not evidence that no rate collides; it is
+evidence that the arrangement is not corrupting anything at the rates a
+validation script can produce.
+
+So the finding stands and is now quantified rather than argued: the second
+writer exists, it is live in the shipped topology, it shares schema authority,
+and it is not currently breaking anything.

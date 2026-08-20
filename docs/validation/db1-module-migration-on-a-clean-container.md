@@ -8,11 +8,13 @@ migrated build on a machine that had never seen the source.
 ## What was used
 
 - **Host**: Proxmox `pvetest` at 192.168.1.252, `pve-manager/9.2.6`.
-- **Container**: LXC **CT 9010** `aimee-db1-verify`, created for this, Debian 13
-  standard template, 4 cores / 6GB / 24GB disk, unprivileged, DHCP.
-  CT 9001 (`db2-replay`) and CT 9002 (`aimee-e2e`) belong to other work and were
-  not touched.
-- **Build**: `feature/db1-module-migration` at `5a86a608c5`, built locally,
+- **Container**: LXC **CT 9077** `aimee-db1-verify-2`, created for this, Debian
+  13 standard template, 4 cores / 6GB / 24GB disk, unprivileged, DHCP. An
+  earlier CT 9010 was used for the first passes; it is described under "the host
+  is shared" below, and the final numbers here are all from 9077.
+- **Build**: `feature/db1-module-migration` at `0e44f5a08d`
+  (`pre-merge-safety-2544-g0e44f5a08d`, printed by the deploy and by the run so
+  every result names the binary that produced it), built locally,
   carried in as binaries. Nothing was compiled on the host or in the container,
   and nothing was installed on the Proxmox host itself.
 - **Installed**: `aimee` and `aimee-server` into `/usr/local/bin`,
@@ -89,6 +91,85 @@ first store call after health has already gone green, then serves every call
 after it. The migrated build's equivalent is asserted in the e2e script, whose
 first store call comes directly after readiness and succeeds.
 
+### `scripts/validation/db1-module-wfe-coexistence.sh` -- the topology that ships
+
+Every script above runs two processes: the daemon and the module. The container
+runs **three**. `server-entrypoint.sh` defaults `AIMEE_WFE_ENGINE=go` and
+launches `aimee-wfe` with `--home` and no `--db`, so `cmd/aimee-server` falls
+back to `$home/aimee.db` -- the module's file -- and opens it with `sql.Open`.
+The bundle generates a `wfe.grant` for it (principal_ref 64), and that grant
+requests kinds 6657, 6678 and 9474 and **no DB1 kinds at all**: the Go WFE does
+not reach the store through the module, it reaches it through the filesystem.
+
+Run with all three up, on a clean container:
+
+- **two processes hold `aimee.db`** -- `aimee-module-db` and `aimee-wfe`, read
+  from `/proc/*/fd`. The module is not the store's sole owner in the shipped
+  configuration, and that is the migration's central claim not holding for the
+  appliance
+- the Go side **amends the module's schema**: 102 tables to 105, and five
+  columns added to `lifecycle_work_item` (`source_path`, `reserved_cost_usd`,
+  `reservation_state`, `reservation_owner`, `reservation_lease_until`). The C
+  module references none of the five, so it is additive, not conflicting
+- it does this **even when it cannot run**: the first attempt had no `wfe.grant`
+  installed, so the WFE died on `bus: attach denied` -- after opening the store
+  and running its migrations
+- **either process will create the store**: started first on an empty home the
+  Go WFE creates seven tables on its own, and the module then completes the
+  schema to the same 105. Both orders work, and `lifecycle_work_item` ends with
+  the same column set in a different column order -- two authorities, and which
+  arrived first stays visible in the file
+
+This is not corruption waiting to happen: both sides are configured for
+multi-process access deliberately (module `journal_mode=WAL` with 5s/15s busy
+timeouts; Go WAL, 5s busy timeout, `MaxOpenConns(1)`, `_txlock=immediate`).
+`scripts/validation/db1-module-write-contention.sh` drives external writers
+against `lifecycle_work_item` while the module takes writes through the daemon
+and checks for lost rows, lock failures and `PRAGMA integrity_check`.
+
+The finding is architectural and it is real: **the doctrine is satisfied in C
+and not in the appliance.** It is tracked in
+`docs/proposals/pending/db1-the-go-wfe-still-opens-the-file.md`, which now
+carries these measurements in place of the reasoning it was written from.
+
+### `scripts/validation/db1-module-write-contention.sh` -- 7 checks, all passing
+
+Whether two owners is also an operational problem, not just a doctrinal one.
+Four external writers insert into `lifecycle_work_item` -- a Go-owned table --
+while the module takes writes through the daemon. At 4x40 external rows against
+40 module writes: **no write failed on either side, no row was lost, no
+lock/busy complaint, `PRAGMA integrity_check` clean**, store healthy afterwards.
+A single create measured 9ms while contention was running.
+
+That is evidence about a rate, not a proof about all rates, and it is worth
+being clear which: both sides configure WAL with busy timeouts precisely so this
+works, so passing was the expected result. "We believe WAL handles it" and "we
+watched it handle it at this rate" are different claims and this is the second.
+
+## The host is shared
+
+Two things happened during this work that are worth writing down, because both
+would have produced confident and wrong conclusions:
+
+**Containers disappeared.** CT 9001, 9002 and the 9010 created for this were all
+gone partway through, with the Proxmox host itself up for 2 days -- so not a
+reboot. Something else manages this host.
+
+**A foreign binary was installed into the container mid-run.** A re-run of the
+e2e script suddenly reported 17 passed / 6 failed, including "daemon created a
+database on its own" and "daemon holds 3 open database descriptors" -- the
+migration's central claim failing outright. It was not failing:
+`/usr/local/bin/aimee-server` had been replaced with
+`pre-merge-safety-2546-gc8d90b60d5`, a build from another branch, timestamped
+between two of my own deploys. Re-running the identical script against a
+verified binary in an isolated container gave 23/0.
+
+Both of those results looked like product findings and neither was. The fix is
+cheap and now permanent: the deploy prints
+`aimee-server --version` and the module's md5 before any suite runs, so every
+result names the binary that produced it. A validation run that cannot say what
+it tested is not evidence.
+
 ## What it turned up
 
 **One finding in the product**, written up as
@@ -128,6 +209,13 @@ Install the three binaries as above, then inside the container:
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-e2e.sh
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-explore.sh
     AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-readiness-probe.sh
+    AIMEE_DB1_GRANT=/path/to/db1.grant scripts/validation/db1-module-write-contention.sh
+
+The coexistence script additionally needs `aimee-wfe` and the WFE grant, and is
+expected to fail until the Go WFE stops opening the store:
+
+    AIMEE_DB1_GRANT=/path/to/db1.grant AIMEE_WFE_GRANT=/path/to/wfe.grant \
+      scripts/validation/db1-module-wfe-coexistence.sh
 
 The upgrade script additionally needs a pre-migration build:
 
