@@ -5592,6 +5592,180 @@
       }
     },
     {
+      "family": "index",
+      "id": 36,
+      "name": "code_search",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed files, their contents and the full-text index over them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_code_search",
+        "canonical_index_code_search"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty project searches every project, an empty query matches nothing rather than failing, and the line is computed only when enrichment is asked for"
+        },
+        "fields": [
+          {
+            "name": "query",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "enrich",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "snippet",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "rank",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "minimum_binary64_bits": 0,
+              "maximum_binary64_bits": 9218868437227405311
+            },
+            {
+              "name": "content_hash",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 79
+            },
+            {
+              "name": "line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 12
+      }
+    },
+    {
+      "family": "index",
+      "id": 37,
+      "name": "code_search_excluding_project",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed files, their contents and the full-text index over them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_code_search_excluding_project",
+        "canonical_index_code_search_excluding_project"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the excluded project must be named, so this is every project but one rather than a filter that can be switched off"
+        },
+        "fields": [
+          {
+            "name": "query",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "excluded_project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "enrich",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "snippet",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "rank",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "minimum_binary64_bits": 0,
+              "maximum_binary64_bits": 9218868437227405311
+            },
+            {
+              "name": "content_hash",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 79
+            },
+            {
+              "name": "line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 12
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",

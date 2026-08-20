@@ -289,6 +289,8 @@ typedef struct
    int (*entity_top_partners)(const char *entity, const char *relation, db2_entity_neighbor_t *out, int max);
    int (*entity_top_targets)(const char *entity, const char *relation, db2_entity_neighbor_t *out, int max);
    int (*file_definitions)(const char *project, const char *file_path, definition_t *out, int max);
+   int (*code_search)(const char *query, const char *project, code_search_hit_t *out, int max, int enrich);
+   int (*code_search_excluding_project)(const char *query, const char *excluded_project, code_search_hit_t *out, int max, int enrich);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

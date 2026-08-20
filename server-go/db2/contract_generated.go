@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "813cd1cb9e0fcd779cf3da73de2743cff465706bcf3afad6c368ee8f19b473e0"
+const ContractSHA256 = "9283bfdcd01c9431b8d6ef0f244ee4938af4d767edfef2e714561202267ddc89"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2190,6 +2190,144 @@ func DecodeFileDefinitionsRequest(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return project, filePath, nil
+}
+
+const EventCodeSearch = EventIndex
+const StageCodeSearch = FamilyIndex
+const OperationCodeSearch uint32 = 36
+const CodeSearchQueryMin = 0
+const CodeSearchQueryMax = 511
+const CodeSearchProjectMin = 0
+const CodeSearchProjectMax = 127
+const CodeSearchEnrichMin uint32 = 0
+const CodeSearchEnrichMax uint32 = 1
+
+// EncodeCodeSearchRequest writes the schema code_search declares, in order.
+func EncodeCodeSearchRequest(query string, project string, enrich uint32) ([]byte, error) {
+	if len(query) < CodeSearchQueryMin || len(query) > CodeSearchQueryMax || hasNUL(query) ||
+		len(project) < CodeSearchProjectMin || len(project) > CodeSearchProjectMax || hasNUL(project) ||
+		enrich < CodeSearchEnrichMin || enrich > CodeSearchEnrichMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, query, CodeSearchQueryMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, CodeSearchProjectMax); err != nil {
+		return nil, err
+	}
+	var enrichBytes [4]byte
+	binary.LittleEndian.PutUint32(enrichBytes[:], enrich)
+	payload = append(payload, enrichBytes[:]...)
+	header, err := EncodeRequestHeader(OperationCodeSearch, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCodeSearchRequest reads it back, checking each field against its own bound.
+func DecodeCodeSearchRequest(request []byte) (string, string, uint32, error) {
+	var query string
+	var project string
+	var enrich uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCodeSearch || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if query, err = takeRowText(payload, &cursor, CodeSearchQueryMax); err != nil ||
+		len(query) < CodeSearchQueryMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, CodeSearchProjectMax); err != nil ||
+		len(project) < CodeSearchProjectMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	enrich = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if enrich < CodeSearchEnrichMin || enrich > CodeSearchEnrichMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return query, project, enrich, nil
+}
+
+const EventCodeSearchExcludingProject = EventIndex
+const StageCodeSearchExcludingProject = FamilyIndex
+const OperationCodeSearchExcludingProject uint32 = 37
+const CodeSearchExcludingProjectQueryMin = 0
+const CodeSearchExcludingProjectQueryMax = 511
+const CodeSearchExcludingProjectExcludedProjectMin = 1
+const CodeSearchExcludingProjectExcludedProjectMax = 127
+const CodeSearchExcludingProjectEnrichMin uint32 = 0
+const CodeSearchExcludingProjectEnrichMax uint32 = 1
+
+// EncodeCodeSearchExcludingProjectRequest writes the schema code_search_excluding_project declares, in order.
+func EncodeCodeSearchExcludingProjectRequest(query string, excludedProject string, enrich uint32) ([]byte, error) {
+	if len(query) < CodeSearchExcludingProjectQueryMin || len(query) > CodeSearchExcludingProjectQueryMax || hasNUL(query) ||
+		len(excludedProject) < CodeSearchExcludingProjectExcludedProjectMin || len(excludedProject) > CodeSearchExcludingProjectExcludedProjectMax || hasNUL(excludedProject) ||
+		enrich < CodeSearchExcludingProjectEnrichMin || enrich > CodeSearchExcludingProjectEnrichMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, query, CodeSearchExcludingProjectQueryMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, excludedProject, CodeSearchExcludingProjectExcludedProjectMax); err != nil {
+		return nil, err
+	}
+	var enrichBytes [4]byte
+	binary.LittleEndian.PutUint32(enrichBytes[:], enrich)
+	payload = append(payload, enrichBytes[:]...)
+	header, err := EncodeRequestHeader(OperationCodeSearchExcludingProject, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCodeSearchExcludingProjectRequest reads it back, checking each field against its own bound.
+func DecodeCodeSearchExcludingProjectRequest(request []byte) (string, string, uint32, error) {
+	var query string
+	var excludedProject string
+	var enrich uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCodeSearchExcludingProject || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if query, err = takeRowText(payload, &cursor, CodeSearchExcludingProjectQueryMax); err != nil ||
+		len(query) < CodeSearchExcludingProjectQueryMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if excludedProject, err = takeRowText(payload, &cursor, CodeSearchExcludingProjectExcludedProjectMax); err != nil ||
+		len(excludedProject) < CodeSearchExcludingProjectExcludedProjectMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	enrich = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if enrich < CodeSearchExcludingProjectEnrichMin || enrich > CodeSearchExcludingProjectEnrichMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return query, excludedProject, enrich, nil
 }
 
 const EventTraceMiningRecord = EventLearning

@@ -872,6 +872,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_top_partners = db2_entity_edge_top_partners_by_relation,
        .entity_top_targets = db2_entity_edge_top_targets_by_relation,
        .file_definitions = db2_code_index_file_definitions,
+       .code_search = db2_code_index_code_search,
+       .code_search_excluding_project = db2_code_index_code_search_excluding_project,
    };
    return &backend;
 }
@@ -3228,6 +3230,90 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_file_definitions_reply_encode(rows, count, response_body,
                                                         response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char query[AIMEE_DB2_CODE_SEARCH_QUERY_MAX + 1] = "";
+         char project[AIMEE_DB2_CODE_SEARCH_PROJECT_MAX + 1] = "";
+         uint32_t enrich = 0u;
+         if (aimee_db2_code_search_request_decode(request_body, request_len, query, sizeof(query),
+                                                  project, sizeof(project), &enrich) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CODE_SEARCH_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->code_search)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_code_search_row_t rows[AIMEE_DB2_CODE_SEARCH_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               static code_search_hit_t found[AIMEE_DB2_CODE_SEARCH_MAX_ROWS];
+               int written = backend->code_search(query, project, found,
+                                                  AIMEE_DB2_CODE_SEARCH_MAX_ROWS, (int)enrich);
+               for (int index = 0; index < written; index++)
+               {
+                  snprintf(rows[index].project, sizeof(rows[index].project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].file_path, sizeof(rows[index].file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].snippet, sizeof(rows[index].snippet), "%s",
+                           found[index].snippet);
+                  rows[index].rank = found[index].rank < 0.0 ? 0.0 : found[index].rank;
+                  snprintf(rows[index].content_hash, sizeof(rows[index].content_hash), "%s",
+                           found[index].content_hash);
+                  rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_code_search_reply_encode(rows, count, response_body, response_capacity,
+                                                   response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char query[AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_QUERY_MAX + 1] = "";
+         char excluded_project[AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_EXCLUDED_PROJECT_MAX + 1] =
+             "";
+         uint32_t enrich = 0u;
+         if (aimee_db2_code_search_excluding_project_request_decode(
+                 request_body, request_len, query, sizeof(query), excluded_project,
+                 sizeof(excluded_project), &enrich) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->code_search_excluding_project)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_code_search_excluding_project_row_t
+                rows[AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               static code_search_hit_t found[AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS];
+               int written = backend->code_search_excluding_project(
+                   query, excluded_project, found, AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS,
+                   (int)enrich);
+               for (int index = 0; index < written; index++)
+               {
+                  snprintf(rows[index].project, sizeof(rows[index].project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].file_path, sizeof(rows[index].file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].snippet, sizeof(rows[index].snippet), "%s",
+                           found[index].snippet);
+                  rows[index].rank = found[index].rank < 0.0 ? 0.0 : found[index].rank;
+                  snprintf(rows[index].content_hash, sizeof(rows[index].content_hash), "%s",
+                           found[index].content_hash);
+                  rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_code_search_excluding_project_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

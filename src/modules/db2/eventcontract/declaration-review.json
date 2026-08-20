@@ -100,6 +100,22 @@
       "reason": "Affected-row inspection belongs to the private statement lifetime; a mutation operation maps it to bounded domain evidence before replying."
     },
     {
+      "symbol": "canonical_index_code_search",
+      "signature_sha256": "c99eaaaa91f897bf4e75295b3bdad3d15aae21a4f9ada3f9727f37223c858416",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "canonical_index_code_search is index.code_search under another name: its whole body forwards to db2_code_index_code_search. Reviewed as the same operation rather than a second one, because a forward is not a boundary, and listed as a forward in the generator's table so it cannot quietly become a second implementation."
+    },
+    {
+      "symbol": "canonical_index_code_search_excluding_project",
+      "signature_sha256": "aa59909fc817e2ed9dc434c5e342667e994f7b0e5142623a5227878507042e8f",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "canonical_index_code_search_excluding_project is index.code_search_excluding_project under another name, forwarding to db2_code_index_code_search_excluding_project. It was the only caller of that backend, which is why the backend read as unconsumed while the search itself was in use. Reviewed as the same operation, and listed as a forward so the two cannot drift."
+    },
+    {
       "symbol": "canonical_index_set_exec_capture",
       "signature_sha256": "1e99a1701424fe709b6626d44151681f875541924a23045c4226c93dfe964cac",
       "disposition": "private-db2",
@@ -274,6 +290,22 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "Reorders a result set the caller already holds so local dependents sort first. It is presentation applied to memory the caller owns, issues no statement, and has nothing to do with the database once the results exist."
+    },
+    {
+      "symbol": "db2_code_index_code_search",
+      "signature_sha256": "464ad397727fd789120b01121f56c7beb0b0bb64ff8c65606e0d8d264dd34036",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.code_search operation searches indexed file contents. An empty project searches every project rather than none. An empty query answers with nothing rather than failing, which is the one input that is not an error. Dotted paths and projects rooted under a dotted directory are excluded. The line is zero unless enrichment is asked for, and even then it is found by locating the snippet in the content, so it is a hint and can precede the real match."
+    },
+    {
+      "symbol": "db2_code_index_code_search_excluding_project",
+      "signature_sha256": "8ddc37119d16e06c2f567eced35d171c14f065d294134ec82184cb7864057d4e",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.code_search_excluding_project operation searches every indexed project but one. The exclusion is required rather than optional -- the backend refuses an empty name -- so this is not index.code_search with a filter switched off, and the two cannot be combined: naming a project to search and a project to exclude in the same call is refused there. Everything else it does, including the enrichment hint, matches index.code_search."
     },
     {
       "symbol": "db2_code_index_drift_candidates",

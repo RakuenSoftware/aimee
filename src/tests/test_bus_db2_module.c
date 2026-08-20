@@ -1830,6 +1830,55 @@ int canonical_index_structure(const char *project, const char *file_path, defini
    return db2_code_index_file_definitions(project, file_path, out, max);
 }
 
+/* Returns a row so the float in a row reply is exercised with a value in it.
+ * The replay only ever sees an empty result: indexing a file there would be
+ * visible to the fresh-schema counts it also asserts. */
+static int code_search_enrich_seen = -1;
+static int code_search_calls;
+
+int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                               int max, int enrich)
+{
+   (void)query;
+   (void)project;
+   code_search_calls++;
+   code_search_enrich_seen = enrich;
+   if (!out || max < 1)
+      return 0;
+   snprintf(out[0].project, sizeof(out[0].project), "%s", "alpha-project");
+   snprintf(out[0].file_path, sizeof(out[0].file_path), "%s", "src/alpha.c");
+   snprintf(out[0].snippet, sizeof(out[0].snippet), "%s", ">>>alpha<<<");
+   /* Not representable exactly in fewer than 53 bits of mantissa, so a rank
+    * that ever went through a float would come back changed. */
+   out[0].rank = 0.1234567890123456;
+   snprintf(out[0].content_hash, sizeof(out[0].content_hash), "%s", "deadbeef");
+   out[0].line = 42;
+   return 1;
+}
+
+int canonical_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                                int max, int enrich)
+{
+   return db2_code_index_code_search(query, project, out, max, enrich);
+}
+
+int db2_code_index_code_search_excluding_project(const char *query, const char *excluded_project,
+                                                 code_search_hit_t *out, int max, int enrich)
+{
+   (void)query;
+   (void)excluded_project;
+   (void)out;
+   (void)max;
+   (void)enrich;
+   return 0;
+}
+
+int canonical_index_code_search_excluding_project(const char *query, const char *excluded_project,
+                                                  code_search_hit_t *out, int max, int enrich)
+{
+   return db2_code_index_code_search_excluding_project(query, excluded_project, out, max, enrich);
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
@@ -3270,6 +3319,7 @@ int main(void)
        .embedder_serving_id = db2_embedder_serving_id,
        .dimension_reset = dimension_reset,
        .entity_neighbors = db2_entity_edge_neighbors,
+       .code_search = db2_code_index_code_search,
        .match_error_keys = db2_memory_promotion_match_error_keys,
    };
    process_thread_t process = {
@@ -3409,6 +3459,22 @@ int main(void)
           neighbor_rows[0].weight == 7 && neighbor_rows[1].node[0] == '\0' &&
           neighbor_rows[1].weight == 0 && entity_neighbors_calls == 1 &&
           entity_neighbors_limit_seen == 12 && strcmp(entity_neighbors_seen, "alpha-entity") == 0);
+
+   /* A row reply carrying a float. The rank needs the full mantissa, so a
+    * codec that ever narrowed it would come back with a different number, and
+    * the enrichment flag is checked at the backend because the reply cannot
+    * show whether it arrived. */
+   static aimee_db2_code_search_row_t search_rows[AIMEE_DB2_CODE_SEARCH_MAX_ROWS];
+   uint32_t search_count = 99;
+   assert(aimee_db2_code_search_call(call_client, &client, 7045, 0, "alpha", "alpha-project", 1u,
+                                     search_rows, AIMEE_DB2_CODE_SEARCH_MAX_ROWS, &search_count,
+                                     NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(search_count == 1 && strcmp(search_rows[0].project, "alpha-project") == 0 &&
+          strcmp(search_rows[0].file_path, "src/alpha.c") == 0 &&
+          strcmp(search_rows[0].snippet, ">>>alpha<<<") == 0 &&
+          search_rows[0].rank == 0.1234567890123456 &&
+          strcmp(search_rows[0].content_hash, "deadbeef") == 0 && search_rows[0].line == 42 &&
+          code_search_calls == 1 && code_search_enrich_seen == 1);
 
    uint64_t scoped_ids[AIMEE_DB2_TOP_L2_FACTS_MAX];
    uint32_t scoped_count = 99;

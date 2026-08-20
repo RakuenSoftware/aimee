@@ -2160,6 +2160,40 @@ int canonical_index_structure(const char *project, const char *file_path, defini
    return db2_code_index_file_definitions(project, file_path, out, max);
 }
 
+int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                               int max, int enrich)
+{
+   (void)query;
+   (void)project;
+   (void)out;
+   (void)max;
+   (void)enrich;
+   return 0;
+}
+
+int canonical_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                                int max, int enrich)
+{
+   return db2_code_index_code_search(query, project, out, max, enrich);
+}
+
+int db2_code_index_code_search_excluding_project(const char *query, const char *excluded_project,
+                                                 code_search_hit_t *out, int max, int enrich)
+{
+   (void)query;
+   (void)excluded_project;
+   (void)out;
+   (void)max;
+   (void)enrich;
+   return 0;
+}
+
+int canonical_index_code_search_excluding_project(const char *query, const char *excluded_project,
+                                                  code_search_hit_t *out, int max, int enrich)
+{
+   return db2_code_index_code_search_excluding_project(query, excluded_project, out, max, enrich);
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

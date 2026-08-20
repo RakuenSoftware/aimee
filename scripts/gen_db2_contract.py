@@ -12729,6 +12729,20 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "forwards": ("canonical_index_structure",),
         "policy": {"reads": 200},
     },
+    "code_search": {
+        "key": ("index", 36),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_code_search",
+        "policy": {"reads": 200},
+        "forwards": ('canonical_index_code_search',),
+    },
+    "code_search_excluding_project": {
+        "key": ("index", 37),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_code_search_excluding_project",
+        "policy": {"reads": 200},
+        "forwards": ('canonical_index_code_search_excluding_project',),
+    },
 }
 
 
@@ -14030,8 +14044,11 @@ def _generic_c_encode_body(operation: dict[str, object], fields: list[dict[str, 
             writes.append(f"""   aimee_db2_put_u64(payload + cursor, {value});
    cursor += 8u;""")
         else:
-            checks.append(f"aimee_db2_binary64_bits({value}) < {bound}_MIN_BITS || "
-                          f"aimee_db2_binary64_bits({value}) > {bound}_MAX_BITS")
+            floor_bits = int(field["minimum_binary64_bits"])
+            checks.append(
+                (f"aimee_db2_binary64_bits({value}) < {bound}_MIN_BITS || "
+                 f"aimee_db2_binary64_bits({value}) > {bound}_MAX_BITS") if floor_bits
+                else f"aimee_db2_binary64_bits({value}) > {bound}_MAX_BITS")
             writes.append(f"""   aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits({value}));
    cursor += 8u;""")
     return ("\n".join(lengths), " ||\n       ".join(checks)), "\n".join(writes)
@@ -14079,12 +14096,15 @@ def _generic_c_decode_body(operation: dict[str, object], fields: list[dict[str, 
    if ({floor}{value} > {bound}_MAX)
       return -1;""")
         else:
+            floor_bits = int(field["minimum_binary64_bits"])
+            guard = (f"bits < {bound}_MIN_BITS || bits > {bound}_MAX_BITS" if floor_bits
+                     else f"bits > {bound}_MAX_BITS")
             steps.append(f"""   if (cursor + 8u > payload_len)
       return -1;
    {{
       uint64_t bits = aimee_db2_get_u64(payload + cursor);
       cursor += 8u;
-      if (bits < {bound}_MIN_BITS || bits > {bound}_MAX_BITS)
+      if ({guard})
          return -1;
       {value} = aimee_db2_binary64_value(bits);
    }}""")

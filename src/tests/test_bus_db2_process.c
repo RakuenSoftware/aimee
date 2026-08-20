@@ -1774,6 +1774,38 @@ int main(int argc, char **argv)
                                           &definition_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(definition_count == 0);
 
+   /* The two code searches, against an index with no files in it. These rows
+    * carry a float, which is what makes them worth replaying here as well as
+    * in the hosted test: the rank crosses as its binary64 bit pattern, and the
+    * schema admits any non-negative finite double and nothing else. */
+   static aimee_db2_code_search_row_t search_rows[AIMEE_DB2_CODE_SEARCH_MAX_ROWS];
+   uint32_t search_count = 99;
+   assert(aimee_db2_code_search_call(call_client, &client, 9274, 0, "replay", "demo", 0u,
+                                     search_rows, AIMEE_DB2_CODE_SEARCH_MAX_ROWS, &search_count,
+                                     NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(search_count == 0);
+   /* An empty project searches every project, and an empty query matches
+    * nothing rather than failing. Both are inputs the reply cannot describe. */
+   search_count = 99;
+   assert(aimee_db2_code_search_call(call_client, &client, 9275, 0, "replay", "", 1u, search_rows,
+                                     AIMEE_DB2_CODE_SEARCH_MAX_ROWS, &search_count, NULL,
+                                     NULL) == AIMEE_MODULE_CALL_OK);
+   assert(search_count == 0);
+   search_count = 99;
+   assert(aimee_db2_code_search_call(call_client, &client, 9276, 0, "", "", 0u, search_rows,
+                                     AIMEE_DB2_CODE_SEARCH_MAX_ROWS, &search_count, NULL,
+                                     NULL) == AIMEE_MODULE_CALL_OK);
+   assert(search_count == 0);
+
+   static aimee_db2_code_search_excluding_project_row_t
+       excluded_rows[AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS];
+   uint32_t excluded_count = 99;
+   assert(aimee_db2_code_search_excluding_project_call(
+              call_client, &client, 9277, 0, "replay", "demo", 0u, excluded_rows,
+              AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS, &excluded_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(excluded_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
