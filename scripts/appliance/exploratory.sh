@@ -44,6 +44,15 @@ run "equals/skill.lint-name" skill lint someskill
 run "equals/skill.patch"     skill patch s old new
 run "equals/skill.patch-all" skill patch s old new --all
 run "equals/skill.pin"       skill pin someskill
+# the user_capture family: the join, the constant prefix, the length refusal
+run "capture/identity"       memory identity favourite-editor vim
+run "capture/identity-join"  memory identity motto never guess a rule
+run "capture/prefer"         memory prefer tone terse and direct
+run "capture/archive"        memory archive old-note the body text
+run "capture/store"          memory store somekey some value here
+run "capture/content-flag"   memory store k --content=body
+run "capture/long-key"       memory identity "$(python3 -c 'print("k"*600)')" v
+run "capture/missing-value"  memory identity onlykey
 # cascades, clamps, widths, arity refusal
 run "cascade/memory.recall"  memory recall --query "what changed"
 run "arity/delegate.log"     delegate log
