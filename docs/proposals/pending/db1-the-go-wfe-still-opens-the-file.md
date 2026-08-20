@@ -45,6 +45,47 @@ proposal that scoped this migration could not see it, and neither could any of
 the sweeps I ran -- until I stopped grepping C and asked which processes open
 the file.
 
+## Which module owns workflow state?
+
+Before costing the work, there is a question underneath it that decides which
+work to do, and getting it wrong means doing a large migration twice.
+
+`aimee-wfe` is not the daemon. It is a separate process, launched by the same
+supervisor, with its own grant and its own principal -- which is to say it is a
+module by every structural test this codebase applies. The doctrine says state
+lives in modules, and the WFE is one. The defect is not that a non-C process
+holds state; it is that **two modules claim the same tables**, and they resolve
+that claim by sharing a file rather than by one of them owning it.
+
+So there are two ways to close this, and they are not variations on each other:
+
+**DB1 owns it; the WFE becomes a client.** Port `internal/db1/store.go` onto the
+Go bus client. 1738 lines, ~40 live methods, **18 transactions** and **17
+recursive CTEs**. Every one of those transactions has to become a single module
+operation -- the same redesign `wfe_engine.c` needed when its sixteen writes
+across two transactions became `db1_work_item_record_outcome` -- and every
+recursive CTE has to move into C. The methods at risk are the ones that matter:
+budget reservation with leases, cancellation trees, orphan reconciliation.
+
+**The WFE owns it; the daemon becomes a client.** Remove `lifecycle` and
+`delegation` from DB1 -- they were migrated *into* it on this branch -- give the
+WFE its own store, and point the daemon's work-item reads at the WFE over the
+bus. That is **~106 C call sites**: 45 in `wfe_autonomy.c`, 35 in
+`server_workflow_api.c`, and the rest across `server_ci_route.c`,
+`trigger_scheduler.c`, `server_dev_submit.c`, `cmd_hooks.c`,
+`router_advise.c` and `s2_native_gate_hook.c`.
+
+Neither is cheap and both are mechanical-with-sharp-edges. The first keeps the
+store single and makes the execution engine a client of it. The second follows
+the grain of "the service that owns a domain owns its state", and would mean
+this branch migrated two families into the wrong module.
+
+That is a call about how the appliance is meant to be shaped, not a detail of
+either implementation, and it should be made deliberately rather than by
+whichever port somebody starts first. Everything measured above holds either
+way: today the file has two owners with two schema authorities, and it is not
+corrupting anything.
+
 ## What closing it costs
 
 Not small, and not this change. `server-go/db1/client.go` -- the Go bus client
