@@ -17,67 +17,72 @@
  * vocabulary general enough to ask for one is general enough to ask for a
  * credential. See the note below on the 26 methods this distinction cost.
  *
- * WHY THE REST ARE NOT HERE YET. 156 of the 181 CLI-reachable methods are
- * served. The 25 that are not are listed BY NAME below with what each would
- * take. None is blocked by the spec language being small; each is blocked by
- * what its marshaller does.
+ * WHY THE REST ARE NOT HERE YET. 160 of the 181 CLI-reachable methods are
+ * served. The 21 that are not are listed BY NAME below with what each would
+ * take.
  *
- * THREE CLAIMS IN THIS FILE TURNED OUT TO BE MISTAKES, all the same shape: a
- * line drawn on convenience and then defended as principle.
+ * FOUR CLAIMS IN THIS FILE TURNED OUT TO BE MISTAKES. All four had the same
+ * shape -- a line drawn on convenience and then defended as principle -- and
+ * each was corrected only after being challenged, which is why the reasons
+ * below are stated so they can be checked rather than taken:
  *
  *   1. "43 methods must never be served, they read the client's own state."
  *      That conflated the client DECIDING a field needs getcwd() -- client-side
  *      knowledge, and what forces a rebuild -- with the client SUPPLYING it
- *      because a served spec asked. Cost: 26 methods. The genuinely client-only
- *      set is SIX.
+ *      because a served spec asked. Cost: 26 methods.
  *
- *   2. "No branch may decide which fields exist." This vocabulary is FULL of
- *      conditionals -- empty:"drop", omit_if_nonpositive, omit_below,
- *      max_positionals, first_of -- and none makes a spec a program. An ARITY
- *      gate consults the invocation's shape, which max_positionals already does
- *      one level up. count_min/count_max/argc_min are that gate. Cost: 6.
+ *   2. "No branch may decide which fields exist." This vocabulary is full of
+ *      conditionals and none makes a spec a program. An ARITY gate consults the
+ *      invocation's shape, which max_positionals already does. Cost: 6.
  *
  *   3. "A literal comparison is string surgery." skip_if_dash already tests a
- *      field's own value against a prefix; `equals`/`not_equals` test it
- *      against a literal, which is the same kind of rule. skill.lint reads
- *      argv[0] and sends `all` when it is exactly "--all" and `name` when it is
- *      not. Cost: 2.
+ *      field's own value against a prefix; equals/not_equals test it against a
+ *      literal. Cost: 2.
  *
- * THE LINE, restated so it can be judged rather than re-argued: a field's rule
- * may depend on ITS OWN value, its own flags, named client facts the SERVER
- * asked for, and the invocation's ARITY. It may not depend on ANOTHER FIELD's
- * value, and it may not compute one.
+ *   4. "The user_capture family is string surgery." A constant prefix and a
+ *      length limit are LESS computation than the clamp already admitted here,
+ *      and neither consults another field. Cost: 4.
  *
- * That line still forbids things, and holds where it should: skill.archive gates
- * absorbed_into (read from argv[2]) on argv[1] being "--absorbed-into", and is
- * refused for exactly that reason -- a spec without the gate would send the
- * field for any third argument.
+ * A FIFTH claim was not wrong but its REASON was, which is worth as much
+ * attention: the MCP-envelope group was refused partly because "four of the
+ * five read $AIMEE_SESSION_ID or the cwd anyway". True when written, false the
+ * moment cwd and session became serveable, and never recomputed. The
+ * conclusion survives on a different footing -- git.verify, git.cli,
+ * index.ast_grep and tool.call each parse argv with a key=value grammar of
+ * their own -- but the stale reason would have told the next reader that
+ * making cwd serveable had unblocked them.
  *
- * WHAT REMAINS, and what each would take:
+ * THE LINE: a field's rule may depend on ITS OWN value, its own flags, named
+ * client facts the SERVER asked for, and the invocation's ARITY. It may not
+ * depend on ANOTHER FIELD's value, and it may not compute one.
  *
- *   SIX are genuinely client-only: the file CONTENTS or key material go into the
- *   body, and a spec that could say "read this path" could say "read
- *   ~/.ssh/id_rsa":
+ * WHAT REMAINS:
+ *
+ *   SIX are client-only, and this one is a SECURITY boundary rather than
+ *   conservatism. cwd and session are two FIXED facts. A file_contents source
+ *   would let the server choose WHICH argv slot becomes a file read, so a
+ *   server -- or anyone able to answer as one -- could turn a value argument
+ *   into a path and have the client post its contents back. That escalation
+ *   does not exist for a fact the client already sends:
  *     delegate, delegate.launch, roundtable.review, skill.create, skill.edit,
  *     vault.unlock
  *
- *   FIVE wear the MCP tool-call envelope -- method "mcp.call" or "help.get", a
- *   constant `tool`, a nested `arguments`, no protocol_version -- and four of
- *   the five read $AIMEE_SESSION_ID or the cwd or parse argv anyway:
- *     get_help, git.cli, git.verify, index.ast_grep, tool.call
+ *   SEVEN parse argv themselves, in a loop, without cli_args_parse. They take
+ *   `--snapshot X` but NOT `--snapshot=X`, which cli_args_parse accepts and
+ *   every served spec therefore does. Describing them means describing a second
+ *   PARSER:
+ *     git.cli, git.verify, index.ast_grep, tool.call, memory.supersede,
+ *     skill.autostub, skill.lifecycle
  *
- *   FOUR derive rather than source: the memory.user_capture family joins the
- *   positionals from index 1, prefixes the key, and refuses one over 512
- *   characters:
- *     memory.archive, memory.identity, memory.prefer, memory.store
- *
- *   THREE parse argv with a grammar of their own, in a loop, without
- *   cli_args_parse -- so they take `--snapshot X` but NOT `--snapshot=X`, which
- *   cli_args_parse accepts and every served spec therefore does:
- *     memory.supersede, skill.autostub, skill.lifecycle
+ *   ONE is a cost decision, recorded as one: get_help wears the MCP tool-call
+ *   envelope -- method "help.get", a constant `tool`, a nested `arguments`, no
+ *   protocol_version -- and serving it needs envelope suppression for a single
+ *   method. Every served spec currently produces a properly enveloped request,
+ *   and an escape hatch used once is a poor trade. Revisit if a second method
+ *   ever wants the shape.
  *
  *   SEVEN need a CROSS-FIELD rule, the half of the line that still forbids.
- *   Each would be served by a marshaller change, not a vocabulary change, and
+ *   Each would be served by a MARSHALLER change, not a vocabulary change, and
  *   that change alters what the CLI sends:
  *     cron.enable, cron.disable  -- job_id OR all:true, and a refusal when
  *                                  NEITHER is given.
@@ -89,21 +94,23 @@
  *                                  truncates at 64 bytes.
  *     index.span                 -- the positional INDEX depends on whether an
  *                                  earlier argument parses as a number.
- *     skill.archive              -- gated on a different argv slot than it reads.
  *
  * AND NOTE WHAT THE TEST CANNOT SEE. Its samples are generated FROM the spec, so
  * a rule the spec omits is invisible. Every defect below was found that way, and
  * each is the same shape -- reading PART of a rule:
  *
  *   - memory.delete SHIPPED saying atoi where the marshaller calls atoll().
- *     atoi() keeps the LOW 32 BITS AS A SIGNED INT, measured on a real
- *     appliance: 4294967297 -> 1. `aimee memory delete 4294967297` deleted
- *     memory 1. A JSON number is a double, so ids above 2^53 cannot round-trip
+ *     atoi() keeps the LOW 32 BITS AS A SIGNED INT: 4294967297 -> 1, so
+ *     `aimee memory delete 4294967297` deleted memory 1. Measured on a real
+ *     appliance. A JSON number is a double, so ids above 2^53 cannot round-trip
  *     whatever parse is named -- a ceiling shared with the marshaller.
  *   - index.structure sent the file as a PROJECT. Two positionals mean
  *     <project> <file_path>, one means <file_path>. The samples generated two
- *     and three, never ONE -- the way the command is used. Found by running the
- *     real command against a real server.
+ *     and three, never ONE. Found by running the real command against a real
+ *     server, and the reason the suite now samples every arity.
+ *   - the user_capture 512-char key limit is the rule a spec-derived sample set
+ *     can NEVER reach: every key it invents is short. It has a deliberately
+ *     oversized sample now.
  *   - kb.search reuses one scratch variable for four flags; the FIRST assignment
  *     gave scope, fusion_mode and embedding_command all --project.
  *   - memory.recall is a four-step cascade; the NEAREST assignment gave the last
@@ -118,7 +125,7 @@
  *
  * Hence the sample set: adversarial, both-sources, numeric straddling 2^31,
  * cascades supplying two steps at once, ARITY at every count from one to n+1,
- * and the `--flag=value` form -- plus
+ * the `--flag=value` form, and an oversized key -- plus
  * scripts/check_argspec_numeric_parity.py, which compares each spec's numeric
  * type against the parse its marshaller calls rather than hoping an input lands
  * on the boundary. Each was plant-tested: a deliberate violation introduced and
@@ -395,6 +402,73 @@
    reading that a client touching getcwd() could not be served at all. */
 {"init.run",
  "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+
+/* The user_capture family. Four methods share one helper whose per-method
+   arguments -- kind, key prefix, tier -- are CONSTANTS, so per-method specs
+   carry them as data and the shared branch disappears.
+
+   Refused for most of this work as "string surgery". A constant prefix and a
+   length limit are less computation than the clamp already admitted here, and
+   neither consults another field. What the limit must NOT do is truncate: a
+   truncated key collides silently with another one, so max_length refuses.
+
+   The key is positional[0]; the content is every positional from index 1 joined
+   with spaces, falling back to --content. Keeping only the first positional
+   stored a fragment of what the operator said, which is why the join is a
+   SOURCE rather than a convenience. */
+{"memory.identity",
+ "{\"method\":\"memory.user_capture\",\"usage\":\"usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)\",\"fields\":["
+ "{\"json\":\"kind\",\"from\":\"const\",\"type\":\"const_value\","
+ "\"value\":\"fact\"},"
+ "{\"json\":\"tier\",\"from\":\"const\",\"type\":\"const_value\","
+ "\"value\":\"L2\"},"
+ "{\"json\":\"key\",\"from\":\"positional\",\"index\":0,"
+ "\"prefix\":\"identity:\",\"max_length\":512,\"required\":true},"
+ "{\"json\":\"content\",\"from\":\"first_of\",\"required\":true,"
+ "\"sources\":[{\"from\":\"positional_join\",\"from_index\":1},"
+ "{\"from\":\"flag\",\"flag\":\"content\"}]}]}"},
+
+{"memory.prefer",
+ "{\"method\":\"memory.user_capture\",\"usage\":\"usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)\",\"fields\":["
+ "{\"json\":\"kind\",\"from\":\"const\",\"type\":\"const_value\","
+ "\"value\":\"preference\"},"
+ "{\"json\":\"tier\",\"from\":\"const\",\"type\":\"const_value\","
+ "\"value\":\"L2\"},"
+ "{\"json\":\"key\",\"from\":\"positional\",\"index\":0,"
+ "\"prefix\":\"pref:\",\"max_length\":512,\"required\":true},"
+ "{\"json\":\"content\",\"from\":\"first_of\",\"required\":true,"
+ "\"sources\":[{\"from\":\"positional_join\",\"from_index\":1},"
+ "{\"from\":\"flag\",\"flag\":\"content\"}]}]}"},
+
+{"memory.archive",
+ "{\"method\":\"memory.user_capture\",\"usage\":\"usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)\",\"fields\":["
+ "{\"json\":\"kind\",\"from\":\"const\",\"type\":\"const_value\","
+ "\"value\":\"archive\"},"
+ "{\"json\":\"tier\",\"from\":\"const\",\"type\":\"const_value\","
+ "\"value\":\"L1\"},"
+ "{\"json\":\"key\",\"from\":\"positional\",\"index\":0,"
+ "\"prefix\":\"archive:\",\"max_length\":512,\"required\":true},"
+ "{\"json\":\"content\",\"from\":\"first_of\",\"required\":true,"
+ "\"sources\":[{\"from\":\"positional_join\",\"from_index\":1},"
+ "{\"from\":\"flag\",\"flag\":\"content\"}]}]}"},
+
+/* memory.store is the family's fourth member and the odd one: no prefix, no
+   length limit, nothing required, and key falls back to --key rather than being
+   refused. Same join for content, and the same reason for it -- an unquoted
+   value arrives one word per positional. */
+{"memory.store",
+ "{\"fields\":["
+ "{\"json\":\"key\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"key\","
+ "\"empty\":\"emit\"},"
+ "{\"json\":\"content\",\"from\":\"first_of\",\"empty\":\"emit\","
+ "\"sources\":[{\"from\":\"positional_join\",\"from_index\":1},"
+ "{\"from\":\"flag\",\"flag\":\"content\"}]},"
+ "{\"json\":\"tier\",\"from\":\"flag\",\"flag\":\"tier\",\"empty\":\"emit\"},"
+ "{\"json\":\"kind\",\"from\":\"flag\",\"flag\":\"kind\",\"empty\":\"emit\"},"
+ "{\"json\":\"session_id\",\"from\":\"flag\",\"flag\":\"session\","
+ "\"empty\":\"emit\"},"
+ "{\"json\":\"confidence\",\"from\":\"flag\",\"flag\":\"confidence\","
+ "\"type\":\"number_lenient_real\",\"empty\":\"emit\"}]}"},
 
 {"delegate.log",
  "{\"usage\":\"usage: aimee delegate log [--json]; for a background job log, "

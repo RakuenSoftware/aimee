@@ -86,6 +86,11 @@
 /* A value fixed by the METHOD, not by the input. skill.pin sends
  * pinned=true and skill.unpin sends pinned=false from one shared
  * marshaller; per-method specs make that a constant rather than a branch. */
+/* Every positional from `from_index` onward, joined with single spaces.
+ * memory.store and the user_capture family take an unquoted value one word
+ * per positional, and keeping only the first silently stored a fragment of
+ * what the operator said. WHERE the value comes from, not surgery on it. */
+#define SRC_POSITIONAL_JOIN  "positional_join"
 #define SRC_CONST            "const"
 #define SRC_POSITIONAL_ARRAY "positional_array"
 #define SRC_FIRST_OF         "first_of"
@@ -143,6 +148,10 @@
  * "status": "ambiguous". Exactly true_if_set with a literal other than true,
  * so the same reasoning admits it -- one field, its own flag, no branch. The
  * literal travels in `value`. */
+/* A constant STRING with no flag to gate it: the user_capture family sends
+ * kind="fact" and tier="L2" as fixed properties of the METHOD. const_if_set
+ * is the same literal gated on a flag; this is the ungated form. */
+#define TYPE_CONST        "const_value"
 #define TYPE_CONST_BOOL   "const_bool"
 #define TYPE_CONST_IF_SET "const_if_set"
 /* One field, two flags, three states: --surprise sends true, --no-surprise
@@ -192,13 +201,13 @@ static const char *field_str(const cJSON *field, const char *key)
 
 static int known_source(const char *from)
 {
-   return from &&
-          (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
-           !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
-           !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY) ||
-           !strcmp(from, SRC_ARGV_INDEX) || !strcmp(from, SRC_REPEATED_FLAG) ||
-           !strcmp(from, SRC_CWD) || !strcmp(from, SRC_SESSION) || !strcmp(from, SRC_FIRST_OF) ||
-           !strcmp(from, SRC_POSITIONAL_ARRAY) || !strcmp(from, SRC_CONST));
+   return from && (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
+                   !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
+                   !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY) ||
+                   !strcmp(from, SRC_ARGV_INDEX) || !strcmp(from, SRC_REPEATED_FLAG) ||
+                   !strcmp(from, SRC_CWD) || !strcmp(from, SRC_SESSION) ||
+                   !strcmp(from, SRC_FIRST_OF) || !strcmp(from, SRC_POSITIONAL_ARRAY) ||
+                   !strcmp(from, SRC_CONST) || !strcmp(from, SRC_POSITIONAL_JOIN));
 }
 
 static int known_empty(const char *e)
@@ -215,7 +224,8 @@ static int known_type(const char *type)
           !strcmp(type, TYPE_NUMBER_LAX_REAL) || !strcmp(type, TYPE_NUMBER_LAX_ULONG) ||
           !strcmp(type, TYPE_BOOL) || !strcmp(type, TYPE_BOOL_INVERTED) ||
           !strcmp(type, TYPE_CONST_IF_SET) || !strcmp(type, TYPE_CONST_BOOL) ||
-          !strcmp(type, TYPE_TRISTATE_FLAG) || !strcmp(type, TYPE_TRUE_IF_SET);
+          !strcmp(type, TYPE_CONST) || !strcmp(type, TYPE_TRISTATE_FLAG) ||
+          !strcmp(type, TYPE_TRUE_IF_SET);
 }
 
 int cli_argspec_supported(const cJSON *spec)
@@ -380,6 +390,35 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
       return "default";
    }
 
+   if (!strcmp(from, SRC_POSITIONAL_JOIN))
+   {
+      const cJSON *fi = cJSON_GetObjectItemCaseSensitive(field, "from_index");
+      int start = cJSON_IsNumber(fi) ? (int)fi->valuedouble : 0;
+      if (opts->pos_count <= start)
+         return NULL;
+      static char joined_pos[8192];
+      size_t at = 0;
+      joined_pos[0] = '\0';
+      for (int i = start; i < opts->pos_count; i++)
+      {
+         const char *w = opts->positional[i] ? opts->positional[i] : "";
+         size_t wl = strlen(w);
+         if (at + wl + (at ? 1 : 0) >= sizeof(joined_pos))
+            break;
+         if (at)
+            joined_pos[at++] = ' ';
+         memcpy(joined_pos + at, w, wl);
+         at += wl;
+         joined_pos[at] = '\0';
+      }
+      /* An empty join is still a JOIN: `memory store k ""` has a positional at
+       * index 1, and positionals_joined returns "" rather than NULL, so the
+       * marshaller sends content:"". Returning NULL here fell through to
+       * --content and dropped the field. Presence is the COUNT, as it is for a
+       * plain positional with empty:"emit". */
+      return joined_pos;
+   }
+
    if (!strcmp(from, SRC_ARGV_JOINED))
       return joined && joined[0] ? joined : NULL;
 
@@ -524,6 +563,15 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       }
    }
 
+   if (type && !strcmp(type, TYPE_CONST))
+   {
+      const char *lit = field_str(field, "value");
+      if (!lit)
+         return -1;
+      cJSON_AddStringToObject(req, json_name, lit);
+      return 0;
+   }
+
    if (type && !strcmp(type, TYPE_CONST_BOOL))
    {
       cJSON_AddBoolToObject(req, json_name,
@@ -653,7 +701,29 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       return required ? -1 : 0;
 
    if (!type || !strcmp(type, TYPE_STRING))
+   {
+      /* `prefix` prepends a constant the SERVER supplies: the user_capture
+       * family stores under "identity:" + the operator's key. `max_length`
+       * REFUSES the result rather than truncating it, because a truncated key
+       * collides silently with another one.
+       *
+       * A constant concatenation and a length limit are less computation than
+       * the clamp this file already admits. Neither consults another field. */
+      const char *pre = field_str(field, "prefix");
+      const cJSON *maxlen = cJSON_GetObjectItemCaseSensitive(field, "max_length");
+      if (pre || cJSON_IsNumber(maxlen))
+      {
+         char pbuf[1024];
+         int need = snprintf(pbuf, sizeof(pbuf), "%s%s", pre ? pre : "", value);
+         if (need < 0 || (size_t)need >= sizeof(pbuf))
+            return -1;
+         if (cJSON_IsNumber(maxlen) && need >= (int)maxlen->valuedouble)
+            return -1;
+         cJSON_AddStringToObject(req, json_name, pbuf);
+         return 0;
+      }
       cJSON_AddStringToObject(req, json_name, value);
+   }
    else if (!strcmp(type, TYPE_NUMBER_LAX))
    /* atoi(): leading digits, 0 for anything else, no refusal. Exactly what
     * the 53 sites do -- described, not endorsed. */
@@ -734,7 +804,11 @@ cJSON *cli_argspec_build(const char *method, const cJSON *spec, int argc, char *
       free(joined);
       return NULL;
    }
-   cJSON_AddStringToObject(req, "method", method);
+   /* A spec may NAME the method it sends. memory.identity, memory.prefer and
+    * memory.archive all dispatch as memory.user_capture, told apart by their
+    * constant kind/prefix/tier -- per-method DATA, not a branch. */
+   const char *wire_method = field_str(spec, "method");
+   cJSON_AddStringToObject(req, "method", wire_method ? wire_method : method);
    cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
 
    /* `max_positionals` refuses an invocation that carries MORE positionals than

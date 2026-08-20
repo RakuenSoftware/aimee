@@ -59,6 +59,18 @@ typedef struct
    const char *argv[8];
 } sample_t;
 
+/* A key long enough to breach the user_capture family's 512-char limit once
+   the prefix is added. The limit is the rule a spec-derived sample set can
+   never reach on its own: every key it invents is short, so the limit is
+   invisible and a spec that omitted it would pass. */
+#define LONG_KEY                                                                                   \
+   "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"  \
+   "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"  \
+   "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"  \
+   "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"  \
+   "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"  \
+   "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+
 static const sample_t SAMPLES[] = {
     /* memory.delete / memory.get / memory.embed — the numeric width samples.
        memory.delete SHIPPED with a spec saying atoi() where the marshaller uses
@@ -551,6 +563,51 @@ static const sample_t SAMPLES[] = {
     {"index.deps", {"--review=v", NULL}},
     {"session.close", {"--session=v", NULL}},
     {"session.get", {"--session=v", NULL}},
+
+    /* The user_capture family: the join, the constant prefix, the length
+       refusal, and the --content fallback. The oversized key is the sample the
+       whole 512-limit exists for, and the one a spec-derived generator would
+       never produce. */
+
+    {"memory.identity", {NULL}},
+    {"memory.identity", {"k", NULL}},
+    {"memory.identity", {"k", "one", NULL}},
+    {"memory.identity", {"k", "one", "two", "three", NULL}},
+    {"memory.identity", {"k", "--content", "body", NULL}},
+    {"memory.identity", {"--content", "body", NULL}},
+    {"memory.identity", {"", "body", NULL}},
+    {"memory.identity", {"k", "", NULL}},
+    {"memory.identity", {LONG_KEY, "body", NULL}},
+    {"memory.prefer", {NULL}},
+    {"memory.prefer", {"k", NULL}},
+    {"memory.prefer", {"k", "one", NULL}},
+    {"memory.prefer", {"k", "one", "two", "three", NULL}},
+    {"memory.prefer", {"k", "--content", "body", NULL}},
+    {"memory.prefer", {"--content", "body", NULL}},
+    {"memory.prefer", {"", "body", NULL}},
+    {"memory.prefer", {"k", "", NULL}},
+    {"memory.prefer", {LONG_KEY, "body", NULL}},
+    {"memory.archive", {NULL}},
+    {"memory.archive", {"k", NULL}},
+    {"memory.archive", {"k", "one", NULL}},
+    {"memory.archive", {"k", "one", "two", "three", NULL}},
+    {"memory.archive", {"k", "--content", "body", NULL}},
+    {"memory.archive", {"--content", "body", NULL}},
+    {"memory.archive", {"", "body", NULL}},
+    {"memory.archive", {"k", "", NULL}},
+    {"memory.archive", {LONG_KEY, "body", NULL}},
+
+    {"memory.store", {NULL}},
+    {"memory.store", {"k", NULL}},
+    {"memory.store", {"k", "one", "two", NULL}},
+    {"memory.store", {"--key", "k", "--content", "c", NULL}},
+    {"memory.store", {"k", "--content", "c", NULL}},
+    {"memory.store", {"k", "v", "--tier", "L2", "--kind", "fact", NULL}},
+    {"memory.store", {"k", "v", "--confidence", "0.5", NULL}},
+    {"memory.store", {"k", "v", "--confidence", "abc", NULL}},
+    {"memory.store", {"", "v", NULL}},
+    {"memory.store", {"k", "", NULL}},
+    {"memory.store", {"k", "v", "--session", "s", NULL}},
 
     /* delegate.log -- an ARITY rule, so the samples that matter are the ones
        that must be REFUSED. The test treats both sides refusing as agreement

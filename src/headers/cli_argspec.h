@@ -73,6 +73,18 @@
  * "--all" and sends `all` or `name` accordingly. That is the same kind of rule
  * as skip_if_dash, which tests the same value against a prefix.
  *
+ * `positional_join` takes every positional from `from_index` onward, joined
+ * with spaces: an unquoted value arrives one word per positional, and keeping
+ * only the first silently stored a fragment of what the operator said.
+ * `prefix` prepends a constant the server supplies, and `max_length` REFUSES a
+ * result that exceeds it rather than truncating -- a truncated key collides
+ * silently with another one. `const_value` is a constant string with no flag to
+ * gate it, and a spec may name the `method` it sends, which is how three
+ * commands dispatch as memory.user_capture with different constants.
+ *
+ * A constant concatenation and a length limit are less computation than the
+ * clamp above, and neither consults another field.
+ *
  * So: a field's rule may depend on its own value, its own flags, named client
  * facts the SERVER asked for, and the invocation's ARITY. It may not depend on
  * another field's value, and it may not compute one. That still forbids things:
