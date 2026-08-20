@@ -54,7 +54,7 @@ static void tree_rollback(sqlite3 *db)
 
 static int tree_begin(sqlite3 *db)
 {
-   return sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) == SQLITE_OK ? 0 : -1;
+   return db1_wfe_begin_immediate(db);
 }
 
 static int tree_commit(sqlite3 *db)
@@ -241,56 +241,84 @@ int db1_wfe_park_budget_tree(const char *root_id, const char *completed_item_id,
 
    /* Charge the completed item and release its reservation: this call happens
     * when an invocation has finished and its cost turned out to exceed what the
-    * tree had left. */
+    * tree had left. Skipped when there is nothing to charge, so a park with no
+    * completed invocation does not clear a reservation it never consumed. */
    static const char *charge_sql = "UPDATE lifecycle_work_item "
                                    "SET cum_cost_usd=cum_cost_usd+?, reserved_cost_usd=0, "
                                    "reservation_state='', reservation_owner='', "
                                    "reservation_lease_until='' "
                                    "WHERE work_item_id=?";
-   sqlite3_stmt *st = NULL;
-   if (sqlite3_prepare_v2(db, charge_sql, -1, &st, NULL) != SQLITE_OK)
+   if (added_cost > 0 && completed_item_id[0])
    {
-      tree_rollback(db);
-      return -1;
-   }
-   sqlite3_bind_double(st, 1, added_cost);
-   sqlite3_bind_text(st, 2, completed_item_id, -1, SQLITE_TRANSIENT);
-   int rc = sqlite3_step(st);
-   sqlite3_finalize(st);
-   if (rc != SQLITE_DONE)
-   {
-      tree_rollback(db);
-      return -1;
+      sqlite3_stmt *charge = NULL;
+      if (sqlite3_prepare_v2(db, charge_sql, -1, &charge, NULL) != SQLITE_OK)
+      {
+         tree_rollback(db);
+         return -1;
+      }
+      sqlite3_bind_double(charge, 1, added_cost);
+      sqlite3_bind_text(charge, 2, completed_item_id, -1, SQLITE_TRANSIENT);
+      int charged = sqlite3_step(charge);
+      sqlite3_finalize(charge);
+      if (charged != SQLITE_DONE)
+      {
+         tree_rollback(db);
+         return -1;
+      }
    }
 
    /* Park every runnable member of the tree, recording the stage each was in so
     * a later resume can put it back. Already-parked runs keep the reason they
     * have: whatever parked them first is the more specific explanation. */
-   static const char *park_sql = TREE_CTE
-       "UPDATE lifecycle_work_item "
-       "SET pause_reason='budget_cap', paused_state=current_stage, "
-       "updated_at=datetime('now') "
-       "WHERE state='active' AND pause_reason='' AND work_item_id IN (SELECT id FROM tree)";
-   if (run_bound(db, park_sql, root_id) != 0)
+   /* Two exclusions matter here:
+    *
+    *   already parked      keeps the reason it has, which is the more specific
+    *                       explanation of why that run stopped.
+    *   holding a live      is mid-invocation. Parking it would strand money it
+    *   reservation         has authorized but not yet reconciled, and the
+    *                       sibling would come back holding a reservation it can
+    *                       no longer spend. The completed item is the exception:
+    *                       its invocation is over, which is why we are here. */
+   static const char *park_sql =
+       TREE_CTE "UPDATE lifecycle_work_item "
+                "SET pause_reason='budget_cap', paused_state=current_stage, "
+                "updated_at=datetime('now') "
+                "WHERE state='active' AND pause_reason='' "
+                "AND work_item_id IN (SELECT id FROM tree) "
+                "AND (reservation_state='' OR work_item_id=?2)";
    {
-      tree_rollback(db);
-      return -1;
+      sqlite3_stmt *park = NULL;
+      if (sqlite3_prepare_v2(db, park_sql, -1, &park, NULL) != SQLITE_OK)
+      {
+         tree_rollback(db);
+         return -1;
+      }
+      sqlite3_bind_text(park, 1, root_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(park, 2, completed_item_id, -1, SQLITE_TRANSIENT);
+      int parked = sqlite3_step(park);
+      sqlite3_finalize(park);
+      if (parked != SQLITE_DONE)
+      {
+         tree_rollback(db);
+         return -1;
+      }
    }
 
-   /* One event against the item that tipped the tree over, carrying the cost
-    * that did it. */
+   /* One event against the ROOT, carrying the cost that tipped the tree over.
+    * The root is what an operator looks at when a whole tree stops. */
    static const char *event_sql =
        "INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,cost_usd) "
        "SELECT work_item_id,current_stage,'pause','go-wfe','budget_cap',? "
        "FROM lifecycle_work_item WHERE work_item_id=?";
+   sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, event_sql, -1, &st, NULL) != SQLITE_OK)
    {
       tree_rollback(db);
       return -1;
    }
    sqlite3_bind_double(st, 1, added_cost);
-   sqlite3_bind_text(st, 2, completed_item_id, -1, SQLITE_TRANSIENT);
-   rc = sqlite3_step(st);
+   sqlite3_bind_text(st, 2, root_id, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
    sqlite3_finalize(st);
    if (rc != SQLITE_DONE)
    {

@@ -25,6 +25,8 @@
 
 #include "wfe_store.h"
 
+#include <sqlite3.h>
+
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -32,9 +34,14 @@ extern "C"
 {
 #endif
 
-/* Bounds for the id lists below. A tree deeper or wider than this is not a
- * tree the engine can act on in one call anyway, and an unbounded list across
- * the wire is a reply the caller cannot size. */
+   /* Bounds for the id lists below. A tree deeper or wider than this is not a
+    * tree the engine can act on in one call anyway, and an unbounded list across
+    * the wire is a reply the caller cannot size. */
+   /* Open a write transaction, waiting out a busy store rather than reporting
+    * one. Shared by every transactional operation here: see the implementation
+    * for why a plain BEGIN IMMEDIATE is not enough under load. */
+   int db1_wfe_begin_immediate(sqlite3 *db);
+
 #define DB1_WFE_ID_LEN      80
 #define DB1_WFE_ID_LIST_MAX 512
 
@@ -71,6 +78,12 @@ extern "C"
     * that will not pass, and they are not allowed to exhaust the same budget. */
    int db1_wfe_runner_failures_since_progress(const char *work_item_id, const char *stage);
    int db1_wfe_capacity_waits_since_progress(const char *work_item_id, const char *stage);
+
+   /* Why a stage last had to retry, as a human would want it explained. Empty
+    * is a legitimate answer: a stage with no attempts and no resume since its
+    * last advance has nothing to explain. */
+   int db1_wfe_latest_stage_retry_detail(const char *work_item_id, const char *stage, char *out,
+                                         size_t n);
 
    /* Every id in a run's subtree, the run itself first. The engine stops or
     * deletes a tree as a unit, so it needs the whole set before it acts on any
@@ -148,10 +161,15 @@ extern "C"
    /* Extend the lease while an invocation is still running. */
    int db1_wfe_budget_heartbeat(const char *work_item_id, const char *owner);
 
-   /* Replace the estimate with measured cost, exactly once. Returns 1 when this
-    * call was the one that did it, 0 when someone else already had, -1 on
-    * error. The caller needs that distinction because only the winner may then
-    * charge the cost to the tree -- both charging would spend it twice. */
+   /* Record measured cost against a reservation and say whether the tree can
+    * afford it. Returns 1 when the cost fits the root's cap, 0 when it does not
+    * (the caller then parks the tree), -1 on error -- including a reservation
+    * this owner does not hold, and a replay whose cost differs from the one
+    * already recorded.
+    *
+    * The allowance is recomputed from durable state on every call, replays
+    * included: a crash between reconciling and parking must not silently
+    * upgrade a denied over-budget decision into an approved one. */
    int db1_wfe_budget_reconcile(const char *work_item_id, const char *owner, double actual);
 
    /* Stage transitions, each one whole transaction. All of them release the
@@ -283,6 +301,19 @@ extern "C"
     * a conflict when it was refused, -1 on error. */
    int db1_wfe_claim_frozen_creates(const db1_wfe_frozen_claim_t *claim,
                                     db1_wfe_frozen_conflict_t *out);
+
+   /* The engine's create: admission cap over active ROOTS, parent eligibility
+    * folded into the insert so a concurrent stop cannot orphan the child, and
+    * the create event that starts the run's history.
+    *
+    * Returns 0 on success, 1 when the admission cap refused it (backpressure,
+    * not failure), 2 when the named parent is not active (a race with a stop),
+    * -1 on anything else. */
+   int db1_wfe_create_work_item(const char *work_item_id, const char *repo,
+                                const char *proposal_path, const char *workflow_name,
+                                const char *workflow_version, const char *start_stage,
+                                const char *mode, const char *submitter, const char *parent_id,
+                                const char *source_path, double max_cost_usd, int root_cap);
 
 #ifdef __cplusplus
 }

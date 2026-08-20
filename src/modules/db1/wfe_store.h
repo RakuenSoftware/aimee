@@ -36,6 +36,16 @@ typedef struct
    double cum_cost_usd;
    double work_item_max_cost_usd; /* 0 = no cap */
    int override_count;
+   /* The workflow engine's own view of a run. These four were columns the Go
+    * engine read directly from this file; they are on the struct now because
+    * the engine reads rows through the module instead. reserved_cost_usd and
+    * reservation_state are the live budget claim, source_path is where the
+    * proposal came from, and updated_at is what the engine's API surfaces to a
+    * human deciding whether a run is stuck. */
+   double reserved_cost_usd;
+   char reservation_state[24]; /* "" | reserved | unresolved | actual */
+   char source_path[1024];
+   char updated_at[32];
 } db1_work_item_t;
 
 typedef struct

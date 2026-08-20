@@ -3449,7 +3449,7 @@ def go_name(snake: str) -> str:
     """work_item_id -> WorkItemID. Initialisms the Go side already spells that
     way are kept, because a generated name that fights the surrounding code is
     a name every caller has to look up."""
-    initialisms = {"id": "ID", "url": "URL", "usd": "USD", "pr": "PR"}
+    initialisms = {"id": "ID", "ids": "IDs", "url": "URL", "usd": "USD", "pr": "PR"}
     parts = [p for p in snake.split("_") if p]
     return "".join(initialisms.get(p, p.capitalize()) for p in parts)
 
@@ -3612,8 +3612,11 @@ def go_operation_bytes(family: str, operation: dict[str, object]) -> list[str]:
     if shape == "none":
         returns = "error"
     elif shape == "scalar":
-        cell = reply["fields"][0]
-        returns = f"({GO_SCALAR[cell.get('type', 'text')]}, error)"
+        # Several loose scalars are several returns. Reading only the first was
+        # a silent truncation: work_item_child_counts answers with three counts
+        # and the caller would have got the total and believed it had them all.
+        types = [GO_SCALAR[cell.get("type", "text")] for cell in reply["fields"]]
+        returns = "(" + ", ".join(types + ["error"]) + ")"
     elif shape == "struct":
         returns = f"({go_struct_name(family, operation)}, error)"
     elif shape == "list-text":
@@ -3621,10 +3624,12 @@ def go_operation_bytes(family: str, operation: dict[str, object]) -> list[str]:
     else:
         returns = f"([]{go_struct_name(family, operation)}, error)"
 
-    zero = {"none": "", "scalar": "0", "struct": "out", "list-text": "nil",
-            "list-struct": "nil"}[shape]
-    if shape == "scalar" and reply["fields"][0].get("type") == "text":
-        zero = '""'
+    if shape == "scalar":
+        zero = ", ".join('""' if cell.get("type", "text") == "text" else "0"
+                         for cell in reply["fields"])
+    else:
+        zero = {"none": "", "struct": "out", "list-text": "nil",
+                "list-struct": "nil"}[shape]
 
     lines = [f"func (c *Client) {method}({', '.join(params)}) {returns} {{"]
     if shape == "struct":
@@ -3669,6 +3674,14 @@ def go_operation_bytes(family: str, operation: dict[str, object]) -> list[str]:
     lines.append("\tif err != nil {")
     lines.append(f"\t\treturn {fail_prefix}err")
     lines.append("\t}")
+    # An operation whose results include "missing" says so with a status rather
+    # than an error: absence is an answer there, and a caller that had to unwrap
+    # an error to discover "nothing recorded" would be one `errors.Is` away from
+    # treating a broken store the same way.
+    if "missing" in operation.get("results", []):
+        lines.append("\tif status == statusMissing {")
+        lines.append(f"\t\treturn {zero + ', ' if shape != 'none' else ''}nil")
+        lines.append("\t}")
     lines.append("\tif status != statusOK {")
     lines.append(f'\t\treturn {fail_prefix}&StatusError{{Op: "{operation["name"]}", Status: status}}')
     lines.append("\t}")
@@ -3676,19 +3689,24 @@ def go_operation_bytes(family: str, operation: dict[str, object]) -> list[str]:
     if shape == "none":
         lines.append("\treturn nil")
     elif shape == "scalar":
-        cell = reply["fields"][0]
-        lines.append("\tif len(reply) < 1 {")
+        cells = reply["fields"]
+        lines.append(f"\tif len(reply) < {len(cells)} {{")
         lines.append(f"\t\treturn {zero}, ErrMalformed")
         lines.append("\t}")
-        kind = cell.get("type", "text")
-        if kind == "text":
-            lines.append("\treturn reply[0], nil")
-        elif kind == "int":
-            lines.append("\treturn Atoi(reply[0])")
-        elif kind == "int64":
-            lines.append("\treturn Atoi64(reply[0])")
-        else:
-            lines.append("\treturn Atof(reply[0])")
+        names = []
+        for index, cell in enumerate(cells):
+            kind = cell.get("type", "text")
+            local = go_lower(cell["name"])
+            names.append(local)
+            if kind == "text":
+                lines.append(f"\t{local} := reply[{index}]")
+                continue
+            parse = {"int": "Atoi", "int64": "Atoi64", "double": "Atof"}[kind]
+            lines.append(f"\t{local}, err := {parse}(reply[{index}])")
+            lines.append("\tif err != nil {")
+            lines.append(f"\t\treturn {zero}, err")
+            lines.append("\t}")
+        lines.append(f"\treturn {', '.join(names)}, nil")
     elif shape == "struct":
         width = len(reply["fields"])
         lines.append(f"\tif len(reply) != {width} {{")

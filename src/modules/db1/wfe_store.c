@@ -66,14 +66,22 @@ static void fill_wi(db1_work_item_t *o, sqlite3_stmt *st)
    db1_copy_col_text(o->worktree, sizeof o->worktree, st, 15);
    db1_copy_col_text(o->submitter, sizeof o->submitter, st, 16);
    db1_copy_col_text(o->parent_id, sizeof o->parent_id, st, 17);
+   o->reserved_cost_usd = sqlite3_column_double(st, 18);
+   db1_copy_col_text(o->reservation_state, sizeof o->reservation_state, st, 19);
+   db1_copy_col_text(o->source_path, sizeof o->source_path, st, 20);
+   db1_copy_col_text(o->updated_at, sizeof o->updated_at, st, 21);
 }
 
-/* pr_ref/worktree/submitter/parent_id are appended last so the existing column
- * indices (0-16) are unchanged. */
+/* Columns are only ever APPENDED here. Every reader indexes this list
+ * positionally, so inserting one in the middle silently shifts every field
+ * after it -- the kind of change that compiles, runs, and puts a repo name in a
+ * stage column. pr_ref/worktree/submitter/parent_id were appended for that
+ * reason, and the engine's four (reservation and provenance) follow them. */
 #define WI_COLS                                                                                    \
    "work_item_id, repo, proposal_path, workflow_name, workflow_version, current_stage, "           \
    "state, mode, pause_reason, paused_state, content_hash, cum_cost_usd, "                         \
-   "work_item_max_cost_usd, override_count, pr_ref, worktree, submitter, parent_id"
+   "work_item_max_cost_usd, override_count, pr_ref, worktree, submitter, parent_id, "              \
+   "reserved_cost_usd, reservation_state, source_path, updated_at"
 
 int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
 {

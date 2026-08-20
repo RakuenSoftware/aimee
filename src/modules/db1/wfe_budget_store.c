@@ -149,7 +149,7 @@ static attempt_result_t reserve_once(sqlite3 *db, const char *work_item_id, cons
                                      db1_wfe_budget_reservation_t *out)
 {
    memset(out, 0, sizeof *out);
-   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_wfe_begin_immediate(db) != 0)
       return ATTEMPT_RETRY; /* another writer holds it; back off and retry */
 
    double max_usd = 0;
@@ -478,29 +478,126 @@ int db1_wfe_budget_reconcile(const char *work_item_id, const char *owner, double
       return -1;
    /* Reject non-finite cost at the durable boundary: a NaN or Inf written into
     * a cost column makes every later budget comparison fail and strands the
-    * whole tree. The engine guards the same way on its side; this is the guard
-    * that matters, because it is the one next to the write. */
+    * whole tree. */
    if (actual < 0 || isnan(actual) || isinf(actual))
       return -1;
    sqlite3 *db = db1_conn();
-   if (!db)
+   if (!db || db1_wfe_begin_immediate(db) != 0)
       return -1;
-   static const char *sql = "UPDATE lifecycle_work_item "
-                            "SET reserved_cost_usd=?,reservation_state='actual' "
-                            "WHERE work_item_id=? AND reservation_owner=? "
-                            "AND reservation_state IN ('reserved','unresolved')";
+
+   char root_id[DB1_WFE_ID_LEN] = "";
+   double max_usd = 0;
+   if (budget_root(db, work_item_id, root_id, sizeof root_id, &max_usd) != 0)
+   {
+      rollback(db);
+      return -1;
+   }
+
+   static const char *load_sql = "SELECT reserved_cost_usd,reservation_state,reservation_owner "
+                                 "FROM lifecycle_work_item WHERE work_item_id=?";
    sqlite3_stmt *st = NULL;
-   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(db, load_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      rollback(db);
       return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   if (sqlite3_step(st) != SQLITE_ROW)
+   {
+      sqlite3_finalize(st);
+      rollback(db);
+      return -1;
+   }
+   double current = sqlite3_column_double(st, 0);
+   char state[24];
+   char holder[128];
+   const unsigned char *state_text = sqlite3_column_text(st, 1);
+   const unsigned char *owner_text = sqlite3_column_text(st, 2);
+   snprintf(state, sizeof state, "%s", state_text ? (const char *)state_text : "");
+   snprintf(holder, sizeof holder, "%s", owner_text ? (const char *)owner_text : "");
+   sqlite3_finalize(st);
+
+   if (strcmp(holder, owner) != 0)
+   {
+      /* Someone else's reservation: reconciling it would decide the fate of
+       * money this caller did not authorize. */
+      rollback(db);
+      return -1;
+   }
+   int replay = (strcmp(state, "actual") == 0);
+   if (!replay && strcmp(state, "reserved") != 0 && strcmp(state, "unresolved") != 0)
+   {
+      rollback(db);
+      return -1;
+   }
+   if (replay && current != actual)
+   {
+      /* A replay must reproduce the cost that was already recorded. A different
+       * number is not a retry of the same invocation, and accepting it would
+       * rewrite history that the tree's accounting already depends on. */
+      rollback(db);
+      return -1;
+   }
+
+   /* The allowance is recomputed from durable state on EVERY call, replays
+    * included. A crash between reconciliation and the tree park must not
+    * silently upgrade a denied over-budget decision into an approved one. */
+   int allowed = 1;
+   if (max_usd > 0)
+   {
+      static const char *avail_sql =
+          "WITH RECURSIVE tree(id) AS ("
+          "SELECT ? UNION ALL "
+          "SELECT child.work_item_id FROM lifecycle_work_item child "
+          "JOIN tree parent ON child.parent_id=parent.id) "
+          "SELECT COALESCE(SUM(cum_cost_usd),0),"
+          "COALESCE(SUM(CASE WHEN work_item_id<>? THEN reserved_cost_usd ELSE 0 END),0) "
+          "FROM lifecycle_work_item WHERE work_item_id IN tree";
+      if (sqlite3_prepare_v2(db, avail_sql, -1, &st, NULL) != SQLITE_OK)
+      {
+         rollback(db);
+         return -1;
+      }
+      sqlite3_bind_text(st, 1, root_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, work_item_id, -1, SQLITE_TRANSIENT);
+      if (sqlite3_step(st) != SQLITE_ROW)
+      {
+         sqlite3_finalize(st);
+         rollback(db);
+         return -1;
+      }
+      double spent = sqlite3_column_double(st, 0);
+      double other_reserved = sqlite3_column_double(st, 1);
+      sqlite3_finalize(st);
+      allowed = (spent + other_reserved + actual <= max_usd) ? 1 : 0;
+   }
+
+   if (replay)
+   {
+      /* Already recorded: report the allowance and write nothing. */
+      return (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK) ? allowed : -1;
+   }
+
+   static const char *apply_sql = "UPDATE lifecycle_work_item "
+                                  "SET reserved_cost_usd=?, reservation_state='actual' "
+                                  "WHERE work_item_id=? AND reservation_owner=? "
+                                  "AND reservation_state IN ('reserved','unresolved')";
+   if (sqlite3_prepare_v2(db, apply_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      rollback(db);
+      return -1;
+   }
    sqlite3_bind_double(st, 1, actual);
    sqlite3_bind_text(st, 2, work_item_id, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(st, 3, owner, -1, SQLITE_TRANSIENT);
    int rc = sqlite3_step(st);
-   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
    sqlite3_finalize(st);
-   if (changed < 0)
+   if (rc != SQLITE_DONE)
+   {
+      rollback(db);
       return -1;
-   return (changed == 1) ? 1 : 0;
+   }
+   return (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK) ? allowed : -1;
 }
 
 /* A runner failure, parked with whatever is known about what it cost.
@@ -525,7 +622,7 @@ int db1_wfe_park_runner_failure(const char *work_item_id, const char *stage, con
        !reason[0] || actual < 0 || isnan(actual) || isinf(actual))
       return -1;
    sqlite3 *db = db1_conn();
-   if (!db || sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+   if (!db || db1_wfe_begin_immediate(db) != 0)
       return -1;
 
    const char *state = "";
@@ -636,7 +733,7 @@ int db1_wfe_recover_lost_replay(const char *work_item_id, const char *stage, con
    if (!work_item_id || !work_item_id[0] || !owner)
       return -1;
    sqlite3 *db = db1_conn();
-   if (!db || sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+   if (!db || db1_wfe_begin_immediate(db) != 0)
       return -1;
 
    static const char *load_sql = "SELECT reservation_state,reservation_owner,reserved_cost_usd "

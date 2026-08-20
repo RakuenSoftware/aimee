@@ -22245,6 +22245,22 @@
      {
       "name": "override_count",
       "type": "int"
+     },
+     {
+      "name": "reserved_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "reservation_state",
+      "type": "text"
+     },
+     {
+      "name": "source_path",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
      }
     ],
     "max_bytes": 8192
@@ -23276,6 +23292,22 @@
      {
       "name": "override_count",
       "type": "int"
+     },
+     {
+      "name": "reserved_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "reservation_state",
+      "type": "text"
+     },
+     {
+      "name": "source_path",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
      }
     ],
     "max_bytes": 1048576
@@ -23388,6 +23420,22 @@
      {
       "name": "override_count",
       "type": "int"
+     },
+     {
+      "name": "reserved_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "reservation_state",
+      "type": "text"
+     },
+     {
+      "name": "source_path",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
      }
     ],
     "max_bytes": 1048576
@@ -25435,6 +25483,153 @@
      }
     ],
     "max_bytes": 2048
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 67,
+   "name": "wfe_create_work_item",
+   "c_name": "db1_wfe_create_work_item",
+   "c_params": [
+    "work_item_id",
+    "repo",
+    "proposal_path",
+    "workflow_name",
+    "workflow_version",
+    "start_stage",
+    "mode",
+    "submitter",
+    "parent_id",
+    "source_path",
+    "max_cost_usd",
+    "root_cap"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "repo",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "proposal_path",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "workflow_name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "workflow_version",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "start_stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "submitter",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "parent_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source_path",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max_cost_usd",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "root_cap",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "admission_full",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 68,
+   "name": "wfe_latest_stage_retry_detail",
+   "c_name": "db1_wfe_latest_stage_retry_detail",
+   "c_params": [
+    "work_item_id",
+    "stage",
+    "out",
+    "n"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "detail",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1024
    }
   },
   {

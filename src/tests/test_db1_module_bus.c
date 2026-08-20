@@ -1610,10 +1610,18 @@ static void test_the_budget_protocol_holds_across_the_bus(void)
    must(r.allowed == 1 && r.busy == 0, "still its own");
    must(r.amount > 4.9 && r.amount < 5.1, "the same estimate, not a second one");
 
-   /* Reconciliation replaces the estimate with measured cost, exactly once. */
-   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", 1.25) == 1, "the first reconcile applies");
-   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", 1.25) == 0,
-        "the second does not -- the estimate is already actual");
+   /* Reconciliation records measured cost and answers whether the tree can
+      AFFORD it -- not whether it wrote anything. That distinction is the whole
+      point: the caller parks the tree when the answer is no. */
+   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", 1.25) == 1,
+        "1.25 fits inside the tree's ten");
+   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", 1.25) == 1,
+        "and a replay of the same cost reports the same allowance");
+   must(db1_wfe_budget_reconcile("bg-kid", "owner-b", 2.0) == -1,
+        "but a replay with a DIFFERENT cost is refused -- it is not the same "
+        "invocation, and accepting it would rewrite settled accounting");
+   must(db1_wfe_budget_reconcile("bg-kid", "owner-a", 1.25) == -1,
+        "and another owner cannot reconcile it at all");
    must(db1_wfe_budget_reconcile("bg-kid", "owner-b", -1.0) == -1, "a negative cost is refused");
 
    /* Releasing an estimate gives the tree its headroom back; releasing measured
@@ -1631,7 +1639,8 @@ static void test_the_budget_protocol_holds_across_the_bus(void)
       reservation sees the child's spend as outstanding. */
    must(db1_wfe_budget_reserve("bg-root", "owner-a", &r) == 0, "root reserves again");
    must(r.allowed == 1, "allowed");
-   must(r.amount > 8.7 && r.amount < 8.8, "ten minus the child's 1.25, all to the one runnable");
+   must(r.amount > 8.7 && r.amount < 8.8,
+        "ten minus the child's outstanding 1.25, all to the one runnable item");
 
    /* Once the tree has spent its cap, nothing more is allowed. */
    must(db1_work_item_add_cost("bg-root", 10.0) == 0, "charge the cap to the tree");
@@ -1845,12 +1854,14 @@ static void test_recovery_never_releases_money_it_cannot_account_for(void)
    must(db1_work_item_create("rc-1", "repo/r", "p/1", "build", "1", "run", "autonomous") == 0, "1");
    must(db1_work_item_set_cost_cap("rc-1", 20.0) == 0, "cap");
    must(db1_wfe_budget_reserve("rc-1", "own-1", &r) == 0 && r.allowed == 1, "reserve");
-   must(db1_wfe_park_runner_failure("rc-1", "run", "own-1", "runner_failed", "boom", 1, 1, 2.0) ==
+   /* delegate_failed rather than an invented reason: the park has to be one an
+      operator is allowed to release, because the next lines release it. */
+   must(db1_wfe_park_runner_failure("rc-1", "run", "own-1", "delegate_failed", "boom", 1, 1, 2.0) ==
             0,
         "park with a known cost");
    must(db1_work_item_get("rc-1", &item) == 1, "read");
    must(item.cum_cost_usd == 2.0, "the measured cost was committed");
-   must(strcmp(item.pause_reason, "runner_failed") == 0, "and it parked with the reason");
+   must(strcmp(item.pause_reason, "delegate_failed") == 0, "and it parked with the reason");
    /* The reservation is fully released, so another owner may take one. */
    must(db1_wfe_resume("rc-1") == 0, "unpark it");
    must(db1_wfe_budget_reserve("rc-1", "own-2", &r) == 0 && r.busy == 0,
@@ -1862,7 +1873,8 @@ static void test_recovery_never_releases_money_it_cannot_account_for(void)
    must(db1_work_item_set_cost_cap("rc-2", 20.0) == 0, "cap");
    must(db1_wfe_budget_reserve("rc-2", "own-1", &r) == 0 && r.allowed == 1, "reserve");
    must(r.amount > 0, "with a real estimate");
-   must(db1_wfe_park_runner_failure("rc-2", "run", "own-1", "runner_lost", "gone", 1, 0, 0.5) == 0,
+   must(db1_wfe_park_runner_failure("rc-2", "run", "own-1", "delegate_failed", "gone", 1, 0, 0.5) ==
+            0,
         "park with the cost unknown");
    must(db1_work_item_get("rc-2", &item) == 1, "read");
    must(item.cum_cost_usd == 0.5, "the known prefix was committed");

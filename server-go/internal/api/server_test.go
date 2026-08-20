@@ -15,13 +15,14 @@ import (
 
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
 func newTestServer(t *testing.T) (*Server, *db1.Store, *wfe.ArtifactStore) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

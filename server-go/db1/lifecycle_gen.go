@@ -53,7 +53,7 @@ const opWfeExecutedTurnCount uint32 = 36
 const opWfeStageLoopCount uint32 = 37
 const opWfeRunnerFailuresSinceProgress uint32 = 38
 const opWfeCapacityWaitsSinceProgress uint32 = 39
-const opWfeDescendantIds uint32 = 40
+const opWfeDescendantIDs uint32 = 40
 const opWfeResumeTransient uint32 = 41
 const opWfeResumeWallCaps uint32 = 42
 const opWfeAbandonExhaustedWallCaps uint32 = 43
@@ -80,6 +80,8 @@ const opWfeParkRunnerFailure uint32 = 63
 const opWfeRecoverLostReplay uint32 = 64
 const opWfeRecordRequestedChanges uint32 = 65
 const opWfeClaimFrozenCreates uint32 = 66
+const opWfeCreateWorkItem uint32 = 67
+const opWfeLatestStageRetryDetail uint32 = 68
 
 // WfeClaimFrozenCreatesItem is one creates entry for wfe_claim_frozen_creates.
 type WfeClaimFrozenCreatesItem struct {
@@ -107,6 +109,10 @@ type WorkItemGet struct {
 	CumCostUSD         float64
 	WorkItemMaxCostUSD float64
 	OverrideCount      int
+	ReservedCostUSD    float64
+	ReservationState   string
+	SourcePath         string
+	UpdatedAt          string
 }
 
 // WorkItemList is the row work_item_list answers with.
@@ -129,6 +135,10 @@ type WorkItemList struct {
 	CumCostUSD         float64
 	WorkItemMaxCostUSD float64
 	OverrideCount      int
+	ReservedCostUSD    float64
+	ReservationState   string
+	SourcePath         string
+	UpdatedAt          string
 }
 
 // WorkItemListLru is the row work_item_list_lru answers with.
@@ -151,6 +161,10 @@ type WorkItemListLru struct {
 	CumCostUSD         float64
 	WorkItemMaxCostUSD float64
 	OverrideCount      int
+	ReservedCostUSD    float64
+	ReservationState   string
+	SourcePath         string
+	UpdatedAt          string
 }
 
 // LifecycleEventList is the row lifecycle_event_list answers with.
@@ -228,11 +242,14 @@ func (c *Client) WorkItemGet(ctx context.Context, workItemID string) (WorkItemGe
 	if err != nil {
 		return out, err
 	}
+	if status == statusMissing {
+		return out, nil
+	}
 	if status != statusOK {
 		return out, &StatusError{Op: "work_item_get", Status: status}
 	}
-	if len(reply) != 18 {
-		return out, fmt.Errorf("%w: work_item_get wants 18 fields, got %d", ErrMalformed, len(reply))
+	if len(reply) != 22 {
+		return out, fmt.Errorf("%w: work_item_get wants 22 fields, got %d", ErrMalformed, len(reply))
 	}
 	out.WorkItemID = reply[0]
 	out.Repo = reply[1]
@@ -264,6 +281,14 @@ func (c *Client) WorkItemGet(ctx context.Context, workItemID string) (WorkItemGe
 	} else {
 		return out, parseErr
 	}
+	if value, parseErr := Atof(reply[18]); parseErr == nil {
+		out.ReservedCostUSD = value
+	} else {
+		return out, parseErr
+	}
+	out.ReservationState = reply[19]
+	out.SourcePath = reply[20]
+	out.UpdatedAt = reply[21]
 	return out, nil
 }
 
@@ -276,13 +301,17 @@ func (c *Client) WorkItemIDByProposal(ctx context.Context, repo string, proposal
 	if err != nil {
 		return "", err
 	}
+	if status == statusMissing {
+		return "", nil
+	}
 	if status != statusOK {
 		return "", &StatusError{Op: "work_item_id_by_proposal", Status: status}
 	}
 	if len(reply) < 1 {
 		return "", ErrMalformed
 	}
-	return reply[0], nil
+	workItemID := reply[0]
+	return workItemID, nil
 }
 
 func (c *Client) WorkItemIDByPRRef(ctx context.Context, pRRef string) (string, error) {
@@ -294,13 +323,17 @@ func (c *Client) WorkItemIDByPRRef(ctx context.Context, pRRef string) (string, e
 	if err != nil {
 		return "", err
 	}
+	if status == statusMissing {
+		return "", nil
+	}
 	if status != statusOK {
 		return "", &StatusError{Op: "work_item_id_by_pr_ref", Status: status}
 	}
 	if len(reply) < 1 {
 		return "", ErrMalformed
 	}
-	return reply[0], nil
+	workItemID := reply[0]
+	return workItemID, nil
 }
 
 func (c *Client) WorkItemSetStage(ctx context.Context, workItemID string, stage string, contentHash string) error {
@@ -393,25 +426,41 @@ func (c *Client) WorkItemAbandonChildren(ctx context.Context, parentID string) (
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	abandoned, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return abandoned, nil
 }
 
-func (c *Client) WorkItemChildCounts(ctx context.Context, parentID string) (int, error) {
+func (c *Client) WorkItemChildCounts(ctx context.Context, parentID string) (int, int, int, error) {
 	if c == nil || c.caller == nil {
-		return 0, ErrConfig
+		return 0, 0, 0, ErrConfig
 	}
 	fields := []string{parentID}
 	status, reply, err := c.callFields(ctx, opWorkItemChildCounts, fields)
 	if err != nil {
-		return 0, err
+		return 0, 0, 0, err
 	}
 	if status != statusOK {
-		return 0, &StatusError{Op: "work_item_child_counts", Status: status}
+		return 0, 0, 0, &StatusError{Op: "work_item_child_counts", Status: status}
 	}
-	if len(reply) < 1 {
-		return 0, ErrMalformed
+	if len(reply) < 3 {
+		return 0, 0, 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	total, err := Atoi(reply[0])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	accepted, err := Atoi(reply[1])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	failed, err := Atoi(reply[2])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return total, accepted, failed, nil
 }
 
 func (c *Client) WorkItemCountActiveBySubmitter(ctx context.Context, submitter string) (int, error) {
@@ -429,7 +478,11 @@ func (c *Client) WorkItemCountActiveBySubmitter(ctx context.Context, submitter s
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	active, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return active, nil
 }
 
 func (c *Client) WorkItemCountRecentBySubmitter(ctx context.Context, submitter string, secs int) (int, error) {
@@ -447,7 +500,11 @@ func (c *Client) WorkItemCountRecentBySubmitter(ctx context.Context, submitter s
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	recent, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return recent, nil
 }
 
 func (c *Client) WorkItemSubmitCapped(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, submitter string, maxActive int, rateMax int, rateSecs int) error {
@@ -495,7 +552,11 @@ func (c *Client) WorkItemGateApply(ctx context.Context, workItemID string, expec
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	applied, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return applied, nil
 }
 
 func (c *Client) WorkItemSetPause(ctx context.Context, workItemID string, reason string, pausedState string) error {
@@ -543,7 +604,11 @@ func (c *Client) WorkItemClearPauseIf(ctx context.Context, workItemID string, ex
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	cleared, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return cleared, nil
 }
 
 func (c *Client) WorkItemAddCost(ctx context.Context, workItemID string, cost float64) error {
@@ -621,7 +686,11 @@ func (c *Client) WorkItemReapStaleParks(ctx context.Context, graceSecs int64) (i
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	reaped, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return reaped, nil
 }
 
 func (c *Client) WorkItemList(ctx context.Context, max int) ([]WorkItemList, error) {
@@ -636,7 +705,7 @@ func (c *Client) WorkItemList(ctx context.Context, max int) ([]WorkItemList, err
 	if status != statusOK {
 		return nil, &StatusError{Op: "work_item_list", Status: status}
 	}
-	rows, err := Rows(reply, 18)
+	rows, err := Rows(reply, 22)
 	if err != nil {
 		return nil, err
 	}
@@ -673,6 +742,14 @@ func (c *Client) WorkItemList(ctx context.Context, max int) ([]WorkItemList, err
 		} else {
 			return nil, parseErr
 		}
+		if value, parseErr := Atof(row[18]); parseErr == nil {
+			item.ReservedCostUSD = value
+		} else {
+			return nil, parseErr
+		}
+		item.ReservationState = row[19]
+		item.SourcePath = row[20]
+		item.UpdatedAt = row[21]
 		out = append(out, item)
 	}
 	return out, nil
@@ -690,7 +767,7 @@ func (c *Client) WorkItemListLru(ctx context.Context, max int) ([]WorkItemListLr
 	if status != statusOK {
 		return nil, &StatusError{Op: "work_item_list_lru", Status: status}
 	}
-	rows, err := Rows(reply, 18)
+	rows, err := Rows(reply, 22)
 	if err != nil {
 		return nil, err
 	}
@@ -727,6 +804,14 @@ func (c *Client) WorkItemListLru(ctx context.Context, max int) ([]WorkItemListLr
 		} else {
 			return nil, parseErr
 		}
+		if value, parseErr := Atof(row[18]); parseErr == nil {
+			item.ReservedCostUSD = value
+		} else {
+			return nil, parseErr
+		}
+		item.ReservationState = row[19]
+		item.SourcePath = row[20]
+		item.UpdatedAt = row[21]
 		out = append(out, item)
 	}
 	return out, nil
@@ -802,7 +887,11 @@ func (c *Client) StageAttemptInc(ctx context.Context, workItemID string, stage s
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	attempts, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return attempts, nil
 }
 
 func (c *Client) StageAttemptReset(ctx context.Context, workItemID string, stage string) error {
@@ -835,7 +924,11 @@ func (c *Client) StageAttemptGet(ctx context.Context, workItemID string, stage s
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	attempts, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return attempts, nil
 }
 
 func (c *Client) WorkItemRecordOutcome(ctx context.Context, workItemID string, nodeID string, disposition int, state string, pauseReason string, pauseStage string, nextStage string, pRRef string, abandonChildren int, costUSD float64, eventKind string, eventDetail string, eventHash string, parkReason string) error {
@@ -883,7 +976,11 @@ func (c *Client) WfeActiveRootCount(ctx context.Context) (int, error) {
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	activeRoots, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return activeRoots, nil
 }
 
 func (c *Client) WfeWorkItemIDByGitProposal(ctx context.Context, repo string, proposalPath string, suffix string) (string, error) {
@@ -895,13 +992,17 @@ func (c *Client) WfeWorkItemIDByGitProposal(ctx context.Context, repo string, pr
 	if err != nil {
 		return "", err
 	}
+	if status == statusMissing {
+		return "", nil
+	}
 	if status != statusOK {
 		return "", &StatusError{Op: "wfe_work_item_id_by_git_proposal", Status: status}
 	}
 	if len(reply) < 1 {
 		return "", ErrMalformed
 	}
-	return reply[0], nil
+	workItemID := reply[0]
+	return workItemID, nil
 }
 
 func (c *Client) WfeExecutedTurnCount(ctx context.Context, workItemID string) (int, error) {
@@ -919,7 +1020,11 @@ func (c *Client) WfeExecutedTurnCount(ctx context.Context, workItemID string) (i
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	turns, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return turns, nil
 }
 
 func (c *Client) WfeStageLoopCount(ctx context.Context, workItemID string, stage string) (int, error) {
@@ -937,7 +1042,11 @@ func (c *Client) WfeStageLoopCount(ctx context.Context, workItemID string, stage
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	loops, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return loops, nil
 }
 
 func (c *Client) WfeRunnerFailuresSinceProgress(ctx context.Context, workItemID string, stage string) (int, error) {
@@ -955,7 +1064,11 @@ func (c *Client) WfeRunnerFailuresSinceProgress(ctx context.Context, workItemID 
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	failures, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return failures, nil
 }
 
 func (c *Client) WfeCapacityWaitsSinceProgress(ctx context.Context, workItemID string, stage string) (int, error) {
@@ -973,15 +1086,19 @@ func (c *Client) WfeCapacityWaitsSinceProgress(ctx context.Context, workItemID s
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	waits, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return waits, nil
 }
 
-func (c *Client) WfeDescendantIds(ctx context.Context, workItemID string, max int) ([]string, error) {
+func (c *Client) WfeDescendantIDs(ctx context.Context, workItemID string, max int) ([]string, error) {
 	if c == nil || c.caller == nil {
 		return nil, ErrConfig
 	}
 	fields := []string{workItemID, Itoa(max)}
-	status, reply, err := c.callFields(ctx, opWfeDescendantIds, fields)
+	status, reply, err := c.callFields(ctx, opWfeDescendantIDs, fields)
 	if err != nil {
 		return nil, err
 	}
@@ -1006,7 +1123,11 @@ func (c *Client) WfeResumeTransient(ctx context.Context, pauseReason string, old
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi64(reply[0])
+	resumed, err := Atoi64(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return resumed, nil
 }
 
 func (c *Client) WfeResumeWallCaps(ctx context.Context, maxResumes int) (int64, error) {
@@ -1024,7 +1145,11 @@ func (c *Client) WfeResumeWallCaps(ctx context.Context, maxResumes int) (int64, 
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi64(reply[0])
+	resumed, err := Atoi64(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return resumed, nil
 }
 
 func (c *Client) WfeAbandonExhaustedWallCaps(ctx context.Context, maxResumes int, graceSecs int) (int64, error) {
@@ -1042,7 +1167,11 @@ func (c *Client) WfeAbandonExhaustedWallCaps(ctx context.Context, maxResumes int
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi64(reply[0])
+	abandoned, err := Atoi64(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return abandoned, nil
 }
 
 func (c *Client) WfeResumeReadyParents(ctx context.Context) (int64, error) {
@@ -1060,7 +1189,11 @@ func (c *Client) WfeResumeReadyParents(ctx context.Context) (int64, error) {
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi64(reply[0])
+	resumed, err := Atoi64(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return resumed, nil
 }
 
 func (c *Client) WfeDelegateJobSave(ctx context.Context, executionKey string, workItemID string, jobID int64, participantToken string) error {
@@ -1228,7 +1361,11 @@ func (c *Client) WfeBudgetReconcile(ctx context.Context, workItemID string, owne
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	applied, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return applied, nil
 }
 
 func (c *Client) WfeMove(ctx context.Context, workItemID string, fromStage string, toStage string, kind string, detail string, contentHash string, cost float64) error {
@@ -1261,7 +1398,11 @@ func (c *Client) WfeRecordRetry(ctx context.Context, workItemID string, stage st
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	parked, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return parked, nil
 }
 
 func (c *Client) WfeParkWithDetail(ctx context.Context, workItemID string, stage string, reason string, detail string, cost float64) error {
@@ -1429,7 +1570,11 @@ func (c *Client) WfeRecoverLostReplay(ctx context.Context, workItemID string, st
 	if len(reply) < 1 {
 		return 0, ErrMalformed
 	}
-	return Atoi(reply[0])
+	redispatch, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return redispatch, nil
 }
 
 func (c *Client) WfeRecordRequestedChanges(ctx context.Context, workItemID string, gate string, planStage string, planHash string, feedbackHash string, unresolved string, maxIterations int, maxIdentical int, cost float64) (WfeRecordRequestedChanges, error) {
@@ -1501,4 +1646,48 @@ func (c *Client) WfeClaimFrozenCreates(ctx context.Context, parentID string, wor
 	out.ExistingWorkItem = reply[1]
 	out.ConflictingWorkItem = reply[2]
 	return out, nil
+}
+
+func (c *Client) WfeCreateWorkItem(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, mode string, submitter string, parentID string, sourcePath string, maxCostUSD float64, rootCap int) (int, error) {
+	if c == nil || c.caller == nil {
+		return 0, ErrConfig
+	}
+	fields := []string{workItemID, repo, proposalPath, workflowName, workflowVersion, startStage, mode, submitter, parentID, sourcePath, Ftoa(maxCostUSD), Itoa(rootCap)}
+	status, reply, err := c.callFields(ctx, opWfeCreateWorkItem, fields)
+	if err != nil {
+		return 0, err
+	}
+	if status != statusOK {
+		return 0, &StatusError{Op: "wfe_create_work_item", Status: status}
+	}
+	if len(reply) < 1 {
+		return 0, ErrMalformed
+	}
+	admissionFull, err := Atoi(reply[0])
+	if err != nil {
+		return 0, err
+	}
+	return admissionFull, nil
+}
+
+func (c *Client) WfeLatestStageRetryDetail(ctx context.Context, workItemID string, stage string) (string, error) {
+	if c == nil || c.caller == nil {
+		return "", ErrConfig
+	}
+	fields := []string{workItemID, stage}
+	status, reply, err := c.callFields(ctx, opWfeLatestStageRetryDetail, fields)
+	if err != nil {
+		return "", err
+	}
+	if status == statusMissing {
+		return "", nil
+	}
+	if status != statusOK {
+		return "", &StatusError{Op: "wfe_latest_stage_retry_detail", Status: status}
+	}
+	if len(reply) < 1 {
+		return "", ErrMalformed
+	}
+	detail := reply[0]
+	return detail, nil
 }

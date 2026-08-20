@@ -180,7 +180,7 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
    db1_wfe_budget_totals_t row_db1_wfe_budget_totals_t;
    db1_wfe_review_outcome_t row_db1_wfe_review_outcome_t;
    db1_wfe_frozen_conflict_t row_db1_wfe_frozen_conflict_t;
-   const char *row_slots[18];
+   const char *row_slots[22];
    char row_text[5][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
@@ -222,6 +222,7 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       snprintf(row_text[0], sizeof row_text[0], "%.17g", (double)row_db1_work_item_t.cum_cost_usd);
       snprintf(row_text[1], sizeof row_text[1], "%.17g", (double)row_db1_work_item_t.work_item_max_cost_usd);
       snprintf(row_text[2], sizeof row_text[2], "%d", row_db1_work_item_t.override_count);
+      snprintf(row_text[3], sizeof row_text[3], "%.17g", (double)row_db1_work_item_t.reserved_cost_usd);
       row_slots[0] = row_db1_work_item_t.work_item_id;
       row_slots[1] = row_db1_work_item_t.repo;
       row_slots[2] = row_db1_work_item_t.proposal_path;
@@ -240,8 +241,12 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       row_slots[15] = row_text[0];
       row_slots[16] = row_text[1];
       row_slots[17] = row_text[2];
+      row_slots[18] = row_text[3];
+      row_slots[19] = row_db1_work_item_t.reservation_state;
+      row_slots[20] = row_db1_work_item_t.source_path;
+      row_slots[21] = row_db1_work_item_t.updated_at;
       rows = row_slots;
-      row_count = 18u;
+      row_count = 22u;
       reads = 1;
       found = 1;
       break;
@@ -669,8 +674,8 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       {
          uint32_t produced = ((uint32_t)rc < (uint32_t)parsed0)
                                  ? (uint32_t)rc : (uint32_t)parsed0;
-         const char **cells = malloc((size_t)produced * 18u * sizeof *cells);
-         char (*numbers)[32] = malloc((size_t)produced * 3u * sizeof *numbers);
+         const char **cells = malloc((size_t)produced * 22u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 4u * sizeof *numbers);
          if (!cells || !numbers)
          {
             free(cells);
@@ -683,33 +688,39 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
          numeric_owned = numbers;
          for (uint32_t row = 0; row < produced; ++row)
          {
-            snprintf(numbers[row * 3u + 0u], 32,
+            snprintf(numbers[row * 4u + 0u], 32,
                      "%.17g", (double)found[row].cum_cost_usd);
-            snprintf(numbers[row * 3u + 1u], 32,
+            snprintf(numbers[row * 4u + 1u], 32,
                      "%.17g", (double)found[row].work_item_max_cost_usd);
-            snprintf(numbers[row * 3u + 2u], 32,
+            snprintf(numbers[row * 4u + 2u], 32,
                      "%d", found[row].override_count);
-            cells[row * 18u + 0u] = found[row].work_item_id;
-            cells[row * 18u + 1u] = found[row].repo;
-            cells[row * 18u + 2u] = found[row].proposal_path;
-            cells[row * 18u + 3u] = found[row].workflow_name;
-            cells[row * 18u + 4u] = found[row].workflow_version;
-            cells[row * 18u + 5u] = found[row].current_stage;
-            cells[row * 18u + 6u] = found[row].state;
-            cells[row * 18u + 7u] = found[row].mode;
-            cells[row * 18u + 8u] = found[row].pause_reason;
-            cells[row * 18u + 9u] = found[row].paused_state;
-            cells[row * 18u + 10u] = found[row].content_hash;
-            cells[row * 18u + 11u] = found[row].pr_ref;
-            cells[row * 18u + 12u] = found[row].worktree;
-            cells[row * 18u + 13u] = found[row].submitter;
-            cells[row * 18u + 14u] = found[row].parent_id;
-            cells[row * 18u + 15u] = numbers[row * 3u + 0u];
-            cells[row * 18u + 16u] = numbers[row * 3u + 1u];
-            cells[row * 18u + 17u] = numbers[row * 3u + 2u];
+            snprintf(numbers[row * 4u + 3u], 32,
+                     "%.17g", (double)found[row].reserved_cost_usd);
+            cells[row * 22u + 0u] = found[row].work_item_id;
+            cells[row * 22u + 1u] = found[row].repo;
+            cells[row * 22u + 2u] = found[row].proposal_path;
+            cells[row * 22u + 3u] = found[row].workflow_name;
+            cells[row * 22u + 4u] = found[row].workflow_version;
+            cells[row * 22u + 5u] = found[row].current_stage;
+            cells[row * 22u + 6u] = found[row].state;
+            cells[row * 22u + 7u] = found[row].mode;
+            cells[row * 22u + 8u] = found[row].pause_reason;
+            cells[row * 22u + 9u] = found[row].paused_state;
+            cells[row * 22u + 10u] = found[row].content_hash;
+            cells[row * 22u + 11u] = found[row].pr_ref;
+            cells[row * 22u + 12u] = found[row].worktree;
+            cells[row * 22u + 13u] = found[row].submitter;
+            cells[row * 22u + 14u] = found[row].parent_id;
+            cells[row * 22u + 15u] = numbers[row * 4u + 0u];
+            cells[row * 22u + 16u] = numbers[row * 4u + 1u];
+            cells[row * 22u + 17u] = numbers[row * 4u + 2u];
+            cells[row * 22u + 18u] = numbers[row * 4u + 3u];
+            cells[row * 22u + 19u] = found[row].reservation_state;
+            cells[row * 22u + 20u] = found[row].source_path;
+            cells[row * 22u + 21u] = found[row].updated_at;
          }
          rows = cells;
-         row_count = produced * 18u;
+         row_count = produced * 22u;
       }
       listed = 1;
       break;
@@ -744,8 +755,8 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       {
          uint32_t produced = ((uint32_t)rc < (uint32_t)parsed0)
                                  ? (uint32_t)rc : (uint32_t)parsed0;
-         const char **cells = malloc((size_t)produced * 18u * sizeof *cells);
-         char (*numbers)[32] = malloc((size_t)produced * 3u * sizeof *numbers);
+         const char **cells = malloc((size_t)produced * 22u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 4u * sizeof *numbers);
          if (!cells || !numbers)
          {
             free(cells);
@@ -758,33 +769,39 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
          numeric_owned = numbers;
          for (uint32_t row = 0; row < produced; ++row)
          {
-            snprintf(numbers[row * 3u + 0u], 32,
+            snprintf(numbers[row * 4u + 0u], 32,
                      "%.17g", (double)found[row].cum_cost_usd);
-            snprintf(numbers[row * 3u + 1u], 32,
+            snprintf(numbers[row * 4u + 1u], 32,
                      "%.17g", (double)found[row].work_item_max_cost_usd);
-            snprintf(numbers[row * 3u + 2u], 32,
+            snprintf(numbers[row * 4u + 2u], 32,
                      "%d", found[row].override_count);
-            cells[row * 18u + 0u] = found[row].work_item_id;
-            cells[row * 18u + 1u] = found[row].repo;
-            cells[row * 18u + 2u] = found[row].proposal_path;
-            cells[row * 18u + 3u] = found[row].workflow_name;
-            cells[row * 18u + 4u] = found[row].workflow_version;
-            cells[row * 18u + 5u] = found[row].current_stage;
-            cells[row * 18u + 6u] = found[row].state;
-            cells[row * 18u + 7u] = found[row].mode;
-            cells[row * 18u + 8u] = found[row].pause_reason;
-            cells[row * 18u + 9u] = found[row].paused_state;
-            cells[row * 18u + 10u] = found[row].content_hash;
-            cells[row * 18u + 11u] = found[row].pr_ref;
-            cells[row * 18u + 12u] = found[row].worktree;
-            cells[row * 18u + 13u] = found[row].submitter;
-            cells[row * 18u + 14u] = found[row].parent_id;
-            cells[row * 18u + 15u] = numbers[row * 3u + 0u];
-            cells[row * 18u + 16u] = numbers[row * 3u + 1u];
-            cells[row * 18u + 17u] = numbers[row * 3u + 2u];
+            snprintf(numbers[row * 4u + 3u], 32,
+                     "%.17g", (double)found[row].reserved_cost_usd);
+            cells[row * 22u + 0u] = found[row].work_item_id;
+            cells[row * 22u + 1u] = found[row].repo;
+            cells[row * 22u + 2u] = found[row].proposal_path;
+            cells[row * 22u + 3u] = found[row].workflow_name;
+            cells[row * 22u + 4u] = found[row].workflow_version;
+            cells[row * 22u + 5u] = found[row].current_stage;
+            cells[row * 22u + 6u] = found[row].state;
+            cells[row * 22u + 7u] = found[row].mode;
+            cells[row * 22u + 8u] = found[row].pause_reason;
+            cells[row * 22u + 9u] = found[row].paused_state;
+            cells[row * 22u + 10u] = found[row].content_hash;
+            cells[row * 22u + 11u] = found[row].pr_ref;
+            cells[row * 22u + 12u] = found[row].worktree;
+            cells[row * 22u + 13u] = found[row].submitter;
+            cells[row * 22u + 14u] = found[row].parent_id;
+            cells[row * 22u + 15u] = numbers[row * 4u + 0u];
+            cells[row * 22u + 16u] = numbers[row * 4u + 1u];
+            cells[row * 22u + 17u] = numbers[row * 4u + 2u];
+            cells[row * 22u + 18u] = numbers[row * 4u + 3u];
+            cells[row * 22u + 19u] = found[row].reservation_state;
+            cells[row * 22u + 20u] = found[row].source_path;
+            cells[row * 22u + 21u] = found[row].updated_at;
          }
          rows = cells;
-         row_count = produced * 18u;
+         row_count = produced * 22u;
       }
       listed = 1;
       break;
@@ -2193,6 +2210,67 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       reads = 1;
       break;
    }
+   case AIMEE_DB1_OP_WFE_CREATE_WORK_ITEM:
+   {
+      if (count != 12u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[5][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      double parsed10;
+      if (parse_double(field[10], &parsed10) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed11;
+      if (parse_int(field[11], &parsed11) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int produced = db1_wfe_create_work_item(field[0], field[1], field[2], field[3], field[4], field[5], field[6], field[7], field[8], field[9], parsed10, parsed11);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_LATEST_STAGE_RETRY_DETAIL:
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_latest_stage_retry_detail(field[0], field[1], value, sizeof value);
+      reads = 1;
+      break;
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

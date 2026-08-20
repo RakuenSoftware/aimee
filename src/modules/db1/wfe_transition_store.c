@@ -44,7 +44,7 @@ static void tx_rollback(sqlite3 *db)
 
 static int tx_begin(sqlite3 *db)
 {
-   return sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) == SQLITE_OK ? 0 : -1;
+   return db1_wfe_begin_immediate(db);
 }
 
 static int tx_commit(sqlite3 *db)
@@ -289,6 +289,45 @@ int db1_wfe_park_with_detail(const char *work_item_id, const char *stage, const 
    return tx_commit(db);
 }
 
+/* Reasons an operator may release by hand.
+ *
+ * The list is the point of this function. Most pauses are lifecycle-owned: the
+ * engine parked the run and the engine will unpark it when the condition that
+ * parked it clears, and a human clearing it instead skips the check that was
+ * about to run. The ones here are different -- they are parks that exist
+ * BECAUSE a human has to decide something, so a human is the only thing that
+ * can release them.
+ *
+ * delegate_failed is on the list deliberately: it parks explicitly for a human,
+ * so a human must be able to release it once the underlying problem is fixed.
+ * base_integration_conflict and request_unimplementable are there for the same
+ * reason -- an operator resolves the integration, or amends the request, and
+ * nothing the engine can do releases either one.
+ */
+static int operator_may_resume(const char *reason)
+{
+   static const char *const allowed[] = {
+       "manual",
+       "wall_cap",
+       "turn_cap",
+       "retry_limit",
+       "convergence_limit",
+       "convergence_no_progress",
+       "budget_cap",
+       "fanout_limit",
+       "workflow_definition_invalid",
+       "workflow_block_unavailable",
+       "delegate_failed",
+       "replay_unrecoverable",
+       "base_integration_conflict",
+       "request_unimplementable",
+   };
+   for (size_t i = 0; i < sizeof allowed / sizeof allowed[0]; i++)
+      if (strcmp(reason, allowed[i]) == 0)
+         return 1;
+   return 0;
+}
+
 int db1_wfe_resume(const char *work_item_id)
 {
    if (!work_item_id || !work_item_id[0])
@@ -323,6 +362,19 @@ int db1_wfe_resume(const char *work_item_id)
    snprintf(reason, sizeof reason, "%s", reason_text ? (const char *)reason_text : "");
    sqlite3_finalize(st);
 
+   if (!reason[0])
+   {
+      /* Not paused. Clearing nothing and recording a resume would put a resume
+       * event in the history of a run that never stopped. */
+      tx_rollback(db);
+      return -1;
+   }
+   if (!operator_may_resume(reason))
+   {
+      tx_rollback(db);
+      return -1;
+   }
+
    static const char *clear_sql =
        "UPDATE lifecycle_work_item SET pause_reason='', paused_state='', "
        "updated_at=datetime('now') WHERE work_item_id=? AND state='active'";
@@ -341,12 +393,18 @@ int db1_wfe_resume(const char *work_item_id)
       return -1;
    }
 
-   /* A resumed stage starts over: the attempts that exhausted its retry budget
-    * are what parked it, and leaving them would park it again immediately. */
-   if (drop_stage_attempts(db, work_item_id, stage) != 0)
+   /* Only a retry_limit resume starts the stage over. A human resume there is
+    * an explicit request for another bounded repair cycle; keeping the
+    * exhausted count made the very next failed repair park again, which reduced
+    * recovery to one attempt per manual resume. Other reasons keep their
+    * counts, because nothing about them says the attempts should be forgiven. */
+   if (strcmp(reason, "retry_limit") == 0)
    {
-      tx_rollback(db);
-      return -1;
+      if (drop_stage_attempts(db, work_item_id, stage) != 0)
+      {
+         tx_rollback(db);
+         return -1;
+      }
    }
    if (add_event(db, work_item_id, stage, "resume", "operator", reason, "", 0) != 0)
    {
@@ -635,6 +693,116 @@ int db1_wfe_record_requested_changes(const char *work_item_id, const char *gate,
          tx_rollback(db);
          return -1;
       }
+   }
+   return tx_commit(db);
+}
+
+/* The engine's create, which is not db1_work_item_create.
+ *
+ * Three things happen here that the daemon's create does not do, and all three
+ * have to be in the same transaction as the insert:
+ *
+ *   the admission cap   counted over ACTIVE ROOTS, so a fan-out of slices does
+ *                       not consume the operator's concurrency budget.
+ *   parent eligibility  spelled as INSERT..SELECT FROM the parent rather than a
+ *                       check followed by an insert. A concurrent StopTree
+ *                       either includes this child or wins first and makes the
+ *                       SELECT yield nothing; there is no window in which a
+ *                       child is created under a parent that has just stopped.
+ *   the create event    so a run's history starts at its creation rather than
+ *                       at its first advance.
+ *
+ * Returns 0, or 1 when the admission cap refused it -- a refusal the caller
+ * reports as backpressure rather than as an error.
+ */
+int db1_wfe_create_work_item(const char *work_item_id, const char *repo, const char *proposal_path,
+                             const char *workflow_name, const char *workflow_version,
+                             const char *start_stage, const char *mode, const char *submitter,
+                             const char *parent_id, const char *source_path, double max_cost_usd,
+                             int root_cap)
+{
+   if (!work_item_id || !work_item_id[0] || !proposal_path || !proposal_path[0] || !workflow_name ||
+       !workflow_name[0] || !start_stage || !start_stage[0] || !cost_is_sane(max_cost_usd))
+      return -1;
+   const char *effective_mode = (mode && mode[0]) ? mode : "autonomous";
+   const char *parent = parent_id ? parent_id : "";
+   sqlite3 *db = db1_conn();
+   if (!db || tx_begin(db) != 0)
+      return -1;
+
+   if (root_cap > 0)
+   {
+      sqlite3_stmt *count = NULL;
+      if (sqlite3_prepare_v2(db,
+                             "SELECT COUNT(*) FROM lifecycle_work_item "
+                             "WHERE parent_id='' AND state='active'",
+                             -1, &count, NULL) != SQLITE_OK)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+      int active = (sqlite3_step(count) == SQLITE_ROW) ? sqlite3_column_int(count, 0) : -1;
+      sqlite3_finalize(count);
+      if (active < 0)
+      {
+         tx_rollback(db);
+         return -1;
+      }
+      if (active >= root_cap)
+      {
+         tx_rollback(db);
+         return 1; /* admission full: backpressure, not failure */
+      }
+   }
+
+   static const char *root_sql =
+       "INSERT INTO lifecycle_work_item "
+       "(work_item_id, repo, proposal_path, workflow_name, workflow_version, "
+       "current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd) "
+       "VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+   static const char *child_sql =
+       "INSERT INTO lifecycle_work_item "
+       "(work_item_id, repo, proposal_path, workflow_name, workflow_version, "
+       "current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd) "
+       "SELECT ?,?,?,?,?,?,?,?,?,?,? FROM lifecycle_work_item parent "
+       "WHERE parent.work_item_id=? AND parent.state='active'";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, parent[0] ? child_sql : root_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      tx_rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, repo ? repo : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 3, proposal_path, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 4, workflow_name, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 5, workflow_version ? workflow_version : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 6, start_stage, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 7, effective_mode, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 8, submitter ? submitter : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 9, parent, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 10, source_path ? source_path : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_double(st, 11, max_cost_usd);
+   if (parent[0])
+      sqlite3_bind_text(st, 12, parent, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
+   sqlite3_finalize(st);
+   if (changed != 1)
+   {
+      tx_rollback(db);
+      /* Distinguish the two ways this fails. A child whose parent is not active
+       * is an ordinary race -- a stop that won -- and the caller reports it as
+       * such; anything else is a genuine failure to insert. Returning the same
+       * value for both would make a lost race read like a broken store. */
+      return parent[0] ? 2 : -1;
+   }
+
+   if (add_event(db, work_item_id, start_stage, "create", submitter ? submitter : "", workflow_name,
+                 workflow_version ? workflow_version : "", 0) != 0)
+   {
+      tx_rollback(db);
+      return -1;
    }
    return tx_commit(db);
 }

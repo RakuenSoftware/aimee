@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -47,7 +48,7 @@ func TestValidateStructuredRejectsInvalidPacketDependencies(t *testing.T) {
 }
 
 func TestPacketDependencyGateWaitsForAcceptedPredecessors(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestPacketDependencyGateWaitsForAcceptedPredecessors(t *testing.T) {
 }
 
 func TestPacketDependencyGateFailsClosedOnRejectedPredecessor(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@
 
 #include <sqlite3.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
 
 /* One integer answer from a statement the caller has already bound. Every count
@@ -411,4 +412,172 @@ int db1_wfe_delegate_jobs_terminal_claim(db1_wfe_delegate_job_t *out, int max)
       return -1;
    }
    return n;
+}
+
+/* Why a stage last had to retry, phrased for a human reading the run.
+ *
+ * The answer is the most recent explanation SINCE the stage last made progress,
+ * and "progress" here has two boundaries rather than one: the last advance out
+ * of the stage, and any operator resume that cleared a retry_limit park after
+ * it. A resume is a decision to try again, so explanations from before it are
+ * about a run the operator has already looked at.
+ *
+ * Three sources, in order of how directly they explain the current attempt:
+ * the newest loop detail after the boundary; failing that -- and only when a
+ * resume moved the boundary -- the pause that preceded that resume, which is
+ * what the operator was looking at when they decided; failing that, the newest
+ * non-manual pause after the boundary. "manual" is excluded throughout because
+ * an operator pausing a run is not the run explaining itself.
+ *
+ * Empty is a legitimate answer: a stage with no attempts and no resume has
+ * nothing to explain.
+ */
+int db1_wfe_latest_stage_retry_detail(const char *work_item_id, const char *stage, char *out,
+                                      size_t n)
+{
+   if (out && n)
+      out[0] = '\0';
+   if (!work_item_id || !work_item_id[0] || !stage || !out || n == 0)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   int attempts = 0;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db,
+                          "SELECT COALESCE(attempts,0) FROM lifecycle_stage_attempt "
+                          "WHERE work_item_id=? AND stage=?",
+                          -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+   if (sqlite3_step(st) == SQLITE_ROW)
+      attempts = sqlite3_column_int(st, 0);
+   sqlite3_finalize(st);
+
+   sqlite3_int64 boundary = 0;
+   if (sqlite3_prepare_v2(db,
+                          "SELECT COALESCE(MAX(id),0) FROM lifecycle_event "
+                          "WHERE work_item_id=? AND stage=? AND kind='advance'",
+                          -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+   if (sqlite3_step(st) == SQLITE_ROW)
+      boundary = sqlite3_column_int64(st, 0);
+   sqlite3_finalize(st);
+
+   sqlite3_int64 reset = 0;
+   if (sqlite3_prepare_v2(db,
+                          "SELECT COALESCE(MAX(id),0) FROM lifecycle_event "
+                          "WHERE work_item_id=? AND stage=? AND kind='resume' "
+                          "AND detail='retry_limit' AND id>?",
+                          -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(st, 3, boundary);
+   if (sqlite3_step(st) == SQLITE_ROW)
+      reset = sqlite3_column_int64(st, 0);
+   sqlite3_finalize(st);
+
+   if (attempts == 0 && reset <= boundary)
+      return 0; /* nothing to explain, and that is an answer */
+
+   sqlite3_int64 after = (reset > boundary) ? reset : boundary;
+   int found = 0;
+
+   /* The newest loop since the boundary: the most direct explanation. */
+   if (sqlite3_prepare_v2(db,
+                          "SELECT detail FROM lifecycle_event "
+                          "WHERE work_item_id=? AND stage=? AND kind='loop' AND id>? "
+                          "ORDER BY id DESC LIMIT 1",
+                          -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(st, 3, after);
+   if (sqlite3_step(st) == SQLITE_ROW)
+   {
+      const unsigned char *detail = sqlite3_column_text(st, 0);
+      snprintf(out, n, "%s", detail ? (const char *)detail : "");
+      found = 1;
+   }
+   sqlite3_finalize(st);
+
+   /* Failing that, and only when a resume moved the boundary: the pause the
+    * operator was looking at when they decided to resume. */
+   if (!found && reset > boundary)
+   {
+      if (sqlite3_prepare_v2(db,
+                             "SELECT detail FROM lifecycle_event "
+                             "WHERE work_item_id=? AND stage=? AND kind='pause' "
+                             "AND detail!='manual' AND id>? AND id<? ORDER BY id DESC LIMIT 1",
+                             -1, &st, NULL) != SQLITE_OK)
+         return -1;
+      sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(st, 3, boundary);
+      sqlite3_bind_int64(st, 4, reset);
+      if (sqlite3_step(st) == SQLITE_ROW)
+      {
+         const unsigned char *detail = sqlite3_column_text(st, 0);
+         snprintf(out, n, "%s", detail ? (const char *)detail : "");
+         found = 1;
+      }
+      sqlite3_finalize(st);
+   }
+
+   /* Failing that, the newest non-manual pause since the boundary. */
+   if (!found)
+   {
+      if (sqlite3_prepare_v2(db,
+                             "SELECT detail FROM lifecycle_event "
+                             "WHERE work_item_id=? AND stage=? AND kind='pause' "
+                             "AND detail!='manual' AND id>? ORDER BY id DESC LIMIT 1",
+                             -1, &st, NULL) != SQLITE_OK)
+         return -1;
+      sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(st, 3, boundary);
+      if (sqlite3_step(st) == SQLITE_ROW)
+      {
+         const unsigned char *detail = sqlite3_column_text(st, 0);
+         snprintf(out, n, "%s", detail ? (const char *)detail : "");
+         found = 1;
+      }
+      sqlite3_finalize(st);
+   }
+   /* The reads convention: a positive return means there is something to say,
+    * zero means there genuinely is not. Returning 0 with text would be reported
+    * to the caller as a miss. */
+   return found;
+}
+
+int db1_wfe_begin_immediate(sqlite3 *db)
+{
+   /* BEGIN IMMEDIATE can still come back SQLITE_BUSY after the connection's
+    * busy timeout: the timeout applies to acquiring the lock, and a writer that
+    * holds it for the whole window leaves the caller with nothing to wait on.
+    *
+    * Treating that as a failure surfaced under load as an operation "refused"
+    * -- a full test run starting a dozen modules at once produced exactly one,
+    * on a reconcile, which is a call about money. Retrying a handful of times
+    * with a short backoff is what the reservation loop already does for the
+    * same reason; this is that reasoning applied to every transaction rather
+    * than to one of them.
+    *
+    * A genuine failure still fails: the retries are bounded and short, so a
+    * deadlocked store reports rather than hangs. */
+   for (int attempt = 0; attempt < 6; attempt++)
+   {
+      int rc = sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
+      if (rc == SQLITE_OK)
+         return 0;
+      if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED)
+         return -1;
+      usleep((useconds_t)(1u << attempt) * 1000u);
+   }
+   return -1;
 }

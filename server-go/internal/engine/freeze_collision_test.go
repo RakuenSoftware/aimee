@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -69,7 +70,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

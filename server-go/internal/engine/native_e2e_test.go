@@ -13,7 +13,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/internal/api"
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -239,7 +239,7 @@ nodes:
 	if _, err := registry.Save("slice", slice, ""); err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
