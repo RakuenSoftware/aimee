@@ -704,6 +704,108 @@ else
     PASS=$((PASS + 1)) # tool.execute reachable over the trusted local /v1 socket
 fi
 
+# The argument specs, as the REAL server actually serves them.
+#
+# Three things were proven separately and never joined up: the differential test
+# reads the data file directly, the end-to-end proof drives a hand-written stub
+# manifest, and nothing checked that the server's emitter puts those specs into
+# the manifest at all. cli_argspec_defs_to_json() drops a row whose spec fails
+# to parse --
+#
+#     cJSON *spec = cJSON_Parse(d->spec);
+#     if (!spec)
+#        continue;
+#
+# -- so a typo in one spec string would silently stop that method being served,
+# the client would fall back to its compiled marshaller, and every existing test
+# would still pass. Ask the running server what it serves.
+# GET, directly. Not via http_rpc: that maps an unmapped method to a POST, and
+# the manifest route is GET-only -- so the first version of this check POSTed,
+# got a non-empty ERROR body, and its "if the answer was empty, try a GET"
+# fallback never fired. It then parsed the error as a manifest and reported
+# zero specs, blaming the server for the check's own bug.
+MANIFEST=$(python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect('$HTTP_SOCK')
+s.settimeout(20)
+s.sendall(b'GET /v1/cli/manifest HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+data = b''
+while True:
+    c = s.recv(65536)
+    if not c:
+        break
+    data += c
+s.close()
+sys.stdout.write(data.partition(b'\r\n\r\n')[2].decode().strip())
+" 2>/dev/null) || true
+
+# Every served body, not just the one that prompted this.
+#
+# The manifest carries four: routes, commands, dispatch, marshal. A broken
+# emitter for any of the last three makes the client fall back to its compiled
+# copy SILENTLY -- the same failure the marshal check below exists for. (routes
+# is the exception: losing it fails loudly with "has no /v1 route".)
+#
+# Checked by SHAPE, not by naming commands: a count floor catches an emitter
+# that returns nothing, and the expected keys on one row catch a rename that
+# would keep the count and break every client. Neither breaks when a command is
+# added or retired, which a "contains init.run" assertion would.
+MANIFEST_BODIES=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    print('unparseable'); raise SystemExit
+want = {
+    'routes':   {'op', 'verb', 'path'},
+    'commands': {'name'},
+    'dispatch': {'cmd', 'method'},
+    'marshal':  {'method', 'args'},
+}
+bad = []
+for key, keys in want.items():
+    rows = doc.get(key)
+    if not isinstance(rows, list) or len(rows) < 10:
+        bad.append(key + ':empty')
+        continue
+    if not any(keys <= set(r) for r in rows if isinstance(r, dict)):
+        bad.append(key + ':shape')
+print(','.join(bad) if bad else 'ok')
+" 2>/dev/null) || true
+check_output "every served manifest body is present and shaped" "ok" echo "$MANIFEST_BODIES"
+
+MANIFEST_SPECS=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    print('0'); raise SystemExit
+rows = doc.get('marshal') or []
+# An argument spec is a marshal row whose args is an OBJECT; the no-argument
+# rows carry the string 'none'.
+print(sum(1 for r in rows if isinstance(r.get('args'), dict)))
+" 2>/dev/null) || true
+check_output "server serves argument specs in the manifest" "yes" \
+    echo "$([ "${MANIFEST_SPECS:-0}" -gt 0 ] && echo yes || echo "no (got ${MANIFEST_SPECS:-none})")"
+
+# And that a known spec arrives INTACT -- not merely that some rows exist. A
+# renamed key in the emitter would keep the count and break every client.
+CATALOG_SPEC=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+for r in (doc.get('marshal') or []):
+    if r.get('method') == 'catalog.list' and isinstance(r.get('args'), dict):
+        names = [f.get('json') for f in (r['args'].get('fields') or [])]
+        print(','.join(sorted(n for n in names if n)))
+        break
+" 2>/dev/null) || true
+check_output "a served spec arrives with its fields" "capability,json,open_weights_only" \
+    echo "$CATALOG_SPEC"
+
 # ============================================================
 # 4. Session management
 # ============================================================

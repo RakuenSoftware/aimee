@@ -48,17 +48,37 @@ def parse_cli_commands():
     entries = []
     # normalize: drop the file's leading comment
     body = text[text.index('{"'):]
+    # Strip block comments BETWEEN entries. A chunk is matched from its start,
+    # so a comment in front of an entry made the match fail -- and the failure
+    # was a `continue`, so the entry vanished from the docs and the "Total
+    # commands" line counted the survivors and looked right. Adding an ordinary
+    # explanatory comment above a row silently deleted that command's reference
+    # page.
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
     # split into entries on `},\n` boundaries that precede a new `{"`
     raw = re.split(r'\},\s*(?=\{")', body)
+    skipped = []
     for chunk in raw:
         m = re.match(r'\s*\{\s*"([^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*AIMEE_CMD_TIER_(\w+)\s*,\s*(\d+)\s*,\s*(.*)$',
                      chunk, re.S)
         if not m:
+            # The table's NULL sentinel is the one chunk that legitimately does
+            # not parse. Anything else is a row this generator could not read,
+            # and dropping it silently is how a command loses its documentation
+            # without anyone being told.
+            if chunk.strip() and not re.match(r'\s*\{\s*NULL', chunk):
+                skipped.append(chunk.strip()[:120])
             continue
         name, desc, tier, hidden, rest = m.groups()
         subs = None if rest.strip().startswith("NULL") else _c_strings(rest).strip("\n")
         entries.append({"name": name, "desc": desc, "tier": tier,
                         "hidden": hidden == "1", "subs": subs})
+    if skipped:
+        raise SystemExit(
+            "gen-reference-docs: could not parse "
+            f"{len(skipped)} command row(s); they would have been dropped from "
+            "the reference silently:\n  "
+            + "\n  ".join(skipped))
     return entries
 
 
