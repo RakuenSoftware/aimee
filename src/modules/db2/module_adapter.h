@@ -225,6 +225,15 @@ typedef struct
    int (*generation_set_source_hash)(int64_t generation_id, const char *source_hash);
    int (*generation_publish)(int64_t generation_id, const char *project);
    int (*purge_files_matching)(int64_t project_id, const char *path_glob);
+   int (*collab_rule_approve)(int rule_id);
+   int (*collab_rule_reject)(int rule_id);
+   int (*collab_rule_retire)(int rule_id);
+   int (*proposal_bump_corroboration)(int proposal_id);
+   int (*proposal_mark_committed)(int proposal_id);
+   int (*rules_delete_by_id)(int rule_row_id);
+   int (*calibration_surfaces_with_data)(int min_rows);
+   int (*reset_stuck_vector_ops)(int max_attempts);
+   int (*dedupe_by_key)(int dry_run);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

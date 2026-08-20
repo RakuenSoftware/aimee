@@ -543,3 +543,30 @@ aimee_db2_ingest_queue_fail_call(aimee_db2_call_fn call, void *call_context, uin
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_reset_stuck_vector_ops_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                      uint64_t deadline_ns, uint32_t max_attempts,
+                                      uint32_t *reset_rows, aimee_module_cancelled_fn cancelled,
+                                      void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RESET_STUCK_VECTOR_OPS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_reset_stuck_vector_ops_request_encode(max_attempts, request, sizeof(request),
+                                                       &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RESET_STUCK_VECTOR_OPS,
+            AIMEE_DB2_STAGE_RESET_STUCK_VECTOR_OPS, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_reset_stuck_vector_ops_reply_decode(response, response_len, reset_rows) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}

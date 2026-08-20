@@ -1752,6 +1752,60 @@ int db2_code_index_purge_files_matching(int64_t project_id, const char *path_glo
    return 0;
 }
 
+int db2_collab_rules_approve(int rule_id)
+{
+   (void)rule_id;
+   return 0;
+}
+
+int db2_collab_rules_reject(int rule_id)
+{
+   (void)rule_id;
+   return 0;
+}
+
+int db2_collab_rules_retire(int rule_id)
+{
+   (void)rule_id;
+   return 0;
+}
+
+int db2_learning_proposal_bump_corroboration(int id)
+{
+   (void)id;
+   return 0;
+}
+
+int db2_learning_proposal_mark_committed(int id)
+{
+   (void)id;
+   return 0;
+}
+
+int db2_rules_delete(int id)
+{
+   (void)id;
+   return 0;
+}
+
+int db2_calibration_surfaces_with_data(int min_rows)
+{
+   (void)min_rows;
+   return 0;
+}
+
+int db2_kb_service_reset_stuck_vector_ops(int max_attempts)
+{
+   (void)max_attempts;
+   return 0;
+}
+
+int db2_memory_dedupe_by_key(int dry_run)
+{
+   (void)dry_run;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

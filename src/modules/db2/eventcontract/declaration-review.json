@@ -204,6 +204,14 @@
       "reason": "Returning a raw calibration-profile JSON blob leaks storage and serialization across the boundary; a typed learning.calibration_threshold operation owns scoped fallback and profile interpretation in one request."
     },
     {
+      "symbol": "db2_calibration_surfaces_with_data",
+      "signature_sha256": "a9fe2ac3e5cc88dbbbfdb163202fb81ea4d1d49ccf580b3b7a4c78f0fb201c2b",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.calibration_surfaces_with_data operation replaces the surface count. The threshold is inside the grouping rather than applied to the result, so it decides which groupings count as having data at all -- raising it does not filter a fixed set, it changes the set. Only events carrying a verdict are considered."
+    },
+    {
       "symbol": "db2_calibration_threshold_from_profile_json",
       "signature_sha256": "3643d66cd059d40957d6c018bf74b9f9120d635439bb4763a9069eb4c3f01a6a",
       "disposition": "private-db2",
@@ -298,6 +306,30 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.visible_source_hash operation replaces the visible-generation read. Only a generation in the visible state is considered, so a project whose generations are all still pending reads back empty rather than reporting the newest one -- which is the behaviour a caller wants and cannot infer from an empty string alone."
+    },
+    {
+      "symbol": "db2_collab_rules_approve",
+      "signature_sha256": "b6e9612570e57c9c81402a5306feee8aa83bc405a8932f07ada06653cfc4272c",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.collab_rule_approve operation replaces the approval. Only a rule still in the proposed state is touched, so approving one that was already rejected does nothing -- and unlike collab_rule_reject beside it, this backend does not report whether a row changed, so the caller cannot tell that from a successful approval. The two are otherwise identical statements, which is what makes the difference worth recording."
+    },
+    {
+      "symbol": "db2_collab_rules_reject",
+      "signature_sha256": "e0fbe128c23e6394ff61ea2f5bf23ab3a787b5d2acbaf77c2d02de26234ce052",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.collab_rule_reject operation replaces the rejection. Its statement is the mirror of approve's, but its backend checks whether a row changed and reports that, so a caller can tell that the rule was not in the proposed state. The reply carries it rather than a bare acknowledgement, because throwing that away would make the two operations look alike when they are not."
+    },
+    {
+      "symbol": "db2_collab_rules_retire",
+      "signature_sha256": "0010c23f48bfc35cf63272c6bb6a0d048f67043a1b0081da77165b1210f9f2e3",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.collab_rule_retire operation replaces the retirement. It touches only an active rule, so a proposed one cannot be retired without being approved first -- the state machine is in the statement rather than anywhere a caller can see, and the acknowledgement is the same whether the rule moved or not."
     },
     {
       "symbol": "db2_conn",
@@ -1684,6 +1716,14 @@
       "reason": "The relation-schema cJSON list is caller presentation; a typed bounded query returns canonical relation definitions and truncation state."
     },
     {
+      "symbol": "db2_kb_service_reset_stuck_vector_ops",
+      "signature_sha256": "3fbec45bcbe9fd945bae5bf2dc066d5660dfa30fe8bd775d56b40bae3d810df8",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.reset_stuck_vector_ops operation replaces the stuck-op reset. It resets two separate queues -- the memory and evidence vector ops, and the code-chunk ops -- and adds their counts, so a caller cannot tell which queue the rows came from. Worse, each half reports a negative on failure, so one failing while the other succeeds produces a smaller number rather than an error. That is the backend's arithmetic and is recorded here because the count looks ordinary."
+    },
+    {
       "symbol": "db2_kb_service_rules_decay_json",
       "signature_sha256": "83366f3f71f8923c3a1d9d6fc71e1747a7bc34e671b9288a409d146ffdc84a67",
       "disposition": "private-db2",
@@ -1882,6 +1922,22 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.commits_in_last_7_days operation replaces the recent-commit count. The seven-day window and the clock it is measured against are both DB2's and never cross, so a caller cannot widen the window or supply its own now; the count is only meaningful beside that fact."
+    },
+    {
+      "symbol": "db2_learning_proposal_bump_corroboration",
+      "signature_sha256": "35b1d0df0c6e34d734cafcbe6a7ac8323c6fe18a58358078bcf679ac4084e9f1",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposal_bump_corroboration operation replaces the corroboration bump. The count is incremented by the statement rather than supplied, so a caller records that a proposal was corroborated again without being able to set or read the total. Only a pending proposal is bumped, so corroborating one already committed does nothing."
+    },
+    {
+      "symbol": "db2_learning_proposal_mark_committed",
+      "signature_sha256": "e5ec6071661411de9b9129e5d8267689b0976f27dd4240440f4e2d69a48d68b5",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposal_mark_committed operation replaces the commit write. Unlike the corroboration bump beside it there is no condition on the proposal's state, so committing one that was already committed overwrites its commit stamp with a later one -- which matters to anything reading when a proposal landed. Both stamps are DB2's clock."
     },
     {
       "symbol": "db2_learning_proposals_archive_expired",
@@ -2138,6 +2194,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.decay_confidence operation replaces the unconditional confidence decay; the multiplier stays fixed policy behind the handler. The backend returns void and so cannot report whether the row existed, which the acknowledgement-only reply preserves rather than inventing a count."
+    },
+    {
+      "symbol": "db2_memory_dedupe_by_key",
+      "signature_sha256": "23d3c4a65507b410bda4fa07e4826b9082f497d5107475e79de07cb32abdef6e",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.dedupe_by_key operation replaces the deduplication pass. The flag decides whether it writes: a dry run counts the memories it would merge and changes nothing, so the same number means two entirely different things and a caller that loses track of which it asked for cannot recover it from the reply. Merging keeps the highest-confidence memory for each key and points the rest at it."
     },
     {
       "symbol": "db2_memory_delete_row",
@@ -2962,6 +3026,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.rules_decay operation replaces the pass that ages rule weights and archives the ones that fall through the floor. Every constant is fixed policy: a caller able to send the decay amount or the intervals could age a hard directive out in a single call, and one able to send the archive threshold could delete rules that are still in force."
+    },
+    {
+      "symbol": "db2_rules_delete",
+      "signature_sha256": "244874fbca46d0a3731daa92ab504faf347ae3037bfbfe767835541cbd29137b",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_delete_by_id operation replaces the rule deletion. Its backend reports whether a row was removed, so the reply carries that: an identifier naming no rule is distinguishable from a deletion that happened, which most of the writes in this batch cannot manage."
     },
     {
       "symbol": "db2_set_embedder_model_id",

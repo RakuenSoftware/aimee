@@ -2237,6 +2237,46 @@
       }
     },
     {
+      "family": "memory",
+      "id": 65,
+      "name": "dedupe_by_key",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Canonical memory rows and the merge pointers between them are relational DB2 state.",
+      "c_symbols": [
+        "db2_memory_dedupe_by_key"
+      ],
+      "request": {
+        "policy": {
+          "writes": "a dry run counts what it would merge without writing, so the same count means two different things depending on the flag"
+        },
+        "fields": [
+          {
+            "name": "dry_run",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "merged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -3571,6 +3611,286 @@
       }
     },
     {
+      "family": "learning",
+      "id": 25,
+      "name": "collab_rule_approve",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Collaboration rules and their statuses are relational DB2 rows.",
+      "c_symbols": [
+        "db2_collab_rules_approve"
+      ],
+      "request": {
+        "policy": {
+          "writes": "only a proposed rule is approved, so approving one already active or rejected changes nothing and is acknowledged the same way"
+        },
+        "fields": [
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 26,
+      "name": "collab_rule_reject",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Collaboration rules and their statuses are relational DB2 rows.",
+      "c_symbols": [
+        "db2_collab_rules_reject"
+      ],
+      "request": {
+        "policy": {
+          "writes": "only a proposed rule is rejected, and this backend reports whether a row actually changed"
+        },
+        "fields": [
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "changed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 27,
+      "name": "collab_rule_retire",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Collaboration rules and their statuses are relational DB2 rows.",
+      "c_symbols": [
+        "db2_collab_rules_retire"
+      ],
+      "request": {
+        "policy": {
+          "writes": "only an active rule is retired, so a proposed rule cannot be retired without being approved first"
+        },
+        "fields": [
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 28,
+      "name": "proposal_bump_corroboration",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposals and their corroboration counts are relational DB2 rows.",
+      "c_symbols": [
+        "db2_learning_proposal_bump_corroboration"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the count is incremented by the statement and only while the proposal is pending, so a caller can neither set it nor read it back, and a committed proposal is not bumped"
+        },
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 29,
+      "name": "proposal_mark_committed",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposals, their states and commit stamps are relational DB2 rows.",
+      "c_symbols": [
+        "db2_learning_proposal_mark_committed"
+      ],
+      "request": {
+        "policy": {
+          "writes": "no condition on the current state, so a proposal already committed has its commit stamp overwritten with a later one"
+        },
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 30,
+      "name": "rules_delete_by_id",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rules are relational DB2 rows.",
+      "c_symbols": [
+        "db2_rules_delete"
+      ],
+      "request": {
+        "policy": {
+          "writes": "reports whether a row was removed, so an identifier naming nothing is distinguishable from a deletion"
+        },
+        "fields": [
+          {
+            "name": "rule_row_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 31,
+      "name": "calibration_surfaces_with_data",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events, the artifacts they judge and the surfaces they belong to are all relational DB2 rows.",
+      "c_symbols": [
+        "db2_calibration_surfaces_with_data"
+      ],
+      "request": {
+        "policy": {
+          "reads": "counts distinct surface, kind and scope groupings that have at least this many judged audit events, so the threshold changes what is counted rather than filtering the answer"
+        },
+        "fields": [
+          {
+            "name": "min_rows",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "surfaces",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -4610,6 +4930,46 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 22,
+      "name": "reset_stuck_vector_ops",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Both vector operation queues are relational DB2 state governing DB2's own vector rows.",
+      "c_symbols": [
+        "db2_kb_service_reset_stuck_vector_ops"
+      ],
+      "request": {
+        "policy": {
+          "writes": "resets two queues and reports their totals added together, so a caller cannot tell which queue the rows came from, and a failure in one is hidden by the other's count"
+        },
+        "fields": [
+          {
+            "name": "max_attempts",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "reset_rows",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
           }
         ]
       }

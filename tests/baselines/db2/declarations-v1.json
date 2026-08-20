@@ -4038,9 +4038,15 @@
           "line": 102
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.calibration_surfaces_with_data operation replaces the surface count. The threshold is inside the grouping rather than applied to the result, so it decides which groupings count as having data at all -- raising it does not filter a fixed set, it changes the set. Only events carrying a verdict are considered."
+      },
       "signature": "int db2_calibration_surfaces_with_data ( int min_rows )",
       "signature_sha256": "a9fe2ac3e5cc88dbbbfdb163202fb81ea4d1d49ccf580b3b7a4c78f0fb201c2b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_calibration_surfaces_with_data"
     },
     {
@@ -4950,9 +4956,15 @@
           "line": 16
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.collab_rule_approve operation replaces the approval. Only a rule still in the proposed state is touched, so approving one that was already rejected does nothing -- and unlike collab_rule_reject beside it, this backend does not report whether a row changed, so the caller cannot tell that from a successful approval. The two are otherwise identical statements, which is what makes the difference worth recording."
+      },
       "signature": "int db2_collab_rules_approve ( int rule_id )",
       "signature_sha256": "b6e9612570e57c9c81402a5306feee8aa83bc405a8932f07ada06653cfc4272c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_collab_rules_approve"
     },
     {
@@ -5076,9 +5088,15 @@
           "line": 17
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.collab_rule_reject operation replaces the rejection. Its statement is the mirror of approve's, but its backend checks whether a row changed and reports that, so a caller can tell that the rule was not in the proposed state. The reply carries it rather than a bare acknowledgement, because throwing that away would make the two operations look alike when they are not."
+      },
       "signature": "int db2_collab_rules_reject ( int rule_id )",
       "signature_sha256": "e0fbe128c23e6394ff61ea2f5bf23ab3a787b5d2acbaf77c2d02de26234ce052",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_collab_rules_reject"
     },
     {
@@ -5092,9 +5110,15 @@
           "line": 18
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.collab_rule_retire operation replaces the retirement. It touches only an active rule, so a proposed one cannot be retired without being approved first -- the state machine is in the statement rather than anywhere a caller can see, and the acknowledgement is the same whether the rule moved or not."
+      },
       "signature": "int db2_collab_rules_retire ( int rule_id )",
       "signature_sha256": "0010c23f48bfc35cf63272c6bb6a0d048f67043a1b0081da77165b1210f9f2e3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_collab_rules_retire"
     },
     {
@@ -13501,9 +13525,15 @@
           "line": 84
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.reset_stuck_vector_ops operation replaces the stuck-op reset. It resets two separate queues -- the memory and evidence vector ops, and the code-chunk ops -- and adds their counts, so a caller cannot tell which queue the rows came from. Worse, each half reports a negative on failure, so one failing while the other succeeds produces a smaller number rather than an error. That is the backend's arithmetic and is recorded here because the count looks ordinary."
+      },
       "signature": "int db2_kb_service_reset_stuck_vector_ops ( int max_attempts )",
       "signature_sha256": "3fbec45bcbe9fd945bae5bf2dc066d5660dfa30fe8bd775d56b40bae3d810df8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_reset_stuck_vector_ops"
     },
     {
@@ -14132,9 +14162,15 @@
           "line": 33
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposal_bump_corroboration operation replaces the corroboration bump. The count is incremented by the statement rather than supplied, so a caller records that a proposal was corroborated again without being able to set or read the total. Only a pending proposal is bumped, so corroborating one already committed does nothing."
+      },
       "signature": "int db2_learning_proposal_bump_corroboration ( int id )",
       "signature_sha256": "35b1d0df0c6e34d734cafcbe6a7ac8323c6fe18a58358078bcf679ac4084e9f1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposal_bump_corroboration"
     },
     {
@@ -14210,9 +14246,15 @@
           "line": 65
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposal_mark_committed operation replaces the commit write. Unlike the corroboration bump beside it there is no condition on the proposal's state, so committing one that was already committed overwrites its commit stamp with a later one -- which matters to anything reading when a proposal landed. Both stamps are DB2's clock."
+      },
       "signature": "int db2_learning_proposal_mark_committed ( int id )",
       "signature_sha256": "e5ec6071661411de9b9129e5d8267689b0976f27dd4240440f4e2d69a48d68b5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposal_mark_committed"
     },
     {
@@ -16339,9 +16381,15 @@
           "line": 685
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.dedupe_by_key operation replaces the deduplication pass. The flag decides whether it writes: a dry run counts the memories it would merge and changes nothing, so the same number means two entirely different things and a caller that loses track of which it asked for cannot recover it from the reply. Merging keeps the highest-confidence memory for each key and points the rest at it."
+      },
       "signature": "int db2_memory_dedupe_by_key ( int dry_run )",
       "signature_sha256": "23d3c4a65507b410bda4fa07e4826b9082f497d5107475e79de07cb32abdef6e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_dedupe_by_key"
     },
     {
@@ -21187,9 +21235,15 @@
           "line": 56
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.rules_delete_by_id operation replaces the rule deletion. Its backend reports whether a row was removed, so the reply carries that: an identifier naming no rule is distinguishable from a deletion that happened, which most of the writes in this batch cannot manage."
+      },
       "signature": "int db2_rules_delete ( int id )",
       "signature_sha256": "244874fbca46d0a3731daa92ab504faf347ae3037bfbfe767835541cbd29137b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_delete"
     },
     {
@@ -26754,15 +26808,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "342df830242ef0ff1369dda14b8f24db571fe8edb3f13e7267af70bc56c3e818",
+  "fingerprint": "e880559c80e75b7672cc7d8fb79e126cf2a3d50b37ddc75c491d73ab85160706",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 503,
+    "audit_pending": 494,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 455
+    "reviewed": 464
   }
 }

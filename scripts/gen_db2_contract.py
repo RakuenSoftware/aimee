@@ -12410,6 +12410,60 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_code_index_purge_files_matching",
         "policy": {"writes": 200},
     },
+    "collab_rule_approve": {
+        "key": ("learning", 25),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_collab_rules_approve",
+        "policy": {"writes": 200},
+    },
+    "collab_rule_reject": {
+        "key": ("learning", 26),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_collab_rules_reject",
+        "policy": {"writes": 200},
+    },
+    "collab_rule_retire": {
+        "key": ("learning", 27),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_collab_rules_retire",
+        "policy": {"writes": 200},
+    },
+    "proposal_bump_corroboration": {
+        "key": ("learning", 28),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_learning_proposal_bump_corroboration",
+        "policy": {"writes": 200},
+    },
+    "proposal_mark_committed": {
+        "key": ("learning", 29),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_learning_proposal_mark_committed",
+        "policy": {"writes": 200},
+    },
+    "rules_delete_by_id": {
+        "key": ("learning", 30),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_delete",
+        "policy": {"writes": 200},
+    },
+    "calibration_surfaces_with_data": {
+        "key": ("learning", 31),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_calibration_surfaces_with_data",
+        "policy": {"reads": 200},
+    },
+    "reset_stuck_vector_ops": {
+        "key": ("maintenance", 22),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_reset_stuck_vector_ops",
+        "policy": {"writes": 200},
+    },
+    "dedupe_by_key": {
+        "key": ("memory", 65),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_dedupe_by_key",
+        "policy": {"writes": 200},
+    },
 }
 
 
