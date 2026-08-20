@@ -81,7 +81,19 @@ int db2_entity_edge_upsert(const char *source, const char *relation, const char 
           " relation_id, subject_kind, object_kind)"
           " VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7)"
           " ON CONFLICT (source, relation, target)"
-          " DO UPDATE SET weight = entity_edges.weight + 1";
+          /* Same R1-A1 guard the slow path below carries, and it is needed MORE
+           * here: the unique index is on the bare triple, so a semantic row and a
+           * co-occurrence row for one triple cannot coexist and the conflict
+           * lands on whichever exists. Without this WHERE, a co-occurrence
+           * observation bumps a typed fact's weight -- and on a semantic edge
+           * weight is a CONFIRMATION COUNT that §5 keys on (promote_durable
+           * weight>=threshold, expire_speculative weight<=1), so "these two words
+           * appeared together" would count as the user re-asserting the fact.
+           * DO UPDATE with a false WHERE degrades to DO NOTHING, which is the
+           * right outcome: the co-occurrence observation is dropped rather than
+           * corrupting the fact. */
+          " DO UPDATE SET weight = entity_edges.weight + 1"
+          " WHERE entity_edges.edge_class <> 'semantic'";
       char err[EE_ERRBUF] = "";
       aimee_pg_stmt_t *st = aimee_pg_prepare(conn, upsert_sql, err, sizeof(err));
       if (!st)
@@ -777,15 +789,29 @@ int db2_entity_edge_normalize_weights(void)
    void *conn = db2_conn();
    if (!conn)
       return 0;
+   /* Rescaling is a CO-OCCURRENCE concern. There, weight is an observation
+    * tally whose absolute size means nothing, so normalising it per relation
+    * makes edges comparable. On a semantic edge weight is a confirmation count
+    * with meaning, and §5 reads it as one: promote_durable fires at
+    * weight >= threshold, expire_speculative at weight <= 1. Rescaling breaks
+    * both. A Class B fact asserted ONCE, sharing a relation with an edge of
+    * weight 5, is rescaled to 20 and promoted to durable on the next cycle --
+    * durability earned by an unrelated edge's name. And once nothing sits at
+    * weight 1 any more, Class C speculation stops expiring entirely. Those are
+    * the exact two outcomes §5 exists to prevent, so semantic rows are left
+    * alone. */
    static const char *sql = "UPDATE entity_edges SET weight = "
                             " CAST(weight * 100.0 / "
                             "  (SELECT MAX(weight) FROM entity_edges e2"
-                            "   WHERE e2.relation = entity_edges.relation)"
+                            "   WHERE e2.relation = entity_edges.relation"
+                            "     AND e2.edge_class <> 'semantic')"
                             " AS INTEGER)"
                             " WHERE weight > 0"
+                            " AND edge_class <> 'semantic'"
                             " AND COALESCE(edge_origin, '') != 'code_projection'"
                             " AND (SELECT MAX(weight) FROM entity_edges e2"
-                            "      WHERE e2.relation = entity_edges.relation) > 1"
+                            "      WHERE e2.relation = entity_edges.relation"
+                            "        AND e2.edge_class <> 'semantic') > 1"
                             /* Skip rows that are already at their normalized value.
                              * Without this the pass rewrites every edge to the value
                              * it already holds on each run — measured: 2 of 2 rows on
@@ -794,7 +820,8 @@ int db2_entity_edge_normalize_weights(void)
                              * idle graph would burn WAL and bump updated_at forever. */
                             " AND weight <> CAST(weight * 100.0 /"
                             "  (SELECT MAX(weight) FROM entity_edges e2"
-                            "   WHERE e2.relation = entity_edges.relation) AS INTEGER)";
+                            "   WHERE e2.relation = entity_edges.relation"
+                            "     AND e2.edge_class <> 'semantic') AS INTEGER)";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

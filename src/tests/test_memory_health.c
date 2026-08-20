@@ -444,6 +444,85 @@ int main(void)
       assert(aimee_pg_column_int(st, 0) == 3);
       aimee_pg_finalize(st);
       printf("semantic_survives_prune OK ");
+
+      /* Weight normalisation must not touch typed facts either. The same cycle
+       * that runs the lifecycle jobs also rescales edge weights per relation so
+       * the maximum is 100 -- which is meaningful for a co-occurrence tally and
+       * destructive for a semantic edge, where weight IS the confirmation count
+       * the §5 thresholds read (promote_durable weight>=threshold,
+       * expire_speculative weight<=1).
+       *
+       * Give 'works_for' a co-occurrence edge heavy enough to set the scale.
+       * Before the fix, lifecycle-b (weight 5) was rescaled and the Class A row
+       * went 1 -> 20, which on the next cycle is "confirmed 20 times". */
+      insert_semantic_edge("norm-a", "works_for", "norm-corp", "A", 1.0, 1, "2026-01-01 00:00:00");
+      {
+         char qerr2[128] = "";
+         aimee_pg_stmt_t *ins = aimee_pg_prepare(
+             db2_conn(),
+             "INSERT INTO entity_edges (source, relation, target, weight, edge_class)"
+             " VALUES ('norm-cooccur', 'works_for', 'norm-other', 50, 'cooccurrence')",
+             qerr2, sizeof(qerr2));
+         assert(ins);
+         assert(aimee_pg_step(ins, qerr2, sizeof(qerr2)) == AIMEE_PG_DONE);
+         aimee_pg_finalize(ins);
+      }
+
+      int p2 = 0, d2 = 0, e2 = 0;
+      memory_run_maintenance(&p2, &d2, &e2);
+
+      /* The typed facts keep their real counts; only the co-occurrence edge is
+       * rescaled. Asserting the exact values, because "unchanged" is the whole
+       * point -- an off-by-scaling here silently re-dates every fact's
+       * confirmation history. */
+      char qerr3[128] = "";
+      aimee_pg_stmt_t *w = aimee_pg_prepare(db2_conn(),
+                                            "SELECT weight FROM entity_edges"
+                                            " WHERE source = ?1 AND relation = 'works_for'",
+                                            qerr3, sizeof(qerr3));
+      assert(w);
+      aimee_pg_bind_text(w, "?1", "norm-a");
+      assert(aimee_pg_step(w, qerr3, sizeof(qerr3)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(w, 0) == 1); /* Class A still asserted once */
+      aimee_pg_finalize(w);
+
+      semantic_edge_state("lifecycle-b", "works_for", superseded, sizeof(superseded), &confidence);
+      w = aimee_pg_prepare(db2_conn(),
+                           "SELECT weight FROM entity_edges WHERE source = 'lifecycle-b'", qerr3,
+                           sizeof(qerr3));
+      assert(w);
+      assert(aimee_pg_step(w, qerr3, sizeof(qerr3)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(w, 0) == 5); /* still five confirmations, not 100 */
+      aimee_pg_finalize(w);
+      printf("semantic_weight_not_normalised OK ");
+   }
+
+   /* --- a co-occurrence observation must not bump a typed fact's weight ---
+    *
+    * The unique index is on the bare (source, relation, target) triple, so a
+    * semantic row and a co-occurrence row for one triple cannot coexist and the
+    * upsert's ON CONFLICT lands on whichever is there. Without a guard, "these
+    * two words appeared in the same session" increments the confirmation count
+    * that §5 uses to grant durability. */
+   {
+      insert_semantic_edge("share-src", "works_for", "share-tgt", "B", 0.6, 1,
+                           "2026-01-01 00:00:00");
+      int added = -1;
+      /* Same triple, via the co-occurrence writer. */
+      assert(db2_entity_edge_upsert("share-src", "works_for", "share-tgt", 0, 0, 0, 0, &added) ==
+             0);
+
+      char qerr[128] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(),
+                                             "SELECT weight, edge_class FROM entity_edges"
+                                             " WHERE source = 'share-src'",
+                                             qerr, sizeof(qerr));
+      assert(st);
+      assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(st, 0) == 1); /* NOT bumped to 2 */
+      assert(strcmp(aimee_pg_column_text(st, 1), "semantic") == 0);
+      aimee_pg_finalize(st);
+      printf("cooccurrence_does_not_bump_fact OK ");
    }
 
    db1_shutdown();

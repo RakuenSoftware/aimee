@@ -7721,6 +7721,7 @@
         "src/modules/memory/memory_graph.c",
         "src/tests/test_graph_fusion.c",
         "src/tests/test_index.c",
+        "src/tests/test_memory_health.c",
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
@@ -25844,7 +25845,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a67b3206142899f7ede526622d0479dcf2363d570c8a46b99dfaa1b93ed88aa8",
+  "fingerprint": "637bee6796f78d3787a1e2a090f4907aeb2b67f5928932f055a3fc5eb17c9b7d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
