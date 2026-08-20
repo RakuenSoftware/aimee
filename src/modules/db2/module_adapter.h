@@ -209,6 +209,12 @@ typedef struct
    const char *(*embedder_serving_id)(void);
    int (*dimension_reset)(uint32_t target_dimension, uint32_t force, uint32_t dry_run,
                           aimee_db2_dimension_reset_t *status);
+   int (*bandit_arms_list)(const char *decision_point, char *arms, size_t capacity);
+   int (*bandit_promotion_get)(const char *decision_point, char *arm_id, size_t capacity);
+   int (*project_fingerprint)(const char *project, char *fingerprint, size_t capacity);
+   int (*visible_source_hash)(const char *project, char *source_hash, size_t capacity);
+   int (*entity_profile_card)(const char *entity_id, char *card_json, size_t capacity);
+   int (*ontology_eval_status)(const char *rel_type, char *status, size_t capacity);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

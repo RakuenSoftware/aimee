@@ -180,6 +180,22 @@
       "reason": "The typed learning.artifact_stamp_reflected operation replaces the reflection stamp. The time written is DB2's own clock and never crosses, so a caller can record that an artifact was reflected on but not when. An identifier naming nothing updates no row and is acknowledged the same as one that did, which the wire cannot show."
     },
     {
+      "symbol": "db2_bandit_arms_list",
+      "signature_sha256": "7aa8a96866d304f3bef2b0441c21477c9d20725b7f97795b677d89925e9a80b5",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.bandit_arms_list operation replaces the arm listing. The backend joins the distinct arm identifiers into one value with newlines between them, so what crosses is a document a caller has to parse -- and an arm identifier containing a newline would read back as two arms. That is the backend's format, not this boundary's, and it is recorded because the wire carries one string either way."
+    },
+    {
+      "symbol": "db2_bandit_promotion_get",
+      "signature_sha256": "3e2d84391a2d9777ba7b863c1ee57cdea9b00eae9e6c4983c18100b13906de28",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.bandit_promotion_get operation replaces the promotion read. A decision point with no promoted arm reads back as the empty string, which is also what a promotion recorded as empty would look like; the operation has one result and cannot separate them. A caller treating empty as \"no promotion\" is right in practice and wrong in principle, which is worth saying once here."
+    },
+    {
       "symbol": "db2_calibration_profile_read",
       "signature_sha256": "09fd9b5b0790dea3a0610b8dda7fc523d8afd38d972b402183476df37c607c46",
       "disposition": "private-db2",
@@ -234,6 +250,22 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.requeue_drifted operation replaces the maintenance enqueue that re-ingests projects whose files have drifted. The forced re-ingest, the status the new rows carry and the pending-or-running dedup are fixed policy: without the dedup a repeated sweep would pile duplicate work onto the ingest drain, and the operation could not claim safe idempotency."
+    },
+    {
+      "symbol": "db2_code_projection_project_fingerprint",
+      "signature_sha256": "38a9655ba772d8e8079d09264d5e0fd771ff3fe8e0a11281c01878f5220243fa",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.project_fingerprint operation replaces the fingerprint read. The value is an md5 DB2 computes over the file paths and hashes of the project's current generation, so it is a summary of that generation rather than an identifier: it changes when the generation does, and comparing one project's fingerprint against another's is meaningless. A project with no files fingerprints the empty string rather than failing."
+    },
+    {
+      "symbol": "db2_code_projection_visible_source_hash",
+      "signature_sha256": "566b5105b3add580a1f29df849a04fd96794741713ed1cfe0ff03fc545bec9cc",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.visible_source_hash operation replaces the visible-generation read. Only a generation in the visible state is considered, so a project whose generations are all still pending reads back empty rather than reporting the newest one -- which is the behaviour a caller wants and cannot infer from an empty string alone."
     },
     {
       "symbol": "db2_conn",
@@ -426,6 +458,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The symbol counterpart of the file key builder, and private for the same reason. Both encode their components the same way and both must stay that way; a divergence produces keys that look valid and match nothing."
+    },
+    {
+      "symbol": "db2_entity_profile_get_card",
+      "signature_sha256": "1ce87ea1c2bab7d6ea8a967d4badf61070621e466d4fef755dec49035bd0a29c",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_profile_card operation replaces the card read. The entity is matched case-insensitively, and the card crosses as whatever JSON DB2 has stored: this boundary bounds its length and refuses an embedded NUL, and does not parse it. A caller receiving malformed JSON is receiving what was written, which is the honest behaviour but not an obvious one."
     },
     {
       "symbol": "db2_entity_profile_is_fresh",
@@ -2770,6 +2810,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.mining_seed_job_defaults operation registers the mining jobs and their schedules on first run. The job list and intervals are fixed policy, and so is the do-nothing conflict rule: it is what keeps a seed pass from overwriting an interval an operator has since tuned. This operation reports success or failure and no count, because the number it could report would be the seeds attempted rather than the rows created."
+    },
+    {
+      "symbol": "db2_ontology_eval_status",
+      "signature_sha256": "8a093cf8d1dca2e86eed604e3813133ef4a72e55bce62640e24a0a593fbc7c77",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.ontology_eval_status operation replaces the evaluation status read. A relation type that has never been evaluated reads back as the empty string, and because no recorded status is empty, that is a usable signal rather than an ambiguity -- unlike the other string reads in this batch, which is why it is worth stating the difference."
     },
     {
       "symbol": "db2_pg_stat_summary",

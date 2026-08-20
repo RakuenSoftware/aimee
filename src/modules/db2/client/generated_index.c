@@ -313,3 +313,87 @@ aimee_db2_entity_profile_fresh_call(aimee_db2_call_fn call, void *call_context, 
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_project_fingerprint_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *project, char *fingerprint,
+                                   size_t fingerprint_capacity, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROJECT_FINGERPRINT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_PROJECT_FINGERPRINT_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_project_fingerprint_request_encode(project, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROJECT_FINGERPRINT, AIMEE_DB2_STAGE_PROJECT_FINGERPRINT,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_project_fingerprint_reply_decode(response, response_len, fingerprint,
+                                                  fingerprint_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_visible_source_hash_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *project, char *source_hash,
+                                   size_t source_hash_capacity, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_VISIBLE_SOURCE_HASH_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_VISIBLE_SOURCE_HASH_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_visible_source_hash_request_encode(project, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_VISIBLE_SOURCE_HASH, AIMEE_DB2_STAGE_VISIBLE_SOURCE_HASH,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_visible_source_hash_reply_decode(response, response_len, source_hash,
+                                                  source_hash_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_entity_profile_card_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *entity_id, char *card_json,
+                                   size_t card_json_capacity, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ENTITY_PROFILE_CARD_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ENTITY_PROFILE_CARD_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_entity_profile_card_request_encode(entity_id, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENTITY_PROFILE_CARD, AIMEE_DB2_STAGE_ENTITY_PROFILE_CARD,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_entity_profile_card_reply_decode(response, response_len, card_json,
+                                                  card_json_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}

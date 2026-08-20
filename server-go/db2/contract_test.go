@@ -222,6 +222,8 @@ type wireBaseline struct {
 			ContradictionRetentionDays uint32   `json:"contradiction_retention_days"`
 			PromoteUseCount            uint32   `json:"promote_use_count"`
 			PromoteConfidenceBits      uint64   `json:"promote_confidence_bits"`
+			DecisionPoint              string   `json:"decision_point"`
+			RelType                    string   `json:"rel_type"`
 			Negative                   []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -337,7 +339,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 139 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 145 ||
+		baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -422,60 +425,66 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[82].Name != "file_index_delete_project" ||
 		baseline.Operations[83].Name != "entity_observation_count" ||
 		baseline.Operations[84].Name != "entity_profile_fresh" ||
-		baseline.Operations[85].Name != "rules_decay" ||
-		baseline.Operations[86].Name != "curiosity_rescore_all" ||
-		baseline.Operations[87].Name != "mining_seed_job_defaults" ||
-		baseline.Operations[88].Name != "proposals_archive_expired" ||
-		baseline.Operations[89].Name != "trace_mining_last_id" ||
-		baseline.Operations[90].Name != "anti_pattern_bump" ||
-		baseline.Operations[91].Name != "anti_pattern_delete" ||
-		baseline.Operations[92].Name != "trace_mining_record" ||
-		baseline.Operations[93].Name != "anti_pattern_exists_exact" ||
-		baseline.Operations[94].Name != "anti_pattern_exists_by_source_ref" ||
-		baseline.Operations[95].Name != "artifact_citation_count" ||
-		baseline.Operations[96].Name != "commits_in_last_7_days" ||
-		baseline.Operations[97].Name != "fidelity_attribution_count" ||
-		baseline.Operations[99].Name != "failed_query_bump" ||
-		baseline.Operations[103].Name != "evidence_mark_failed" ||
-		baseline.Operations[104].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[105].Name != "doc_delete" ||
-		baseline.Operations[106].Name != "task_delete" ||
-		baseline.Operations[107].Name != "clear_project" ||
-		baseline.Operations[108].Name != "clear_current_project" ||
-		baseline.Operations[109].Name != "document_exists" ||
-		baseline.Operations[110].Name != "blob_referenced" ||
-		baseline.Operations[111].Name != "fence_active" ||
-		baseline.Operations[114].Name != "pdf_quarantine_reject" ||
-		baseline.Operations[115].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[116].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[117].Name != "release_get_active" ||
-		baseline.Operations[118].Name != "enrollment_active" ||
-		baseline.Operations[119].Name != "prospective_sweep_expired" ||
-		baseline.Operations[120].Name != "directive_sweep_expired" ||
-		baseline.Operations[121].Name != "mark_revisit_due" ||
-		baseline.Operations[122].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[123].Name != "evidence_reembed_all" ||
-		baseline.Operations[124].Name != "curator_reembed_all" ||
-		baseline.Operations[125].Name != "synth_reenqueue_all" ||
-		baseline.Operations[126].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[127].Name != "directive_suppress" ||
-		baseline.Operations[128].Name != "directive_record_surface" ||
-		baseline.Operations[129].Name != "async_pending_count" ||
-		baseline.Operations[98].Name != "artifact_stamp_reflected" ||
-		baseline.Operations[130].Name != "runtime_state_touch" ||
-		baseline.Operations[131].Name != "synth_enqueue" ||
-		baseline.Operations[132].Name != "synth_mark_done" ||
-		baseline.Operations[133].Name != "reembed_mark_finished" ||
-		baseline.Operations[134].Name != "mining_job_try_lock" ||
-		baseline.Operations[100].Name != "artifact_set_state" ||
-		baseline.Operations[101].Name != "artifact_register_exemplar" ||
-		baseline.Operations[102].Name != "evidence_enqueue" ||
-		baseline.Operations[135].Name != "synth_mark_failed" ||
-		baseline.Operations[136].Name != "runtime_state_set" ||
-		baseline.Operations[137].Name != "set_active_embedder_version" ||
-		baseline.Operations[112].Name != "doc_exists_by_hash" ||
-		baseline.Operations[113].Name != "pdf_quarantine_confirm" ||
-		baseline.Operations[138].Name != "runtime_state_get" {
+		baseline.Operations[85].Name != "project_fingerprint" ||
+		baseline.Operations[86].Name != "visible_source_hash" ||
+		baseline.Operations[87].Name != "entity_profile_card" ||
+		baseline.Operations[88].Name != "rules_decay" ||
+		baseline.Operations[89].Name != "curiosity_rescore_all" ||
+		baseline.Operations[90].Name != "mining_seed_job_defaults" ||
+		baseline.Operations[91].Name != "proposals_archive_expired" ||
+		baseline.Operations[92].Name != "trace_mining_last_id" ||
+		baseline.Operations[93].Name != "anti_pattern_bump" ||
+		baseline.Operations[94].Name != "anti_pattern_delete" ||
+		baseline.Operations[95].Name != "trace_mining_record" ||
+		baseline.Operations[96].Name != "anti_pattern_exists_exact" ||
+		baseline.Operations[97].Name != "anti_pattern_exists_by_source_ref" ||
+		baseline.Operations[98].Name != "artifact_citation_count" ||
+		baseline.Operations[99].Name != "commits_in_last_7_days" ||
+		baseline.Operations[100].Name != "fidelity_attribution_count" ||
+		baseline.Operations[101].Name != "artifact_stamp_reflected" ||
+		baseline.Operations[102].Name != "failed_query_bump" ||
+		baseline.Operations[103].Name != "artifact_set_state" ||
+		baseline.Operations[104].Name != "artifact_register_exemplar" ||
+		baseline.Operations[105].Name != "evidence_enqueue" ||
+		baseline.Operations[106].Name != "evidence_mark_failed" ||
+		baseline.Operations[107].Name != "bandit_arms_list" ||
+		baseline.Operations[108].Name != "bandit_promotion_get" ||
+		baseline.Operations[109].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[110].Name != "doc_delete" ||
+		baseline.Operations[111].Name != "task_delete" ||
+		baseline.Operations[112].Name != "clear_project" ||
+		baseline.Operations[113].Name != "clear_current_project" ||
+		baseline.Operations[114].Name != "document_exists" ||
+		baseline.Operations[115].Name != "blob_referenced" ||
+		baseline.Operations[116].Name != "fence_active" ||
+		baseline.Operations[117].Name != "doc_exists_by_hash" ||
+		baseline.Operations[118].Name != "pdf_quarantine_confirm" ||
+		baseline.Operations[119].Name != "pdf_quarantine_reject" ||
+		baseline.Operations[120].Name != "ontology_eval_status" ||
+		baseline.Operations[121].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[122].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[123].Name != "release_get_active" ||
+		baseline.Operations[124].Name != "enrollment_active" ||
+		baseline.Operations[125].Name != "prospective_sweep_expired" ||
+		baseline.Operations[126].Name != "directive_sweep_expired" ||
+		baseline.Operations[127].Name != "mark_revisit_due" ||
+		baseline.Operations[128].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[129].Name != "evidence_reembed_all" ||
+		baseline.Operations[130].Name != "curator_reembed_all" ||
+		baseline.Operations[131].Name != "synth_reenqueue_all" ||
+		baseline.Operations[132].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[133].Name != "directive_suppress" ||
+		baseline.Operations[134].Name != "directive_record_surface" ||
+		baseline.Operations[135].Name != "async_pending_count" ||
+		baseline.Operations[136].Name != "runtime_state_touch" ||
+		baseline.Operations[137].Name != "synth_enqueue" ||
+		baseline.Operations[138].Name != "synth_mark_done" ||
+		baseline.Operations[139].Name != "reembed_mark_finished" ||
+		baseline.Operations[140].Name != "mining_job_try_lock" ||
+		baseline.Operations[141].Name != "synth_mark_failed" ||
+		baseline.Operations[142].Name != "runtime_state_set" ||
+		baseline.Operations[143].Name != "set_active_embedder_version" ||
+		baseline.Operations[144].Name != "runtime_state_get" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -718,7 +727,7 @@ func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
 
 func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	operation := baseline.Operations[125]
+	operation := baseline.Operations[operationIndex(t, "synth_reenqueue_all")]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -1028,13 +1037,13 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 		decode func([]byte) (uint64, error)
 		reply  func([]byte) error
 	}{
-		{90, "anti_pattern_bump", "learning", 41,
+		{operationIndex(t, "anti_pattern_bump"), "anti_pattern_bump", "learning", 41,
 			EncodeAntiPatternBumpRequest, DecodeAntiPatternBumpRequest, DecodeAntiPatternBumpReply},
-		{91, "anti_pattern_delete", "learning", 42,
+		{operationIndex(t, "anti_pattern_delete"), "anti_pattern_delete", "learning", 42,
 			EncodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteReply},
-		{105, "doc_delete", "organization", 43,
+		{operationIndex(t, "doc_delete"), "doc_delete", "organization", 43,
 			EncodeDocDeleteRequest, DecodeDocDeleteRequest, DecodeDocDeleteReply},
-		{106, "task_delete", "organization", 44,
+		{operationIndex(t, "task_delete"), "task_delete", "organization", 44,
 			EncodeTaskDeleteRequest, DecodeTaskDeleteRequest, DecodeTaskDeleteReply},
 	} {
 		entry := baseline.Operations[operation.index]
@@ -1068,8 +1077,8 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 
 func TestDirectiveIDOperationsMatchEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	suppress := baseline.Operations[127]
-	surface := baseline.Operations[128]
+	suppress := baseline.Operations[operationIndex(t, "directive_suppress")]
+	surface := baseline.Operations[operationIndex(t, "directive_record_surface")]
 	if suppress.Family != "maintenance" || surface.Family != "maintenance" {
 		t.Fatalf("families = %q/%q, want maintenance", suppress.Family, surface.Family)
 	}
@@ -1241,8 +1250,8 @@ func TestReleaseGetActiveMatchesEverySharedCVector(t *testing.T) {
 
 func TestVectorRebuildLockMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	acquire := baseline.Operations[115]
-	release := baseline.Operations[116]
+	acquire := baseline.Operations[operationIndex(t, "vector_rebuild_lock_try_acquire")]
+	release := baseline.Operations[operationIndex(t, "vector_rebuild_lock_release")]
 	if acquire.Family != "custody" || release.Family != "custody" {
 		t.Fatalf("families = %q/%q, want custody", acquire.Family, release.Family)
 	}
@@ -2837,6 +2846,114 @@ func TestRuntimeStateGetMatchesEverySharedCVector(t *testing.T) {
 	}
 	for _, vector := range operation.Request.Negative {
 		if _, err := DecodeRuntimeStateGetRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestProjectFingerprintMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "project_fingerprint")]
+
+	request, err := EncodeProjectFingerprintRequest(operation.Request.Project)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	project, err := DecodeProjectFingerprintRequest(request)
+	if err != nil || project != operation.Request.Project {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeProjectFingerprintRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestVisibleSourceHashMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "visible_source_hash")]
+
+	request, err := EncodeVisibleSourceHashRequest(operation.Request.Project)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	project, err := DecodeVisibleSourceHashRequest(request)
+	if err != nil || project != operation.Request.Project {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeVisibleSourceHashRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestEntityProfileCardMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "entity_profile_card")]
+
+	request, err := EncodeEntityProfileCardRequest(operation.Request.EntityID)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	entityID, err := DecodeEntityProfileCardRequest(request)
+	if err != nil || entityID != operation.Request.EntityID {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeEntityProfileCardRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestBanditArmsListMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "bandit_arms_list")]
+
+	request, err := EncodeBanditArmsListRequest(operation.Request.DecisionPoint)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	decisionPoint, err := DecodeBanditArmsListRequest(request)
+	if err != nil || decisionPoint != operation.Request.DecisionPoint {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeBanditArmsListRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestBanditPromotionGetMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "bandit_promotion_get")]
+
+	request, err := EncodeBanditPromotionGetRequest(operation.Request.DecisionPoint)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	decisionPoint, err := DecodeBanditPromotionGetRequest(request)
+	if err != nil || decisionPoint != operation.Request.DecisionPoint {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeBanditPromotionGetRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestOntologyEvalStatusMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "ontology_eval_status")]
+
+	request, err := EncodeOntologyEvalStatusRequest(operation.Request.RelType)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	relType, err := DecodeOntologyEvalStatusRequest(request)
+	if err != nil || relType != operation.Request.RelType {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeOntologyEvalStatusRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}

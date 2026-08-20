@@ -2503,6 +2503,126 @@
       }
     },
     {
+      "family": "index",
+      "id": 14,
+      "name": "project_fingerprint",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Files, their hashes and the generation they belong to are relational DB2 rows, so summarising them stays DB2 authority.",
+      "c_symbols": [
+        "db2_code_projection_project_fingerprint"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the fingerprint is an md5 DB2 computes over the project's current generation, so it changes when that generation does and cannot be compared across projects"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "fingerprint",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 15,
+      "name": "visible_source_hash",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projection generations and their states are relational DB2 rows, so which one is visible is DB2 authority.",
+      "c_symbols": [
+        "db2_code_projection_visible_source_hash"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only a generation in the visible state is read, so a project whose generations are all pending reads back empty rather than reporting the newest"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "source_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 16,
+      "name": "entity_profile_card",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity profiles and the cards computed for them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_profile_get_card"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the entity is matched case-insensitively, and the card crosses as the JSON document DB2 stored without being parsed or validated on the way"
+        },
+        "fields": [
+          {
+            "name": "entity_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "card_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -3003,6 +3123,86 @@
       }
     },
     {
+      "family": "learning",
+      "id": 20,
+      "name": "bandit_arms_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Bandit decisions and the arms they name are relational DB2 rows, so enumerating a decision point's arms is DB2 authority.",
+      "c_symbols": [
+        "db2_bandit_arms_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the arms are joined into one newline-separated value by the backend, so a caller parses rather than iterates, and an arm identifier containing a newline would be indistinguishable from two arms"
+        },
+        "fields": [
+          {
+            "name": "decision_point",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "arms",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 2047
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 21,
+      "name": "bandit_promotion_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Promoted arms are relational DB2 rows keyed by decision point, so which arm is promoted is DB2 authority.",
+      "c_symbols": [
+        "db2_bandit_promotion_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a decision point with no promoted arm reads back empty, so a caller cannot tell that from a promotion recorded as the empty string"
+        },
+        "fields": [
+          {
+            "name": "decision_point",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "arm_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -3292,6 +3492,46 @@
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
         "field": {"name": "rejected", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
+      "family": "organization",
+      "id": 12,
+      "name": "ontology_eval_status",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ontology evaluations and their statuses are relational DB2 rows.",
+      "c_symbols": [
+        "db2_ontology_eval_status"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a relation type with no evaluation reads back empty, which is distinct from every status the evaluation table records"
+        },
+        "fields": [
+          {
+            "name": "rel_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "status",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
       }
     },
     {

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "0c1b97e821a97fddf5502ba96bb66f46ca8c44910728bcbd61acdb307d96212c"
+const ContractSHA256 = "8299cb9e99309f5e6a29765f13b8677f6331d420390f0daffbfdf7a1373867c1"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -724,6 +724,135 @@ func DecodeEntityProfileFreshReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return value, nil
+}
+
+const EventProjectFingerprint = EventIndex
+const StageProjectFingerprint = FamilyIndex
+const OperationProjectFingerprint uint32 = 14
+const ProjectFingerprintProjectMin = 1
+const ProjectFingerprintProjectMax = 255
+
+// EncodeProjectFingerprintRequest writes the schema project_fingerprint declares, in order.
+func EncodeProjectFingerprintRequest(project string) ([]byte, error) {
+	if len(project) < ProjectFingerprintProjectMin || len(project) > ProjectFingerprintProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, ProjectFingerprintProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProjectFingerprint, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectFingerprintRequest reads it back, checking each field against its own bound.
+func DecodeProjectFingerprintRequest(request []byte) (string, error) {
+	var project string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectFingerprint || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, ProjectFingerprintProjectMax); err != nil ||
+		len(project) < ProjectFingerprintProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return project, nil
+}
+
+const EventVisibleSourceHash = EventIndex
+const StageVisibleSourceHash = FamilyIndex
+const OperationVisibleSourceHash uint32 = 15
+const VisibleSourceHashProjectMin = 1
+const VisibleSourceHashProjectMax = 255
+
+// EncodeVisibleSourceHashRequest writes the schema visible_source_hash declares, in order.
+func EncodeVisibleSourceHashRequest(project string) ([]byte, error) {
+	if len(project) < VisibleSourceHashProjectMin || len(project) > VisibleSourceHashProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, VisibleSourceHashProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationVisibleSourceHash, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeVisibleSourceHashRequest reads it back, checking each field against its own bound.
+func DecodeVisibleSourceHashRequest(request []byte) (string, error) {
+	var project string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationVisibleSourceHash || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, VisibleSourceHashProjectMax); err != nil ||
+		len(project) < VisibleSourceHashProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return project, nil
+}
+
+const EventEntityProfileCard = EventIndex
+const StageEntityProfileCard = FamilyIndex
+const OperationEntityProfileCard uint32 = 16
+const EntityProfileCardEntityIDMin = 1
+const EntityProfileCardEntityIDMax = 255
+
+// EncodeEntityProfileCardRequest writes the schema entity_profile_card declares, in order.
+func EncodeEntityProfileCardRequest(entityID string) ([]byte, error) {
+	if len(entityID) < EntityProfileCardEntityIDMin || len(entityID) > EntityProfileCardEntityIDMax || hasNUL(entityID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entityID, EntityProfileCardEntityIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityProfileCard, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityProfileCardRequest reads it back, checking each field against its own bound.
+func DecodeEntityProfileCardRequest(request []byte) (string, error) {
+	var entityID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityProfileCard || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entityID, err = takeRowText(payload, &cursor, EntityProfileCardEntityIDMax); err != nil ||
+		len(entityID) < EntityProfileCardEntityIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return entityID, nil
 }
 
 const EventTraceMiningRecord = EventLearning
@@ -1531,6 +1660,92 @@ func DecodeEvidenceMarkFailedReply(reply []byte) error {
 	return nil
 }
 
+const EventBanditArmsList = EventLearning
+const StageBanditArmsList = FamilyLearning
+const OperationBanditArmsList uint32 = 20
+const BanditArmsListDecisionPointMin = 1
+const BanditArmsListDecisionPointMax = 127
+
+// EncodeBanditArmsListRequest writes the schema bandit_arms_list declares, in order.
+func EncodeBanditArmsListRequest(decisionPoint string) ([]byte, error) {
+	if len(decisionPoint) < BanditArmsListDecisionPointMin || len(decisionPoint) > BanditArmsListDecisionPointMax || hasNUL(decisionPoint) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionPoint, BanditArmsListDecisionPointMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationBanditArmsList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditArmsListRequest reads it back, checking each field against its own bound.
+func DecodeBanditArmsListRequest(request []byte) (string, error) {
+	var decisionPoint string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditArmsList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionPoint, err = takeRowText(payload, &cursor, BanditArmsListDecisionPointMax); err != nil ||
+		len(decisionPoint) < BanditArmsListDecisionPointMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return decisionPoint, nil
+}
+
+const EventBanditPromotionGet = EventLearning
+const StageBanditPromotionGet = FamilyLearning
+const OperationBanditPromotionGet uint32 = 21
+const BanditPromotionGetDecisionPointMin = 1
+const BanditPromotionGetDecisionPointMax = 127
+
+// EncodeBanditPromotionGetRequest writes the schema bandit_promotion_get declares, in order.
+func EncodeBanditPromotionGetRequest(decisionPoint string) ([]byte, error) {
+	if len(decisionPoint) < BanditPromotionGetDecisionPointMin || len(decisionPoint) > BanditPromotionGetDecisionPointMax || hasNUL(decisionPoint) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionPoint, BanditPromotionGetDecisionPointMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationBanditPromotionGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditPromotionGetRequest reads it back, checking each field against its own bound.
+func DecodeBanditPromotionGetRequest(request []byte) (string, error) {
+	var decisionPoint string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditPromotionGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionPoint, err = takeRowText(payload, &cursor, BanditPromotionGetDecisionPointMax); err != nil ||
+		len(decisionPoint) < BanditPromotionGetDecisionPointMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return decisionPoint, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -1972,6 +2187,49 @@ func DecodePdfQuarantineRejectReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return value, nil
+}
+
+const EventOntologyEvalStatus = EventOrganization
+const StageOntologyEvalStatus = FamilyOrganization
+const OperationOntologyEvalStatus uint32 = 12
+const OntologyEvalStatusRelTypeMin = 1
+const OntologyEvalStatusRelTypeMax = 127
+
+// EncodeOntologyEvalStatusRequest writes the schema ontology_eval_status declares, in order.
+func EncodeOntologyEvalStatusRequest(relType string) ([]byte, error) {
+	if len(relType) < OntologyEvalStatusRelTypeMin || len(relType) > OntologyEvalStatusRelTypeMax || hasNUL(relType) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, relType, OntologyEvalStatusRelTypeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationOntologyEvalStatus, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeOntologyEvalStatusRequest reads it back, checking each field against its own bound.
+func DecodeOntologyEvalStatusRequest(request []byte) (string, error) {
+	var relType string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationOntologyEvalStatus || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if relType, err = takeRowText(payload, &cursor, OntologyEvalStatusRelTypeMax); err != nil ||
+		len(relType) < OntologyEvalStatusRelTypeMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return relType, nil
 }
 
 const EventEnrollmentActive = EventCustody

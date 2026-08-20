@@ -1634,6 +1634,54 @@ int db2_kb_runtime_state_get(const char *key, char *out, size_t out_len)
    return 0;
 }
 
+int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
+{
+   (void)decision_point;
+   if (buf && len)
+      buf[0] = '\0';
+   return 0;
+}
+
+int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
+{
+   (void)decision_point;
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   return 0;
+}
+
+int db2_code_projection_project_fingerprint(const char *project, char *out, size_t out_len)
+{
+   (void)project;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}
+
+int db2_code_projection_visible_source_hash(const char *project, char *out, size_t out_len)
+{
+   (void)project;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}
+
+int db2_entity_profile_get_card(const char *entity_id, char *out_json, size_t out_len)
+{
+   (void)entity_id;
+   if (out_json && out_len)
+      out_json[0] = '\0';
+   return 0;
+}
+
+int db2_ontology_eval_status(const char *rel_type, char *out, size_t out_len)
+{
+   (void)rel_type;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

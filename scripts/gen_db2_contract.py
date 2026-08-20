@@ -12297,6 +12297,42 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "key": ("maintenance", 20), "format": "db2-envelope-generic-v1",
         "symbol": "db2_kb_runtime_state_get", "policy": {"reads": 200},
     },
+    "bandit_arms_list": {
+        "key": ("learning", 20),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_arms_list",
+        "policy": {"reads": 200},
+    },
+    "bandit_promotion_get": {
+        "key": ("learning", 21),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_promotion_get",
+        "policy": {"reads": 200},
+    },
+    "project_fingerprint": {
+        "key": ("index", 14),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_project_fingerprint",
+        "policy": {"reads": 200},
+    },
+    "visible_source_hash": {
+        "key": ("index", 15),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_visible_source_hash",
+        "policy": {"reads": 200},
+    },
+    "entity_profile_card": {
+        "key": ("index", 16),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_profile_get_card",
+        "policy": {"reads": 200},
+    },
+    "ontology_eval_status": {
+        "key": ("organization", 12),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_ontology_eval_status",
+        "policy": {"reads": 200},
+    },
 }
 
 

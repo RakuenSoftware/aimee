@@ -547,6 +547,18 @@ extern "C"
        const char *entity_id, const char *window, uint32_t *fresh,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_project_fingerprint_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, char *fingerprint, size_t fingerprint_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_visible_source_hash_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, char *source_hash, size_t source_hash_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_entity_profile_card_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *entity_id, char *card_json, size_t card_json_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_trace_mining_record_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -605,6 +617,14 @@ extern "C"
        const char *artifact_id, const char *last_error, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_bandit_arms_list_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *decision_point, char *arms, size_t arms_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_bandit_promotion_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *decision_point, char *arm_id, size_t arm_id_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
@@ -634,6 +654,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *project, const char *file_path, uint32_t *rejected,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_ontology_eval_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *rel_type, char *status, size_t status_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_enrollment_active_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,

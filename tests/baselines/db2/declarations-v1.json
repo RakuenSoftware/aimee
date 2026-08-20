@@ -3804,9 +3804,15 @@
           "line": 76
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_arms_list operation replaces the arm listing. The backend joins the distinct arm identifiers into one value with newlines between them, so what crosses is a document a caller has to parse -- and an arm identifier containing a newline would read back as two arms. That is the backend's format, not this boundary's, and it is recorded because the wire carries one string either way."
+      },
       "signature": "int db2_bandit_arms_list ( const char * decision_point , char * buf , size_t len )",
       "signature_sha256": "7aa8a96866d304f3bef2b0441c21477c9d20725b7f97795b677d89925e9a80b5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_arms_list"
     },
     {
@@ -3904,9 +3910,15 @@
           "line": 81
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_promotion_get operation replaces the promotion read. A decision point with no promoted arm reads back as the empty string, which is also what a promotion recorded as empty would look like; the operation has one result and cannot separate them. A caller treating empty as \"no promotion\" is right in practice and wrong in principle, which is worth saying once here."
+      },
       "signature": "int db2_bandit_promotion_get ( const char * decision_point , char * arm_out , size_t arm_out_len )",
       "signature_sha256": "3e2d84391a2d9777ba7b863c1ee57cdea9b00eae9e6c4983c18100b13906de28",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_promotion_get"
     },
     {
@@ -4833,9 +4845,15 @@
           "line": 50
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.project_fingerprint operation replaces the fingerprint read. The value is an md5 DB2 computes over the file paths and hashes of the project's current generation, so it is a summary of that generation rather than an identifier: it changes when the generation does, and comparing one project's fingerprint against another's is meaningless. A project with no files fingerprints the empty string rather than failing."
+      },
       "signature": "int db2_code_projection_project_fingerprint ( const char * project , char * out , size_t out_len )",
       "signature_sha256": "38a9655ba772d8e8079d09264d5e0fd771ff3fe8e0a11281c01878f5220243fa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_project_fingerprint"
     },
     {
@@ -4886,9 +4904,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.visible_source_hash operation replaces the visible-generation read. Only a generation in the visible state is considered, so a project whose generations are all still pending reads back empty rather than reporting the newest one -- which is the behaviour a caller wants and cannot infer from an empty string alone."
+      },
       "signature": "int db2_code_projection_visible_source_hash ( const char * project , char * out , size_t out_len )",
       "signature_sha256": "566b5105b3add580a1f29df849a04fd96794741713ed1cfe0ff03fc545bec9cc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_visible_source_hash"
     },
     {
@@ -8235,9 +8259,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_profile_card operation replaces the card read. The entity is matched case-insensitively, and the card crosses as whatever JSON DB2 has stored: this boundary bounds its length and refuses an embedded NUL, and does not parse it. A caller receiving malformed JSON is receiving what was written, which is the honest behaviour but not an obvious one."
+      },
       "signature": "int db2_entity_profile_get_card ( const char * entity_id , char * out_json , size_t out_len )",
       "signature_sha256": "1ce87ea1c2bab7d6ea8a967d4badf61070621e466d4fef755dec49035bd0a29c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_profile_get_card"
     },
     {
@@ -19985,9 +20015,15 @@
           "line": 41
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.ontology_eval_status operation replaces the evaluation status read. A relation type that has never been evaluated reads back as the empty string, and because no recorded status is empty, that is a usable signal rather than an ambiguity -- unlike the other string reads in this batch, which is why it is worth stating the difference."
+      },
       "signature": "int db2_ontology_eval_status ( const char * rel_type , char * out , size_t out_len )",
       "signature_sha256": "8a093cf8d1dca2e86eed604e3813133ef4a72e55bce62640e24a0a593fbc7c77",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_ontology_eval_status"
     },
     {
@@ -26658,15 +26694,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d9899951308b879f83949c541ca826aadac36927d58fcc3a50ded8fafbaac5ed",
+  "fingerprint": "025f28396348c1c943cb179275e847564101a780b70da672d1d00a26bfdc6fc3",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 519,
+    "audit_pending": 513,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 439
+    "reviewed": 445
   }
 }
