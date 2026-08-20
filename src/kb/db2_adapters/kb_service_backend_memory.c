@@ -678,12 +678,12 @@ cJSON *db2_kb_service_memory_query_health_json(void)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_delete_json(int64_t id, memory_authority_t authority)
+cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   if (memory_delete_as(id, authority) != 0)
+   if (memory_delete_as(id, (memory_authority_t)authority) != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "failed to delete memory");
@@ -692,7 +692,7 @@ cJSON *db2_kb_service_memory_delete_json(int64_t id, memory_authority_t authorit
    cJSON_AddStringToObject(resp, "status", "ok");
    /* Tell the caller which of the two things actually happened, so an agent is
     * not told "forgotten" when the content is still recoverable. */
-   cJSON_AddBoolToObject(resp, "destroyed", authority == MEMORY_AUTHORITY_USER);
+   cJSON_AddBoolToObject(resp, "destroyed", authority == (int)MEMORY_AUTHORITY_USER);
    return resp;
 }
 
@@ -711,8 +711,7 @@ cJSON *db2_kb_service_memory_touch_json(int64_t id)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content,
-                                         memory_authority_t authority)
+cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -724,7 +723,7 @@ cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content,
       return resp;
    }
    int64_t new_id = 0;
-   if (memory_update_content_as(id, content, authority, &new_id) != 0)
+   if (memory_update_content_as(id, content, (memory_authority_t)authority, &new_id) != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "failed to update memory content");

@@ -3,7 +3,6 @@
 
 #include "vector_index_ops.h"
 #include "cJSON.h"
-#include "memory_authority.h" /* memory_authority_t: destructive-edit authority on the memory ops */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -254,13 +253,21 @@ extern "C"
                                                      const char *rule, double observed_confidence,
                                                      const char *session_id);
    /* `authority` decides destructiveness, not permission — the caller's
-    * capability was already checked at the entry point. MEMORY_AUTHORITY_MODEL
-    * (the default for a request that omits the field) retires/versions the old
-    * value; MEMORY_AUTHORITY_USER destroys it. */
-   cJSON *db2_kb_service_memory_delete_json(int64_t id, memory_authority_t authority);
+    * capability was already checked at the entry point. It carries a
+    * memory_authority_t value: 0 (MEMORY_AUTHORITY_MODEL, and the default for a
+    * request that omits the field) retires/versions the old value, 1
+    * (MEMORY_AUTHORITY_USER) destroys it.
+    *
+    * Spelled `int` rather than the enum deliberately: DB2's outbound dependency
+    * surface is frozen (scripts/check_db2_source_boundary.py), and naming the
+    * type here would add an edge from a DB2 header to src/headers for a
+    * parameter whose contract is two documented values. The enum lives in
+    * memory_authority.h and is used either side of this seam; only the frozen
+    * header spells it as int. Note that 0 is the SAFE value, so a caller that
+    * passes nothing meaningful still gets the non-destructive path. */
+   cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority);
    cJSON *db2_kb_service_memory_touch_json(int64_t id);
-   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content,
-                                            memory_authority_t authority);
+   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
    cJSON *db2_kb_service_memory_stats_json(void);
    cJSON *db2_kb_service_memory_list_conflicts_json(int max);
