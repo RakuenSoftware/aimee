@@ -678,18 +678,21 @@ cJSON *db2_kb_service_memory_query_health_json(void)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_delete_json(int64_t id)
+cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   if (memory_delete(id) != 0)
+   if (memory_delete_as(id, (memory_authority_t)authority) != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "failed to delete memory");
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   /* Tell the caller which of the two things actually happened, so an agent is
+    * not told "forgotten" when the content is still recoverable. */
+   cJSON_AddBoolToObject(resp, "destroyed", authority == (int)MEMORY_AUTHORITY_USER);
    return resp;
 }
 
@@ -708,7 +711,7 @@ cJSON *db2_kb_service_memory_touch_json(int64_t id)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content)
+cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -719,13 +722,18 @@ cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content)
       cJSON_AddStringToObject(resp, "message", "content is required");
       return resp;
    }
-   if (memory_update_content(id, content) != 0)
+   int64_t new_id = 0;
+   if (memory_update_content_as(id, content, (memory_authority_t)authority, &new_id) != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "failed to update memory content");
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   /* Under model authority the update was versioned, so the current value now
+    * lives under a NEW id; the caller needs it to keep referring to the fact. */
+   cJSON_AddNumberToObject(resp, "id", (double)new_id);
+   cJSON_AddBoolToObject(resp, "superseded", new_id != id);
    return resp;
 }
 

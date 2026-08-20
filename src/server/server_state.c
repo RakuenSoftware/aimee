@@ -339,8 +339,12 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * interface a user has — a memory stored by mistake (a secret, a typo, a test
  * fixture written against a live deployment) could not be taken back.
  *
- * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
- * memory.store rather than inventing its own. */
+ * Gated on CAP_MEMORY_ADMIN — deliberately NOT the CAP_MEMORY_WRITE that
+ * memory.store carries. This is the one memory path that destroys rather than
+ * versions, so it is graded like rules.delete: holding "may remember" is not
+ * holding "may forget". A caller that clears that gate is operator-grade, so the
+ * delete runs with USER authority and is a real delete; the model-facing MCP
+ * `forget` verb has no such authority and retires the memory instead. */
 cJSON *memory_delete_command(cJSON *req)
 {
    int64_t id = 0;
@@ -348,7 +352,7 @@ cJSON *memory_delete_command(cJSON *req)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   if (kb_client_memory_delete(id) != 0)
+   if (kb_client_memory_delete_as(id, MEMORY_AUTHORITY_USER) != 0)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 

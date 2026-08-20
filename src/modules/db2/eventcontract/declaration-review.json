@@ -581,11 +581,11 @@
     },
     {
       "symbol": "db2_kb_service_memory_delete_json",
-      "signature_sha256": "f7fae92869a13282ea171253afbf164c8d23261773b5141d316789cd0d3ce5b2",
+      "signature_sha256": "3941a4875c934903aa6dc31476b353798dde44a9db4a4fd9edddb06a4bd0f838",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "The cJSON deletion facade is not the mutation contract; a typed memory.delete operation owns relational cleanup and returns explicit status before caller serialization."
+      "reason": "The cJSON deletion facade is not the mutation contract; a typed memory.delete operation owns relational cleanup and returns explicit status before caller serialization. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority retires the row (recoverable via fact history), user authority destroys it, so the typed operation must express authority rather than assume destruction."
     },
     {
       "symbol": "db2_kb_service_memory_diagnose_scoped_json",
@@ -1045,11 +1045,11 @@
     },
     {
       "symbol": "db2_kb_service_memory_update_json",
-      "signature_sha256": "3fe72aa9eaa0e1924c8104eceebc853133feda092c9492b1701ebbcea61e6085",
+      "signature_sha256": "d2cafe934fb7c06b37e568be4460a0bac4a3492cddc33921d27317c7423802b1",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "The memory-update cJSON facade is not the mutation contract; a typed operation validates bounded content and returns structured update status."
+      "reason": "The memory-update cJSON facade is not the mutation contract; a typed operation validates bounded content and returns structured update status. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority supersedes (prior content kept as a version, new id returned), user authority overwrites in place, so the typed operation must express authority rather than assume overwrite."
     },
     {
       "symbol": "db2_kb_service_memory_upsert_workflow_json",

@@ -252,9 +252,22 @@ extern "C"
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,
                                                      const char *session_id);
-   cJSON *db2_kb_service_memory_delete_json(int64_t id);
+   /* `authority` decides destructiveness, not permission — the caller's
+    * capability was already checked at the entry point. It carries a
+    * memory_authority_t value: 0 (MEMORY_AUTHORITY_MODEL, and the default for a
+    * request that omits the field) retires/versions the old value, 1
+    * (MEMORY_AUTHORITY_USER) destroys it.
+    *
+    * Spelled `int` rather than the enum deliberately: DB2's outbound dependency
+    * surface is frozen (scripts/check_db2_source_boundary.py), and naming the
+    * type here would add an edge from a DB2 header to src/headers for a
+    * parameter whose contract is two documented values. The enum lives in
+    * memory_authority.h and is used either side of this seam; only the frozen
+    * header spells it as int. Note that 0 is the SAFE value, so a caller that
+    * passes nothing meaningful still gets the non-destructive path. */
+   cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority);
    cJSON *db2_kb_service_memory_touch_json(int64_t id);
-   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content);
+   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
    cJSON *db2_kb_service_memory_stats_json(void);
    cJSON *db2_kb_service_memory_list_conflicts_json(int max);
