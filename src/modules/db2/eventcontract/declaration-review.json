@@ -268,6 +268,14 @@
       "reason": "The typed index.project_count operation replaces the current-project tally used by the doctor surface. Only projects in the current lifecycle state are counted and that state is fixed policy, so a caller cannot include detached projects in the number."
     },
     {
+      "symbol": "db2_code_index_project_delete",
+      "signature_sha256": "459b52d59931f8937dfdf255b75b95f33274e5eb43ba00c7906f4fd46c66ab9d",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.project_delete operation deletes a whole indexed project. Aliases, generations and files all cascade off the projects row, so the reply's one deleted row stands for everything the project held. Unlike the file-index deletes beside it the name is not resolved through aliases, so naming an alias deletes nothing and reports zero -- the same reply as a project that was already gone."
+    },
+    {
       "symbol": "db2_code_index_purge_files_matching",
       "signature_sha256": "932fefe5fe2d1001a2fac79acd6f373ea35797754bc0876171dde6816eb413b1",
       "disposition": "wire-operation",
@@ -394,6 +402,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.cross_repo_rebuild_routes operation replaces the pass that empties and rebuilds the cross-repo include route table inside one transaction. The routing heuristics are fixed policy and travel nowhere: quoted includes only, the fan-out threshold that suppresses ubiquitous headers, and the generated-build-header rejects. Each was tuned against live findings, and a caller able to send them could reroute a repository's symbol resolution."
+    },
+    {
+      "symbol": "db2_css_migration_enumerate",
+      "signature_sha256": "1bc3fa6043b871a822db2321cc5006afd8cbcca102aff451840c970619843fcd",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.css_migration_enumerate operation refreshes a project's CSS migration units from its component files. Two things the count does not show: it reads at most 4096 component files and stops, so a larger project reports 4096 and silently leaves the rest un-enumerated; and the upserts run one at a time with no transaction, so a failure part way leaves some units refreshed and reports failure for all of them. An existing unit keeps its state and its note; only the token counts are refreshed."
     },
     {
       "symbol": "db2_curator_reembed_all",
@@ -698,6 +714,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.doc_exists_by_hash operation replaces the content probe. The hash is matched exactly and within one scope, so the same content in another scope does not count -- which is what makes this usable as a per-scope duplicate check rather than a global one."
+    },
+    {
+      "symbol": "db2_kb_file_index_delete_current_project",
+      "signature_sha256": "ce7e7b70b214f1130425b545ab5f667802155eef1982ca64bd87ef5f06bd44b2",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.file_index_delete_current_generation operation deletes a project's file index for its current generation only. It is one letter away from index.file_index_delete_project, which deletes every generation, and the names are the only thing telling them apart. The project name goes through a helper called db2_kb_resolve_project which copies it and resolves nothing, so an alias matches no rows. A project with no current generation reports zero, and so does an index that was already empty."
     },
     {
       "symbol": "db2_kb_file_index_delete_project",
@@ -3004,12 +3028,28 @@
       "reason": "The typed learning.mining_seed_job_defaults operation registers the mining jobs and their schedules on first run. The job list and intervals are fixed policy, and so is the do-nothing conflict rule: it is what keeps a seed pass from overwriting an interval an operator has since tuned. This operation reports success or failure and no count, because the number it could report would be the seeds attempted rather than the rows created."
     },
     {
+      "symbol": "db2_ontology_approve",
+      "signature_sha256": "aea184bdb37446a38a0bf8f5d59e36e3941d139d30427c3f36f1be2c3e2b1e1e",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.ontology_approve operation approves a proposed relationship type. The name is normalized before anything is matched, so two spellings can reach the same type. Promoting the type to active is best-effort and its result is discarded -- a seeded type is already active -- while marking the evaluation approved must match exactly one row or the whole transaction rolls back. So a refusal means there was no evaluation to approve, never that the type failed to be promoted."
+    },
+    {
       "symbol": "db2_ontology_eval_status",
       "signature_sha256": "8a093cf8d1dca2e86eed604e3813133ef4a72e55bce62640e24a0a593fbc7c77",
       "disposition": "wire-operation",
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.ontology_eval_status operation replaces the evaluation status read. A relation type that has never been evaluated reads back as the empty string, and because no recorded status is empty, that is a usable signal rather than an ambiguity -- unlike the other string reads in this batch, which is why it is worth stating the difference."
+    },
+    {
+      "symbol": "db2_ontology_reject",
+      "signature_sha256": "b3b46ff86fb67bb350c08d1f6d61682e477b3bf1cacf40831bde3987c8214e71",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.ontology_reject operation rejects a proposed relationship type. It writes the same two rows as organization.ontology_approve in the opposite order: the evaluation must match exactly one row first, and marking the type rejected is the best-effort half. Both run in one transaction, so a refusal leaves neither row changed, and as with approve a refusal only ever means there was no evaluation to decide."
     },
     {
       "symbol": "db2_pg_stat_summary",
@@ -3100,6 +3140,14 @@
       "reason": "The typed learning.rules_delete_by_id operation replaces the rule deletion. Its backend reports whether a row was removed, so the reply carries that: an identifier naming no rule is distinguishable from a deletion that happened, which most of the writes in this batch cannot manage."
     },
     {
+      "symbol": "db2_rules_delete_by_directive_type",
+      "signature_sha256": "f639e608c35590b89bc727fbda598d8eb88f708188f15d3866d7a0a2e2441630",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_delete_by_directive_type operation deletes every rule carrying a directive type -- unlike learning.rules_delete_by_id beside it, one call can remove an unbounded number of rules, and the reply's count is the only record of how many. The rules cache it drops afterwards is a static inside the module process, but it is keyed on a signature read from the rules table, so another process notices the deletion on its next read regardless."
+    },
+    {
       "symbol": "db2_set_embedder_model_id",
       "signature_sha256": "d2b66b580397baf047e9df90d812a1db222a1c4a8ba00e30e90122b5051b4bf8",
       "disposition": "private-db2",
@@ -3154,6 +3202,14 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "Connection and pool teardown belongs to supervised process termination; callers cannot remotely shut down the required DB2 capability."
+    },
+    {
+      "symbol": "db2_sketch_minhash_signature_delete_project",
+      "signature_sha256": "ad06a151530be6cb30087286aa9e7f857b271ee938d75040b5f969bdaeb1b41d",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.minhash_delete_current_generation operation drops a project's minhash signatures and the LSH buckets built from them. The two deletes run one after the other with no transaction around them, so a failure between them leaves the signatures gone and the buckets pointing at nothing, and the reply reports only that the second statement failed. Recorded because the pair reads as one operation and is not one."
     },
     {
       "symbol": "db2_synth_enqueue",

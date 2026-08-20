@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "747e1c06f98273ee99db295931dcd997ff1078016e20b373b7eb4aeb65028f06"
+#define AIMEE_DB2_CONTRACT_SHA256 "736266c5ba2a0d4d5315d96fe79a8bc878a758221188f3bea4006db178d07a4e"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -34,1820 +34,1904 @@
 #define AIMEE_DB2_RESULT_RETRYABLE     4u
 #define AIMEE_DB2_RESULT_INVALID_STATE 5u
 
-#define AIMEE_DB2_EVENT_HEALTH                                      AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_HEALTH                                      AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_HEALTH                                  1u
-#define AIMEE_DB2_REQUEST_MAGIC                                     0x51483244u /* "D2HQ", little-endian */
-#define AIMEE_DB2_RESPONSE_MAGIC                                    0x52483244u /* "D2HR", little-endian */
-#define AIMEE_DB2_REQUEST_LEN                                       8u
-#define AIMEE_DB2_RESPONSE_LEN                                      16u
-#define AIMEE_DB2_EVENT_EMBEDDING_DIMENSION                         AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_EMBEDDING_DIMENSION                         AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION                     2u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN                   24u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN                  28u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN                     24u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_MIN                           1u
-#define AIMEE_DB2_EMBEDDING_DIMENSION_MAX                           4000u
-#define AIMEE_DB2_EVENT_POOL_STATUS                                 AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_POOL_STATUS                                 AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_POOL_STATUS                             3u
-#define AIMEE_DB2_POOL_STATUS_REQUEST_LEN                           24u
-#define AIMEE_DB2_POOL_STATUS_RESPONSE_LEN                          68u
-#define AIMEE_DB2_POOL_STATUS_ERROR_LEN                             24u
-#define AIMEE_DB2_POOL_SIZE_MAX                                     256u
-#define AIMEE_DB2_EVENT_EMBEDDING_REFUSALS                          AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_EMBEDDING_REFUSALS                          AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS                      4u
-#define AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN                    24u
-#define AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN                   36u
-#define AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN                      24u
-#define AIMEE_DB2_EMBEDDING_OFFERED_MAX                             2147483647u
-#define AIMEE_DB2_EVENT_POSTGRES_STATUS                             AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_POSTGRES_STATUS                             AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_POSTGRES_STATUS                         5u
-#define AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN                       24u
-#define AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN                      48u
-#define AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN                         24u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE                         0x1u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_MAX                            0x2u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_ROLE                           0x4u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_LAG                            0x8u
-#define AIMEE_DB2_POSTGRES_AVAILABLE_ALL                            0xfu
-#define AIMEE_DB2_POSTGRES_COUNT_MAX                                2147483647u
-#define AIMEE_DB2_EVENT_REEMBED_STATUS                              AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_REEMBED_STATUS                              AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_REEMBED_STATUS                          6u
-#define AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN                        24u
-#define AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN                       36u
-#define AIMEE_DB2_REEMBED_STATUS_ERROR_LEN                          24u
-#define AIMEE_DB2_REEMBED_DIMENSION_MIN                             1u
-#define AIMEE_DB2_REEMBED_DIMENSION_MAX                             4000u
-#define AIMEE_DB2_EVENT_REEMBED_CLEAR                               AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_REEMBED_CLEAR                               AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_REEMBED_CLEAR                           7u
-#define AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN                         24u
-#define AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN                        24u
-#define AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR                         AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR                         AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR                     8u
-#define AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN                   28u
-#define AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN                  36u
-#define AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID                         AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID                         AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID                     9u
-#define AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN                   24u
-#define AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN              187u
-#define AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN                     24u
-#define AIMEE_DB2_EMBEDDER_SERVING_ID_MAX                           159u
-#define AIMEE_DB2_EVENT_DIMENSION_RESET                             AIMEE_DB2_EVENT_LIFECYCLE
-#define AIMEE_DB2_STAGE_DIMENSION_RESET                             AIMEE_DB2_FAMILY_LIFECYCLE
-#define AIMEE_DB2_OPERATION_DIMENSION_RESET                         10u
-#define AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN                       36u
-#define AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN                      56u
-#define AIMEE_DB2_DIMENSION_RESET_ERROR_LEN                         24u
-#define AIMEE_DB2_DIMENSION_RESET_TABLES_MAX                        16u
-#define AIMEE_DB2_EVENT_LEVEL3_COUNT                                AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LEVEL3_COUNT                                AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LEVEL3_COUNT                            1u
-#define AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN                          24u
-#define AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN                         28u
-#define AIMEE_DB2_LEVEL3_COUNT_ERROR_LEN                            24u
-#define AIMEE_DB2_LEVEL3_COUNT_MAX                                  2147483647u
-#define AIMEE_DB2_EVENT_LEVEL2_COUNT                                AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LEVEL2_COUNT                                AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LEVEL2_COUNT                            2u
-#define AIMEE_DB2_LEVEL2_COUNT_REQUEST_LEN                          24u
-#define AIMEE_DB2_LEVEL2_COUNT_RESPONSE_LEN                         28u
-#define AIMEE_DB2_LEVEL2_COUNT_ERROR_LEN                            24u
-#define AIMEE_DB2_LEVEL2_COUNT_MAX                                  2147483647u
-#define AIMEE_DB2_EVENT_ORPHANED_L0_COUNT                           AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_ORPHANED_L0_COUNT                           AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_ORPHANED_L0_COUNT                       3u
-#define AIMEE_DB2_ORPHANED_L0_COUNT_REQUEST_LEN                     24u
-#define AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN                    28u
-#define AIMEE_DB2_ORPHANED_L0_COUNT_ERROR_LEN                       24u
-#define AIMEE_DB2_ORPHANED_L0_COUNT_MAX                             2147483647u
-#define AIMEE_DB2_EVENT_TOTAL_COUNT                                 AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_TOTAL_COUNT                                 AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_TOTAL_COUNT                             4u
-#define AIMEE_DB2_TOTAL_COUNT_REQUEST_LEN                           24u
-#define AIMEE_DB2_TOTAL_COUNT_RESPONSE_LEN                          32u
-#define AIMEE_DB2_TOTAL_COUNT_ERROR_LEN                             24u
-#define AIMEE_DB2_TOTAL_COUNT_MAX                                   9223372036854775807ull
-#define AIMEE_DB2_EVENT_SESSION_L2_COUNT                            AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_SESSION_L2_COUNT                            AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_SESSION_L2_COUNT                        5u
-#define AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MIN_LEN                  29u
-#define AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN                  155u
-#define AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN                     28u
-#define AIMEE_DB2_SESSION_L2_COUNT_ERROR_LEN                        24u
-#define AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX                      127u
-#define AIMEE_DB2_SESSION_L2_COUNT_MAX                              2147483647u
-#define AIMEE_DB2_EVENT_KEY_EXISTS                                  AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_KEY_EXISTS                                  AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_KEY_EXISTS                              6u
-#define AIMEE_DB2_KEY_EXISTS_REQUEST_MIN_LEN                        29u
-#define AIMEE_DB2_KEY_EXISTS_REQUEST_MAX_LEN                        539u
-#define AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN                           28u
-#define AIMEE_DB2_KEY_EXISTS_ERROR_LEN                              24u
-#define AIMEE_DB2_KEY_EXISTS_KEY_MAX                                511u
-#define AIMEE_DB2_KEY_EXISTS_MAX                                    1u
-#define AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND                         AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND                         AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND                     7u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MIN_LEN               34u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN               558u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN                  36u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_ERROR_LEN                     24u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX                       511u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX                      15u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX                     1u
-#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX                        9223372036854775807ull
-#define AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR                     AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR                     AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR                 8u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MIN_LEN           39u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN           577u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN              28u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_ERROR_LEN                 24u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX                   511u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX                15u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX                15u
-#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX                       1u
-#define AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE                        AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE                        AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE                    9u
-#define AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN                  44u
-#define AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN                 24u
-#define AIMEE_DB2_EFFECTIVENESS_UPDATE_ERROR_LEN                    24u
-#define AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX                9223372036854775807ull
-#define AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX                1u
-#define AIMEE_DB2_EVENT_RETENTION_ENFORCE                           AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_RETENTION_ENFORCE                           AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_RETENTION_ENFORCE                       10u
-#define AIMEE_DB2_RETENTION_ENFORCE_REQUEST_LEN                     24u
-#define AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN                    28u
-#define AIMEE_DB2_RETENTION_ENFORCE_ERROR_LEN                       24u
-#define AIMEE_DB2_RETENTION_RESTRICTED                              "restricted"
-#define AIMEE_DB2_RETENTION_RESTRICTED_DAYS                         7u
-#define AIMEE_DB2_RETENTION_SENSITIVE                               "sensitive"
-#define AIMEE_DB2_RETENTION_SENSITIVE_DAYS                          90u
-#define AIMEE_DB2_RETENTION_ENFORCE_MAX                             2147483647u
-#define AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE                        AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE                        AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE                    11u
-#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_REQUEST_LEN                  24u
-#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN                 28u
-#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_ERROR_LEN                    24u
-#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD                    0.3
-#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX                          2147483647u
-#define AIMEE_DB2_EVENT_EFFECTIVENESS_STATS                         AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_EFFECTIVENESS_STATS                         AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS                     12u
-#define AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN                   24u
-#define AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN                  40u
-#define AIMEE_DB2_EFFECTIVENESS_STATS_ERROR_LEN                     24u
-#define AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD                 0.3
-#define AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN                       0.0
-#define AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX                       1.0
-#define AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX                       2147483647u
-#define AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX                      2147483647u
-#define AIMEE_DB2_EVENT_L2_MEMORY_IDS                               AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_L2_MEMORY_IDS                               AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_L2_MEMORY_IDS                           13u
-#define AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN                         24u
-#define AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MIN_LEN                    28u
-#define AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN                    16412u
-#define AIMEE_DB2_L2_MEMORY_IDS_ERROR_LEN                           24u
-#define AIMEE_DB2_L2_MEMORY_IDS_MAX                                 2048u
-#define AIMEE_DB2_L2_MEMORY_ID_MIN                                  1u
-#define AIMEE_DB2_L2_MEMORY_ID_MAX                                  9223372036854775807ull
-#define AIMEE_DB2_EVENT_HEALTH_RECORD                               AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_HEALTH_RECORD                               AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_HEALTH_RECORD                           14u
-#define AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN                         36u
-#define AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN                        24u
-#define AIMEE_DB2_HEALTH_RECORD_ERROR_LEN                           24u
-#define AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS                1
-#define AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX                         2147483647u
-#define AIMEE_DB2_EVENT_HEALTH_RETENTION                            AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_HEALTH_RETENTION                            AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_HEALTH_RETENTION                        15u
-#define AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN                      24u
-#define AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN                     32u
-#define AIMEE_DB2_HEALTH_RETENTION_ERROR_LEN                        24u
-#define AIMEE_DB2_HEALTH_RETENTION_SNAPSHOT_DAYS                    90
-#define AIMEE_DB2_HEALTH_RETENTION_CONTRADICTION_DAYS               90
-#define AIMEE_DB2_HEALTH_RETENTION_MAX                              2147483647u
-#define AIMEE_DB2_EVENT_HEALTH_COUNTERS                             AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_HEALTH_COUNTERS                             AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_HEALTH_COUNTERS                         16u
-#define AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN                       24u
-#define AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN                      60u
-#define AIMEE_DB2_HEALTH_COUNTERS_ERROR_LEN                         24u
-#define AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT                 3
-#define AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE                0.9
-#define AIMEE_DB2_HEALTH_COUNTERS_FIELDS                            9u
-#define AIMEE_DB2_HEALTH_COUNTERS_MAX                               2147483647u
-#define AIMEE_DB2_EVENT_STATS_COUNTS                                AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_STATS_COUNTS                                AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_STATS_COUNTS                            17u
-#define AIMEE_DB2_STATS_COUNTS_REQUEST_LEN                          24u
-#define AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN                         96u
-#define AIMEE_DB2_STATS_COUNTS_ERROR_LEN                            24u
-#define AIMEE_DB2_STATS_COUNTS_TIERS                                6u
-#define AIMEE_DB2_STATS_COUNTS_KINDS                                10u
-#define AIMEE_DB2_STATS_COUNTS_MAX                                  2147483647u
-#define AIMEE_DB2_EVENT_EXPIRE                                      AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_EXPIRE                                      AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_EXPIRE                                  18u
-#define AIMEE_DB2_EXPIRE_REQUEST_LEN                                24u
-#define AIMEE_DB2_EXPIRE_RESPONSE_LEN                               32u
-#define AIMEE_DB2_EXPIRE_ERROR_LEN                                  24u
-#define AIMEE_DB2_EXPIRE_STALE_TIER                                 "L1"
-#define AIMEE_DB2_EXPIRE_KINDS_MAX                                  16u
-#define AIMEE_DB2_EXPIRE_MAX                                        2147483647u
-#define AIMEE_DB2_EVENT_DEMOTE                                      AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_DEMOTE                                      AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_DEMOTE                                  19u
-#define AIMEE_DB2_DEMOTE_REQUEST_LEN                                24u
-#define AIMEE_DB2_DEMOTE_RESPONSE_LEN                               32u
-#define AIMEE_DB2_DEMOTE_ERROR_LEN                                  24u
-#define AIMEE_DB2_DEMOTE_TIER                                       "L2"
-#define AIMEE_DB2_DEMOTE_KINDS_MAX                                  16u
-#define AIMEE_DB2_DEMOTE_MAX                                        2147483647u
-#define AIMEE_DB2_EVENT_PROMOTE_STABLE                              AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_PROMOTE_STABLE                              AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_PROMOTE_STABLE                          20u
-#define AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN                        24u
-#define AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN                       28u
-#define AIMEE_DB2_PROMOTE_STABLE_ERROR_LEN                          24u
-#define AIMEE_DB2_PROMOTE_STABLE_SOURCE_TIER                        "L2"
-#define AIMEE_DB2_PROMOTE_STABLE_TARGET_TIER                        "L3"
-#define AIMEE_DB2_PROMOTE_STABLE_CONFIDENCE                         0.95
-#define AIMEE_DB2_PROMOTE_STABLE_USE_COUNT                          5u
-#define AIMEE_DB2_PROMOTE_STABLE_DAYS                               30u
-#define AIMEE_DB2_PROMOTE_STABLE_MAX                                2147483647u
-#define AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES                       AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES                       AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES                   21u
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN                 28u
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN                28u
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_ERROR_LEN                   24u
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_SOURCE_TIER                 "L3"
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_TARGET_TIER                 "L4"
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATED_KIND                  "policy"
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX                    1u
-#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX                         2147483647u
-#define AIMEE_DB2_EVENT_RECORD_L4_APPROVAL                          AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_RECORD_L4_APPROVAL                          AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL                      22u
-#define AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MIN_LEN                41u
-#define AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN                614u
-#define AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN                   24u
-#define AIMEE_DB2_RECORD_L4_APPROVAL_ERROR_LEN                      24u
-#define AIMEE_DB2_RECORD_L4_APPROVAL_TIER                           "L4"
-#define AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX                  9223372036854775807ull
-#define AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX                   63u
-#define AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX                       511u
-#define AIMEE_DB2_EVENT_PRUNE_ORPHANED_L0                           AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_PRUNE_ORPHANED_L0                           AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0                       23u
-#define AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN                     24u
-#define AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN                    28u
-#define AIMEE_DB2_PRUNE_ORPHANED_L0_ERROR_LEN                       24u
-#define AIMEE_DB2_PRUNE_ORPHANED_L0_TIER                            "L0"
-#define AIMEE_DB2_PRUNE_ORPHANED_L0_MAX_AGE                         "-7 days"
-#define AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX                       2147483647u
-#define AIMEE_DB2_EVENT_LIFECYCLE_SWEEP_EXPIRED                     AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LIFECYCLE_SWEEP_EXPIRED                     AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LIFECYCLE_SWEEP_EXPIRED                 24u
-#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REQUEST_LEN               24u
-#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN              28u
-#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_ERROR_LEN                 24u
-#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_SOURCE_STATE              "pending"
-#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_TARGET_STATE              "archived"
-#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REASON                    "pending_ttl_expired"
-#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_COUNT_MAX                 2147483647u
-#define AIMEE_DB2_EVENT_DEMOTE_ID                                   AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_DEMOTE_ID                                   AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_DEMOTE_ID                               25u
-#define AIMEE_DB2_DEMOTE_ID_REQUEST_LEN                             32u
-#define AIMEE_DB2_DEMOTE_ID_RESPONSE_LEN                            28u
-#define AIMEE_DB2_DEMOTE_ID_ERROR_LEN                               24u
-#define AIMEE_DB2_DEMOTE_ID_MEMORY_ID_MAX                           9223372036854775807ull
-#define AIMEE_DB2_DEMOTE_ID_COUNT_MAX                               1u
-#define AIMEE_DB2_DEMOTE_ID_MULTIPLIER_BITS                         4606281698874543309ull
-#define AIMEE_DB2_DEMOTE_ID_MINIMUM_CONFIDENCE_BITS                 4599075939470750515ull
-#define AIMEE_DB2_EVENT_HAS_WORKSPACE_TAG                           AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_HAS_WORKSPACE_TAG                           AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG                       26u
-#define AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN                     32u
-#define AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN                    28u
-#define AIMEE_DB2_HAS_WORKSPACE_TAG_ERROR_LEN                       24u
-#define AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX                   9223372036854775807ull
-#define AIMEE_DB2_HAS_WORKSPACE_TAG_MAX                             1u
-#define AIMEE_DB2_EVENT_DELETE_ROW                                  AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_DELETE_ROW                                  AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_DELETE_ROW                              27u
-#define AIMEE_DB2_DELETE_ROW_REQUEST_LEN                            32u
-#define AIMEE_DB2_DELETE_ROW_RESPONSE_LEN                           28u
-#define AIMEE_DB2_DELETE_ROW_ERROR_LEN                              24u
-#define AIMEE_DB2_DELETE_ROW_MEMORY_ID_MAX                          9223372036854775807ull
-#define AIMEE_DB2_DELETE_ROW_MAX                                    1u
-#define AIMEE_DB2_EVENT_TOUCH                                       AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_TOUCH                                       AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_TOUCH                                   28u
-#define AIMEE_DB2_TOUCH_REQUEST_LEN                                 32u
-#define AIMEE_DB2_TOUCH_RESPONSE_LEN                                24u
-#define AIMEE_DB2_TOUCH_ERROR_LEN                                   24u
-#define AIMEE_DB2_TOUCH_MEMORY_ID_MAX                               9223372036854775807ull
-#define AIMEE_DB2_EVENT_LINK_DELETE                                 AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LINK_DELETE                                 AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LINK_DELETE                             29u
-#define AIMEE_DB2_LINK_DELETE_REQUEST_LEN                           32u
-#define AIMEE_DB2_LINK_DELETE_RESPONSE_LEN                          24u
-#define AIMEE_DB2_LINK_DELETE_ERROR_LEN                             24u
-#define AIMEE_DB2_LINK_DELETE_LINK_ID_MAX                           9223372036854775807ull
-#define AIMEE_DB2_EVENT_VALID_AT                                    AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_VALID_AT                                    AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_VALID_AT                                30u
-#define AIMEE_DB2_VALID_AT_REQUEST_MIN_LEN                          37u
-#define AIMEE_DB2_VALID_AT_REQUEST_MAX_LEN                          99u
-#define AIMEE_DB2_VALID_AT_RESPONSE_LEN                             28u
-#define AIMEE_DB2_VALID_AT_ERROR_LEN                                24u
-#define AIMEE_DB2_VALID_AT_MEMORY_ID_MAX                            9223372036854775807ull
-#define AIMEE_DB2_VALID_AT_AS_OF_MAX                                63u
-#define AIMEE_DB2_VALID_AT_MAX                                      1u
-#define AIMEE_DB2_EVENT_HAS_SCOPE_TYPE                              AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_HAS_SCOPE_TYPE                              AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_HAS_SCOPE_TYPE                          31u
-#define AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MIN_LEN                    37u
-#define AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MAX_LEN                    99u
-#define AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN                       28u
-#define AIMEE_DB2_HAS_SCOPE_TYPE_ERROR_LEN                          24u
-#define AIMEE_DB2_HAS_SCOPE_TYPE_MEMORY_ID_MAX                      9223372036854775807ull
-#define AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX                          63u
-#define AIMEE_DB2_HAS_SCOPE_TYPE_MAX                                1u
-#define AIMEE_DB2_EVENT_REJECT                                      AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_REJECT                                      AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_REJECT                                  32u
-#define AIMEE_DB2_REJECT_REQUEST_LEN                                32u
-#define AIMEE_DB2_REJECT_RESPONSE_LEN                               24u
-#define AIMEE_DB2_REJECT_ERROR_LEN                                  24u
-#define AIMEE_DB2_REJECT_MEMORY_ID_MAX                              9223372036854775807ull
-#define AIMEE_DB2_REJECT_PENALTY_BITS                               4591870180066957722ull
-#define AIMEE_DB2_REJECT_FLOOR_BITS                                 0ull
-#define AIMEE_DB2_EVENT_UPDATE_CONTENT                              AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_UPDATE_CONTENT                              AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_UPDATE_CONTENT                          33u
-#define AIMEE_DB2_UPDATE_CONTENT_REQUEST_MIN_LEN                    37u
-#define AIMEE_DB2_UPDATE_CONTENT_REQUEST_MAX_LEN                    2083u
-#define AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN                       28u
-#define AIMEE_DB2_UPDATE_CONTENT_ERROR_LEN                          24u
-#define AIMEE_DB2_UPDATE_CONTENT_MEMORY_ID_MAX                      9223372036854775807ull
-#define AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX                        2047u
-#define AIMEE_DB2_UPDATE_CONTENT_MAX                                1u
-#define AIMEE_DB2_EVENT_DECAY_CONFIDENCE                            AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_DECAY_CONFIDENCE                            AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_DECAY_CONFIDENCE                        34u
-#define AIMEE_DB2_DECAY_CONFIDENCE_REQUEST_LEN                      32u
-#define AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN                     24u
-#define AIMEE_DB2_DECAY_CONFIDENCE_ERROR_LEN                        24u
-#define AIMEE_DB2_DECAY_CONFIDENCE_MEMORY_ID_MAX                    9223372036854775807ull
-#define AIMEE_DB2_DECAY_CONFIDENCE_MULTIPLIER_BITS                  4604480259023595110ull
-#define AIMEE_DB2_EVENT_WORKSPACE_TAG_INSERT                        AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_WORKSPACE_TAG_INSERT                        AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_WORKSPACE_TAG_INSERT                    35u
-#define AIMEE_DB2_WORKSPACE_TAG_INSERT_REQUEST_MIN_LEN              37u
-#define AIMEE_DB2_WORKSPACE_TAG_INSERT_REQUEST_MAX_LEN              547u
-#define AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN                 24u
-#define AIMEE_DB2_WORKSPACE_TAG_INSERT_ERROR_LEN                    24u
-#define AIMEE_DB2_WORKSPACE_TAG_INSERT_MEMORY_ID_MAX                9223372036854775807ull
-#define AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX                511u
-#define AIMEE_DB2_EVENT_SET_COGNIFIED_KIND                          AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_SET_COGNIFIED_KIND                          AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_SET_COGNIFIED_KIND                      36u
-#define AIMEE_DB2_SET_COGNIFIED_KIND_REQUEST_MIN_LEN                37u
-#define AIMEE_DB2_SET_COGNIFIED_KIND_REQUEST_MAX_LEN                51u
-#define AIMEE_DB2_SET_COGNIFIED_KIND_RESPONSE_LEN                   24u
-#define AIMEE_DB2_SET_COGNIFIED_KIND_ERROR_LEN                      24u
-#define AIMEE_DB2_SET_COGNIFIED_KIND_MEMORY_ID_MAX                  9223372036854775807ull
-#define AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX                       15u
-#define AIMEE_DB2_EVENT_SET_SOURCE_SESSION                          AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_SET_SOURCE_SESSION                          AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_SET_SOURCE_SESSION                      37u
-#define AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MIN_LEN                36u
-#define AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN                163u
-#define AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN                   24u
-#define AIMEE_DB2_SET_SOURCE_SESSION_ERROR_LEN                      24u
-#define AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX                  9223372036854775807ull
-#define AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX                    127u
-#define AIMEE_DB2_EVENT_NEGATION_TOKENS_UPDATE                      AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_NEGATION_TOKENS_UPDATE                      AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_NEGATION_TOKENS_UPDATE                  38u
-#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MIN_LEN            36u
-#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MAX_LEN            2083u
-#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN               24u
-#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_ERROR_LEN                  24u
-#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_MEMORY_ID_MAX              9223372036854775807ull
-#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX                 2047u
-#define AIMEE_DB2_EVENT_GET_CONTENT                                 AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_GET_CONTENT                                 AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_GET_CONTENT                             39u
-#define AIMEE_DB2_GET_CONTENT_REQUEST_LEN                           32u
-#define AIMEE_DB2_GET_CONTENT_RESPONSE_MIN_LEN                      28u
-#define AIMEE_DB2_GET_CONTENT_RESPONSE_MAX_LEN                      2075u
-#define AIMEE_DB2_GET_CONTENT_ERROR_LEN                             24u
-#define AIMEE_DB2_GET_CONTENT_MEMORY_ID_MAX                         9223372036854775807ull
-#define AIMEE_DB2_GET_CONTENT_CONTENT_MAX                           2047u
-#define AIMEE_DB2_EVENT_GET_SOURCE_SESSION                          AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_GET_SOURCE_SESSION                          AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_GET_SOURCE_SESSION                      40u
-#define AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN                    32u
-#define AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MIN_LEN               29u
-#define AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MAX_LEN               155u
-#define AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN                      24u
-#define AIMEE_DB2_GET_SOURCE_SESSION_MEMORY_ID_MAX                  9223372036854775807ull
-#define AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX                    127u
-#define AIMEE_DB2_EVENT_PICK_FIRST_TEMPORAL_REF                     AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_PICK_FIRST_TEMPORAL_REF                     AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF                 41u
-#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN               32u
-#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MIN_LEN          29u
-#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MAX_LEN          155u
-#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN                 24u
-#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_MEMORY_ID_MAX             9223372036854775807ull
-#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX                   127u
-#define AIMEE_DB2_EVENT_COUNT_AND_MAX_UPDATED                       AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_COUNT_AND_MAX_UPDATED                       AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED                   42u
-#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_REQUEST_LEN                 24u
-#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MIN_LEN            32u
-#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MAX_LEN            63u
-#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN                   24u
-#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_COUNT_MAX                   2147483647u
-#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX                   31u
-#define AIMEE_DB2_EVENT_TOP_L2_FACTS                                AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_TOP_L2_FACTS                                AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_TOP_L2_FACTS                            43u
-#define AIMEE_DB2_TOP_L2_FACTS_REQUEST_MIN_LEN                      40u
-#define AIMEE_DB2_TOP_L2_FACTS_REQUEST_MAX_LEN                      1062u
-#define AIMEE_DB2_TOP_L2_FACTS_LIMIT_MIN                            1u
-#define AIMEE_DB2_TOP_L2_FACTS_LIMIT_MAX                            64u
-#define AIMEE_DB2_TOP_L2_FACTS_SCOPE_FLAGS_MAX                      3u
-#define AIMEE_DB2_TOP_L2_FACTS_WORKSPACE_MAX                        511u
-#define AIMEE_DB2_TOP_L2_FACTS_PROJECT_MAX                          511u
-#define AIMEE_DB2_TOP_L2_FACTS_RESPONSE_MIN_LEN                     28u
-#define AIMEE_DB2_TOP_L2_FACTS_RESPONSE_MAX_LEN                     540u
-#define AIMEE_DB2_TOP_L2_FACTS_ERROR_LEN                            24u
-#define AIMEE_DB2_TOP_L2_FACTS_MAX                                  64u
-#define AIMEE_DB2_TOP_L2_FACTS_ID_MIN                               1u
-#define AIMEE_DB2_TOP_L2_FACTS_ID_MAX                               9223372036854775807ull
-#define AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY                 AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY                 AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LIST_SESSION_SCOPE_PRIORITY             44u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_REQUEST_MIN_LEN       40u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_REQUEST_MAX_LEN       1062u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIMIT_MIN             1u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIMIT_MAX             64u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_SCOPE_FLAGS_MAX       3u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_WORKSPACE_MAX         511u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_PROJECT_MAX           511u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_RESPONSE_MIN_LEN      28u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_RESPONSE_MAX_LEN      540u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_ERROR_LEN             24u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_MAX                   64u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_ID_MIN                1u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_ID_MAX                9223372036854775807ull
-#define AIMEE_DB2_EVENT_COLLECT_ALIAS_MATCHES                       AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_COLLECT_ALIAS_MATCHES                       AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_COLLECT_ALIAS_MATCHES                   45u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_REQUEST_MIN_LEN             45u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_REQUEST_MAX_LEN             1577u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_LIMIT_MIN                   1u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_LIMIT_MAX                   64u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_SCOPE_FLAGS_MAX             3u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_TERM_MIN                    1u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_TERM_MAX                    511u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_WORKSPACE_MAX               511u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_PROJECT_MAX                 511u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_RESPONSE_MIN_LEN            28u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_RESPONSE_MAX_LEN            540u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_ERROR_LEN                   24u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX                         64u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_ID_MIN                      1u
-#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_ID_MAX                      9223372036854775807ull
-#define AIMEE_DB2_EVENT_COLLECT_ENTITY_MATCHES                      AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_COLLECT_ENTITY_MATCHES                      AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_COLLECT_ENTITY_MATCHES                  46u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_REQUEST_MIN_LEN            45u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_REQUEST_MAX_LEN            1577u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_LIMIT_MIN                  1u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_LIMIT_MAX                  64u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_SCOPE_FLAGS_MAX            3u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_TERM_MIN                   1u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_TERM_MAX                   511u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_WORKSPACE_MAX              511u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_PROJECT_MAX                511u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_RESPONSE_MIN_LEN           28u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_RESPONSE_MAX_LEN           540u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_ERROR_LEN                  24u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_MAX                        64u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_ID_MIN                     1u
-#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_ID_MAX                     9223372036854775807ull
-#define AIMEE_DB2_EVENT_COLLECT_EVENT_FRAME_MATCHES                 AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_COLLECT_EVENT_FRAME_MATCHES                 AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_COLLECT_EVENT_FRAME_MATCHES             47u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_REQUEST_MIN_LEN       45u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_REQUEST_MAX_LEN       1577u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_LIMIT_MIN             1u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_LIMIT_MAX             64u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_SCOPE_FLAGS_MAX       3u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_TERM_MIN              1u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_TERM_MAX              511u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_WORKSPACE_MAX         511u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_PROJECT_MAX           511u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_RESPONSE_MIN_LEN      28u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_RESPONSE_MAX_LEN      540u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_ERROR_LEN             24u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_MAX                   64u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_ID_MIN                1u
-#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_ID_MAX                9223372036854775807ull
-#define AIMEE_DB2_EVENT_COLLECT_RELATION_TOKEN_MATCHES              AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_COLLECT_RELATION_TOKEN_MATCHES              AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_COLLECT_RELATION_TOKEN_MATCHES          48u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_REQUEST_MIN_LEN    45u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_REQUEST_MAX_LEN    1577u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_LIMIT_MIN          1u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_LIMIT_MAX          64u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_SCOPE_FLAGS_MAX    3u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_TERM_MIN           1u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_TERM_MAX           511u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_WORKSPACE_MAX      511u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_PROJECT_MAX        511u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_RESPONSE_MIN_LEN   28u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_RESPONSE_MAX_LEN   540u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_ERROR_LEN          24u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_MAX                64u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_ID_MIN             1u
-#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_ID_MAX             9223372036854775807ull
-#define AIMEE_DB2_EVENT_COLLECT_SUMMARY_MATCHES                     AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_COLLECT_SUMMARY_MATCHES                     AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_COLLECT_SUMMARY_MATCHES                 49u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_REQUEST_MIN_LEN           45u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_REQUEST_MAX_LEN           1577u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_LIMIT_MIN                 1u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_LIMIT_MAX                 64u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_SCOPE_FLAGS_MAX           3u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_TERM_MIN                  1u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_TERM_MAX                  511u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_WORKSPACE_MAX             511u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_PROJECT_MAX               511u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_RESPONSE_MIN_LEN          28u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_RESPONSE_MAX_LEN          540u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_ERROR_LEN                 24u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_MAX                       64u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_ID_MIN                    1u
-#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_ID_MAX                    9223372036854775807ull
-#define AIMEE_DB2_EVENT_COLLECT_TEMPORAL_MATCHES                    AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_COLLECT_TEMPORAL_MATCHES                    AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_COLLECT_TEMPORAL_MATCHES                50u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_REQUEST_MIN_LEN          45u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_REQUEST_MAX_LEN          1577u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_LIMIT_MIN                1u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_LIMIT_MAX                64u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_SCOPE_FLAGS_MAX          3u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_TERM_MIN                 1u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_TERM_MAX                 511u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_WORKSPACE_MAX            511u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_PROJECT_MAX              511u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_RESPONSE_MIN_LEN         28u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_RESPONSE_MAX_LEN         540u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_ERROR_LEN                24u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_MAX                      64u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_ID_MIN                   1u
-#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_ID_MAX                   9223372036854775807ull
-#define AIMEE_DB2_EVENT_FIND_FACTS_LIKE                             AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_FIND_FACTS_LIKE                             AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_FIND_FACTS_LIKE                         51u
-#define AIMEE_DB2_FIND_FACTS_LIKE_REQUEST_MIN_LEN                   45u
-#define AIMEE_DB2_FIND_FACTS_LIKE_REQUEST_MAX_LEN                   1577u
-#define AIMEE_DB2_FIND_FACTS_LIKE_LIMIT_MIN                         1u
-#define AIMEE_DB2_FIND_FACTS_LIKE_LIMIT_MAX                         64u
-#define AIMEE_DB2_FIND_FACTS_LIKE_SCOPE_FLAGS_MAX                   3u
-#define AIMEE_DB2_FIND_FACTS_LIKE_TERM_MIN                          1u
-#define AIMEE_DB2_FIND_FACTS_LIKE_TERM_MAX                          511u
-#define AIMEE_DB2_FIND_FACTS_LIKE_WORKSPACE_MAX                     511u
-#define AIMEE_DB2_FIND_FACTS_LIKE_PROJECT_MAX                       511u
-#define AIMEE_DB2_FIND_FACTS_LIKE_RESPONSE_MIN_LEN                  28u
-#define AIMEE_DB2_FIND_FACTS_LIKE_RESPONSE_MAX_LEN                  540u
-#define AIMEE_DB2_FIND_FACTS_LIKE_ERROR_LEN                         24u
-#define AIMEE_DB2_FIND_FACTS_LIKE_MAX                               64u
-#define AIMEE_DB2_FIND_FACTS_LIKE_ID_MIN                            1u
-#define AIMEE_DB2_FIND_FACTS_LIKE_ID_MAX                            9223372036854775807ull
-#define AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY_LIKE            AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY_LIKE            AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LIST_SESSION_SCOPE_PRIORITY_LIKE        52u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_REQUEST_MIN_LEN  45u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_REQUEST_MAX_LEN  1577u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_LIMIT_MIN        1u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_LIMIT_MAX        64u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_SCOPE_FLAGS_MAX  3u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_TERM_MIN         1u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_TERM_MAX         511u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_WORKSPACE_MAX    511u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_PROJECT_MAX      511u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_RESPONSE_MIN_LEN 28u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_RESPONSE_MAX_LEN 540u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_ERROR_LEN        24u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_MAX              64u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_ID_MIN           1u
-#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_ID_MAX           9223372036854775807ull
-#define AIMEE_DB2_EVENT_NEGATION_FTS_SEARCH                         AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_NEGATION_FTS_SEARCH                         AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_NEGATION_FTS_SEARCH                     53u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_REQUEST_MIN_LEN               45u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_REQUEST_MAX_LEN               1577u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_LIMIT_MIN                     1u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_LIMIT_MAX                     64u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_SCOPE_FLAGS_MAX               3u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_TERM_MIN                      1u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_TERM_MAX                      511u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_WORKSPACE_MAX                 511u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_PROJECT_MAX                   511u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_RESPONSE_MAX_LEN              540u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_ERROR_LEN                     24u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_MAX                           64u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MIN                        1u
-#define AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MAX                        9223372036854775807ull
-#define AIMEE_DB2_EVENT_SESSION_NEIGHBORS_BEFORE                    AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_SESSION_NEIGHBORS_BEFORE                    AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_BEFORE                54u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MIN_LEN          41u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MAX_LEN          167u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ANCHOR_MAX               9223372036854775807ull
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MIN                1u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MAX                64u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MIN              1u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX              127u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_RESPONSE_MIN_LEN         28u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_RESPONSE_MAX_LEN         540u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ERROR_LEN                24u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX                      64u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MIN                   1u
-#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MAX                   9223372036854775807ull
-#define AIMEE_DB2_EVENT_SESSION_NEIGHBORS_AFTER                     AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_SESSION_NEIGHBORS_AFTER                     AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_AFTER                 55u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MIN_LEN           41u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MAX_LEN           167u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ANCHOR_MAX                9223372036854775807ull
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MIN                 1u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MAX                 64u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MIN               1u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MAX               127u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_RESPONSE_MIN_LEN          28u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_RESPONSE_MAX_LEN          540u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ERROR_LEN                 24u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_MAX                       64u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MIN                    1u
-#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MAX                    9223372036854775807ull
-#define AIMEE_DB2_MEMORY_ROW_TIER_MAX                               3u
-#define AIMEE_DB2_MEMORY_ROW_KIND_MAX                               15u
-#define AIMEE_DB2_MEMORY_ROW_KEY_MAX                                511u
-#define AIMEE_DB2_MEMORY_ROW_CONTENT_MAX                            2047u
-#define AIMEE_DB2_MEMORY_ROW_USE_CASES_MAX                          1023u
-#define AIMEE_DB2_MEMORY_ROW_LAST_USED_AT_MAX                       31u
-#define AIMEE_DB2_MEMORY_ROW_CREATED_AT_MAX                         31u
-#define AIMEE_DB2_MEMORY_ROW_UPDATED_AT_MAX                         31u
-#define AIMEE_DB2_MEMORY_ROW_SOURCE_SESSION_MAX                     127u
-#define AIMEE_DB2_MEMORY_ROW_PROVENANCE_CATEGORY_MAX                31u
-#define AIMEE_DB2_MEMORY_ROW_ID_MAX                                 9223372036854775807ull
-#define AIMEE_DB2_MEMORY_ROW_USE_COUNT_MAX                          2147483647u
-#define AIMEE_DB2_MEMORY_ROW_UNIT_BITS                              4607182418800017408ull
-#define AIMEE_DB2_MEMORY_ROW_PAYLOAD_MIN                            68u
-#define AIMEE_DB2_MEMORY_ROW_PAYLOAD_MAX                            3918u
-#define AIMEE_DB2_EVENT_ROW_GET                                     AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_ROW_GET                                     AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_ROW_GET                                 56u
-#define AIMEE_DB2_ROW_GET_REQUEST_LEN                               32u
-#define AIMEE_DB2_ROW_GET_IDENTIFIER_MAX                            9223372036854775807ull
-#define AIMEE_DB2_ROW_GET_RESPONSE_MIN_LEN                          92u
-#define AIMEE_DB2_ROW_GET_RESPONSE_MAX_LEN                          3942u
-#define AIMEE_DB2_ROW_GET_ERROR_LEN                                 24u
-#define AIMEE_DB2_EVENT_ROW_GET_BY_UNIT_ID                          AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_ROW_GET_BY_UNIT_ID                          AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_ROW_GET_BY_UNIT_ID                      57u
-#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_REQUEST_LEN                    32u
-#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_IDENTIFIER_MAX                 9223372036854775807ull
-#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_RESPONSE_MIN_LEN               92u
-#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_RESPONSE_MAX_LEN               3942u
-#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_ERROR_LEN                      24u
-#define AIMEE_DB2_EVENT_SEARCH_FACTS_PATTERNS_BY_KEYWORD            AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_SEARCH_FACTS_PATTERNS_BY_KEYWORD            AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_SEARCH_FACTS_PATTERNS_BY_KEYWORD        58u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_REQUEST_MIN_LEN  45u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_REQUEST_MAX_LEN  1577u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_LIMIT_MIN        1u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_LIMIT_MAX        64u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_SCOPE_FLAGS_MAX  3u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_TERM_MIN         1u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_TERM_MAX         511u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_WORKSPACE_MAX    511u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_PROJECT_MAX      511u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_RESPONSE_MIN_LEN 28u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_RESPONSE_MAX_LEN 540u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_ERROR_LEN        24u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_MAX              64u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_ID_MIN           1u
-#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_ID_MAX           9223372036854775807ull
-#define AIMEE_DB2_EVENT_FACT_HISTORY                                AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_FACT_HISTORY                                AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_FACT_HISTORY                            59u
-#define AIMEE_DB2_FACT_HISTORY_REQUEST_MIN_LEN                      33u
-#define AIMEE_DB2_FACT_HISTORY_REQUEST_MAX_LEN                      543u
-#define AIMEE_DB2_FACT_HISTORY_LIMIT_MIN                            1u
-#define AIMEE_DB2_FACT_HISTORY_LIMIT_MAX                            64u
-#define AIMEE_DB2_FACT_HISTORY_KEY_MIN                              1u
-#define AIMEE_DB2_FACT_HISTORY_KEY_MAX                              511u
-#define AIMEE_DB2_FACT_HISTORY_RESPONSE_MIN_LEN                     28u
-#define AIMEE_DB2_FACT_HISTORY_RESPONSE_MAX_LEN                     540u
-#define AIMEE_DB2_FACT_HISTORY_ERROR_LEN                            24u
-#define AIMEE_DB2_FACT_HISTORY_MAX                                  64u
-#define AIMEE_DB2_FACT_HISTORY_ID_MIN                               1u
-#define AIMEE_DB2_FACT_HISTORY_ID_MAX                               9223372036854775807ull
-#define AIMEE_DB2_EVENT_LIST_ROWS                                   AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LIST_ROWS                                   AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LIST_ROWS                               60u
-#define AIMEE_DB2_LIST_ROWS_REQUEST_MIN_LEN                         52u
-#define AIMEE_DB2_LIST_ROWS_REQUEST_MAX_LEN                         1092u
-#define AIMEE_DB2_LIST_ROWS_LIMIT_MIN                               1u
-#define AIMEE_DB2_LIST_ROWS_LIMIT_MAX                               64u
-#define AIMEE_DB2_LIST_ROWS_SCOPE_FLAGS_MAX                         3u
-#define AIMEE_DB2_LIST_ROWS_HIDE_ARCHIVED_MAX                       1u
-#define AIMEE_DB2_LIST_ROWS_TIER_MAX                                3u
-#define AIMEE_DB2_LIST_ROWS_KIND_MAX                                15u
-#define AIMEE_DB2_LIST_ROWS_WORKSPACE_MAX                           511u
-#define AIMEE_DB2_LIST_ROWS_PROJECT_MAX                             511u
-#define AIMEE_DB2_LIST_ROWS_RESPONSE_MIN_LEN                        28u
-#define AIMEE_DB2_LIST_ROWS_RESPONSE_MAX_LEN                        540u
-#define AIMEE_DB2_LIST_ROWS_ERROR_LEN                               24u
-#define AIMEE_DB2_LIST_ROWS_MAX                                     64u
-#define AIMEE_DB2_LIST_ROWS_ID_MIN                                  1u
-#define AIMEE_DB2_LIST_ROWS_ID_MAX                                  9223372036854775807ull
-#define AIMEE_DB2_EVENT_AGGREGATE                                   AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_AGGREGATE                                   AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_AGGREGATE                               61u
-#define AIMEE_DB2_AGGREGATE_REQUEST_MIN_LEN                         36u
-#define AIMEE_DB2_AGGREGATE_REQUEST_MAX_LEN                         290u
-#define AIMEE_DB2_AGGREGATE_LIMIT_MIN                               1u
-#define AIMEE_DB2_AGGREGATE_LIMIT_MAX                               64u
-#define AIMEE_DB2_AGGREGATE_ENTITY_SEED_MAX                         127u
-#define AIMEE_DB2_AGGREGATE_KEYWORD_MAX                             127u
-#define AIMEE_DB2_AGGREGATE_RESPONSE_MIN_LEN                        32u
-#define AIMEE_DB2_AGGREGATE_RESPONSE_MAX_LEN                        544u
-#define AIMEE_DB2_AGGREGATE_ERROR_LEN                               24u
-#define AIMEE_DB2_AGGREGATE_TRUNCATED_MAX                           1u
-#define AIMEE_DB2_AGGREGATE_MAX                                     64u
-#define AIMEE_DB2_AGGREGATE_ID_MIN                                  1u
-#define AIMEE_DB2_AGGREGATE_ID_MAX                                  9223372036854775807ull
-#define AIMEE_DB2_EVENT_LOAD_EVAL_CORPUS                            AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_LOAD_EVAL_CORPUS                            AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_LOAD_EVAL_CORPUS                        62u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_REQUEST_LEN                      28u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_LIMIT_MIN                        1u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_LIMIT_MAX                        64u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_RESPONSE_MIN_LEN                 32u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_RESPONSE_MAX_LEN                 575u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_ERROR_LEN                        24u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_LABEL_MAX                        31u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_MAX                              64u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_ID_MIN                           1u
-#define AIMEE_DB2_LOAD_EVAL_CORPUS_ID_MAX                           9223372036854775807ull
-#define AIMEE_DB2_EVENT_RECORD_EXISTS                               AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_RECORD_EXISTS                               AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_RECORD_EXISTS                           63u
-#define AIMEE_DB2_RECORD_EXISTS_REQUEST_LEN                         32u
-#define AIMEE_DB2_RECORD_EXISTS_IDENTIFIER_MAX                      9223372036854775807ull
-#define AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN                        28u
-#define AIMEE_DB2_RECORD_EXISTS_ERROR_LEN                           24u
-#define AIMEE_DB2_RECORD_EXISTS_MAX                                 1u
-#define AIMEE_DB2_EVENT_PROSPECTIVE_SET_STATE                       AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_PROSPECTIVE_SET_STATE                       AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_PROSPECTIVE_SET_STATE                   64u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_REQUEST_MIN_LEN             36u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_REQUEST_MAX_LEN             99u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_PROSPECTIVE_ID_MIN          1ull
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_PROSPECTIVE_ID_MAX          9223372036854775807ull
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_NEW_STATE_MIN               1u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_NEW_STATE_MAX               63u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_ACKNOWLEDGED_MIN            0u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_ACKNOWLEDGED_MAX            1u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_RESPONSE_MIN_LEN            28u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_RESPONSE_MAX_LEN            28u
-#define AIMEE_DB2_PROSPECTIVE_SET_STATE_ERROR_LEN                   24u
-#define AIMEE_DB2_EVENT_DEDUPE_BY_KEY                               AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_DEDUPE_BY_KEY                               AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_DEDUPE_BY_KEY                           65u
-#define AIMEE_DB2_DEDUPE_BY_KEY_REQUEST_MIN_LEN                     28u
-#define AIMEE_DB2_DEDUPE_BY_KEY_REQUEST_MAX_LEN                     28u
-#define AIMEE_DB2_DEDUPE_BY_KEY_DRY_RUN_MIN                         0u
-#define AIMEE_DB2_DEDUPE_BY_KEY_DRY_RUN_MAX                         1u
-#define AIMEE_DB2_DEDUPE_BY_KEY_MERGED_MIN                          0u
-#define AIMEE_DB2_DEDUPE_BY_KEY_MERGED_MAX                          2147483647u
-#define AIMEE_DB2_DEDUPE_BY_KEY_RESPONSE_MIN_LEN                    28u
-#define AIMEE_DB2_DEDUPE_BY_KEY_RESPONSE_MAX_LEN                    28u
-#define AIMEE_DB2_DEDUPE_BY_KEY_ERROR_LEN                           24u
-#define AIMEE_DB2_EVENT_SCENE_MEMBER_EXISTS                         AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_SCENE_MEMBER_EXISTS                         AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_SCENE_MEMBER_EXISTS                     66u
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_REQUEST_MIN_LEN               40u
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_REQUEST_MAX_LEN               40u
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_MEMORY_ID_MIN           1ull
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_MEMORY_ID_MAX           9223372036854775807ull
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_ID_MIN                  1ull
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_ID_MAX                  9223372036854775807ull
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_MEMBER_MIN                    0u
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_MEMBER_MAX                    1u
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_RESPONSE_MAX_LEN              28u
-#define AIMEE_DB2_SCENE_MEMBER_EXISTS_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_UNIT_EDGE_EXISTS                            AIMEE_DB2_EVENT_MEMORY
-#define AIMEE_DB2_STAGE_UNIT_EDGE_EXISTS                            AIMEE_DB2_FAMILY_MEMORY
-#define AIMEE_DB2_OPERATION_UNIT_EDGE_EXISTS                        67u
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_REQUEST_MIN_LEN                  40u
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_REQUEST_MAX_LEN                  40u
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_A_MIN                    1ull
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_A_MAX                    9223372036854775807ull
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_B_MIN                    1ull
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_B_MAX                    9223372036854775807ull
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_CONNECTED_MIN                    0u
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_CONNECTED_MAX                    1u
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_RESPONSE_MIN_LEN                 28u
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_RESPONSE_MAX_LEN                 28u
-#define AIMEE_DB2_UNIT_EDGE_EXISTS_ERROR_LEN                        24u
-#define AIMEE_DB2_EVENT_ENTITY_OBSERVATION_COUNT                    AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_ENTITY_OBSERVATION_COUNT                    AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_ENTITY_OBSERVATION_COUNT                12u
-#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_REQUEST_MIN_LEN          29u
-#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_REQUEST_MAX_LEN          283u
-#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ARGUMENT_MIN             1u
-#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ARGUMENT_MAX             255u
-#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_RESPONSE_LEN             28u
-#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ERROR_LEN                24u
-#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_MAX                      2147483647u
-#define AIMEE_DB2_EVENT_ENTITY_PROFILE_FRESH                        AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_ENTITY_PROFILE_FRESH                        AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_ENTITY_PROFILE_FRESH                    13u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_REQUEST_MIN_LEN              34u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_REQUEST_MAX_LEN              350u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_FIRST_MIN                    1u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_FIRST_MAX                    255u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_SECOND_MIN                   1u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_SECOND_MAX                   63u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_RESPONSE_LEN                 28u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_ERROR_LEN                    24u
-#define AIMEE_DB2_ENTITY_PROFILE_FRESH_MAX                          1u
-#define AIMEE_DB2_EVENT_PROJECT_FINGERPRINT                         AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_PROJECT_FINGERPRINT                         AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_PROJECT_FINGERPRINT                     14u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_REQUEST_MIN_LEN               28u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_REQUEST_MAX_LEN               283u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_PROJECT_MIN                   1u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_PROJECT_MAX                   255u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_FINGERPRINT_MIN               0u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_FINGERPRINT_MAX               63u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_RESPONSE_MAX_LEN              91u
-#define AIMEE_DB2_PROJECT_FINGERPRINT_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_VISIBLE_SOURCE_HASH                         AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_VISIBLE_SOURCE_HASH                         AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_VISIBLE_SOURCE_HASH                     15u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_REQUEST_MIN_LEN               28u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_REQUEST_MAX_LEN               283u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_PROJECT_MIN                   1u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_PROJECT_MAX                   255u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_SOURCE_HASH_MIN               0u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_SOURCE_HASH_MAX               63u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_RESPONSE_MAX_LEN              91u
-#define AIMEE_DB2_VISIBLE_SOURCE_HASH_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_ENTITY_PROFILE_CARD                         AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_ENTITY_PROFILE_CARD                         AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_ENTITY_PROFILE_CARD                     16u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_REQUEST_MIN_LEN               28u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_REQUEST_MAX_LEN               283u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_ENTITY_ID_MIN                 1u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_ENTITY_ID_MAX                 255u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_CARD_JSON_MIN                 0u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_CARD_JSON_MAX                 4095u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_RESPONSE_MAX_LEN              4123u
-#define AIMEE_DB2_ENTITY_PROFILE_CARD_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_GENERATION_ABORT                            AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_GENERATION_ABORT                            AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_GENERATION_ABORT                        17u
-#define AIMEE_DB2_GENERATION_ABORT_REQUEST_MIN_LEN                  36u
-#define AIMEE_DB2_GENERATION_ABORT_REQUEST_MAX_LEN                  1059u
-#define AIMEE_DB2_GENERATION_ABORT_GENERATION_ID_MIN                1ull
-#define AIMEE_DB2_GENERATION_ABORT_GENERATION_ID_MAX                9223372036854775807ull
-#define AIMEE_DB2_GENERATION_ABORT_ERROR_MESSAGE_MIN                0u
-#define AIMEE_DB2_GENERATION_ABORT_ERROR_MESSAGE_MAX                1023u
-#define AIMEE_DB2_GENERATION_ABORT_ACKNOWLEDGED_MIN                 0u
-#define AIMEE_DB2_GENERATION_ABORT_ACKNOWLEDGED_MAX                 1u
-#define AIMEE_DB2_GENERATION_ABORT_RESPONSE_MIN_LEN                 28u
-#define AIMEE_DB2_GENERATION_ABORT_RESPONSE_MAX_LEN                 28u
-#define AIMEE_DB2_GENERATION_ABORT_ERROR_LEN                        24u
-#define AIMEE_DB2_EVENT_GENERATION_SET_SOURCE_HASH                  AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_GENERATION_SET_SOURCE_HASH                  AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_GENERATION_SET_SOURCE_HASH              18u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_REQUEST_MIN_LEN        36u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_REQUEST_MAX_LEN        99u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_GENERATION_ID_MIN      1ull
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_GENERATION_ID_MAX      9223372036854775807ull
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_SOURCE_HASH_MIN        1u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_SOURCE_HASH_MAX        63u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_ACKNOWLEDGED_MIN       0u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_ACKNOWLEDGED_MAX       1u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_RESPONSE_MIN_LEN       28u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_RESPONSE_MAX_LEN       28u
-#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_ERROR_LEN              24u
-#define AIMEE_DB2_EVENT_GENERATION_PUBLISH                          AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_GENERATION_PUBLISH                          AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_GENERATION_PUBLISH                      19u
-#define AIMEE_DB2_GENERATION_PUBLISH_REQUEST_MIN_LEN                36u
-#define AIMEE_DB2_GENERATION_PUBLISH_REQUEST_MAX_LEN                291u
-#define AIMEE_DB2_GENERATION_PUBLISH_GENERATION_ID_MIN              1ull
-#define AIMEE_DB2_GENERATION_PUBLISH_GENERATION_ID_MAX              9223372036854775807ull
-#define AIMEE_DB2_GENERATION_PUBLISH_PROJECT_MIN                    1u
-#define AIMEE_DB2_GENERATION_PUBLISH_PROJECT_MAX                    255u
-#define AIMEE_DB2_GENERATION_PUBLISH_ACKNOWLEDGED_MIN               0u
-#define AIMEE_DB2_GENERATION_PUBLISH_ACKNOWLEDGED_MAX               1u
-#define AIMEE_DB2_GENERATION_PUBLISH_RESPONSE_MIN_LEN               28u
-#define AIMEE_DB2_GENERATION_PUBLISH_RESPONSE_MAX_LEN               28u
-#define AIMEE_DB2_GENERATION_PUBLISH_ERROR_LEN                      24u
-#define AIMEE_DB2_EVENT_PURGE_FILES_MATCHING                        AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_PURGE_FILES_MATCHING                        AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_PURGE_FILES_MATCHING                    20u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_REQUEST_MIN_LEN              36u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_REQUEST_MAX_LEN              547u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_PROJECT_ID_MIN               1ull
-#define AIMEE_DB2_PURGE_FILES_MATCHING_PROJECT_ID_MAX               9223372036854775807ull
-#define AIMEE_DB2_PURGE_FILES_MATCHING_PATH_GLOB_MIN                1u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_PATH_GLOB_MAX                511u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_DELETED_MIN                  0u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_DELETED_MAX                  2147483647u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_RESPONSE_MIN_LEN             28u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_RESPONSE_MAX_LEN             28u
-#define AIMEE_DB2_PURGE_FILES_MATCHING_ERROR_LEN                    24u
-#define AIMEE_DB2_EVENT_TRACE_MINING_RECORD                         AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_TRACE_MINING_RECORD                         AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_TRACE_MINING_RECORD                     8u
-#define AIMEE_DB2_TRACE_MINING_RECORD_REQUEST_LEN                   32u
-#define AIMEE_DB2_TRACE_MINING_RECORD_IDENTIFIER_MAX                9223372036854775807ull
-#define AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN                  24u
-#define AIMEE_DB2_TRACE_MINING_RECORD_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_ANTI_PATTERN_EXISTS_EXACT                   AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ANTI_PATTERN_EXISTS_EXACT                   AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ANTI_PATTERN_EXISTS_EXACT               9u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_REQUEST_MIN_LEN         29u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_REQUEST_MAX_LEN         539u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ARGUMENT_MIN            1u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ARGUMENT_MAX            511u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_RESPONSE_LEN            28u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ERROR_LEN               24u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_MAX                     1u
-#define AIMEE_DB2_EVENT_ANTI_PATTERN_EXISTS_BY_SOURCE_REF           AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ANTI_PATTERN_EXISTS_BY_SOURCE_REF           AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ANTI_PATTERN_EXISTS_BY_SOURCE_REF       10u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_REQUEST_MIN_LEN 29u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_REQUEST_MAX_LEN 539u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_ARGUMENT_MIN    1u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_ARGUMENT_MAX    511u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_RESPONSE_LEN    28u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_ERROR_LEN       24u
-#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_MAX             1u
-#define AIMEE_DB2_EVENT_ARTIFACT_CITATION_COUNT                     AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ARTIFACT_CITATION_COUNT                     AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ARTIFACT_CITATION_COUNT                 11u
-#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_REQUEST_MIN_LEN           29u
-#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_REQUEST_MAX_LEN           155u
-#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_ARGUMENT_MIN              1u
-#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_ARGUMENT_MAX              127u
-#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_RESPONSE_LEN              28u
-#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_ERROR_LEN                 24u
-#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_MAX                       2147483647u
-#define AIMEE_DB2_EVENT_COMMITS_IN_LAST_7_DAYS                      AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_COMMITS_IN_LAST_7_DAYS                      AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_COMMITS_IN_LAST_7_DAYS                  12u
-#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_REQUEST_MIN_LEN            29u
-#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_REQUEST_MAX_LEN            155u
-#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_ARGUMENT_MIN               1u
-#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_ARGUMENT_MAX               127u
-#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_RESPONSE_LEN               28u
-#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_ERROR_LEN                  24u
-#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_MAX                        2147483647u
-#define AIMEE_DB2_EVENT_FIDELITY_ATTRIBUTION_COUNT                  AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_FIDELITY_ATTRIBUTION_COUNT                  AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_FIDELITY_ATTRIBUTION_COUNT              13u
-#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_REQUEST_MIN_LEN        29u
-#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_REQUEST_MAX_LEN        155u
-#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ARGUMENT_MIN           1u
-#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ARGUMENT_MAX           127u
-#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_RESPONSE_LEN           28u
-#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ERROR_LEN              24u
-#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_MAX                    2147483647u
-#define AIMEE_DB2_EVENT_ARTIFACT_STAMP_REFLECTED                    AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ARTIFACT_STAMP_REFLECTED                    AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ARTIFACT_STAMP_REFLECTED                14u
-#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_REQUEST_MIN_LEN          29u
-#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_REQUEST_MAX_LEN          155u
-#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_ARGUMENT_MIN             1u
-#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_ARGUMENT_MAX             127u
-#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_RESPONSE_LEN             24u
-#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_ERROR_LEN                24u
-#define AIMEE_DB2_EVENT_FAILED_QUERY_BUMP                           AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_FAILED_QUERY_BUMP                           AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_FAILED_QUERY_BUMP                       15u
-#define AIMEE_DB2_FAILED_QUERY_BUMP_REQUEST_MIN_LEN                 29u
-#define AIMEE_DB2_FAILED_QUERY_BUMP_REQUEST_MAX_LEN                 539u
-#define AIMEE_DB2_FAILED_QUERY_BUMP_ARGUMENT_MIN                    1u
-#define AIMEE_DB2_FAILED_QUERY_BUMP_ARGUMENT_MAX                    511u
-#define AIMEE_DB2_FAILED_QUERY_BUMP_RESPONSE_LEN                    28u
-#define AIMEE_DB2_FAILED_QUERY_BUMP_ERROR_LEN                       24u
-#define AIMEE_DB2_FAILED_QUERY_BUMP_MAX                             2147483647u
-#define AIMEE_DB2_EVENT_ARTIFACT_SET_STATE                          AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ARTIFACT_SET_STATE                          AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ARTIFACT_SET_STATE                      16u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_REQUEST_MIN_LEN                34u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_REQUEST_MAX_LEN                222u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_FIRST_MIN                      1u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_FIRST_MAX                      63u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_SECOND_MIN                     1u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_SECOND_MAX                     127u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_RESPONSE_LEN                   24u
-#define AIMEE_DB2_ARTIFACT_SET_STATE_ERROR_LEN                      24u
-#define AIMEE_DB2_EVENT_ARTIFACT_REGISTER_EXEMPLAR                  AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ARTIFACT_REGISTER_EXEMPLAR                  AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ARTIFACT_REGISTER_EXEMPLAR              17u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_REQUEST_MIN_LEN        34u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_REQUEST_MAX_LEN        222u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_FIRST_MIN              1u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_FIRST_MAX              127u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_SECOND_MIN             1u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_SECOND_MAX             63u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_RESPONSE_LEN           24u
-#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_ERROR_LEN              24u
-#define AIMEE_DB2_EVENT_EVIDENCE_ENQUEUE                            AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_EVIDENCE_ENQUEUE                            AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_EVIDENCE_ENQUEUE                        18u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_REQUEST_MIN_LEN                  34u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_REQUEST_MAX_LEN                  222u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_FIRST_MIN                        1u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_FIRST_MAX                        127u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_SECOND_MIN                       1u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_SECOND_MAX                       63u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_RESPONSE_LEN                     24u
-#define AIMEE_DB2_EVIDENCE_ENQUEUE_ERROR_LEN                        24u
-#define AIMEE_DB2_EVENT_EVIDENCE_MARK_FAILED                        AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_EVIDENCE_MARK_FAILED                        AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_EVIDENCE_MARK_FAILED                    19u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_REQUEST_MIN_LEN              33u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_REQUEST_MAX_LEN              670u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_FIRST_MIN                    1u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_FIRST_MAX                    127u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_SECOND_MIN                   0u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_SECOND_MAX                   511u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_RESPONSE_LEN                 24u
-#define AIMEE_DB2_EVIDENCE_MARK_FAILED_ERROR_LEN                    24u
-#define AIMEE_DB2_EVENT_BANDIT_ARMS_LIST                            AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_BANDIT_ARMS_LIST                            AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_BANDIT_ARMS_LIST                        20u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_REQUEST_MIN_LEN                  28u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_REQUEST_MAX_LEN                  155u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_DECISION_POINT_MIN               1u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_DECISION_POINT_MAX               127u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_ARMS_MIN                         0u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_ARMS_MAX                         2047u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_RESPONSE_MIN_LEN                 28u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_RESPONSE_MAX_LEN                 2075u
-#define AIMEE_DB2_BANDIT_ARMS_LIST_ERROR_LEN                        24u
-#define AIMEE_DB2_EVENT_BANDIT_PROMOTION_GET                        AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_BANDIT_PROMOTION_GET                        AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_BANDIT_PROMOTION_GET                    21u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_REQUEST_MIN_LEN              28u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_REQUEST_MAX_LEN              155u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_DECISION_POINT_MIN           1u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_DECISION_POINT_MAX           127u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_ARM_ID_MIN                   0u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_ARM_ID_MAX                   127u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_RESPONSE_MIN_LEN             28u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_RESPONSE_MAX_LEN             155u
-#define AIMEE_DB2_BANDIT_PROMOTION_GET_ERROR_LEN                    24u
-#define AIMEE_DB2_EVENT_DECISION_LOG_SET_OUTCOME                    AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_DECISION_LOG_SET_OUTCOME                    AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_DECISION_LOG_SET_OUTCOME                22u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_REQUEST_MIN_LEN          36u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_REQUEST_MAX_LEN          547u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_DECISION_ID_MIN          1ull
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_DECISION_ID_MAX          9223372036854775807ull
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_OUTCOME_MIN              0u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_OUTCOME_MAX              511u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_ACKNOWLEDGED_MIN         0u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_ACKNOWLEDGED_MAX         1u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_RESPONSE_MIN_LEN         28u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_RESPONSE_MAX_LEN         28u
-#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_ERROR_LEN                24u
-#define AIMEE_DB2_EVENT_DECISION_LOG_SET_STATUS                     AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_DECISION_LOG_SET_STATUS                     AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_DECISION_LOG_SET_STATUS                 23u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_REQUEST_MIN_LEN           36u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_REQUEST_MAX_LEN           99u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_DECISION_ID_MIN           1ull
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_DECISION_ID_MAX           9223372036854775807ull
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_STATUS_MIN                1u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_STATUS_MAX                63u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_ACKNOWLEDGED_MIN          0u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_ACKNOWLEDGED_MAX          1u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_RESPONSE_MIN_LEN          28u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_RESPONSE_MAX_LEN          28u
-#define AIMEE_DB2_DECISION_LOG_SET_STATUS_ERROR_LEN                 24u
-#define AIMEE_DB2_EVENT_DECISION_LOG_SET_REVISIT                    AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_DECISION_LOG_SET_REVISIT                    AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_DECISION_LOG_SET_REVISIT                24u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REQUEST_MIN_LEN          36u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REQUEST_MAX_LEN          99u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_DECISION_ID_MIN          1ull
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_DECISION_ID_MAX          9223372036854775807ull
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REVISIT_WHEN_MIN         0u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REVISIT_WHEN_MAX         63u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_ACKNOWLEDGED_MIN         0u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_ACKNOWLEDGED_MAX         1u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_RESPONSE_MIN_LEN         28u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_RESPONSE_MAX_LEN         28u
-#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_ERROR_LEN                24u
-#define AIMEE_DB2_EVENT_COLLAB_RULE_APPROVE                         AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_COLLAB_RULE_APPROVE                         AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_COLLAB_RULE_APPROVE                     25u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_REQUEST_MIN_LEN               28u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_REQUEST_MAX_LEN               28u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_RULE_ID_MIN                   1u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_RULE_ID_MAX                   2147483647u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_ACKNOWLEDGED_MIN              0u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_ACKNOWLEDGED_MAX              1u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_RESPONSE_MAX_LEN              28u
-#define AIMEE_DB2_COLLAB_RULE_APPROVE_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_COLLAB_RULE_REJECT                          AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_COLLAB_RULE_REJECT                          AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_COLLAB_RULE_REJECT                      26u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_REQUEST_MIN_LEN                28u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_REQUEST_MAX_LEN                28u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_RULE_ID_MIN                    1u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_RULE_ID_MAX                    2147483647u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_CHANGED_MIN                    0u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_CHANGED_MAX                    1u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_RESPONSE_MIN_LEN               28u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_RESPONSE_MAX_LEN               28u
-#define AIMEE_DB2_COLLAB_RULE_REJECT_ERROR_LEN                      24u
-#define AIMEE_DB2_EVENT_COLLAB_RULE_RETIRE                          AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_COLLAB_RULE_RETIRE                          AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_COLLAB_RULE_RETIRE                      27u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_REQUEST_MIN_LEN                28u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_REQUEST_MAX_LEN                28u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_RULE_ID_MIN                    1u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_RULE_ID_MAX                    2147483647u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_ACKNOWLEDGED_MIN               0u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_ACKNOWLEDGED_MAX               1u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_RESPONSE_MIN_LEN               28u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_RESPONSE_MAX_LEN               28u
-#define AIMEE_DB2_COLLAB_RULE_RETIRE_ERROR_LEN                      24u
-#define AIMEE_DB2_EVENT_PROPOSAL_BUMP_CORROBORATION                 AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_PROPOSAL_BUMP_CORROBORATION                 AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_PROPOSAL_BUMP_CORROBORATION             28u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_REQUEST_MIN_LEN       28u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_REQUEST_MAX_LEN       28u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_PROPOSAL_ID_MIN       1u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_PROPOSAL_ID_MAX       2147483647u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_ACKNOWLEDGED_MIN      0u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_ACKNOWLEDGED_MAX      1u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_RESPONSE_MIN_LEN      28u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_RESPONSE_MAX_LEN      28u
-#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_ERROR_LEN             24u
-#define AIMEE_DB2_EVENT_PROPOSAL_MARK_COMMITTED                     AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_PROPOSAL_MARK_COMMITTED                     AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_PROPOSAL_MARK_COMMITTED                 29u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_REQUEST_MIN_LEN           28u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_REQUEST_MAX_LEN           28u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_PROPOSAL_ID_MIN           1u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_PROPOSAL_ID_MAX           2147483647u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_ACKNOWLEDGED_MIN          0u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_ACKNOWLEDGED_MAX          1u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_RESPONSE_MIN_LEN          28u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_RESPONSE_MAX_LEN          28u
-#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_ERROR_LEN                 24u
-#define AIMEE_DB2_EVENT_RULES_DELETE_BY_ID                          AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_RULES_DELETE_BY_ID                          AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_RULES_DELETE_BY_ID                      30u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_REQUEST_MIN_LEN                28u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_REQUEST_MAX_LEN                28u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_RULE_ROW_ID_MIN                1u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_RULE_ROW_ID_MAX                2147483647u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_DELETED_MIN                    0u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_DELETED_MAX                    1u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_RESPONSE_MIN_LEN               28u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_RESPONSE_MAX_LEN               28u
-#define AIMEE_DB2_RULES_DELETE_BY_ID_ERROR_LEN                      24u
-#define AIMEE_DB2_EVENT_CALIBRATION_SURFACES_WITH_DATA              AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_CALIBRATION_SURFACES_WITH_DATA              AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_CALIBRATION_SURFACES_WITH_DATA          31u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_REQUEST_MIN_LEN    28u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_REQUEST_MAX_LEN    28u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_MIN_ROWS_MIN       1u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_MIN_ROWS_MAX       2147483647u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_SURFACES_MIN       0u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_SURFACES_MAX       2147483647u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_RESPONSE_MIN_LEN   28u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_RESPONSE_MAX_LEN   28u
-#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_ERROR_LEN          24u
-#define AIMEE_DB2_EVENT_ARTIFACT_CITE                               AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ARTIFACT_CITE                               AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ARTIFACT_CITE                           32u
-#define AIMEE_DB2_ARTIFACT_CITE_REQUEST_MIN_LEN                     36u
-#define AIMEE_DB2_ARTIFACT_CITE_REQUEST_MAX_LEN                     353u
-#define AIMEE_DB2_ARTIFACT_CITE_CITING_ARTIFACT_ID_MIN              1u
-#define AIMEE_DB2_ARTIFACT_CITE_CITING_ARTIFACT_ID_MAX              127u
-#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_KIND_MIN                     1u
-#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_KIND_MAX                     63u
-#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_ID_MIN                       1u
-#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_ID_MAX                       127u
-#define AIMEE_DB2_ARTIFACT_CITE_ACKNOWLEDGED_MIN                    0u
-#define AIMEE_DB2_ARTIFACT_CITE_ACKNOWLEDGED_MAX                    1u
-#define AIMEE_DB2_ARTIFACT_CITE_RESPONSE_MIN_LEN                    28u
-#define AIMEE_DB2_ARTIFACT_CITE_RESPONSE_MAX_LEN                    28u
-#define AIMEE_DB2_ARTIFACT_CITE_ERROR_LEN                           24u
-#define AIMEE_DB2_EVENT_ARTIFACT_LINK                               AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ARTIFACT_LINK                               AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ARTIFACT_LINK                           33u
-#define AIMEE_DB2_ARTIFACT_LINK_REQUEST_MIN_LEN                     36u
-#define AIMEE_DB2_ARTIFACT_LINK_REQUEST_MAX_LEN                     353u
-#define AIMEE_DB2_ARTIFACT_LINK_FROM_ARTIFACT_ID_MIN                1u
-#define AIMEE_DB2_ARTIFACT_LINK_FROM_ARTIFACT_ID_MAX                127u
-#define AIMEE_DB2_ARTIFACT_LINK_TO_ARTIFACT_ID_MIN                  1u
-#define AIMEE_DB2_ARTIFACT_LINK_TO_ARTIFACT_ID_MAX                  127u
-#define AIMEE_DB2_ARTIFACT_LINK_LINK_KIND_MIN                       1u
-#define AIMEE_DB2_ARTIFACT_LINK_LINK_KIND_MAX                       63u
-#define AIMEE_DB2_ARTIFACT_LINK_ACKNOWLEDGED_MIN                    0u
-#define AIMEE_DB2_ARTIFACT_LINK_ACKNOWLEDGED_MAX                    1u
-#define AIMEE_DB2_ARTIFACT_LINK_RESPONSE_MIN_LEN                    28u
-#define AIMEE_DB2_ARTIFACT_LINK_RESPONSE_MAX_LEN                    28u
-#define AIMEE_DB2_ARTIFACT_LINK_ERROR_LEN                           24u
-#define AIMEE_DB2_EVENT_BANDIT_PROMOTION_SET                        AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_BANDIT_PROMOTION_SET                        AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_BANDIT_PROMOTION_SET                    34u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_REQUEST_MIN_LEN              36u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_REQUEST_MAX_LEN              417u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_DECISION_POINT_MIN           1u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_DECISION_POINT_MAX           127u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_ARM_ID_MIN                   1u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_ARM_ID_MAX                   127u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_ROLLBACK_ARM_MIN             0u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_ROLLBACK_ARM_MAX             127u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_ACKNOWLEDGED_MIN             0u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_ACKNOWLEDGED_MAX             1u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_RESPONSE_MIN_LEN             28u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_RESPONSE_MAX_LEN             28u
-#define AIMEE_DB2_BANDIT_PROMOTION_SET_ERROR_LEN                    24u
-#define AIMEE_DB2_EVENT_COLLAB_RULE_PROPOSE                         AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_COLLAB_RULE_PROPOSE                         AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_COLLAB_RULE_PROPOSE                     35u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_REQUEST_MIN_LEN               36u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_REQUEST_MAX_LEN               3233u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_TEXT_MIN                 1u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_TEXT_MAX                 2047u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_REASON_MIN               0u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_REASON_MAX               1023u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_PROPOSED_BY_MIN               1u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_PROPOSED_BY_MAX               127u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_ID_MIN                   0u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_ID_MAX                   2147483647u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RESPONSE_MIN_LEN              28u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RESPONSE_MAX_LEN              28u
-#define AIMEE_DB2_COLLAB_RULE_PROPOSE_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_DOCUMENT_EXISTS                             AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_DOCUMENT_EXISTS                             AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_DOCUMENT_EXISTS                         6u
-#define AIMEE_DB2_DOCUMENT_EXISTS_REQUEST_LEN                       32u
-#define AIMEE_DB2_DOCUMENT_EXISTS_IDENTIFIER_MAX                    9223372036854775807ull
-#define AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN                      28u
-#define AIMEE_DB2_DOCUMENT_EXISTS_ERROR_LEN                         24u
-#define AIMEE_DB2_DOCUMENT_EXISTS_MAX                               1u
-#define AIMEE_DB2_EVENT_BLOB_REFERENCED                             AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_BLOB_REFERENCED                             AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_BLOB_REFERENCED                         7u
-#define AIMEE_DB2_BLOB_REFERENCED_REQUEST_MIN_LEN                   29u
-#define AIMEE_DB2_BLOB_REFERENCED_REQUEST_MAX_LEN                   283u
-#define AIMEE_DB2_BLOB_REFERENCED_ARGUMENT_MIN                      1u
-#define AIMEE_DB2_BLOB_REFERENCED_ARGUMENT_MAX                      255u
-#define AIMEE_DB2_BLOB_REFERENCED_RESPONSE_LEN                      28u
-#define AIMEE_DB2_BLOB_REFERENCED_ERROR_LEN                         24u
-#define AIMEE_DB2_BLOB_REFERENCED_MAX                               1u
-#define AIMEE_DB2_EVENT_FENCE_ACTIVE                                AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_FENCE_ACTIVE                                AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_FENCE_ACTIVE                            8u
-#define AIMEE_DB2_FENCE_ACTIVE_REQUEST_MIN_LEN                      29u
-#define AIMEE_DB2_FENCE_ACTIVE_REQUEST_MAX_LEN                      283u
-#define AIMEE_DB2_FENCE_ACTIVE_ARGUMENT_MIN                         1u
-#define AIMEE_DB2_FENCE_ACTIVE_ARGUMENT_MAX                         255u
-#define AIMEE_DB2_FENCE_ACTIVE_RESPONSE_LEN                         28u
-#define AIMEE_DB2_FENCE_ACTIVE_ERROR_LEN                            24u
-#define AIMEE_DB2_FENCE_ACTIVE_MAX                                  1u
-#define AIMEE_DB2_EVENT_DOC_EXISTS_BY_HASH                          AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_DOC_EXISTS_BY_HASH                          AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_DOC_EXISTS_BY_HASH                      9u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_REQUEST_MIN_LEN                34u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_REQUEST_MAX_LEN                286u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_FIRST_MIN                      1u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_FIRST_MAX                      127u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_SECOND_MIN                     1u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_SECOND_MAX                     127u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_RESPONSE_LEN                   28u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_ERROR_LEN                      24u
-#define AIMEE_DB2_DOC_EXISTS_BY_HASH_MAX                            1u
-#define AIMEE_DB2_EVENT_PDF_QUARANTINE_CONFIRM                      AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_PDF_QUARANTINE_CONFIRM                      AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_PDF_QUARANTINE_CONFIRM                  10u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_REQUEST_MIN_LEN            34u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_REQUEST_MAX_LEN            798u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_FIRST_MIN                  1u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_FIRST_MAX                  255u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_SECOND_MIN                 1u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_SECOND_MAX                 511u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_RESPONSE_LEN               28u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_ERROR_LEN                  24u
-#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_MAX                        2147483647u
-#define AIMEE_DB2_EVENT_PDF_QUARANTINE_REJECT                       AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_PDF_QUARANTINE_REJECT                       AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_PDF_QUARANTINE_REJECT                   11u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_REQUEST_MIN_LEN             34u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_REQUEST_MAX_LEN             798u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_FIRST_MIN                   1u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_FIRST_MAX                   255u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_SECOND_MIN                  1u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_SECOND_MAX                  511u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_RESPONSE_LEN                28u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_ERROR_LEN                   24u
-#define AIMEE_DB2_PDF_QUARANTINE_REJECT_MAX                         2147483647u
-#define AIMEE_DB2_EVENT_ONTOLOGY_EVAL_STATUS                        AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_ONTOLOGY_EVAL_STATUS                        AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_ONTOLOGY_EVAL_STATUS                    12u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REQUEST_MIN_LEN              28u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REQUEST_MAX_LEN              155u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REL_TYPE_MIN                 1u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REL_TYPE_MAX                 127u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_STATUS_MIN                   0u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_STATUS_MAX                   63u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_RESPONSE_MIN_LEN             28u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_RESPONSE_MAX_LEN             91u
-#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_ERROR_LEN                    24u
-#define AIMEE_DB2_EVENT_TASK_UPDATE_STATE                           AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_TASK_UPDATE_STATE                           AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_TASK_UPDATE_STATE                       13u
-#define AIMEE_DB2_TASK_UPDATE_STATE_REQUEST_MIN_LEN                 36u
-#define AIMEE_DB2_TASK_UPDATE_STATE_REQUEST_MAX_LEN                 99u
-#define AIMEE_DB2_TASK_UPDATE_STATE_TASK_ID_MIN                     1ull
-#define AIMEE_DB2_TASK_UPDATE_STATE_TASK_ID_MAX                     9223372036854775807ull
-#define AIMEE_DB2_TASK_UPDATE_STATE_STATE_MIN                       1u
-#define AIMEE_DB2_TASK_UPDATE_STATE_STATE_MAX                       63u
-#define AIMEE_DB2_TASK_UPDATE_STATE_CHANGED_MIN                     0u
-#define AIMEE_DB2_TASK_UPDATE_STATE_CHANGED_MAX                     1u
-#define AIMEE_DB2_TASK_UPDATE_STATE_RESPONSE_MIN_LEN                28u
-#define AIMEE_DB2_TASK_UPDATE_STATE_RESPONSE_MAX_LEN                28u
-#define AIMEE_DB2_TASK_UPDATE_STATE_ERROR_LEN                       24u
-#define AIMEE_DB2_EVENT_RELEASE_ADD_DOC                             AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_RELEASE_ADD_DOC                             AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_RELEASE_ADD_DOC                         14u
-#define AIMEE_DB2_RELEASE_ADD_DOC_REQUEST_MIN_LEN                   40u
-#define AIMEE_DB2_RELEASE_ADD_DOC_REQUEST_MAX_LEN                   40u
-#define AIMEE_DB2_RELEASE_ADD_DOC_RELEASE_ID_MIN                    1ull
-#define AIMEE_DB2_RELEASE_ADD_DOC_RELEASE_ID_MAX                    9223372036854775807ull
-#define AIMEE_DB2_RELEASE_ADD_DOC_DOC_ID_MIN                        1ull
-#define AIMEE_DB2_RELEASE_ADD_DOC_DOC_ID_MAX                        9223372036854775807ull
-#define AIMEE_DB2_RELEASE_ADD_DOC_ACKNOWLEDGED_MIN                  0u
-#define AIMEE_DB2_RELEASE_ADD_DOC_ACKNOWLEDGED_MAX                  1u
-#define AIMEE_DB2_RELEASE_ADD_DOC_RESPONSE_MIN_LEN                  28u
-#define AIMEE_DB2_RELEASE_ADD_DOC_RESPONSE_MAX_LEN                  28u
-#define AIMEE_DB2_RELEASE_ADD_DOC_ERROR_LEN                         24u
-#define AIMEE_DB2_EVENT_ENROLLMENT_ACTIVE                           AIMEE_DB2_EVENT_CUSTODY
-#define AIMEE_DB2_STAGE_ENROLLMENT_ACTIVE                           AIMEE_DB2_FAMILY_CUSTODY
-#define AIMEE_DB2_OPERATION_ENROLLMENT_ACTIVE                       4u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_REQUEST_MIN_LEN                 34u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_REQUEST_MAX_LEN                 670u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_FIRST_MIN                       1u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_FIRST_MAX                       511u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_SECOND_MIN                      1u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_SECOND_MAX                      127u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_RESPONSE_LEN                    28u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_ERROR_LEN                       24u
-#define AIMEE_DB2_ENROLLMENT_ACTIVE_MAX                             1u
-#define AIMEE_DB2_EVENT_ASYNC_PENDING_COUNT                         AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_ASYNC_PENDING_COUNT                         AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_ASYNC_PENDING_COUNT                     11u
-#define AIMEE_DB2_ASYNC_PENDING_COUNT_REQUEST_MIN_LEN               29u
-#define AIMEE_DB2_ASYNC_PENDING_COUNT_REQUEST_MAX_LEN               91u
-#define AIMEE_DB2_ASYNC_PENDING_COUNT_ARGUMENT_MIN                  1u
-#define AIMEE_DB2_ASYNC_PENDING_COUNT_ARGUMENT_MAX                  63u
-#define AIMEE_DB2_ASYNC_PENDING_COUNT_RESPONSE_LEN                  28u
-#define AIMEE_DB2_ASYNC_PENDING_COUNT_ERROR_LEN                     24u
-#define AIMEE_DB2_ASYNC_PENDING_COUNT_MAX                           2147483647u
-#define AIMEE_DB2_EVENT_RUNTIME_STATE_TOUCH                         AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_RUNTIME_STATE_TOUCH                         AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_RUNTIME_STATE_TOUCH                     12u
-#define AIMEE_DB2_RUNTIME_STATE_TOUCH_REQUEST_MIN_LEN               29u
-#define AIMEE_DB2_RUNTIME_STATE_TOUCH_REQUEST_MAX_LEN               283u
-#define AIMEE_DB2_RUNTIME_STATE_TOUCH_ARGUMENT_MIN                  1u
-#define AIMEE_DB2_RUNTIME_STATE_TOUCH_ARGUMENT_MAX                  255u
-#define AIMEE_DB2_RUNTIME_STATE_TOUCH_RESPONSE_LEN                  24u
-#define AIMEE_DB2_RUNTIME_STATE_TOUCH_ERROR_LEN                     24u
-#define AIMEE_DB2_EVENT_SYNTH_ENQUEUE                               AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_SYNTH_ENQUEUE                               AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_SYNTH_ENQUEUE                           13u
-#define AIMEE_DB2_SYNTH_ENQUEUE_REQUEST_MIN_LEN                     29u
-#define AIMEE_DB2_SYNTH_ENQUEUE_REQUEST_MAX_LEN                     155u
-#define AIMEE_DB2_SYNTH_ENQUEUE_ARGUMENT_MIN                        1u
-#define AIMEE_DB2_SYNTH_ENQUEUE_ARGUMENT_MAX                        127u
-#define AIMEE_DB2_SYNTH_ENQUEUE_RESPONSE_LEN                        24u
-#define AIMEE_DB2_SYNTH_ENQUEUE_ERROR_LEN                           24u
-#define AIMEE_DB2_EVENT_SYNTH_MARK_DONE                             AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_SYNTH_MARK_DONE                             AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_SYNTH_MARK_DONE                         14u
-#define AIMEE_DB2_SYNTH_MARK_DONE_REQUEST_MIN_LEN                   29u
-#define AIMEE_DB2_SYNTH_MARK_DONE_REQUEST_MAX_LEN                   155u
-#define AIMEE_DB2_SYNTH_MARK_DONE_ARGUMENT_MIN                      1u
-#define AIMEE_DB2_SYNTH_MARK_DONE_ARGUMENT_MAX                      127u
-#define AIMEE_DB2_SYNTH_MARK_DONE_RESPONSE_LEN                      24u
-#define AIMEE_DB2_SYNTH_MARK_DONE_ERROR_LEN                         24u
-#define AIMEE_DB2_EVENT_REEMBED_MARK_FINISHED                       AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_REEMBED_MARK_FINISHED                       AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_REEMBED_MARK_FINISHED                   15u
-#define AIMEE_DB2_REEMBED_MARK_FINISHED_REQUEST_MIN_LEN             29u
-#define AIMEE_DB2_REEMBED_MARK_FINISHED_REQUEST_MAX_LEN             59u
-#define AIMEE_DB2_REEMBED_MARK_FINISHED_ARGUMENT_MIN                1u
-#define AIMEE_DB2_REEMBED_MARK_FINISHED_ARGUMENT_MAX                31u
-#define AIMEE_DB2_REEMBED_MARK_FINISHED_RESPONSE_LEN                24u
-#define AIMEE_DB2_REEMBED_MARK_FINISHED_ERROR_LEN                   24u
-#define AIMEE_DB2_EVENT_MINING_JOB_TRY_LOCK                         AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_MINING_JOB_TRY_LOCK                         AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_MINING_JOB_TRY_LOCK                     16u
-#define AIMEE_DB2_MINING_JOB_TRY_LOCK_REQUEST_MIN_LEN               29u
-#define AIMEE_DB2_MINING_JOB_TRY_LOCK_REQUEST_MAX_LEN               283u
-#define AIMEE_DB2_MINING_JOB_TRY_LOCK_ARGUMENT_MIN                  1u
-#define AIMEE_DB2_MINING_JOB_TRY_LOCK_ARGUMENT_MAX                  255u
-#define AIMEE_DB2_MINING_JOB_TRY_LOCK_RESPONSE_LEN                  28u
-#define AIMEE_DB2_MINING_JOB_TRY_LOCK_ERROR_LEN                     24u
-#define AIMEE_DB2_MINING_JOB_TRY_LOCK_MAX                           1u
-#define AIMEE_DB2_EVENT_SYNTH_MARK_FAILED                           AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_SYNTH_MARK_FAILED                           AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_SYNTH_MARK_FAILED                       17u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_REQUEST_MIN_LEN                 33u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_REQUEST_MAX_LEN                 670u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_FIRST_MIN                       1u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_FIRST_MAX                       127u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_SECOND_MIN                      0u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_SECOND_MAX                      511u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_RESPONSE_LEN                    24u
-#define AIMEE_DB2_SYNTH_MARK_FAILED_ERROR_LEN                       24u
-#define AIMEE_DB2_EVENT_RUNTIME_STATE_SET                           AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_RUNTIME_STATE_SET                           AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_RUNTIME_STATE_SET                       18u
-#define AIMEE_DB2_RUNTIME_STATE_SET_REQUEST_MIN_LEN                 33u
-#define AIMEE_DB2_RUNTIME_STATE_SET_REQUEST_MAX_LEN                 798u
-#define AIMEE_DB2_RUNTIME_STATE_SET_FIRST_MIN                       1u
-#define AIMEE_DB2_RUNTIME_STATE_SET_FIRST_MAX                       255u
-#define AIMEE_DB2_RUNTIME_STATE_SET_SECOND_MIN                      0u
-#define AIMEE_DB2_RUNTIME_STATE_SET_SECOND_MAX                      511u
-#define AIMEE_DB2_RUNTIME_STATE_SET_RESPONSE_LEN                    24u
-#define AIMEE_DB2_RUNTIME_STATE_SET_ERROR_LEN                       24u
-#define AIMEE_DB2_EVENT_SET_ACTIVE_EMBEDDER_VERSION                 AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_SET_ACTIVE_EMBEDDER_VERSION                 AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_SET_ACTIVE_EMBEDDER_VERSION             19u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_REQUEST_MIN_LEN       34u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_REQUEST_MAX_LEN       190u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_FIRST_MIN             1u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_FIRST_MAX             127u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_SECOND_MIN            1u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_SECOND_MAX            31u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_RESPONSE_LEN          24u
-#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_ERROR_LEN             24u
-#define AIMEE_DB2_EVENT_RUNTIME_STATE_GET                           AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_RUNTIME_STATE_GET                           AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_RUNTIME_STATE_GET                       20u
-#define AIMEE_DB2_RUNTIME_STATE_GET_REQUEST_MIN_LEN                 28u
-#define AIMEE_DB2_RUNTIME_STATE_GET_REQUEST_MAX_LEN                 283u
-#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_KEY_MIN                   1u
-#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_KEY_MAX                   255u
-#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_VALUE_MIN                 0u
-#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_VALUE_MAX                 511u
-#define AIMEE_DB2_RUNTIME_STATE_GET_RESPONSE_MIN_LEN                28u
-#define AIMEE_DB2_RUNTIME_STATE_GET_RESPONSE_MAX_LEN                539u
-#define AIMEE_DB2_RUNTIME_STATE_GET_ERROR_LEN                       24u
-#define AIMEE_DB2_EVENT_INGEST_QUEUE_FAIL                           AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_INGEST_QUEUE_FAIL                           AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_INGEST_QUEUE_FAIL                       21u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_REQUEST_MIN_LEN                 36u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_REQUEST_MAX_LEN                 1059u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_INGEST_JOB_ID_MIN               1ull
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_INGEST_JOB_ID_MAX               9223372036854775807ull
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_ERROR_MESSAGE_MIN               0u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_ERROR_MESSAGE_MAX               1023u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_ACKNOWLEDGED_MIN                0u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_ACKNOWLEDGED_MAX                1u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_RESPONSE_MIN_LEN                28u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_RESPONSE_MAX_LEN                28u
-#define AIMEE_DB2_INGEST_QUEUE_FAIL_ERROR_LEN                       24u
-#define AIMEE_DB2_EVENT_RESET_STUCK_VECTOR_OPS                      AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_RESET_STUCK_VECTOR_OPS                      AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_RESET_STUCK_VECTOR_OPS                  22u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_REQUEST_MIN_LEN            28u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_REQUEST_MAX_LEN            28u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_MAX_ATTEMPTS_MIN           1u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_MAX_ATTEMPTS_MAX           2147483647u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESET_ROWS_MIN             0u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESET_ROWS_MAX             2147483647u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESPONSE_MIN_LEN           28u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESPONSE_MAX_LEN           28u
-#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_ERROR_LEN                  24u
-#define AIMEE_DB2_EVENT_DIRECTIVE_RESOLVE                           AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_DIRECTIVE_RESOLVE                           AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_DIRECTIVE_RESOLVE                       23u
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_REQUEST_MIN_LEN                 40u
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_REQUEST_MAX_LEN                 40u
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_DIRECTIVE_ID_MIN                1ull
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_DIRECTIVE_ID_MAX                9223372036854775807ull
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESOLUTION_MEMORY_ID_MIN        1ull
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESOLUTION_MEMORY_ID_MAX        9223372036854775807ull
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_ACKNOWLEDGED_MIN                0u
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_ACKNOWLEDGED_MAX                1u
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESPONSE_MIN_LEN                28u
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESPONSE_MAX_LEN                28u
-#define AIMEE_DB2_DIRECTIVE_RESOLVE_ERROR_LEN                       24u
-#define AIMEE_DB2_STRING_ACK_ARGUMENT_MAX                           255u
-#define AIMEE_DB2_STRING_COUNT_ARGUMENT_MAX                         511u
-#define AIMEE_DB2_STRING_PAIR_FIRST_MAX                             511u
-#define AIMEE_DB2_STRING_PAIR_SECOND_MAX                            511u
-#define AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS                   AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS                   AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS               1u
-#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN             24u
-#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN            28u
-#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_ERROR_LEN               24u
-#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_COUNT_MAX               2147483647u
-#define AIMEE_DB2_EVENT_ENTITY_EDGE_NORMALIZE_WEIGHTS               AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS               AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_ENTITY_EDGE_NORMALIZE_WEIGHTS           2u
-#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_REQUEST_LEN         24u
-#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN        28u
-#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_ERROR_LEN           24u
-#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_SCALE               100u
-#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_COUNT_MAX           2147483647u
-#define AIMEE_DB2_EVENT_PROJECT_COUNT                               AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_PROJECT_COUNT                               AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_PROJECT_COUNT                           3u
-#define AIMEE_DB2_PROJECT_COUNT_REQUEST_LEN                         24u
-#define AIMEE_DB2_PROJECT_COUNT_RESPONSE_LEN                        28u
-#define AIMEE_DB2_PROJECT_COUNT_ERROR_LEN                           24u
-#define AIMEE_DB2_PROJECT_COUNT_MAX                                 2147483647u
-#define AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION                      AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION                      AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_PURGE_HIDDEN_POLLUTION                  4u
-#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN                24u
-#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN               28u
-#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_ERROR_LEN                  24u
-#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_MAX                        2147483647u
-#define AIMEE_DB2_EVENT_REQUEUE_DRIFTED                             AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_REQUEUE_DRIFTED                             AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_REQUEUE_DRIFTED                         5u
-#define AIMEE_DB2_REQUEUE_DRIFTED_REQUEST_LEN                       24u
-#define AIMEE_DB2_REQUEUE_DRIFTED_RESPONSE_LEN                      28u
-#define AIMEE_DB2_REQUEUE_DRIFTED_ERROR_LEN                         24u
-#define AIMEE_DB2_REQUEUE_DRIFTED_MAX                               2147483647u
-#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_ROUTES                   AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES                   AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES               6u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN             24u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN            28u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_ERROR_LEN               24u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX                     2147483647u
-#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_IDENTITIES               AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES               AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_IDENTITIES           7u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_REQUEST_LEN         24u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_RESPONSE_LEN        28u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_ERROR_LEN           24u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_MAX                 2147483647u
-#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_BUILD_DEPS               AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS               AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_BUILD_DEPS           8u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_REQUEST_LEN         24u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN        28u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_ERROR_LEN           24u
-#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX                 2147483647u
-#define AIMEE_DB2_EVENT_DRIFT_CANDIDATES                            AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_DRIFT_CANDIDATES                            AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_DRIFT_CANDIDATES                        9u
-#define AIMEE_DB2_DRIFT_CANDIDATES_REQUEST_LEN                      24u
-#define AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN                     32u
-#define AIMEE_DB2_DRIFT_CANDIDATES_ERROR_LEN                        24u
-#define AIMEE_DB2_DRIFT_CANDIDATES_MAX                              9223372036854775807ull
-#define AIMEE_DB2_EVENT_RULES_DECAY                                 AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_RULES_DECAY                                 AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_RULES_DECAY                             1u
-#define AIMEE_DB2_RULES_DECAY_REQUEST_LEN                           24u
-#define AIMEE_DB2_RULES_DECAY_RESPONSE_LEN                          28u
-#define AIMEE_DB2_RULES_DECAY_ERROR_LEN                             24u
-#define AIMEE_DB2_RULES_DECAY_MAX                                   2147483647u
-#define AIMEE_DB2_EVENT_CURIOSITY_RESCORE_ALL                       AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL                       AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_CURIOSITY_RESCORE_ALL                   2u
-#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN                 24u
-#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN                28u
-#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_ERROR_LEN                   24u
-#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_MAX                         2147483647u
-#define AIMEE_DB2_EVENT_MINING_SEED_JOB_DEFAULTS                    AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS                    AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_MINING_SEED_JOB_DEFAULTS                3u
-#define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_REQUEST_LEN              24u
-#define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_RESPONSE_LEN             24u
-#define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_ERROR_LEN                24u
-#define AIMEE_DB2_EVENT_PROPOSALS_ARCHIVE_EXPIRED                   AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED                   AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED               4u
-#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN             24u
-#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN            24u
-#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_ERROR_LEN               24u
-#define AIMEE_DB2_EVENT_TRACE_MINING_LAST_ID                        AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_TRACE_MINING_LAST_ID                        AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID                    5u
-#define AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN                  24u
-#define AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN                 32u
-#define AIMEE_DB2_TRACE_MINING_LAST_ID_ERROR_LEN                    24u
-#define AIMEE_DB2_TRACE_MINING_LAST_ID_MAX                          9223372036854775807ull
-#define AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED                       AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED                       AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED                   1u
-#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN                 24u
-#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN                24u
-#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_ERROR_LEN                   24u
-#define AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE             AIMEE_DB2_EVENT_CUSTODY
-#define AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE             AIMEE_DB2_FAMILY_CUSTODY
-#define AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_TRY_ACQUIRE         1u
-#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_REQUEST_LEN       24u
-#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN      28u
-#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_ERROR_LEN         24u
-#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_MAX               1u
-#define AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_RELEASE                 AIMEE_DB2_EVENT_CUSTODY
-#define AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE                 AIMEE_DB2_FAMILY_CUSTODY
-#define AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_RELEASE             2u
-#define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN           24u
-#define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN          24u
-#define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_ERROR_LEN             24u
-#define AIMEE_DB2_EVENT_RELEASE_GET_ACTIVE                          AIMEE_DB2_EVENT_CUSTODY
-#define AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE                          AIMEE_DB2_FAMILY_CUSTODY
-#define AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE                      3u
-#define AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN                    24u
-#define AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN                   32u
-#define AIMEE_DB2_RELEASE_GET_ACTIVE_ERROR_LEN                      24u
-#define AIMEE_DB2_RELEASE_GET_ACTIVE_MAX                            9223372036854775807ull
-#define AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED                   AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED                   AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED               1u
-#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_REQUEST_LEN             24u
-#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_RESPONSE_LEN            28u
-#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_ERROR_LEN               24u
-#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX                     2147483647u
-#define AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED                     AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED                     AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_DIRECTIVE_SWEEP_EXPIRED                 2u
-#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_REQUEST_LEN               24u
-#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_RESPONSE_LEN              28u
-#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_ERROR_LEN                 24u
-#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_MAX                       2147483647u
-#define AIMEE_DB2_EVENT_MARK_REVISIT_DUE                            AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_MARK_REVISIT_DUE                            AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_MARK_REVISIT_DUE                        3u
-#define AIMEE_DB2_MARK_REVISIT_DUE_REQUEST_LEN                      24u
-#define AIMEE_DB2_MARK_REVISIT_DUE_RESPONSE_LEN                     28u
-#define AIMEE_DB2_MARK_REVISIT_DUE_ERROR_LEN                        24u
-#define AIMEE_DB2_MARK_REVISIT_DUE_MAX                              2147483647u
-#define AIMEE_DB2_EVENT_INGEST_QUEUE_RESET_RUNNING                  AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING                  AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_INGEST_QUEUE_RESET_RUNNING              4u
-#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_REQUEST_LEN            24u
-#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_RESPONSE_LEN           28u
-#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_ERROR_LEN              24u
-#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_MAX                    2147483647u
-#define AIMEE_DB2_EVENT_EVIDENCE_REEMBED_ALL                        AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL                        AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_EVIDENCE_REEMBED_ALL                    5u
-#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_REQUEST_LEN                  24u
-#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_RESPONSE_LEN                 28u
-#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_ERROR_LEN                    24u
-#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_MAX                          2147483647u
-#define AIMEE_DB2_EVENT_CURATOR_REEMBED_ALL                         AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL                         AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_CURATOR_REEMBED_ALL                     6u
-#define AIMEE_DB2_CURATOR_REEMBED_ALL_REQUEST_LEN                   24u
-#define AIMEE_DB2_CURATOR_REEMBED_ALL_RESPONSE_LEN                  28u
-#define AIMEE_DB2_CURATOR_REEMBED_ALL_ERROR_LEN                     24u
-#define AIMEE_DB2_CURATOR_REEMBED_ALL_MAX                           2147483647u
-#define AIMEE_DB2_EVENT_SYNTH_REENQUEUE_ALL                         AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL                         AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_SYNTH_REENQUEUE_ALL                     7u
-#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_REQUEST_LEN                   24u
-#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN                  28u
-#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_ERROR_LEN                     24u
-#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_MAX                           2147483647u
-#define AIMEE_DB2_EVENT_CURATOR_REENQUEUE_EXTRACT_ALL               AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_CURATOR_REENQUEUE_EXTRACT_ALL               AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_CURATOR_REENQUEUE_EXTRACT_ALL           8u
-#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_REQUEST_LEN         24u
-#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_RESPONSE_LEN        28u
-#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_ERROR_LEN           24u
-#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_MAX                 2147483647u
-#define AIMEE_DB2_EVENT_DIRECTIVE_SUPPRESS                          AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS                          AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_DIRECTIVE_SUPPRESS                      9u
-#define AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN                    32u
-#define AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN                   24u
-#define AIMEE_DB2_DIRECTIVE_SUPPRESS_ERROR_LEN                      24u
-#define AIMEE_DB2_DIRECTIVE_SUPPRESS_ID_MAX                         9223372036854775807ull
-#define AIMEE_DB2_EVENT_DIRECTIVE_RECORD_SURFACE                    AIMEE_DB2_EVENT_MAINTENANCE
-#define AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE                    AIMEE_DB2_FAMILY_MAINTENANCE
-#define AIMEE_DB2_OPERATION_DIRECTIVE_RECORD_SURFACE                10u
-#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN              32u
-#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN             24u
-#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ERROR_LEN                24u
-#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ID_MAX                   9223372036854775807ull
-#define AIMEE_DB2_EVENT_ANTI_PATTERN_BUMP                           AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ANTI_PATTERN_BUMP                           AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP                       6u
-#define AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN                     32u
-#define AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN                    24u
-#define AIMEE_DB2_ANTI_PATTERN_BUMP_ERROR_LEN                       24u
-#define AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX                          9223372036854775807ull
-#define AIMEE_DB2_EVENT_ANTI_PATTERN_DELETE                         AIMEE_DB2_EVENT_LEARNING
-#define AIMEE_DB2_STAGE_ANTI_PATTERN_DELETE                         AIMEE_DB2_FAMILY_LEARNING
-#define AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE                     7u
-#define AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN                   32u
-#define AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN                  24u
-#define AIMEE_DB2_ANTI_PATTERN_DELETE_ERROR_LEN                     24u
-#define AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX                        9223372036854775807ull
-#define AIMEE_DB2_EVENT_DOC_DELETE                                  AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_DOC_DELETE                                  AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_DOC_DELETE                              2u
-#define AIMEE_DB2_DOC_DELETE_REQUEST_LEN                            32u
-#define AIMEE_DB2_DOC_DELETE_RESPONSE_LEN                           24u
-#define AIMEE_DB2_DOC_DELETE_ERROR_LEN                              24u
-#define AIMEE_DB2_DOC_DELETE_ID_MAX                                 9223372036854775807ull
-#define AIMEE_DB2_EVENT_TASK_DELETE                                 AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_TASK_DELETE                                 AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_TASK_DELETE                             3u
-#define AIMEE_DB2_TASK_DELETE_REQUEST_LEN                           32u
-#define AIMEE_DB2_TASK_DELETE_RESPONSE_LEN                          24u
-#define AIMEE_DB2_TASK_DELETE_ERROR_LEN                             24u
-#define AIMEE_DB2_TASK_DELETE_ID_MAX                                9223372036854775807ull
-#define AIMEE_DB2_EVENT_FILE_INDEX_DELETE_PROJECT                   AIMEE_DB2_EVENT_INDEX
-#define AIMEE_DB2_STAGE_FILE_INDEX_DELETE_PROJECT                   AIMEE_DB2_FAMILY_INDEX
-#define AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT               10u
-#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MIN             29u
-#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MAX             155u
-#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX             127u
-#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN            28u
-#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_ERROR_LEN               24u
-#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX                     2147483647u
-#define AIMEE_DB2_EVENT_CLEAR_PROJECT                               AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_CLEAR_PROJECT                               AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_CLEAR_PROJECT                           4u
-#define AIMEE_DB2_CLEAR_PROJECT_REQUEST_MIN                         29u
-#define AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX                         155u
-#define AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX                         127u
-#define AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN                        28u
-#define AIMEE_DB2_CLEAR_PROJECT_ERROR_LEN                           24u
-#define AIMEE_DB2_CLEAR_PROJECT_MAX                                 2147483647u
-#define AIMEE_DB2_EVENT_CLEAR_CURRENT_PROJECT                       AIMEE_DB2_EVENT_ORGANIZATION
-#define AIMEE_DB2_STAGE_CLEAR_CURRENT_PROJECT                       AIMEE_DB2_FAMILY_ORGANIZATION
-#define AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT                   5u
-#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MIN                 29u
-#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MAX                 155u
-#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX                 127u
-#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN                28u
-#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_ERROR_LEN                   24u
-#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX                         2147483647u
+#define AIMEE_DB2_EVENT_HEALTH                                          AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_HEALTH                                          AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_HEALTH                                      1u
+#define AIMEE_DB2_REQUEST_MAGIC                                         0x51483244u /* "D2HQ", little-endian */
+#define AIMEE_DB2_RESPONSE_MAGIC                                        0x52483244u /* "D2HR", little-endian */
+#define AIMEE_DB2_REQUEST_LEN                                           8u
+#define AIMEE_DB2_RESPONSE_LEN                                          16u
+#define AIMEE_DB2_EVENT_EMBEDDING_DIMENSION                             AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_EMBEDDING_DIMENSION                             AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION                         2u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN                       24u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN                      28u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN                         24u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_MIN                               1u
+#define AIMEE_DB2_EMBEDDING_DIMENSION_MAX                               4000u
+#define AIMEE_DB2_EVENT_POOL_STATUS                                     AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_POOL_STATUS                                     AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_POOL_STATUS                                 3u
+#define AIMEE_DB2_POOL_STATUS_REQUEST_LEN                               24u
+#define AIMEE_DB2_POOL_STATUS_RESPONSE_LEN                              68u
+#define AIMEE_DB2_POOL_STATUS_ERROR_LEN                                 24u
+#define AIMEE_DB2_POOL_SIZE_MAX                                         256u
+#define AIMEE_DB2_EVENT_EMBEDDING_REFUSALS                              AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_EMBEDDING_REFUSALS                              AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS                          4u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN                        24u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN                       36u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN                          24u
+#define AIMEE_DB2_EMBEDDING_OFFERED_MAX                                 2147483647u
+#define AIMEE_DB2_EVENT_POSTGRES_STATUS                                 AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_POSTGRES_STATUS                                 AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_POSTGRES_STATUS                             5u
+#define AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN                           24u
+#define AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN                          48u
+#define AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN                             24u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE                             0x1u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_MAX                                0x2u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ROLE                               0x4u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_LAG                                0x8u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ALL                                0xfu
+#define AIMEE_DB2_POSTGRES_COUNT_MAX                                    2147483647u
+#define AIMEE_DB2_EVENT_REEMBED_STATUS                                  AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_STATUS                                  AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_STATUS                              6u
+#define AIMEE_DB2_REEMBED_STATUS_REQUEST_LEN                            24u
+#define AIMEE_DB2_REEMBED_STATUS_RESPONSE_LEN                           36u
+#define AIMEE_DB2_REEMBED_STATUS_ERROR_LEN                              24u
+#define AIMEE_DB2_REEMBED_DIMENSION_MIN                                 1u
+#define AIMEE_DB2_REEMBED_DIMENSION_MAX                                 4000u
+#define AIMEE_DB2_EVENT_REEMBED_CLEAR                                   AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_CLEAR                                   AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_CLEAR                               7u
+#define AIMEE_DB2_REEMBED_CLEAR_REQUEST_LEN                             24u
+#define AIMEE_DB2_REEMBED_CLEAR_RESPONSE_LEN                            24u
+#define AIMEE_DB2_EVENT_REEMBED_MAINT_CLEAR                             AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_REEMBED_MAINT_CLEAR                             AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_REEMBED_MAINT_CLEAR                         8u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_REQUEST_LEN                       28u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_RESPONSE_LEN                      36u
+#define AIMEE_DB2_REEMBED_MAINT_CLEAR_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID                             AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID                             AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_EMBEDDER_SERVING_ID                         9u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_REQUEST_LEN                       24u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_RESPONSE_MAX_LEN                  187u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_ERROR_LEN                         24u
+#define AIMEE_DB2_EMBEDDER_SERVING_ID_MAX                               159u
+#define AIMEE_DB2_EVENT_DIMENSION_RESET                                 AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_DIMENSION_RESET                                 AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_DIMENSION_RESET                             10u
+#define AIMEE_DB2_DIMENSION_RESET_REQUEST_LEN                           36u
+#define AIMEE_DB2_DIMENSION_RESET_RESPONSE_LEN                          56u
+#define AIMEE_DB2_DIMENSION_RESET_ERROR_LEN                             24u
+#define AIMEE_DB2_DIMENSION_RESET_TABLES_MAX                            16u
+#define AIMEE_DB2_EVENT_LEVEL3_COUNT                                    AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LEVEL3_COUNT                                    AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LEVEL3_COUNT                                1u
+#define AIMEE_DB2_LEVEL3_COUNT_REQUEST_LEN                              24u
+#define AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN                             28u
+#define AIMEE_DB2_LEVEL3_COUNT_ERROR_LEN                                24u
+#define AIMEE_DB2_LEVEL3_COUNT_MAX                                      2147483647u
+#define AIMEE_DB2_EVENT_LEVEL2_COUNT                                    AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LEVEL2_COUNT                                    AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LEVEL2_COUNT                                2u
+#define AIMEE_DB2_LEVEL2_COUNT_REQUEST_LEN                              24u
+#define AIMEE_DB2_LEVEL2_COUNT_RESPONSE_LEN                             28u
+#define AIMEE_DB2_LEVEL2_COUNT_ERROR_LEN                                24u
+#define AIMEE_DB2_LEVEL2_COUNT_MAX                                      2147483647u
+#define AIMEE_DB2_EVENT_ORPHANED_L0_COUNT                               AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_ORPHANED_L0_COUNT                               AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_ORPHANED_L0_COUNT                           3u
+#define AIMEE_DB2_ORPHANED_L0_COUNT_REQUEST_LEN                         24u
+#define AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN                        28u
+#define AIMEE_DB2_ORPHANED_L0_COUNT_ERROR_LEN                           24u
+#define AIMEE_DB2_ORPHANED_L0_COUNT_MAX                                 2147483647u
+#define AIMEE_DB2_EVENT_TOTAL_COUNT                                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_TOTAL_COUNT                                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_TOTAL_COUNT                                 4u
+#define AIMEE_DB2_TOTAL_COUNT_REQUEST_LEN                               24u
+#define AIMEE_DB2_TOTAL_COUNT_RESPONSE_LEN                              32u
+#define AIMEE_DB2_TOTAL_COUNT_ERROR_LEN                                 24u
+#define AIMEE_DB2_TOTAL_COUNT_MAX                                       9223372036854775807ull
+#define AIMEE_DB2_EVENT_SESSION_L2_COUNT                                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SESSION_L2_COUNT                                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SESSION_L2_COUNT                            5u
+#define AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MIN_LEN                      29u
+#define AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN                      155u
+#define AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN                         28u
+#define AIMEE_DB2_SESSION_L2_COUNT_ERROR_LEN                            24u
+#define AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX                          127u
+#define AIMEE_DB2_SESSION_L2_COUNT_MAX                                  2147483647u
+#define AIMEE_DB2_EVENT_KEY_EXISTS                                      AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_KEY_EXISTS                                      AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_KEY_EXISTS                                  6u
+#define AIMEE_DB2_KEY_EXISTS_REQUEST_MIN_LEN                            29u
+#define AIMEE_DB2_KEY_EXISTS_REQUEST_MAX_LEN                            539u
+#define AIMEE_DB2_KEY_EXISTS_RESPONSE_LEN                               28u
+#define AIMEE_DB2_KEY_EXISTS_ERROR_LEN                                  24u
+#define AIMEE_DB2_KEY_EXISTS_KEY_MAX                                    511u
+#define AIMEE_DB2_KEY_EXISTS_MAX                                        1u
+#define AIMEE_DB2_EVENT_FIND_ID_BY_KEY_KIND                             AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_FIND_ID_BY_KEY_KIND                             AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_FIND_ID_BY_KEY_KIND                         7u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MIN_LEN                   34u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_REQUEST_MAX_LEN                   558u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_RESPONSE_LEN                      36u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_ERROR_LEN                         24u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_KEY_MAX                           511u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_KIND_MAX                          15u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_FOUND_MAX                         1u
+#define AIMEE_DB2_FIND_ID_BY_KEY_KIND_ID_MAX                            9223372036854775807ull
+#define AIMEE_DB2_EVENT_KEY_EXISTS_IN_TIER_PAIR                         AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_KEY_EXISTS_IN_TIER_PAIR                         AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_KEY_EXISTS_IN_TIER_PAIR                     8u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MIN_LEN               39u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_REQUEST_MAX_LEN               577u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_RESPONSE_LEN                  28u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_ERROR_LEN                     24u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_KEY_MAX                       511u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_A_MAX                    15u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_TIER_B_MAX                    15u
+#define AIMEE_DB2_KEY_EXISTS_IN_TIER_PAIR_MAX                           1u
+#define AIMEE_DB2_EVENT_EFFECTIVENESS_UPDATE                            AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EFFECTIVENESS_UPDATE                            AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EFFECTIVENESS_UPDATE                        9u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_REQUEST_LEN                      44u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_RESPONSE_LEN                     24u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_ERROR_LEN                        24u
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_MEMORY_ID_MAX                    9223372036854775807ull
+#define AIMEE_DB2_EFFECTIVENESS_UPDATE_HAS_VALUE_MAX                    1u
+#define AIMEE_DB2_EVENT_RETENTION_ENFORCE                               AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RETENTION_ENFORCE                               AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RETENTION_ENFORCE                           10u
+#define AIMEE_DB2_RETENTION_ENFORCE_REQUEST_LEN                         24u
+#define AIMEE_DB2_RETENTION_ENFORCE_RESPONSE_LEN                        28u
+#define AIMEE_DB2_RETENTION_ENFORCE_ERROR_LEN                           24u
+#define AIMEE_DB2_RETENTION_RESTRICTED                                  "restricted"
+#define AIMEE_DB2_RETENTION_RESTRICTED_DAYS                             7u
+#define AIMEE_DB2_RETENTION_SENSITIVE                                   "sensitive"
+#define AIMEE_DB2_RETENTION_SENSITIVE_DAYS                              90u
+#define AIMEE_DB2_RETENTION_ENFORCE_MAX                                 2147483647u
+#define AIMEE_DB2_EVENT_EFFECTIVENESS_DEMOTE                            AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EFFECTIVENESS_DEMOTE                            AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EFFECTIVENESS_DEMOTE                        11u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_REQUEST_LEN                      24u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_RESPONSE_LEN                     28u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_ERROR_LEN                        24u
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_THRESHOLD                        0.3
+#define AIMEE_DB2_EFFECTIVENESS_DEMOTE_MAX                              2147483647u
+#define AIMEE_DB2_EVENT_EFFECTIVENESS_STATS                             AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EFFECTIVENESS_STATS                             AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EFFECTIVENESS_STATS                         12u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_REQUEST_LEN                       24u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_RESPONSE_LEN                      40u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_ERROR_LEN                         24u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_LOW_THRESHOLD                     0.3
+#define AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MIN                           0.0
+#define AIMEE_DB2_EFFECTIVENESS_STATS_AVG_MAX                           1.0
+#define AIMEE_DB2_EFFECTIVENESS_STATS_LOW_MAX                           2147483647u
+#define AIMEE_DB2_EFFECTIVENESS_STATS_HIGH_MAX                          2147483647u
+#define AIMEE_DB2_EVENT_L2_MEMORY_IDS                                   AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_L2_MEMORY_IDS                                   AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_L2_MEMORY_IDS                               13u
+#define AIMEE_DB2_L2_MEMORY_IDS_REQUEST_LEN                             24u
+#define AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MIN_LEN                        28u
+#define AIMEE_DB2_L2_MEMORY_IDS_RESPONSE_MAX_LEN                        16412u
+#define AIMEE_DB2_L2_MEMORY_IDS_ERROR_LEN                               24u
+#define AIMEE_DB2_L2_MEMORY_IDS_MAX                                     2048u
+#define AIMEE_DB2_L2_MEMORY_ID_MIN                                      1u
+#define AIMEE_DB2_L2_MEMORY_ID_MAX                                      9223372036854775807ull
+#define AIMEE_DB2_EVENT_HEALTH_RECORD                                   AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HEALTH_RECORD                                   AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HEALTH_RECORD                               14u
+#define AIMEE_DB2_HEALTH_RECORD_REQUEST_LEN                             36u
+#define AIMEE_DB2_HEALTH_RECORD_RESPONSE_LEN                            24u
+#define AIMEE_DB2_HEALTH_RECORD_ERROR_LEN                               24u
+#define AIMEE_DB2_HEALTH_RECORD_CONFLICT_WINDOW_DAYS                    1
+#define AIMEE_DB2_HEALTH_RECORD_COUNTER_MAX                             2147483647u
+#define AIMEE_DB2_EVENT_HEALTH_RETENTION                                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HEALTH_RETENTION                                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HEALTH_RETENTION                            15u
+#define AIMEE_DB2_HEALTH_RETENTION_REQUEST_LEN                          24u
+#define AIMEE_DB2_HEALTH_RETENTION_RESPONSE_LEN                         32u
+#define AIMEE_DB2_HEALTH_RETENTION_ERROR_LEN                            24u
+#define AIMEE_DB2_HEALTH_RETENTION_SNAPSHOT_DAYS                        90
+#define AIMEE_DB2_HEALTH_RETENTION_CONTRADICTION_DAYS                   90
+#define AIMEE_DB2_HEALTH_RETENTION_MAX                                  2147483647u
+#define AIMEE_DB2_EVENT_HEALTH_COUNTERS                                 AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HEALTH_COUNTERS                                 AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HEALTH_COUNTERS                             16u
+#define AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN                           24u
+#define AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN                          60u
+#define AIMEE_DB2_HEALTH_COUNTERS_ERROR_LEN                             24u
+#define AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT                     3
+#define AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE                    0.9
+#define AIMEE_DB2_HEALTH_COUNTERS_FIELDS                                9u
+#define AIMEE_DB2_HEALTH_COUNTERS_MAX                                   2147483647u
+#define AIMEE_DB2_EVENT_STATS_COUNTS                                    AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_STATS_COUNTS                                    AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_STATS_COUNTS                                17u
+#define AIMEE_DB2_STATS_COUNTS_REQUEST_LEN                              24u
+#define AIMEE_DB2_STATS_COUNTS_RESPONSE_LEN                             96u
+#define AIMEE_DB2_STATS_COUNTS_ERROR_LEN                                24u
+#define AIMEE_DB2_STATS_COUNTS_TIERS                                    6u
+#define AIMEE_DB2_STATS_COUNTS_KINDS                                    10u
+#define AIMEE_DB2_STATS_COUNTS_MAX                                      2147483647u
+#define AIMEE_DB2_EVENT_EXPIRE                                          AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_EXPIRE                                          AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_EXPIRE                                      18u
+#define AIMEE_DB2_EXPIRE_REQUEST_LEN                                    24u
+#define AIMEE_DB2_EXPIRE_RESPONSE_LEN                                   32u
+#define AIMEE_DB2_EXPIRE_ERROR_LEN                                      24u
+#define AIMEE_DB2_EXPIRE_STALE_TIER                                     "L1"
+#define AIMEE_DB2_EXPIRE_KINDS_MAX                                      16u
+#define AIMEE_DB2_EXPIRE_MAX                                            2147483647u
+#define AIMEE_DB2_EVENT_DEMOTE                                          AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_DEMOTE                                          AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_DEMOTE                                      19u
+#define AIMEE_DB2_DEMOTE_REQUEST_LEN                                    24u
+#define AIMEE_DB2_DEMOTE_RESPONSE_LEN                                   32u
+#define AIMEE_DB2_DEMOTE_ERROR_LEN                                      24u
+#define AIMEE_DB2_DEMOTE_TIER                                           "L2"
+#define AIMEE_DB2_DEMOTE_KINDS_MAX                                      16u
+#define AIMEE_DB2_DEMOTE_MAX                                            2147483647u
+#define AIMEE_DB2_EVENT_PROMOTE_STABLE                                  AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_PROMOTE_STABLE                                  AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_PROMOTE_STABLE                              20u
+#define AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN                            24u
+#define AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN                           28u
+#define AIMEE_DB2_PROMOTE_STABLE_ERROR_LEN                              24u
+#define AIMEE_DB2_PROMOTE_STABLE_SOURCE_TIER                            "L2"
+#define AIMEE_DB2_PROMOTE_STABLE_TARGET_TIER                            "L3"
+#define AIMEE_DB2_PROMOTE_STABLE_CONFIDENCE                             0.95
+#define AIMEE_DB2_PROMOTE_STABLE_USE_COUNT                              5u
+#define AIMEE_DB2_PROMOTE_STABLE_DAYS                                   30u
+#define AIMEE_DB2_PROMOTE_STABLE_MAX                                    2147483647u
+#define AIMEE_DB2_EVENT_RECLASSIFY_DIRECTIVES                           AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RECLASSIFY_DIRECTIVES                           AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RECLASSIFY_DIRECTIVES                       21u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_REQUEST_LEN                     28u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_RESPONSE_LEN                    28u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_ERROR_LEN                       24u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_SOURCE_TIER                     "L3"
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_TARGET_TIER                     "L4"
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATED_KIND                      "policy"
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_GATE_MAX                        1u
+#define AIMEE_DB2_RECLASSIFY_DIRECTIVES_MAX                             2147483647u
+#define AIMEE_DB2_EVENT_RECORD_L4_APPROVAL                              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RECORD_L4_APPROVAL                              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RECORD_L4_APPROVAL                          22u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MIN_LEN                    41u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_REQUEST_MAX_LEN                    614u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_RESPONSE_LEN                       24u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_ERROR_LEN                          24u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_TIER                               "L4"
+#define AIMEE_DB2_RECORD_L4_APPROVAL_MEMORY_ID_MAX                      9223372036854775807ull
+#define AIMEE_DB2_RECORD_L4_APPROVAL_APPROVER_MAX                       63u
+#define AIMEE_DB2_RECORD_L4_APPROVAL_NOTE_MAX                           511u
+#define AIMEE_DB2_EVENT_PRUNE_ORPHANED_L0                               AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_PRUNE_ORPHANED_L0                               AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_PRUNE_ORPHANED_L0                           23u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_REQUEST_LEN                         24u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_RESPONSE_LEN                        28u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_ERROR_LEN                           24u
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_TIER                                "L0"
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_MAX_AGE                             "-7 days"
+#define AIMEE_DB2_PRUNE_ORPHANED_L0_COUNT_MAX                           2147483647u
+#define AIMEE_DB2_EVENT_LIFECYCLE_SWEEP_EXPIRED                         AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LIFECYCLE_SWEEP_EXPIRED                         AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LIFECYCLE_SWEEP_EXPIRED                     24u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REQUEST_LEN                   24u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_RESPONSE_LEN                  28u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_ERROR_LEN                     24u
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_SOURCE_STATE                  "pending"
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_TARGET_STATE                  "archived"
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_REASON                        "pending_ttl_expired"
+#define AIMEE_DB2_LIFECYCLE_SWEEP_EXPIRED_COUNT_MAX                     2147483647u
+#define AIMEE_DB2_EVENT_DEMOTE_ID                                       AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_DEMOTE_ID                                       AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_DEMOTE_ID                                   25u
+#define AIMEE_DB2_DEMOTE_ID_REQUEST_LEN                                 32u
+#define AIMEE_DB2_DEMOTE_ID_RESPONSE_LEN                                28u
+#define AIMEE_DB2_DEMOTE_ID_ERROR_LEN                                   24u
+#define AIMEE_DB2_DEMOTE_ID_MEMORY_ID_MAX                               9223372036854775807ull
+#define AIMEE_DB2_DEMOTE_ID_COUNT_MAX                                   1u
+#define AIMEE_DB2_DEMOTE_ID_MULTIPLIER_BITS                             4606281698874543309ull
+#define AIMEE_DB2_DEMOTE_ID_MINIMUM_CONFIDENCE_BITS                     4599075939470750515ull
+#define AIMEE_DB2_EVENT_HAS_WORKSPACE_TAG                               AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HAS_WORKSPACE_TAG                               AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HAS_WORKSPACE_TAG                           26u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_REQUEST_LEN                         32u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_RESPONSE_LEN                        28u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_ERROR_LEN                           24u
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_MEMORY_ID_MAX                       9223372036854775807ull
+#define AIMEE_DB2_HAS_WORKSPACE_TAG_MAX                                 1u
+#define AIMEE_DB2_EVENT_DELETE_ROW                                      AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_DELETE_ROW                                      AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_DELETE_ROW                                  27u
+#define AIMEE_DB2_DELETE_ROW_REQUEST_LEN                                32u
+#define AIMEE_DB2_DELETE_ROW_RESPONSE_LEN                               28u
+#define AIMEE_DB2_DELETE_ROW_ERROR_LEN                                  24u
+#define AIMEE_DB2_DELETE_ROW_MEMORY_ID_MAX                              9223372036854775807ull
+#define AIMEE_DB2_DELETE_ROW_MAX                                        1u
+#define AIMEE_DB2_EVENT_TOUCH                                           AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_TOUCH                                           AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_TOUCH                                       28u
+#define AIMEE_DB2_TOUCH_REQUEST_LEN                                     32u
+#define AIMEE_DB2_TOUCH_RESPONSE_LEN                                    24u
+#define AIMEE_DB2_TOUCH_ERROR_LEN                                       24u
+#define AIMEE_DB2_TOUCH_MEMORY_ID_MAX                                   9223372036854775807ull
+#define AIMEE_DB2_EVENT_LINK_DELETE                                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LINK_DELETE                                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LINK_DELETE                                 29u
+#define AIMEE_DB2_LINK_DELETE_REQUEST_LEN                               32u
+#define AIMEE_DB2_LINK_DELETE_RESPONSE_LEN                              24u
+#define AIMEE_DB2_LINK_DELETE_ERROR_LEN                                 24u
+#define AIMEE_DB2_LINK_DELETE_LINK_ID_MAX                               9223372036854775807ull
+#define AIMEE_DB2_EVENT_VALID_AT                                        AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_VALID_AT                                        AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_VALID_AT                                    30u
+#define AIMEE_DB2_VALID_AT_REQUEST_MIN_LEN                              37u
+#define AIMEE_DB2_VALID_AT_REQUEST_MAX_LEN                              99u
+#define AIMEE_DB2_VALID_AT_RESPONSE_LEN                                 28u
+#define AIMEE_DB2_VALID_AT_ERROR_LEN                                    24u
+#define AIMEE_DB2_VALID_AT_MEMORY_ID_MAX                                9223372036854775807ull
+#define AIMEE_DB2_VALID_AT_AS_OF_MAX                                    63u
+#define AIMEE_DB2_VALID_AT_MAX                                          1u
+#define AIMEE_DB2_EVENT_HAS_SCOPE_TYPE                                  AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HAS_SCOPE_TYPE                                  AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HAS_SCOPE_TYPE                              31u
+#define AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MIN_LEN                        37u
+#define AIMEE_DB2_HAS_SCOPE_TYPE_REQUEST_MAX_LEN                        99u
+#define AIMEE_DB2_HAS_SCOPE_TYPE_RESPONSE_LEN                           28u
+#define AIMEE_DB2_HAS_SCOPE_TYPE_ERROR_LEN                              24u
+#define AIMEE_DB2_HAS_SCOPE_TYPE_MEMORY_ID_MAX                          9223372036854775807ull
+#define AIMEE_DB2_HAS_SCOPE_TYPE_SCOPE_MAX                              63u
+#define AIMEE_DB2_HAS_SCOPE_TYPE_MAX                                    1u
+#define AIMEE_DB2_EVENT_REJECT                                          AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_REJECT                                          AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_REJECT                                      32u
+#define AIMEE_DB2_REJECT_REQUEST_LEN                                    32u
+#define AIMEE_DB2_REJECT_RESPONSE_LEN                                   24u
+#define AIMEE_DB2_REJECT_ERROR_LEN                                      24u
+#define AIMEE_DB2_REJECT_MEMORY_ID_MAX                                  9223372036854775807ull
+#define AIMEE_DB2_REJECT_PENALTY_BITS                                   4591870180066957722ull
+#define AIMEE_DB2_REJECT_FLOOR_BITS                                     0ull
+#define AIMEE_DB2_EVENT_UPDATE_CONTENT                                  AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_UPDATE_CONTENT                                  AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_UPDATE_CONTENT                              33u
+#define AIMEE_DB2_UPDATE_CONTENT_REQUEST_MIN_LEN                        37u
+#define AIMEE_DB2_UPDATE_CONTENT_REQUEST_MAX_LEN                        2083u
+#define AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN                           28u
+#define AIMEE_DB2_UPDATE_CONTENT_ERROR_LEN                              24u
+#define AIMEE_DB2_UPDATE_CONTENT_MEMORY_ID_MAX                          9223372036854775807ull
+#define AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX                            2047u
+#define AIMEE_DB2_UPDATE_CONTENT_MAX                                    1u
+#define AIMEE_DB2_EVENT_DECAY_CONFIDENCE                                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_DECAY_CONFIDENCE                                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_DECAY_CONFIDENCE                            34u
+#define AIMEE_DB2_DECAY_CONFIDENCE_REQUEST_LEN                          32u
+#define AIMEE_DB2_DECAY_CONFIDENCE_RESPONSE_LEN                         24u
+#define AIMEE_DB2_DECAY_CONFIDENCE_ERROR_LEN                            24u
+#define AIMEE_DB2_DECAY_CONFIDENCE_MEMORY_ID_MAX                        9223372036854775807ull
+#define AIMEE_DB2_DECAY_CONFIDENCE_MULTIPLIER_BITS                      4604480259023595110ull
+#define AIMEE_DB2_EVENT_WORKSPACE_TAG_INSERT                            AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_WORKSPACE_TAG_INSERT                            AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_WORKSPACE_TAG_INSERT                        35u
+#define AIMEE_DB2_WORKSPACE_TAG_INSERT_REQUEST_MIN_LEN                  37u
+#define AIMEE_DB2_WORKSPACE_TAG_INSERT_REQUEST_MAX_LEN                  547u
+#define AIMEE_DB2_WORKSPACE_TAG_INSERT_RESPONSE_LEN                     24u
+#define AIMEE_DB2_WORKSPACE_TAG_INSERT_ERROR_LEN                        24u
+#define AIMEE_DB2_WORKSPACE_TAG_INSERT_MEMORY_ID_MAX                    9223372036854775807ull
+#define AIMEE_DB2_WORKSPACE_TAG_INSERT_WORKSPACE_MAX                    511u
+#define AIMEE_DB2_EVENT_SET_COGNIFIED_KIND                              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SET_COGNIFIED_KIND                              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SET_COGNIFIED_KIND                          36u
+#define AIMEE_DB2_SET_COGNIFIED_KIND_REQUEST_MIN_LEN                    37u
+#define AIMEE_DB2_SET_COGNIFIED_KIND_REQUEST_MAX_LEN                    51u
+#define AIMEE_DB2_SET_COGNIFIED_KIND_RESPONSE_LEN                       24u
+#define AIMEE_DB2_SET_COGNIFIED_KIND_ERROR_LEN                          24u
+#define AIMEE_DB2_SET_COGNIFIED_KIND_MEMORY_ID_MAX                      9223372036854775807ull
+#define AIMEE_DB2_SET_COGNIFIED_KIND_KIND_MAX                           15u
+#define AIMEE_DB2_EVENT_SET_SOURCE_SESSION                              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SET_SOURCE_SESSION                              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SET_SOURCE_SESSION                          37u
+#define AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MIN_LEN                    36u
+#define AIMEE_DB2_SET_SOURCE_SESSION_REQUEST_MAX_LEN                    163u
+#define AIMEE_DB2_SET_SOURCE_SESSION_RESPONSE_LEN                       24u
+#define AIMEE_DB2_SET_SOURCE_SESSION_ERROR_LEN                          24u
+#define AIMEE_DB2_SET_SOURCE_SESSION_MEMORY_ID_MAX                      9223372036854775807ull
+#define AIMEE_DB2_SET_SOURCE_SESSION_SESSION_MAX                        127u
+#define AIMEE_DB2_EVENT_NEGATION_TOKENS_UPDATE                          AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_NEGATION_TOKENS_UPDATE                          AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_NEGATION_TOKENS_UPDATE                      38u
+#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MIN_LEN                36u
+#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_REQUEST_MAX_LEN                2083u
+#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_RESPONSE_LEN                   24u
+#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_ERROR_LEN                      24u
+#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_MEMORY_ID_MAX                  9223372036854775807ull
+#define AIMEE_DB2_NEGATION_TOKENS_UPDATE_TOKENS_MAX                     2047u
+#define AIMEE_DB2_EVENT_GET_CONTENT                                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_GET_CONTENT                                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_GET_CONTENT                                 39u
+#define AIMEE_DB2_GET_CONTENT_REQUEST_LEN                               32u
+#define AIMEE_DB2_GET_CONTENT_RESPONSE_MIN_LEN                          28u
+#define AIMEE_DB2_GET_CONTENT_RESPONSE_MAX_LEN                          2075u
+#define AIMEE_DB2_GET_CONTENT_ERROR_LEN                                 24u
+#define AIMEE_DB2_GET_CONTENT_MEMORY_ID_MAX                             9223372036854775807ull
+#define AIMEE_DB2_GET_CONTENT_CONTENT_MAX                               2047u
+#define AIMEE_DB2_EVENT_GET_SOURCE_SESSION                              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_GET_SOURCE_SESSION                              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_GET_SOURCE_SESSION                          40u
+#define AIMEE_DB2_GET_SOURCE_SESSION_REQUEST_LEN                        32u
+#define AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MIN_LEN                   29u
+#define AIMEE_DB2_GET_SOURCE_SESSION_RESPONSE_MAX_LEN                   155u
+#define AIMEE_DB2_GET_SOURCE_SESSION_ERROR_LEN                          24u
+#define AIMEE_DB2_GET_SOURCE_SESSION_MEMORY_ID_MAX                      9223372036854775807ull
+#define AIMEE_DB2_GET_SOURCE_SESSION_SESSION_MAX                        127u
+#define AIMEE_DB2_EVENT_PICK_FIRST_TEMPORAL_REF                         AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_PICK_FIRST_TEMPORAL_REF                         AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_PICK_FIRST_TEMPORAL_REF                     41u
+#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_REQUEST_LEN                   32u
+#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MIN_LEN              29u
+#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_RESPONSE_MAX_LEN              155u
+#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_ERROR_LEN                     24u
+#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_MEMORY_ID_MAX                 9223372036854775807ull
+#define AIMEE_DB2_PICK_FIRST_TEMPORAL_REF_KEY_MAX                       127u
+#define AIMEE_DB2_EVENT_COUNT_AND_MAX_UPDATED                           AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COUNT_AND_MAX_UPDATED                           AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COUNT_AND_MAX_UPDATED                       42u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_REQUEST_LEN                     24u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MIN_LEN                32u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_RESPONSE_MAX_LEN                63u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_ERROR_LEN                       24u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_COUNT_MAX                       2147483647u
+#define AIMEE_DB2_COUNT_AND_MAX_UPDATED_STAMP_MAX                       31u
+#define AIMEE_DB2_EVENT_TOP_L2_FACTS                                    AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_TOP_L2_FACTS                                    AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_TOP_L2_FACTS                                43u
+#define AIMEE_DB2_TOP_L2_FACTS_REQUEST_MIN_LEN                          40u
+#define AIMEE_DB2_TOP_L2_FACTS_REQUEST_MAX_LEN                          1062u
+#define AIMEE_DB2_TOP_L2_FACTS_LIMIT_MIN                                1u
+#define AIMEE_DB2_TOP_L2_FACTS_LIMIT_MAX                                64u
+#define AIMEE_DB2_TOP_L2_FACTS_SCOPE_FLAGS_MAX                          3u
+#define AIMEE_DB2_TOP_L2_FACTS_WORKSPACE_MAX                            511u
+#define AIMEE_DB2_TOP_L2_FACTS_PROJECT_MAX                              511u
+#define AIMEE_DB2_TOP_L2_FACTS_RESPONSE_MIN_LEN                         28u
+#define AIMEE_DB2_TOP_L2_FACTS_RESPONSE_MAX_LEN                         540u
+#define AIMEE_DB2_TOP_L2_FACTS_ERROR_LEN                                24u
+#define AIMEE_DB2_TOP_L2_FACTS_MAX                                      64u
+#define AIMEE_DB2_TOP_L2_FACTS_ID_MIN                                   1u
+#define AIMEE_DB2_TOP_L2_FACTS_ID_MAX                                   9223372036854775807ull
+#define AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LIST_SESSION_SCOPE_PRIORITY                 44u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_REQUEST_MIN_LEN           40u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_REQUEST_MAX_LEN           1062u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIMIT_MIN                 1u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIMIT_MAX                 64u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_SCOPE_FLAGS_MAX           3u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_WORKSPACE_MAX             511u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_PROJECT_MAX               511u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_RESPONSE_MIN_LEN          28u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_RESPONSE_MAX_LEN          540u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_ERROR_LEN                 24u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_MAX                       64u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_ID_MIN                    1u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_ID_MAX                    9223372036854775807ull
+#define AIMEE_DB2_EVENT_COLLECT_ALIAS_MATCHES                           AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COLLECT_ALIAS_MATCHES                           AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COLLECT_ALIAS_MATCHES                       45u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_REQUEST_MIN_LEN                 45u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_REQUEST_MAX_LEN                 1577u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_LIMIT_MIN                       1u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_LIMIT_MAX                       64u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_SCOPE_FLAGS_MAX                 3u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_TERM_MIN                        1u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_TERM_MAX                        511u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_WORKSPACE_MAX                   511u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_PROJECT_MAX                     511u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_RESPONSE_MIN_LEN                28u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_RESPONSE_MAX_LEN                540u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_ERROR_LEN                       24u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_MAX                             64u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_ID_MIN                          1u
+#define AIMEE_DB2_COLLECT_ALIAS_MATCHES_ID_MAX                          9223372036854775807ull
+#define AIMEE_DB2_EVENT_COLLECT_ENTITY_MATCHES                          AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COLLECT_ENTITY_MATCHES                          AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COLLECT_ENTITY_MATCHES                      46u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_REQUEST_MIN_LEN                45u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_REQUEST_MAX_LEN                1577u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_LIMIT_MIN                      1u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_LIMIT_MAX                      64u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_SCOPE_FLAGS_MAX                3u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_TERM_MIN                       1u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_TERM_MAX                       511u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_WORKSPACE_MAX                  511u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_PROJECT_MAX                    511u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_RESPONSE_MIN_LEN               28u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_RESPONSE_MAX_LEN               540u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_ERROR_LEN                      24u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_MAX                            64u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_ID_MIN                         1u
+#define AIMEE_DB2_COLLECT_ENTITY_MATCHES_ID_MAX                         9223372036854775807ull
+#define AIMEE_DB2_EVENT_COLLECT_EVENT_FRAME_MATCHES                     AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COLLECT_EVENT_FRAME_MATCHES                     AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COLLECT_EVENT_FRAME_MATCHES                 47u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_REQUEST_MIN_LEN           45u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_REQUEST_MAX_LEN           1577u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_LIMIT_MIN                 1u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_LIMIT_MAX                 64u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_SCOPE_FLAGS_MAX           3u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_TERM_MIN                  1u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_TERM_MAX                  511u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_WORKSPACE_MAX             511u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_PROJECT_MAX               511u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_RESPONSE_MIN_LEN          28u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_RESPONSE_MAX_LEN          540u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_ERROR_LEN                 24u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_MAX                       64u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_ID_MIN                    1u
+#define AIMEE_DB2_COLLECT_EVENT_FRAME_MATCHES_ID_MAX                    9223372036854775807ull
+#define AIMEE_DB2_EVENT_COLLECT_RELATION_TOKEN_MATCHES                  AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COLLECT_RELATION_TOKEN_MATCHES                  AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COLLECT_RELATION_TOKEN_MATCHES              48u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_REQUEST_MIN_LEN        45u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_REQUEST_MAX_LEN        1577u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_LIMIT_MIN              1u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_LIMIT_MAX              64u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_SCOPE_FLAGS_MAX        3u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_TERM_MIN               1u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_TERM_MAX               511u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_WORKSPACE_MAX          511u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_PROJECT_MAX            511u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_RESPONSE_MIN_LEN       28u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_RESPONSE_MAX_LEN       540u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_ERROR_LEN              24u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_MAX                    64u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_ID_MIN                 1u
+#define AIMEE_DB2_COLLECT_RELATION_TOKEN_MATCHES_ID_MAX                 9223372036854775807ull
+#define AIMEE_DB2_EVENT_COLLECT_SUMMARY_MATCHES                         AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COLLECT_SUMMARY_MATCHES                         AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COLLECT_SUMMARY_MATCHES                     49u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_REQUEST_MIN_LEN               45u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_REQUEST_MAX_LEN               1577u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_LIMIT_MIN                     1u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_LIMIT_MAX                     64u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_SCOPE_FLAGS_MAX               3u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_TERM_MIN                      1u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_TERM_MAX                      511u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_WORKSPACE_MAX                 511u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_PROJECT_MAX                   511u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_RESPONSE_MIN_LEN              28u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_RESPONSE_MAX_LEN              540u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_ERROR_LEN                     24u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_MAX                           64u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_ID_MIN                        1u
+#define AIMEE_DB2_COLLECT_SUMMARY_MATCHES_ID_MAX                        9223372036854775807ull
+#define AIMEE_DB2_EVENT_COLLECT_TEMPORAL_MATCHES                        AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_COLLECT_TEMPORAL_MATCHES                        AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_COLLECT_TEMPORAL_MATCHES                    50u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_REQUEST_MIN_LEN              45u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_REQUEST_MAX_LEN              1577u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_LIMIT_MIN                    1u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_LIMIT_MAX                    64u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_SCOPE_FLAGS_MAX              3u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_TERM_MIN                     1u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_TERM_MAX                     511u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_WORKSPACE_MAX                511u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_PROJECT_MAX                  511u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_RESPONSE_MIN_LEN             28u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_RESPONSE_MAX_LEN             540u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_ERROR_LEN                    24u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_MAX                          64u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_ID_MIN                       1u
+#define AIMEE_DB2_COLLECT_TEMPORAL_MATCHES_ID_MAX                       9223372036854775807ull
+#define AIMEE_DB2_EVENT_FIND_FACTS_LIKE                                 AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_FIND_FACTS_LIKE                                 AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_FIND_FACTS_LIKE                             51u
+#define AIMEE_DB2_FIND_FACTS_LIKE_REQUEST_MIN_LEN                       45u
+#define AIMEE_DB2_FIND_FACTS_LIKE_REQUEST_MAX_LEN                       1577u
+#define AIMEE_DB2_FIND_FACTS_LIKE_LIMIT_MIN                             1u
+#define AIMEE_DB2_FIND_FACTS_LIKE_LIMIT_MAX                             64u
+#define AIMEE_DB2_FIND_FACTS_LIKE_SCOPE_FLAGS_MAX                       3u
+#define AIMEE_DB2_FIND_FACTS_LIKE_TERM_MIN                              1u
+#define AIMEE_DB2_FIND_FACTS_LIKE_TERM_MAX                              511u
+#define AIMEE_DB2_FIND_FACTS_LIKE_WORKSPACE_MAX                         511u
+#define AIMEE_DB2_FIND_FACTS_LIKE_PROJECT_MAX                           511u
+#define AIMEE_DB2_FIND_FACTS_LIKE_RESPONSE_MIN_LEN                      28u
+#define AIMEE_DB2_FIND_FACTS_LIKE_RESPONSE_MAX_LEN                      540u
+#define AIMEE_DB2_FIND_FACTS_LIKE_ERROR_LEN                             24u
+#define AIMEE_DB2_FIND_FACTS_LIKE_MAX                                   64u
+#define AIMEE_DB2_FIND_FACTS_LIKE_ID_MIN                                1u
+#define AIMEE_DB2_FIND_FACTS_LIKE_ID_MAX                                9223372036854775807ull
+#define AIMEE_DB2_EVENT_LIST_SESSION_SCOPE_PRIORITY_LIKE                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LIST_SESSION_SCOPE_PRIORITY_LIKE                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LIST_SESSION_SCOPE_PRIORITY_LIKE            52u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_REQUEST_MIN_LEN      45u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_REQUEST_MAX_LEN      1577u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_LIMIT_MIN            1u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_LIMIT_MAX            64u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_SCOPE_FLAGS_MAX      3u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_TERM_MIN             1u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_TERM_MAX             511u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_WORKSPACE_MAX        511u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_PROJECT_MAX          511u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_RESPONSE_MIN_LEN     28u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_RESPONSE_MAX_LEN     540u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_ERROR_LEN            24u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_MAX                  64u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_ID_MIN               1u
+#define AIMEE_DB2_LIST_SESSION_SCOPE_PRIORITY_LIKE_ID_MAX               9223372036854775807ull
+#define AIMEE_DB2_EVENT_NEGATION_FTS_SEARCH                             AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_NEGATION_FTS_SEARCH                             AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_NEGATION_FTS_SEARCH                         53u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_REQUEST_MIN_LEN                   45u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_REQUEST_MAX_LEN                   1577u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_LIMIT_MIN                         1u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_LIMIT_MAX                         64u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_SCOPE_FLAGS_MAX                   3u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_TERM_MIN                          1u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_TERM_MAX                          511u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_WORKSPACE_MAX                     511u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_PROJECT_MAX                       511u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_RESPONSE_MAX_LEN                  540u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_ERROR_LEN                         24u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_MAX                               64u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MIN                            1u
+#define AIMEE_DB2_NEGATION_FTS_SEARCH_ID_MAX                            9223372036854775807ull
+#define AIMEE_DB2_EVENT_SESSION_NEIGHBORS_BEFORE                        AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SESSION_NEIGHBORS_BEFORE                        AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_BEFORE                    54u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MIN_LEN              41u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_REQUEST_MAX_LEN              167u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ANCHOR_MAX                   9223372036854775807ull
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MIN                    1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_LIMIT_MAX                    64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MIN                  1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_SESSION_MAX                  127u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_RESPONSE_MIN_LEN             28u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_RESPONSE_MAX_LEN             540u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ERROR_LEN                    24u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_MAX                          64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MIN                       1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_BEFORE_ID_MAX                       9223372036854775807ull
+#define AIMEE_DB2_EVENT_SESSION_NEIGHBORS_AFTER                         AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SESSION_NEIGHBORS_AFTER                         AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SESSION_NEIGHBORS_AFTER                     55u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MIN_LEN               41u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_REQUEST_MAX_LEN               167u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ANCHOR_MAX                    9223372036854775807ull
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MIN                     1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_LIMIT_MAX                     64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MIN                   1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_SESSION_MAX                   127u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_RESPONSE_MIN_LEN              28u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_RESPONSE_MAX_LEN              540u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ERROR_LEN                     24u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_MAX                           64u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MIN                        1u
+#define AIMEE_DB2_SESSION_NEIGHBORS_AFTER_ID_MAX                        9223372036854775807ull
+#define AIMEE_DB2_MEMORY_ROW_TIER_MAX                                   3u
+#define AIMEE_DB2_MEMORY_ROW_KIND_MAX                                   15u
+#define AIMEE_DB2_MEMORY_ROW_KEY_MAX                                    511u
+#define AIMEE_DB2_MEMORY_ROW_CONTENT_MAX                                2047u
+#define AIMEE_DB2_MEMORY_ROW_USE_CASES_MAX                              1023u
+#define AIMEE_DB2_MEMORY_ROW_LAST_USED_AT_MAX                           31u
+#define AIMEE_DB2_MEMORY_ROW_CREATED_AT_MAX                             31u
+#define AIMEE_DB2_MEMORY_ROW_UPDATED_AT_MAX                             31u
+#define AIMEE_DB2_MEMORY_ROW_SOURCE_SESSION_MAX                         127u
+#define AIMEE_DB2_MEMORY_ROW_PROVENANCE_CATEGORY_MAX                    31u
+#define AIMEE_DB2_MEMORY_ROW_ID_MAX                                     9223372036854775807ull
+#define AIMEE_DB2_MEMORY_ROW_USE_COUNT_MAX                              2147483647u
+#define AIMEE_DB2_MEMORY_ROW_UNIT_BITS                                  4607182418800017408ull
+#define AIMEE_DB2_MEMORY_ROW_PAYLOAD_MIN                                68u
+#define AIMEE_DB2_MEMORY_ROW_PAYLOAD_MAX                                3918u
+#define AIMEE_DB2_EVENT_ROW_GET                                         AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_ROW_GET                                         AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_ROW_GET                                     56u
+#define AIMEE_DB2_ROW_GET_REQUEST_LEN                                   32u
+#define AIMEE_DB2_ROW_GET_IDENTIFIER_MAX                                9223372036854775807ull
+#define AIMEE_DB2_ROW_GET_RESPONSE_MIN_LEN                              92u
+#define AIMEE_DB2_ROW_GET_RESPONSE_MAX_LEN                              3942u
+#define AIMEE_DB2_ROW_GET_ERROR_LEN                                     24u
+#define AIMEE_DB2_EVENT_ROW_GET_BY_UNIT_ID                              AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_ROW_GET_BY_UNIT_ID                              AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_ROW_GET_BY_UNIT_ID                          57u
+#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_REQUEST_LEN                        32u
+#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_IDENTIFIER_MAX                     9223372036854775807ull
+#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_RESPONSE_MIN_LEN                   92u
+#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_RESPONSE_MAX_LEN                   3942u
+#define AIMEE_DB2_ROW_GET_BY_UNIT_ID_ERROR_LEN                          24u
+#define AIMEE_DB2_EVENT_SEARCH_FACTS_PATTERNS_BY_KEYWORD                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SEARCH_FACTS_PATTERNS_BY_KEYWORD                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SEARCH_FACTS_PATTERNS_BY_KEYWORD            58u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_REQUEST_MIN_LEN      45u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_REQUEST_MAX_LEN      1577u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_LIMIT_MIN            1u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_LIMIT_MAX            64u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_SCOPE_FLAGS_MAX      3u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_TERM_MIN             1u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_TERM_MAX             511u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_WORKSPACE_MAX        511u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_PROJECT_MAX          511u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_RESPONSE_MIN_LEN     28u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_RESPONSE_MAX_LEN     540u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_ERROR_LEN            24u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_MAX                  64u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_ID_MIN               1u
+#define AIMEE_DB2_SEARCH_FACTS_PATTERNS_BY_KEYWORD_ID_MAX               9223372036854775807ull
+#define AIMEE_DB2_EVENT_FACT_HISTORY                                    AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_FACT_HISTORY                                    AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_FACT_HISTORY                                59u
+#define AIMEE_DB2_FACT_HISTORY_REQUEST_MIN_LEN                          33u
+#define AIMEE_DB2_FACT_HISTORY_REQUEST_MAX_LEN                          543u
+#define AIMEE_DB2_FACT_HISTORY_LIMIT_MIN                                1u
+#define AIMEE_DB2_FACT_HISTORY_LIMIT_MAX                                64u
+#define AIMEE_DB2_FACT_HISTORY_KEY_MIN                                  1u
+#define AIMEE_DB2_FACT_HISTORY_KEY_MAX                                  511u
+#define AIMEE_DB2_FACT_HISTORY_RESPONSE_MIN_LEN                         28u
+#define AIMEE_DB2_FACT_HISTORY_RESPONSE_MAX_LEN                         540u
+#define AIMEE_DB2_FACT_HISTORY_ERROR_LEN                                24u
+#define AIMEE_DB2_FACT_HISTORY_MAX                                      64u
+#define AIMEE_DB2_FACT_HISTORY_ID_MIN                                   1u
+#define AIMEE_DB2_FACT_HISTORY_ID_MAX                                   9223372036854775807ull
+#define AIMEE_DB2_EVENT_LIST_ROWS                                       AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LIST_ROWS                                       AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LIST_ROWS                                   60u
+#define AIMEE_DB2_LIST_ROWS_REQUEST_MIN_LEN                             52u
+#define AIMEE_DB2_LIST_ROWS_REQUEST_MAX_LEN                             1092u
+#define AIMEE_DB2_LIST_ROWS_LIMIT_MIN                                   1u
+#define AIMEE_DB2_LIST_ROWS_LIMIT_MAX                                   64u
+#define AIMEE_DB2_LIST_ROWS_SCOPE_FLAGS_MAX                             3u
+#define AIMEE_DB2_LIST_ROWS_HIDE_ARCHIVED_MAX                           1u
+#define AIMEE_DB2_LIST_ROWS_TIER_MAX                                    3u
+#define AIMEE_DB2_LIST_ROWS_KIND_MAX                                    15u
+#define AIMEE_DB2_LIST_ROWS_WORKSPACE_MAX                               511u
+#define AIMEE_DB2_LIST_ROWS_PROJECT_MAX                                 511u
+#define AIMEE_DB2_LIST_ROWS_RESPONSE_MIN_LEN                            28u
+#define AIMEE_DB2_LIST_ROWS_RESPONSE_MAX_LEN                            540u
+#define AIMEE_DB2_LIST_ROWS_ERROR_LEN                                   24u
+#define AIMEE_DB2_LIST_ROWS_MAX                                         64u
+#define AIMEE_DB2_LIST_ROWS_ID_MIN                                      1u
+#define AIMEE_DB2_LIST_ROWS_ID_MAX                                      9223372036854775807ull
+#define AIMEE_DB2_EVENT_AGGREGATE                                       AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_AGGREGATE                                       AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_AGGREGATE                                   61u
+#define AIMEE_DB2_AGGREGATE_REQUEST_MIN_LEN                             36u
+#define AIMEE_DB2_AGGREGATE_REQUEST_MAX_LEN                             290u
+#define AIMEE_DB2_AGGREGATE_LIMIT_MIN                                   1u
+#define AIMEE_DB2_AGGREGATE_LIMIT_MAX                                   64u
+#define AIMEE_DB2_AGGREGATE_ENTITY_SEED_MAX                             127u
+#define AIMEE_DB2_AGGREGATE_KEYWORD_MAX                                 127u
+#define AIMEE_DB2_AGGREGATE_RESPONSE_MIN_LEN                            32u
+#define AIMEE_DB2_AGGREGATE_RESPONSE_MAX_LEN                            544u
+#define AIMEE_DB2_AGGREGATE_ERROR_LEN                                   24u
+#define AIMEE_DB2_AGGREGATE_TRUNCATED_MAX                               1u
+#define AIMEE_DB2_AGGREGATE_MAX                                         64u
+#define AIMEE_DB2_AGGREGATE_ID_MIN                                      1u
+#define AIMEE_DB2_AGGREGATE_ID_MAX                                      9223372036854775807ull
+#define AIMEE_DB2_EVENT_LOAD_EVAL_CORPUS                                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_LOAD_EVAL_CORPUS                                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_LOAD_EVAL_CORPUS                            62u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_REQUEST_LEN                          28u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_LIMIT_MIN                            1u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_LIMIT_MAX                            64u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_RESPONSE_MIN_LEN                     32u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_RESPONSE_MAX_LEN                     575u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_ERROR_LEN                            24u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_LABEL_MAX                            31u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_MAX                                  64u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_ID_MIN                               1u
+#define AIMEE_DB2_LOAD_EVAL_CORPUS_ID_MAX                               9223372036854775807ull
+#define AIMEE_DB2_EVENT_RECORD_EXISTS                                   AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_RECORD_EXISTS                                   AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_RECORD_EXISTS                               63u
+#define AIMEE_DB2_RECORD_EXISTS_REQUEST_LEN                             32u
+#define AIMEE_DB2_RECORD_EXISTS_IDENTIFIER_MAX                          9223372036854775807ull
+#define AIMEE_DB2_RECORD_EXISTS_RESPONSE_LEN                            28u
+#define AIMEE_DB2_RECORD_EXISTS_ERROR_LEN                               24u
+#define AIMEE_DB2_RECORD_EXISTS_MAX                                     1u
+#define AIMEE_DB2_EVENT_PROSPECTIVE_SET_STATE                           AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_PROSPECTIVE_SET_STATE                           AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_PROSPECTIVE_SET_STATE                       64u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_REQUEST_MIN_LEN                 36u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_REQUEST_MAX_LEN                 99u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_PROSPECTIVE_ID_MIN              1ull
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_PROSPECTIVE_ID_MAX              9223372036854775807ull
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_NEW_STATE_MIN                   1u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_NEW_STATE_MAX                   63u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_ACKNOWLEDGED_MIN                0u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_ACKNOWLEDGED_MAX                1u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_RESPONSE_MIN_LEN                28u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_RESPONSE_MAX_LEN                28u
+#define AIMEE_DB2_PROSPECTIVE_SET_STATE_ERROR_LEN                       24u
+#define AIMEE_DB2_EVENT_DEDUPE_BY_KEY                                   AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_DEDUPE_BY_KEY                                   AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_DEDUPE_BY_KEY                               65u
+#define AIMEE_DB2_DEDUPE_BY_KEY_REQUEST_MIN_LEN                         28u
+#define AIMEE_DB2_DEDUPE_BY_KEY_REQUEST_MAX_LEN                         28u
+#define AIMEE_DB2_DEDUPE_BY_KEY_DRY_RUN_MIN                             0u
+#define AIMEE_DB2_DEDUPE_BY_KEY_DRY_RUN_MAX                             1u
+#define AIMEE_DB2_DEDUPE_BY_KEY_MERGED_MIN                              0u
+#define AIMEE_DB2_DEDUPE_BY_KEY_MERGED_MAX                              2147483647u
+#define AIMEE_DB2_DEDUPE_BY_KEY_RESPONSE_MIN_LEN                        28u
+#define AIMEE_DB2_DEDUPE_BY_KEY_RESPONSE_MAX_LEN                        28u
+#define AIMEE_DB2_DEDUPE_BY_KEY_ERROR_LEN                               24u
+#define AIMEE_DB2_EVENT_SCENE_MEMBER_EXISTS                             AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_SCENE_MEMBER_EXISTS                             AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_SCENE_MEMBER_EXISTS                         66u
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_REQUEST_MIN_LEN                   40u
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_REQUEST_MAX_LEN                   40u
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_MEMORY_ID_MIN               1ull
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_MEMORY_ID_MAX               9223372036854775807ull
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_ID_MIN                      1ull
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_SCENE_ID_MAX                      9223372036854775807ull
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_MEMBER_MIN                        0u
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_MEMBER_MAX                        1u
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_RESPONSE_MAX_LEN                  28u
+#define AIMEE_DB2_SCENE_MEMBER_EXISTS_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_UNIT_EDGE_EXISTS                                AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_UNIT_EDGE_EXISTS                                AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_UNIT_EDGE_EXISTS                            67u
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_REQUEST_MIN_LEN                      40u
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_REQUEST_MAX_LEN                      40u
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_A_MIN                        1ull
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_A_MAX                        9223372036854775807ull
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_B_MIN                        1ull
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_UNIT_ID_B_MAX                        9223372036854775807ull
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_CONNECTED_MIN                        0u
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_CONNECTED_MAX                        1u
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_RESPONSE_MIN_LEN                     28u
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_RESPONSE_MAX_LEN                     28u
+#define AIMEE_DB2_UNIT_EDGE_EXISTS_ERROR_LEN                            24u
+#define AIMEE_DB2_EVENT_ENTITY_OBSERVATION_COUNT                        AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_ENTITY_OBSERVATION_COUNT                        AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_ENTITY_OBSERVATION_COUNT                    12u
+#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_REQUEST_MIN_LEN              29u
+#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_REQUEST_MAX_LEN              283u
+#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ARGUMENT_MIN                 1u
+#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ARGUMENT_MAX                 255u
+#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_RESPONSE_LEN                 28u
+#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_ERROR_LEN                    24u
+#define AIMEE_DB2_ENTITY_OBSERVATION_COUNT_MAX                          2147483647u
+#define AIMEE_DB2_EVENT_ENTITY_PROFILE_FRESH                            AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_ENTITY_PROFILE_FRESH                            AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_ENTITY_PROFILE_FRESH                        13u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_REQUEST_MIN_LEN                  34u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_REQUEST_MAX_LEN                  350u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_FIRST_MIN                        1u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_FIRST_MAX                        255u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_SECOND_MIN                       1u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_SECOND_MAX                       63u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_RESPONSE_LEN                     28u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_ERROR_LEN                        24u
+#define AIMEE_DB2_ENTITY_PROFILE_FRESH_MAX                              1u
+#define AIMEE_DB2_EVENT_PROJECT_FINGERPRINT                             AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_PROJECT_FINGERPRINT                             AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_PROJECT_FINGERPRINT                         14u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_REQUEST_MIN_LEN                   28u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_REQUEST_MAX_LEN                   283u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_PROJECT_MIN                       1u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_PROJECT_MAX                       255u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_FINGERPRINT_MIN                   0u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_FINGERPRINT_MAX                   63u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_RESPONSE_MAX_LEN                  91u
+#define AIMEE_DB2_PROJECT_FINGERPRINT_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_VISIBLE_SOURCE_HASH                             AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_VISIBLE_SOURCE_HASH                             AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_VISIBLE_SOURCE_HASH                         15u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_REQUEST_MIN_LEN                   28u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_REQUEST_MAX_LEN                   283u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_PROJECT_MIN                       1u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_PROJECT_MAX                       255u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_SOURCE_HASH_MIN                   0u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_SOURCE_HASH_MAX                   63u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_RESPONSE_MAX_LEN                  91u
+#define AIMEE_DB2_VISIBLE_SOURCE_HASH_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_ENTITY_PROFILE_CARD                             AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_ENTITY_PROFILE_CARD                             AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_ENTITY_PROFILE_CARD                         16u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_REQUEST_MIN_LEN                   28u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_REQUEST_MAX_LEN                   283u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_ENTITY_ID_MIN                     1u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_ENTITY_ID_MAX                     255u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_CARD_JSON_MIN                     0u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_CARD_JSON_MAX                     4095u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_RESPONSE_MAX_LEN                  4123u
+#define AIMEE_DB2_ENTITY_PROFILE_CARD_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_GENERATION_ABORT                                AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_GENERATION_ABORT                                AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_GENERATION_ABORT                            17u
+#define AIMEE_DB2_GENERATION_ABORT_REQUEST_MIN_LEN                      36u
+#define AIMEE_DB2_GENERATION_ABORT_REQUEST_MAX_LEN                      1059u
+#define AIMEE_DB2_GENERATION_ABORT_GENERATION_ID_MIN                    1ull
+#define AIMEE_DB2_GENERATION_ABORT_GENERATION_ID_MAX                    9223372036854775807ull
+#define AIMEE_DB2_GENERATION_ABORT_ERROR_MESSAGE_MIN                    0u
+#define AIMEE_DB2_GENERATION_ABORT_ERROR_MESSAGE_MAX                    1023u
+#define AIMEE_DB2_GENERATION_ABORT_ACKNOWLEDGED_MIN                     0u
+#define AIMEE_DB2_GENERATION_ABORT_ACKNOWLEDGED_MAX                     1u
+#define AIMEE_DB2_GENERATION_ABORT_RESPONSE_MIN_LEN                     28u
+#define AIMEE_DB2_GENERATION_ABORT_RESPONSE_MAX_LEN                     28u
+#define AIMEE_DB2_GENERATION_ABORT_ERROR_LEN                            24u
+#define AIMEE_DB2_EVENT_GENERATION_SET_SOURCE_HASH                      AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_GENERATION_SET_SOURCE_HASH                      AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_GENERATION_SET_SOURCE_HASH                  18u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_REQUEST_MIN_LEN            36u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_REQUEST_MAX_LEN            99u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_GENERATION_ID_MIN          1ull
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_GENERATION_ID_MAX          9223372036854775807ull
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_SOURCE_HASH_MIN            1u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_SOURCE_HASH_MAX            63u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_ACKNOWLEDGED_MIN           0u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_ACKNOWLEDGED_MAX           1u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_RESPONSE_MIN_LEN           28u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_RESPONSE_MAX_LEN           28u
+#define AIMEE_DB2_GENERATION_SET_SOURCE_HASH_ERROR_LEN                  24u
+#define AIMEE_DB2_EVENT_GENERATION_PUBLISH                              AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_GENERATION_PUBLISH                              AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_GENERATION_PUBLISH                          19u
+#define AIMEE_DB2_GENERATION_PUBLISH_REQUEST_MIN_LEN                    36u
+#define AIMEE_DB2_GENERATION_PUBLISH_REQUEST_MAX_LEN                    291u
+#define AIMEE_DB2_GENERATION_PUBLISH_GENERATION_ID_MIN                  1ull
+#define AIMEE_DB2_GENERATION_PUBLISH_GENERATION_ID_MAX                  9223372036854775807ull
+#define AIMEE_DB2_GENERATION_PUBLISH_PROJECT_MIN                        1u
+#define AIMEE_DB2_GENERATION_PUBLISH_PROJECT_MAX                        255u
+#define AIMEE_DB2_GENERATION_PUBLISH_ACKNOWLEDGED_MIN                   0u
+#define AIMEE_DB2_GENERATION_PUBLISH_ACKNOWLEDGED_MAX                   1u
+#define AIMEE_DB2_GENERATION_PUBLISH_RESPONSE_MIN_LEN                   28u
+#define AIMEE_DB2_GENERATION_PUBLISH_RESPONSE_MAX_LEN                   28u
+#define AIMEE_DB2_GENERATION_PUBLISH_ERROR_LEN                          24u
+#define AIMEE_DB2_EVENT_PURGE_FILES_MATCHING                            AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_PURGE_FILES_MATCHING                            AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_PURGE_FILES_MATCHING                        20u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_REQUEST_MIN_LEN                  36u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_REQUEST_MAX_LEN                  547u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_PROJECT_ID_MIN                   1ull
+#define AIMEE_DB2_PURGE_FILES_MATCHING_PROJECT_ID_MAX                   9223372036854775807ull
+#define AIMEE_DB2_PURGE_FILES_MATCHING_PATH_GLOB_MIN                    1u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_PATH_GLOB_MAX                    511u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_DELETED_MIN                      0u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_DELETED_MAX                      2147483647u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_RESPONSE_MIN_LEN                 28u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_RESPONSE_MAX_LEN                 28u
+#define AIMEE_DB2_PURGE_FILES_MATCHING_ERROR_LEN                        24u
+#define AIMEE_DB2_EVENT_FILE_INDEX_DELETE_CURRENT_GENERATION            AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_FILE_INDEX_DELETE_CURRENT_GENERATION            AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_CURRENT_GENERATION        21u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_REQUEST_MIN_LEN  28u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_REQUEST_MAX_LEN  155u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MIN      1u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MAX      127u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_DELETED_MIN      0u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_DELETED_MAX      4294967295u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_RESPONSE_MIN_LEN 28u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_RESPONSE_MAX_LEN 28u
+#define AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_ERROR_LEN        24u
+#define AIMEE_DB2_EVENT_PROJECT_DELETE                                  AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_PROJECT_DELETE                                  AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_PROJECT_DELETE                              22u
+#define AIMEE_DB2_PROJECT_DELETE_REQUEST_MIN_LEN                        28u
+#define AIMEE_DB2_PROJECT_DELETE_REQUEST_MAX_LEN                        155u
+#define AIMEE_DB2_PROJECT_DELETE_PROJECT_MIN                            1u
+#define AIMEE_DB2_PROJECT_DELETE_PROJECT_MAX                            127u
+#define AIMEE_DB2_PROJECT_DELETE_DELETED_MIN                            0u
+#define AIMEE_DB2_PROJECT_DELETE_DELETED_MAX                            4294967295u
+#define AIMEE_DB2_PROJECT_DELETE_RESPONSE_MIN_LEN                       28u
+#define AIMEE_DB2_PROJECT_DELETE_RESPONSE_MAX_LEN                       28u
+#define AIMEE_DB2_PROJECT_DELETE_ERROR_LEN                              24u
+#define AIMEE_DB2_EVENT_MINHASH_DELETE_CURRENT_GENERATION               AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_MINHASH_DELETE_CURRENT_GENERATION               AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_MINHASH_DELETE_CURRENT_GENERATION           23u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_REQUEST_MIN_LEN     28u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_REQUEST_MAX_LEN     155u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MIN         1u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MAX         127u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_ACKNOWLEDGED_MIN    0u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_ACKNOWLEDGED_MAX    1u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_RESPONSE_MIN_LEN    28u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_RESPONSE_MAX_LEN    28u
+#define AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_ERROR_LEN           24u
+#define AIMEE_DB2_EVENT_TRACE_MINING_RECORD                             AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_TRACE_MINING_RECORD                             AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_TRACE_MINING_RECORD                         8u
+#define AIMEE_DB2_TRACE_MINING_RECORD_REQUEST_LEN                       32u
+#define AIMEE_DB2_TRACE_MINING_RECORD_IDENTIFIER_MAX                    9223372036854775807ull
+#define AIMEE_DB2_TRACE_MINING_RECORD_RESPONSE_LEN                      24u
+#define AIMEE_DB2_TRACE_MINING_RECORD_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_ANTI_PATTERN_EXISTS_EXACT                       AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ANTI_PATTERN_EXISTS_EXACT                       AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ANTI_PATTERN_EXISTS_EXACT                   9u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_REQUEST_MIN_LEN             29u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_REQUEST_MAX_LEN             539u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ARGUMENT_MIN                1u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ARGUMENT_MAX                511u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_RESPONSE_LEN                28u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ERROR_LEN                   24u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_MAX                         1u
+#define AIMEE_DB2_EVENT_ANTI_PATTERN_EXISTS_BY_SOURCE_REF               AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ANTI_PATTERN_EXISTS_BY_SOURCE_REF               AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ANTI_PATTERN_EXISTS_BY_SOURCE_REF           10u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_REQUEST_MIN_LEN     29u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_REQUEST_MAX_LEN     539u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_ARGUMENT_MIN        1u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_ARGUMENT_MAX        511u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_RESPONSE_LEN        28u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_ERROR_LEN           24u
+#define AIMEE_DB2_ANTI_PATTERN_EXISTS_BY_SOURCE_REF_MAX                 1u
+#define AIMEE_DB2_EVENT_ARTIFACT_CITATION_COUNT                         AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ARTIFACT_CITATION_COUNT                         AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ARTIFACT_CITATION_COUNT                     11u
+#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_REQUEST_MIN_LEN               29u
+#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_REQUEST_MAX_LEN               155u
+#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_ARGUMENT_MIN                  1u
+#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_ARGUMENT_MAX                  127u
+#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_RESPONSE_LEN                  28u
+#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_ERROR_LEN                     24u
+#define AIMEE_DB2_ARTIFACT_CITATION_COUNT_MAX                           2147483647u
+#define AIMEE_DB2_EVENT_COMMITS_IN_LAST_7_DAYS                          AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_COMMITS_IN_LAST_7_DAYS                          AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_COMMITS_IN_LAST_7_DAYS                      12u
+#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_REQUEST_MIN_LEN                29u
+#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_REQUEST_MAX_LEN                155u
+#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_ARGUMENT_MIN                   1u
+#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_ARGUMENT_MAX                   127u
+#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_RESPONSE_LEN                   28u
+#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_ERROR_LEN                      24u
+#define AIMEE_DB2_COMMITS_IN_LAST_7_DAYS_MAX                            2147483647u
+#define AIMEE_DB2_EVENT_FIDELITY_ATTRIBUTION_COUNT                      AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_FIDELITY_ATTRIBUTION_COUNT                      AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_FIDELITY_ATTRIBUTION_COUNT                  13u
+#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_REQUEST_MIN_LEN            29u
+#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_REQUEST_MAX_LEN            155u
+#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ARGUMENT_MIN               1u
+#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ARGUMENT_MAX               127u
+#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_RESPONSE_LEN               28u
+#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_ERROR_LEN                  24u
+#define AIMEE_DB2_FIDELITY_ATTRIBUTION_COUNT_MAX                        2147483647u
+#define AIMEE_DB2_EVENT_ARTIFACT_STAMP_REFLECTED                        AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ARTIFACT_STAMP_REFLECTED                        AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ARTIFACT_STAMP_REFLECTED                    14u
+#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_REQUEST_MIN_LEN              29u
+#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_REQUEST_MAX_LEN              155u
+#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_ARGUMENT_MIN                 1u
+#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_ARGUMENT_MAX                 127u
+#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_RESPONSE_LEN                 24u
+#define AIMEE_DB2_ARTIFACT_STAMP_REFLECTED_ERROR_LEN                    24u
+#define AIMEE_DB2_EVENT_FAILED_QUERY_BUMP                               AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_FAILED_QUERY_BUMP                               AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_FAILED_QUERY_BUMP                           15u
+#define AIMEE_DB2_FAILED_QUERY_BUMP_REQUEST_MIN_LEN                     29u
+#define AIMEE_DB2_FAILED_QUERY_BUMP_REQUEST_MAX_LEN                     539u
+#define AIMEE_DB2_FAILED_QUERY_BUMP_ARGUMENT_MIN                        1u
+#define AIMEE_DB2_FAILED_QUERY_BUMP_ARGUMENT_MAX                        511u
+#define AIMEE_DB2_FAILED_QUERY_BUMP_RESPONSE_LEN                        28u
+#define AIMEE_DB2_FAILED_QUERY_BUMP_ERROR_LEN                           24u
+#define AIMEE_DB2_FAILED_QUERY_BUMP_MAX                                 2147483647u
+#define AIMEE_DB2_EVENT_ARTIFACT_SET_STATE                              AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ARTIFACT_SET_STATE                              AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ARTIFACT_SET_STATE                          16u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_REQUEST_MIN_LEN                    34u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_REQUEST_MAX_LEN                    222u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_FIRST_MIN                          1u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_FIRST_MAX                          63u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_SECOND_MIN                         1u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_SECOND_MAX                         127u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_RESPONSE_LEN                       24u
+#define AIMEE_DB2_ARTIFACT_SET_STATE_ERROR_LEN                          24u
+#define AIMEE_DB2_EVENT_ARTIFACT_REGISTER_EXEMPLAR                      AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ARTIFACT_REGISTER_EXEMPLAR                      AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ARTIFACT_REGISTER_EXEMPLAR                  17u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_REQUEST_MIN_LEN            34u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_REQUEST_MAX_LEN            222u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_FIRST_MIN                  1u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_FIRST_MAX                  127u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_SECOND_MIN                 1u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_SECOND_MAX                 63u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_RESPONSE_LEN               24u
+#define AIMEE_DB2_ARTIFACT_REGISTER_EXEMPLAR_ERROR_LEN                  24u
+#define AIMEE_DB2_EVENT_EVIDENCE_ENQUEUE                                AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_EVIDENCE_ENQUEUE                                AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_EVIDENCE_ENQUEUE                            18u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_REQUEST_MIN_LEN                      34u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_REQUEST_MAX_LEN                      222u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_FIRST_MIN                            1u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_FIRST_MAX                            127u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_SECOND_MIN                           1u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_SECOND_MAX                           63u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_RESPONSE_LEN                         24u
+#define AIMEE_DB2_EVIDENCE_ENQUEUE_ERROR_LEN                            24u
+#define AIMEE_DB2_EVENT_EVIDENCE_MARK_FAILED                            AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_EVIDENCE_MARK_FAILED                            AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_EVIDENCE_MARK_FAILED                        19u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_REQUEST_MIN_LEN                  33u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_REQUEST_MAX_LEN                  670u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_FIRST_MIN                        1u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_FIRST_MAX                        127u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_SECOND_MIN                       0u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_SECOND_MAX                       511u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_RESPONSE_LEN                     24u
+#define AIMEE_DB2_EVIDENCE_MARK_FAILED_ERROR_LEN                        24u
+#define AIMEE_DB2_EVENT_BANDIT_ARMS_LIST                                AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_BANDIT_ARMS_LIST                                AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_BANDIT_ARMS_LIST                            20u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_REQUEST_MIN_LEN                      28u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_REQUEST_MAX_LEN                      155u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_DECISION_POINT_MIN                   1u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_DECISION_POINT_MAX                   127u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_ARMS_MIN                             0u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_ARMS_MAX                             2047u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_RESPONSE_MIN_LEN                     28u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_RESPONSE_MAX_LEN                     2075u
+#define AIMEE_DB2_BANDIT_ARMS_LIST_ERROR_LEN                            24u
+#define AIMEE_DB2_EVENT_BANDIT_PROMOTION_GET                            AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_BANDIT_PROMOTION_GET                            AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_BANDIT_PROMOTION_GET                        21u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_REQUEST_MIN_LEN                  28u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_REQUEST_MAX_LEN                  155u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_DECISION_POINT_MIN               1u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_DECISION_POINT_MAX               127u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_ARM_ID_MIN                       0u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_ARM_ID_MAX                       127u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_RESPONSE_MIN_LEN                 28u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_RESPONSE_MAX_LEN                 155u
+#define AIMEE_DB2_BANDIT_PROMOTION_GET_ERROR_LEN                        24u
+#define AIMEE_DB2_EVENT_DECISION_LOG_SET_OUTCOME                        AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_DECISION_LOG_SET_OUTCOME                        AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_DECISION_LOG_SET_OUTCOME                    22u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_REQUEST_MIN_LEN              36u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_REQUEST_MAX_LEN              547u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_DECISION_ID_MIN              1ull
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_DECISION_ID_MAX              9223372036854775807ull
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_OUTCOME_MIN                  0u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_OUTCOME_MAX                  511u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_ACKNOWLEDGED_MIN             0u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_ACKNOWLEDGED_MAX             1u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_RESPONSE_MIN_LEN             28u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_RESPONSE_MAX_LEN             28u
+#define AIMEE_DB2_DECISION_LOG_SET_OUTCOME_ERROR_LEN                    24u
+#define AIMEE_DB2_EVENT_DECISION_LOG_SET_STATUS                         AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_DECISION_LOG_SET_STATUS                         AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_DECISION_LOG_SET_STATUS                     23u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_REQUEST_MIN_LEN               36u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_REQUEST_MAX_LEN               99u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_DECISION_ID_MIN               1ull
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_DECISION_ID_MAX               9223372036854775807ull
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_STATUS_MIN                    1u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_STATUS_MAX                    63u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_ACKNOWLEDGED_MIN              0u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_ACKNOWLEDGED_MAX              1u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_RESPONSE_MIN_LEN              28u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_RESPONSE_MAX_LEN              28u
+#define AIMEE_DB2_DECISION_LOG_SET_STATUS_ERROR_LEN                     24u
+#define AIMEE_DB2_EVENT_DECISION_LOG_SET_REVISIT                        AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_DECISION_LOG_SET_REVISIT                        AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_DECISION_LOG_SET_REVISIT                    24u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REQUEST_MIN_LEN              36u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REQUEST_MAX_LEN              99u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_DECISION_ID_MIN              1ull
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_DECISION_ID_MAX              9223372036854775807ull
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REVISIT_WHEN_MIN             0u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_REVISIT_WHEN_MAX             63u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_ACKNOWLEDGED_MIN             0u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_ACKNOWLEDGED_MAX             1u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_RESPONSE_MIN_LEN             28u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_RESPONSE_MAX_LEN             28u
+#define AIMEE_DB2_DECISION_LOG_SET_REVISIT_ERROR_LEN                    24u
+#define AIMEE_DB2_EVENT_COLLAB_RULE_APPROVE                             AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_COLLAB_RULE_APPROVE                             AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_COLLAB_RULE_APPROVE                         25u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_REQUEST_MIN_LEN                   28u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_REQUEST_MAX_LEN                   28u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_RULE_ID_MIN                       1u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_RULE_ID_MAX                       2147483647u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_ACKNOWLEDGED_MIN                  0u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_ACKNOWLEDGED_MAX                  1u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_RESPONSE_MAX_LEN                  28u
+#define AIMEE_DB2_COLLAB_RULE_APPROVE_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_COLLAB_RULE_REJECT                              AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_COLLAB_RULE_REJECT                              AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_COLLAB_RULE_REJECT                          26u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_REQUEST_MIN_LEN                    28u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_REQUEST_MAX_LEN                    28u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_RULE_ID_MIN                        1u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_RULE_ID_MAX                        2147483647u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_CHANGED_MIN                        0u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_CHANGED_MAX                        1u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_RESPONSE_MIN_LEN                   28u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_RESPONSE_MAX_LEN                   28u
+#define AIMEE_DB2_COLLAB_RULE_REJECT_ERROR_LEN                          24u
+#define AIMEE_DB2_EVENT_COLLAB_RULE_RETIRE                              AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_COLLAB_RULE_RETIRE                              AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_COLLAB_RULE_RETIRE                          27u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_REQUEST_MIN_LEN                    28u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_REQUEST_MAX_LEN                    28u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_RULE_ID_MIN                        1u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_RULE_ID_MAX                        2147483647u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_ACKNOWLEDGED_MIN                   0u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_ACKNOWLEDGED_MAX                   1u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_RESPONSE_MIN_LEN                   28u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_RESPONSE_MAX_LEN                   28u
+#define AIMEE_DB2_COLLAB_RULE_RETIRE_ERROR_LEN                          24u
+#define AIMEE_DB2_EVENT_PROPOSAL_BUMP_CORROBORATION                     AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_PROPOSAL_BUMP_CORROBORATION                     AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_PROPOSAL_BUMP_CORROBORATION                 28u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_REQUEST_MIN_LEN           28u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_REQUEST_MAX_LEN           28u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_PROPOSAL_ID_MIN           1u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_PROPOSAL_ID_MAX           2147483647u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_ACKNOWLEDGED_MIN          0u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_ACKNOWLEDGED_MAX          1u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_RESPONSE_MIN_LEN          28u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_RESPONSE_MAX_LEN          28u
+#define AIMEE_DB2_PROPOSAL_BUMP_CORROBORATION_ERROR_LEN                 24u
+#define AIMEE_DB2_EVENT_PROPOSAL_MARK_COMMITTED                         AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_PROPOSAL_MARK_COMMITTED                         AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_PROPOSAL_MARK_COMMITTED                     29u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_REQUEST_MIN_LEN               28u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_REQUEST_MAX_LEN               28u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_PROPOSAL_ID_MIN               1u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_PROPOSAL_ID_MAX               2147483647u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_ACKNOWLEDGED_MIN              0u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_ACKNOWLEDGED_MAX              1u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_RESPONSE_MIN_LEN              28u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_RESPONSE_MAX_LEN              28u
+#define AIMEE_DB2_PROPOSAL_MARK_COMMITTED_ERROR_LEN                     24u
+#define AIMEE_DB2_EVENT_RULES_DELETE_BY_ID                              AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_RULES_DELETE_BY_ID                              AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_RULES_DELETE_BY_ID                          30u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_REQUEST_MIN_LEN                    28u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_REQUEST_MAX_LEN                    28u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_RULE_ROW_ID_MIN                    1u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_RULE_ROW_ID_MAX                    2147483647u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_DELETED_MIN                        0u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_DELETED_MAX                        1u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_RESPONSE_MIN_LEN                   28u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_RESPONSE_MAX_LEN                   28u
+#define AIMEE_DB2_RULES_DELETE_BY_ID_ERROR_LEN                          24u
+#define AIMEE_DB2_EVENT_CALIBRATION_SURFACES_WITH_DATA                  AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_CALIBRATION_SURFACES_WITH_DATA                  AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_CALIBRATION_SURFACES_WITH_DATA              31u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_REQUEST_MIN_LEN        28u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_REQUEST_MAX_LEN        28u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_MIN_ROWS_MIN           1u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_MIN_ROWS_MAX           2147483647u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_SURFACES_MIN           0u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_SURFACES_MAX           2147483647u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_RESPONSE_MIN_LEN       28u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_RESPONSE_MAX_LEN       28u
+#define AIMEE_DB2_CALIBRATION_SURFACES_WITH_DATA_ERROR_LEN              24u
+#define AIMEE_DB2_EVENT_ARTIFACT_CITE                                   AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ARTIFACT_CITE                                   AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ARTIFACT_CITE                               32u
+#define AIMEE_DB2_ARTIFACT_CITE_REQUEST_MIN_LEN                         36u
+#define AIMEE_DB2_ARTIFACT_CITE_REQUEST_MAX_LEN                         353u
+#define AIMEE_DB2_ARTIFACT_CITE_CITING_ARTIFACT_ID_MIN                  1u
+#define AIMEE_DB2_ARTIFACT_CITE_CITING_ARTIFACT_ID_MAX                  127u
+#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_KIND_MIN                         1u
+#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_KIND_MAX                         63u
+#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_ID_MIN                           1u
+#define AIMEE_DB2_ARTIFACT_CITE_SOURCE_ID_MAX                           127u
+#define AIMEE_DB2_ARTIFACT_CITE_ACKNOWLEDGED_MIN                        0u
+#define AIMEE_DB2_ARTIFACT_CITE_ACKNOWLEDGED_MAX                        1u
+#define AIMEE_DB2_ARTIFACT_CITE_RESPONSE_MIN_LEN                        28u
+#define AIMEE_DB2_ARTIFACT_CITE_RESPONSE_MAX_LEN                        28u
+#define AIMEE_DB2_ARTIFACT_CITE_ERROR_LEN                               24u
+#define AIMEE_DB2_EVENT_ARTIFACT_LINK                                   AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ARTIFACT_LINK                                   AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ARTIFACT_LINK                               33u
+#define AIMEE_DB2_ARTIFACT_LINK_REQUEST_MIN_LEN                         36u
+#define AIMEE_DB2_ARTIFACT_LINK_REQUEST_MAX_LEN                         353u
+#define AIMEE_DB2_ARTIFACT_LINK_FROM_ARTIFACT_ID_MIN                    1u
+#define AIMEE_DB2_ARTIFACT_LINK_FROM_ARTIFACT_ID_MAX                    127u
+#define AIMEE_DB2_ARTIFACT_LINK_TO_ARTIFACT_ID_MIN                      1u
+#define AIMEE_DB2_ARTIFACT_LINK_TO_ARTIFACT_ID_MAX                      127u
+#define AIMEE_DB2_ARTIFACT_LINK_LINK_KIND_MIN                           1u
+#define AIMEE_DB2_ARTIFACT_LINK_LINK_KIND_MAX                           63u
+#define AIMEE_DB2_ARTIFACT_LINK_ACKNOWLEDGED_MIN                        0u
+#define AIMEE_DB2_ARTIFACT_LINK_ACKNOWLEDGED_MAX                        1u
+#define AIMEE_DB2_ARTIFACT_LINK_RESPONSE_MIN_LEN                        28u
+#define AIMEE_DB2_ARTIFACT_LINK_RESPONSE_MAX_LEN                        28u
+#define AIMEE_DB2_ARTIFACT_LINK_ERROR_LEN                               24u
+#define AIMEE_DB2_EVENT_BANDIT_PROMOTION_SET                            AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_BANDIT_PROMOTION_SET                            AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_BANDIT_PROMOTION_SET                        34u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_REQUEST_MIN_LEN                  36u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_REQUEST_MAX_LEN                  417u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_DECISION_POINT_MIN               1u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_DECISION_POINT_MAX               127u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_ARM_ID_MIN                       1u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_ARM_ID_MAX                       127u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_ROLLBACK_ARM_MIN                 0u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_ROLLBACK_ARM_MAX                 127u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_ACKNOWLEDGED_MIN                 0u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_ACKNOWLEDGED_MAX                 1u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_RESPONSE_MIN_LEN                 28u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_RESPONSE_MAX_LEN                 28u
+#define AIMEE_DB2_BANDIT_PROMOTION_SET_ERROR_LEN                        24u
+#define AIMEE_DB2_EVENT_COLLAB_RULE_PROPOSE                             AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_COLLAB_RULE_PROPOSE                             AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_COLLAB_RULE_PROPOSE                         35u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_REQUEST_MIN_LEN                   36u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_REQUEST_MAX_LEN                   3233u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_TEXT_MIN                     1u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_TEXT_MAX                     2047u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_REASON_MIN                   0u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_REASON_MAX                   1023u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_PROPOSED_BY_MIN                   1u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_PROPOSED_BY_MAX                   127u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_ID_MIN                       0u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RULE_ID_MAX                       2147483647u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RESPONSE_MIN_LEN                  28u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_RESPONSE_MAX_LEN                  28u
+#define AIMEE_DB2_COLLAB_RULE_PROPOSE_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_RULES_DELETE_BY_DIRECTIVE_TYPE                  AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_RULES_DELETE_BY_DIRECTIVE_TYPE                  AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_RULES_DELETE_BY_DIRECTIVE_TYPE              36u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_REQUEST_MIN_LEN        28u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_REQUEST_MAX_LEN        43u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MIN     1u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MAX     15u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DELETED_MIN            0u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DELETED_MAX            4294967295u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_RESPONSE_MIN_LEN       28u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_RESPONSE_MAX_LEN       28u
+#define AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_ERROR_LEN              24u
+#define AIMEE_DB2_EVENT_DOCUMENT_EXISTS                                 AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_DOCUMENT_EXISTS                                 AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_DOCUMENT_EXISTS                             6u
+#define AIMEE_DB2_DOCUMENT_EXISTS_REQUEST_LEN                           32u
+#define AIMEE_DB2_DOCUMENT_EXISTS_IDENTIFIER_MAX                        9223372036854775807ull
+#define AIMEE_DB2_DOCUMENT_EXISTS_RESPONSE_LEN                          28u
+#define AIMEE_DB2_DOCUMENT_EXISTS_ERROR_LEN                             24u
+#define AIMEE_DB2_DOCUMENT_EXISTS_MAX                                   1u
+#define AIMEE_DB2_EVENT_BLOB_REFERENCED                                 AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_BLOB_REFERENCED                                 AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_BLOB_REFERENCED                             7u
+#define AIMEE_DB2_BLOB_REFERENCED_REQUEST_MIN_LEN                       29u
+#define AIMEE_DB2_BLOB_REFERENCED_REQUEST_MAX_LEN                       283u
+#define AIMEE_DB2_BLOB_REFERENCED_ARGUMENT_MIN                          1u
+#define AIMEE_DB2_BLOB_REFERENCED_ARGUMENT_MAX                          255u
+#define AIMEE_DB2_BLOB_REFERENCED_RESPONSE_LEN                          28u
+#define AIMEE_DB2_BLOB_REFERENCED_ERROR_LEN                             24u
+#define AIMEE_DB2_BLOB_REFERENCED_MAX                                   1u
+#define AIMEE_DB2_EVENT_FENCE_ACTIVE                                    AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_FENCE_ACTIVE                                    AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_FENCE_ACTIVE                                8u
+#define AIMEE_DB2_FENCE_ACTIVE_REQUEST_MIN_LEN                          29u
+#define AIMEE_DB2_FENCE_ACTIVE_REQUEST_MAX_LEN                          283u
+#define AIMEE_DB2_FENCE_ACTIVE_ARGUMENT_MIN                             1u
+#define AIMEE_DB2_FENCE_ACTIVE_ARGUMENT_MAX                             255u
+#define AIMEE_DB2_FENCE_ACTIVE_RESPONSE_LEN                             28u
+#define AIMEE_DB2_FENCE_ACTIVE_ERROR_LEN                                24u
+#define AIMEE_DB2_FENCE_ACTIVE_MAX                                      1u
+#define AIMEE_DB2_EVENT_DOC_EXISTS_BY_HASH                              AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_DOC_EXISTS_BY_HASH                              AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_DOC_EXISTS_BY_HASH                          9u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_REQUEST_MIN_LEN                    34u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_REQUEST_MAX_LEN                    286u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_FIRST_MIN                          1u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_FIRST_MAX                          127u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_SECOND_MIN                         1u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_SECOND_MAX                         127u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_RESPONSE_LEN                       28u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_ERROR_LEN                          24u
+#define AIMEE_DB2_DOC_EXISTS_BY_HASH_MAX                                1u
+#define AIMEE_DB2_EVENT_PDF_QUARANTINE_CONFIRM                          AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_PDF_QUARANTINE_CONFIRM                          AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_PDF_QUARANTINE_CONFIRM                      10u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_REQUEST_MIN_LEN                34u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_REQUEST_MAX_LEN                798u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_FIRST_MIN                      1u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_FIRST_MAX                      255u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_SECOND_MIN                     1u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_SECOND_MAX                     511u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_RESPONSE_LEN                   28u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_ERROR_LEN                      24u
+#define AIMEE_DB2_PDF_QUARANTINE_CONFIRM_MAX                            2147483647u
+#define AIMEE_DB2_EVENT_PDF_QUARANTINE_REJECT                           AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_PDF_QUARANTINE_REJECT                           AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_PDF_QUARANTINE_REJECT                       11u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_REQUEST_MIN_LEN                 34u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_REQUEST_MAX_LEN                 798u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_FIRST_MIN                       1u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_FIRST_MAX                       255u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_SECOND_MIN                      1u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_SECOND_MAX                      511u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_RESPONSE_LEN                    28u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_ERROR_LEN                       24u
+#define AIMEE_DB2_PDF_QUARANTINE_REJECT_MAX                             2147483647u
+#define AIMEE_DB2_EVENT_ONTOLOGY_EVAL_STATUS                            AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_ONTOLOGY_EVAL_STATUS                            AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_ONTOLOGY_EVAL_STATUS                        12u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REQUEST_MIN_LEN                  28u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REQUEST_MAX_LEN                  155u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REL_TYPE_MIN                     1u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_REL_TYPE_MAX                     127u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_STATUS_MIN                       0u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_STATUS_MAX                       63u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_RESPONSE_MIN_LEN                 28u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_RESPONSE_MAX_LEN                 91u
+#define AIMEE_DB2_ONTOLOGY_EVAL_STATUS_ERROR_LEN                        24u
+#define AIMEE_DB2_EVENT_TASK_UPDATE_STATE                               AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_TASK_UPDATE_STATE                               AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_TASK_UPDATE_STATE                           13u
+#define AIMEE_DB2_TASK_UPDATE_STATE_REQUEST_MIN_LEN                     36u
+#define AIMEE_DB2_TASK_UPDATE_STATE_REQUEST_MAX_LEN                     99u
+#define AIMEE_DB2_TASK_UPDATE_STATE_TASK_ID_MIN                         1ull
+#define AIMEE_DB2_TASK_UPDATE_STATE_TASK_ID_MAX                         9223372036854775807ull
+#define AIMEE_DB2_TASK_UPDATE_STATE_STATE_MIN                           1u
+#define AIMEE_DB2_TASK_UPDATE_STATE_STATE_MAX                           63u
+#define AIMEE_DB2_TASK_UPDATE_STATE_CHANGED_MIN                         0u
+#define AIMEE_DB2_TASK_UPDATE_STATE_CHANGED_MAX                         1u
+#define AIMEE_DB2_TASK_UPDATE_STATE_RESPONSE_MIN_LEN                    28u
+#define AIMEE_DB2_TASK_UPDATE_STATE_RESPONSE_MAX_LEN                    28u
+#define AIMEE_DB2_TASK_UPDATE_STATE_ERROR_LEN                           24u
+#define AIMEE_DB2_EVENT_RELEASE_ADD_DOC                                 AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_RELEASE_ADD_DOC                                 AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_RELEASE_ADD_DOC                             14u
+#define AIMEE_DB2_RELEASE_ADD_DOC_REQUEST_MIN_LEN                       40u
+#define AIMEE_DB2_RELEASE_ADD_DOC_REQUEST_MAX_LEN                       40u
+#define AIMEE_DB2_RELEASE_ADD_DOC_RELEASE_ID_MIN                        1ull
+#define AIMEE_DB2_RELEASE_ADD_DOC_RELEASE_ID_MAX                        9223372036854775807ull
+#define AIMEE_DB2_RELEASE_ADD_DOC_DOC_ID_MIN                            1ull
+#define AIMEE_DB2_RELEASE_ADD_DOC_DOC_ID_MAX                            9223372036854775807ull
+#define AIMEE_DB2_RELEASE_ADD_DOC_ACKNOWLEDGED_MIN                      0u
+#define AIMEE_DB2_RELEASE_ADD_DOC_ACKNOWLEDGED_MAX                      1u
+#define AIMEE_DB2_RELEASE_ADD_DOC_RESPONSE_MIN_LEN                      28u
+#define AIMEE_DB2_RELEASE_ADD_DOC_RESPONSE_MAX_LEN                      28u
+#define AIMEE_DB2_RELEASE_ADD_DOC_ERROR_LEN                             24u
+#define AIMEE_DB2_EVENT_ONTOLOGY_APPROVE                                AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_ONTOLOGY_APPROVE                                AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_ONTOLOGY_APPROVE                            15u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_REQUEST_MIN_LEN                      28u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_REQUEST_MAX_LEN                      91u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MIN                         1u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MAX                         63u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_ACKNOWLEDGED_MIN                     0u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_ACKNOWLEDGED_MAX                     1u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_RESPONSE_MIN_LEN                     28u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_RESPONSE_MAX_LEN                     28u
+#define AIMEE_DB2_ONTOLOGY_APPROVE_ERROR_LEN                            24u
+#define AIMEE_DB2_EVENT_ONTOLOGY_REJECT                                 AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_ONTOLOGY_REJECT                                 AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_ONTOLOGY_REJECT                             16u
+#define AIMEE_DB2_ONTOLOGY_REJECT_REQUEST_MIN_LEN                       28u
+#define AIMEE_DB2_ONTOLOGY_REJECT_REQUEST_MAX_LEN                       91u
+#define AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MIN                          1u
+#define AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MAX                          63u
+#define AIMEE_DB2_ONTOLOGY_REJECT_ACKNOWLEDGED_MIN                      0u
+#define AIMEE_DB2_ONTOLOGY_REJECT_ACKNOWLEDGED_MAX                      1u
+#define AIMEE_DB2_ONTOLOGY_REJECT_RESPONSE_MIN_LEN                      28u
+#define AIMEE_DB2_ONTOLOGY_REJECT_RESPONSE_MAX_LEN                      28u
+#define AIMEE_DB2_ONTOLOGY_REJECT_ERROR_LEN                             24u
+#define AIMEE_DB2_EVENT_ENROLLMENT_ACTIVE                               AIMEE_DB2_EVENT_CUSTODY
+#define AIMEE_DB2_STAGE_ENROLLMENT_ACTIVE                               AIMEE_DB2_FAMILY_CUSTODY
+#define AIMEE_DB2_OPERATION_ENROLLMENT_ACTIVE                           4u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_REQUEST_MIN_LEN                     34u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_REQUEST_MAX_LEN                     670u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_FIRST_MIN                           1u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_FIRST_MAX                           511u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_SECOND_MIN                          1u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_SECOND_MAX                          127u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_RESPONSE_LEN                        28u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_ERROR_LEN                           24u
+#define AIMEE_DB2_ENROLLMENT_ACTIVE_MAX                                 1u
+#define AIMEE_DB2_EVENT_ASYNC_PENDING_COUNT                             AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_ASYNC_PENDING_COUNT                             AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_ASYNC_PENDING_COUNT                         11u
+#define AIMEE_DB2_ASYNC_PENDING_COUNT_REQUEST_MIN_LEN                   29u
+#define AIMEE_DB2_ASYNC_PENDING_COUNT_REQUEST_MAX_LEN                   91u
+#define AIMEE_DB2_ASYNC_PENDING_COUNT_ARGUMENT_MIN                      1u
+#define AIMEE_DB2_ASYNC_PENDING_COUNT_ARGUMENT_MAX                      63u
+#define AIMEE_DB2_ASYNC_PENDING_COUNT_RESPONSE_LEN                      28u
+#define AIMEE_DB2_ASYNC_PENDING_COUNT_ERROR_LEN                         24u
+#define AIMEE_DB2_ASYNC_PENDING_COUNT_MAX                               2147483647u
+#define AIMEE_DB2_EVENT_RUNTIME_STATE_TOUCH                             AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_RUNTIME_STATE_TOUCH                             AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_RUNTIME_STATE_TOUCH                         12u
+#define AIMEE_DB2_RUNTIME_STATE_TOUCH_REQUEST_MIN_LEN                   29u
+#define AIMEE_DB2_RUNTIME_STATE_TOUCH_REQUEST_MAX_LEN                   283u
+#define AIMEE_DB2_RUNTIME_STATE_TOUCH_ARGUMENT_MIN                      1u
+#define AIMEE_DB2_RUNTIME_STATE_TOUCH_ARGUMENT_MAX                      255u
+#define AIMEE_DB2_RUNTIME_STATE_TOUCH_RESPONSE_LEN                      24u
+#define AIMEE_DB2_RUNTIME_STATE_TOUCH_ERROR_LEN                         24u
+#define AIMEE_DB2_EVENT_SYNTH_ENQUEUE                                   AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_SYNTH_ENQUEUE                                   AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_SYNTH_ENQUEUE                               13u
+#define AIMEE_DB2_SYNTH_ENQUEUE_REQUEST_MIN_LEN                         29u
+#define AIMEE_DB2_SYNTH_ENQUEUE_REQUEST_MAX_LEN                         155u
+#define AIMEE_DB2_SYNTH_ENQUEUE_ARGUMENT_MIN                            1u
+#define AIMEE_DB2_SYNTH_ENQUEUE_ARGUMENT_MAX                            127u
+#define AIMEE_DB2_SYNTH_ENQUEUE_RESPONSE_LEN                            24u
+#define AIMEE_DB2_SYNTH_ENQUEUE_ERROR_LEN                               24u
+#define AIMEE_DB2_EVENT_SYNTH_MARK_DONE                                 AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_SYNTH_MARK_DONE                                 AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_SYNTH_MARK_DONE                             14u
+#define AIMEE_DB2_SYNTH_MARK_DONE_REQUEST_MIN_LEN                       29u
+#define AIMEE_DB2_SYNTH_MARK_DONE_REQUEST_MAX_LEN                       155u
+#define AIMEE_DB2_SYNTH_MARK_DONE_ARGUMENT_MIN                          1u
+#define AIMEE_DB2_SYNTH_MARK_DONE_ARGUMENT_MAX                          127u
+#define AIMEE_DB2_SYNTH_MARK_DONE_RESPONSE_LEN                          24u
+#define AIMEE_DB2_SYNTH_MARK_DONE_ERROR_LEN                             24u
+#define AIMEE_DB2_EVENT_REEMBED_MARK_FINISHED                           AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_REEMBED_MARK_FINISHED                           AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_REEMBED_MARK_FINISHED                       15u
+#define AIMEE_DB2_REEMBED_MARK_FINISHED_REQUEST_MIN_LEN                 29u
+#define AIMEE_DB2_REEMBED_MARK_FINISHED_REQUEST_MAX_LEN                 59u
+#define AIMEE_DB2_REEMBED_MARK_FINISHED_ARGUMENT_MIN                    1u
+#define AIMEE_DB2_REEMBED_MARK_FINISHED_ARGUMENT_MAX                    31u
+#define AIMEE_DB2_REEMBED_MARK_FINISHED_RESPONSE_LEN                    24u
+#define AIMEE_DB2_REEMBED_MARK_FINISHED_ERROR_LEN                       24u
+#define AIMEE_DB2_EVENT_MINING_JOB_TRY_LOCK                             AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_MINING_JOB_TRY_LOCK                             AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_MINING_JOB_TRY_LOCK                         16u
+#define AIMEE_DB2_MINING_JOB_TRY_LOCK_REQUEST_MIN_LEN                   29u
+#define AIMEE_DB2_MINING_JOB_TRY_LOCK_REQUEST_MAX_LEN                   283u
+#define AIMEE_DB2_MINING_JOB_TRY_LOCK_ARGUMENT_MIN                      1u
+#define AIMEE_DB2_MINING_JOB_TRY_LOCK_ARGUMENT_MAX                      255u
+#define AIMEE_DB2_MINING_JOB_TRY_LOCK_RESPONSE_LEN                      28u
+#define AIMEE_DB2_MINING_JOB_TRY_LOCK_ERROR_LEN                         24u
+#define AIMEE_DB2_MINING_JOB_TRY_LOCK_MAX                               1u
+#define AIMEE_DB2_EVENT_SYNTH_MARK_FAILED                               AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_SYNTH_MARK_FAILED                               AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_SYNTH_MARK_FAILED                           17u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_REQUEST_MIN_LEN                     33u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_REQUEST_MAX_LEN                     670u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_FIRST_MIN                           1u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_FIRST_MAX                           127u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_SECOND_MIN                          0u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_SECOND_MAX                          511u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_RESPONSE_LEN                        24u
+#define AIMEE_DB2_SYNTH_MARK_FAILED_ERROR_LEN                           24u
+#define AIMEE_DB2_EVENT_RUNTIME_STATE_SET                               AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_RUNTIME_STATE_SET                               AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_RUNTIME_STATE_SET                           18u
+#define AIMEE_DB2_RUNTIME_STATE_SET_REQUEST_MIN_LEN                     33u
+#define AIMEE_DB2_RUNTIME_STATE_SET_REQUEST_MAX_LEN                     798u
+#define AIMEE_DB2_RUNTIME_STATE_SET_FIRST_MIN                           1u
+#define AIMEE_DB2_RUNTIME_STATE_SET_FIRST_MAX                           255u
+#define AIMEE_DB2_RUNTIME_STATE_SET_SECOND_MIN                          0u
+#define AIMEE_DB2_RUNTIME_STATE_SET_SECOND_MAX                          511u
+#define AIMEE_DB2_RUNTIME_STATE_SET_RESPONSE_LEN                        24u
+#define AIMEE_DB2_RUNTIME_STATE_SET_ERROR_LEN                           24u
+#define AIMEE_DB2_EVENT_SET_ACTIVE_EMBEDDER_VERSION                     AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_SET_ACTIVE_EMBEDDER_VERSION                     AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_SET_ACTIVE_EMBEDDER_VERSION                 19u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_REQUEST_MIN_LEN           34u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_REQUEST_MAX_LEN           190u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_FIRST_MIN                 1u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_FIRST_MAX                 127u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_SECOND_MIN                1u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_SECOND_MAX                31u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_RESPONSE_LEN              24u
+#define AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_ERROR_LEN                 24u
+#define AIMEE_DB2_EVENT_RUNTIME_STATE_GET                               AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_RUNTIME_STATE_GET                               AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_RUNTIME_STATE_GET                           20u
+#define AIMEE_DB2_RUNTIME_STATE_GET_REQUEST_MIN_LEN                     28u
+#define AIMEE_DB2_RUNTIME_STATE_GET_REQUEST_MAX_LEN                     283u
+#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_KEY_MIN                       1u
+#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_KEY_MAX                       255u
+#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_VALUE_MIN                     0u
+#define AIMEE_DB2_RUNTIME_STATE_GET_STATE_VALUE_MAX                     511u
+#define AIMEE_DB2_RUNTIME_STATE_GET_RESPONSE_MIN_LEN                    28u
+#define AIMEE_DB2_RUNTIME_STATE_GET_RESPONSE_MAX_LEN                    539u
+#define AIMEE_DB2_RUNTIME_STATE_GET_ERROR_LEN                           24u
+#define AIMEE_DB2_EVENT_INGEST_QUEUE_FAIL                               AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_INGEST_QUEUE_FAIL                               AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_INGEST_QUEUE_FAIL                           21u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_REQUEST_MIN_LEN                     36u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_REQUEST_MAX_LEN                     1059u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_INGEST_JOB_ID_MIN                   1ull
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_INGEST_JOB_ID_MAX                   9223372036854775807ull
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_ERROR_MESSAGE_MIN                   0u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_ERROR_MESSAGE_MAX                   1023u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_ACKNOWLEDGED_MIN                    0u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_ACKNOWLEDGED_MAX                    1u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_RESPONSE_MIN_LEN                    28u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_RESPONSE_MAX_LEN                    28u
+#define AIMEE_DB2_INGEST_QUEUE_FAIL_ERROR_LEN                           24u
+#define AIMEE_DB2_EVENT_RESET_STUCK_VECTOR_OPS                          AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_RESET_STUCK_VECTOR_OPS                          AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_RESET_STUCK_VECTOR_OPS                      22u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_REQUEST_MIN_LEN                28u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_REQUEST_MAX_LEN                28u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_MAX_ATTEMPTS_MIN               1u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_MAX_ATTEMPTS_MAX               2147483647u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESET_ROWS_MIN                 0u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESET_ROWS_MAX                 2147483647u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESPONSE_MIN_LEN               28u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_RESPONSE_MAX_LEN               28u
+#define AIMEE_DB2_RESET_STUCK_VECTOR_OPS_ERROR_LEN                      24u
+#define AIMEE_DB2_EVENT_DIRECTIVE_RESOLVE                               AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_DIRECTIVE_RESOLVE                               AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_DIRECTIVE_RESOLVE                           23u
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_REQUEST_MIN_LEN                     40u
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_REQUEST_MAX_LEN                     40u
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_DIRECTIVE_ID_MIN                    1ull
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_DIRECTIVE_ID_MAX                    9223372036854775807ull
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESOLUTION_MEMORY_ID_MIN            1ull
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESOLUTION_MEMORY_ID_MAX            9223372036854775807ull
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_ACKNOWLEDGED_MIN                    0u
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_ACKNOWLEDGED_MAX                    1u
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESPONSE_MIN_LEN                    28u
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_RESPONSE_MAX_LEN                    28u
+#define AIMEE_DB2_DIRECTIVE_RESOLVE_ERROR_LEN                           24u
+#define AIMEE_DB2_EVENT_CSS_MIGRATION_ENUMERATE                         AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_CSS_MIGRATION_ENUMERATE                         AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_CSS_MIGRATION_ENUMERATE                     24u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_REQUEST_MIN_LEN               28u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_REQUEST_MAX_LEN               155u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MIN                   1u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MAX                   127u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_ENUMERATED_MIN                0u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_ENUMERATED_MAX                4096u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_RESPONSE_MIN_LEN              28u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_RESPONSE_MAX_LEN              28u
+#define AIMEE_DB2_CSS_MIGRATION_ENUMERATE_ERROR_LEN                     24u
+#define AIMEE_DB2_STRING_ACK_ARGUMENT_MAX                               255u
+#define AIMEE_DB2_STRING_COUNT_ARGUMENT_MAX                             511u
+#define AIMEE_DB2_STRING_PAIR_FIRST_MAX                                 511u
+#define AIMEE_DB2_STRING_PAIR_SECOND_MAX                                511u
+#define AIMEE_DB2_EVENT_ENTITY_EDGE_PRUNE_ORPHANS                       AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_ENTITY_EDGE_PRUNE_ORPHANS                       AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_ENTITY_EDGE_PRUNE_ORPHANS                   1u
+#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_REQUEST_LEN                 24u
+#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_RESPONSE_LEN                28u
+#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_ERROR_LEN                   24u
+#define AIMEE_DB2_ENTITY_EDGE_PRUNE_ORPHANS_COUNT_MAX                   2147483647u
+#define AIMEE_DB2_EVENT_ENTITY_EDGE_NORMALIZE_WEIGHTS                   AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_ENTITY_EDGE_NORMALIZE_WEIGHTS                   AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_ENTITY_EDGE_NORMALIZE_WEIGHTS               2u
+#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_REQUEST_LEN             24u
+#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN            28u
+#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_ERROR_LEN               24u
+#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_SCALE                   100u
+#define AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_COUNT_MAX               2147483647u
+#define AIMEE_DB2_EVENT_PROJECT_COUNT                                   AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_PROJECT_COUNT                                   AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_PROJECT_COUNT                               3u
+#define AIMEE_DB2_PROJECT_COUNT_REQUEST_LEN                             24u
+#define AIMEE_DB2_PROJECT_COUNT_RESPONSE_LEN                            28u
+#define AIMEE_DB2_PROJECT_COUNT_ERROR_LEN                               24u
+#define AIMEE_DB2_PROJECT_COUNT_MAX                                     2147483647u
+#define AIMEE_DB2_EVENT_PURGE_HIDDEN_POLLUTION                          AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_PURGE_HIDDEN_POLLUTION                          AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_PURGE_HIDDEN_POLLUTION                      4u
+#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_REQUEST_LEN                    24u
+#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_RESPONSE_LEN                   28u
+#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_ERROR_LEN                      24u
+#define AIMEE_DB2_PURGE_HIDDEN_POLLUTION_MAX                            2147483647u
+#define AIMEE_DB2_EVENT_REQUEUE_DRIFTED                                 AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_REQUEUE_DRIFTED                                 AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_REQUEUE_DRIFTED                             5u
+#define AIMEE_DB2_REQUEUE_DRIFTED_REQUEST_LEN                           24u
+#define AIMEE_DB2_REQUEUE_DRIFTED_RESPONSE_LEN                          28u
+#define AIMEE_DB2_REQUEUE_DRIFTED_ERROR_LEN                             24u
+#define AIMEE_DB2_REQUEUE_DRIFTED_MAX                                   2147483647u
+#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_ROUTES                       AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_ROUTES                       AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_ROUTES                   6u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_REQUEST_LEN                 24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_RESPONSE_LEN                28u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_ERROR_LEN                   24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_ROUTES_MAX                         2147483647u
+#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_IDENTITIES                   AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_IDENTITIES                   AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_IDENTITIES               7u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_REQUEST_LEN             24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_RESPONSE_LEN            28u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_ERROR_LEN               24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_IDENTITIES_MAX                     2147483647u
+#define AIMEE_DB2_EVENT_CROSS_REPO_REBUILD_BUILD_DEPS                   AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_CROSS_REPO_REBUILD_BUILD_DEPS                   AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_CROSS_REPO_REBUILD_BUILD_DEPS               8u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_REQUEST_LEN             24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_RESPONSE_LEN            28u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_ERROR_LEN               24u
+#define AIMEE_DB2_CROSS_REPO_REBUILD_BUILD_DEPS_MAX                     2147483647u
+#define AIMEE_DB2_EVENT_DRIFT_CANDIDATES                                AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_DRIFT_CANDIDATES                                AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_DRIFT_CANDIDATES                            9u
+#define AIMEE_DB2_DRIFT_CANDIDATES_REQUEST_LEN                          24u
+#define AIMEE_DB2_DRIFT_CANDIDATES_RESPONSE_LEN                         32u
+#define AIMEE_DB2_DRIFT_CANDIDATES_ERROR_LEN                            24u
+#define AIMEE_DB2_DRIFT_CANDIDATES_MAX                                  9223372036854775807ull
+#define AIMEE_DB2_EVENT_RULES_DECAY                                     AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_RULES_DECAY                                     AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_RULES_DECAY                                 1u
+#define AIMEE_DB2_RULES_DECAY_REQUEST_LEN                               24u
+#define AIMEE_DB2_RULES_DECAY_RESPONSE_LEN                              28u
+#define AIMEE_DB2_RULES_DECAY_ERROR_LEN                                 24u
+#define AIMEE_DB2_RULES_DECAY_MAX                                       2147483647u
+#define AIMEE_DB2_EVENT_CURIOSITY_RESCORE_ALL                           AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_CURIOSITY_RESCORE_ALL                           AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_CURIOSITY_RESCORE_ALL                       2u
+#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_REQUEST_LEN                     24u
+#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_RESPONSE_LEN                    28u
+#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_ERROR_LEN                       24u
+#define AIMEE_DB2_CURIOSITY_RESCORE_ALL_MAX                             2147483647u
+#define AIMEE_DB2_EVENT_MINING_SEED_JOB_DEFAULTS                        AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_MINING_SEED_JOB_DEFAULTS                        AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_MINING_SEED_JOB_DEFAULTS                    3u
+#define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_REQUEST_LEN                  24u
+#define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_RESPONSE_LEN                 24u
+#define AIMEE_DB2_MINING_SEED_JOB_DEFAULTS_ERROR_LEN                    24u
+#define AIMEE_DB2_EVENT_PROPOSALS_ARCHIVE_EXPIRED                       AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_PROPOSALS_ARCHIVE_EXPIRED                       AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_PROPOSALS_ARCHIVE_EXPIRED                   4u
+#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_REQUEST_LEN                 24u
+#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN                24u
+#define AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_ERROR_LEN                   24u
+#define AIMEE_DB2_EVENT_TRACE_MINING_LAST_ID                            AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_TRACE_MINING_LAST_ID                            AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_TRACE_MINING_LAST_ID                        5u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_REQUEST_LEN                      24u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_RESPONSE_LEN                     32u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_ERROR_LEN                        24u
+#define AIMEE_DB2_TRACE_MINING_LAST_ID_MAX                              9223372036854775807ull
+#define AIMEE_DB2_EVENT_REL_TYPES_ENSURE_SEED                           AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_REL_TYPES_ENSURE_SEED                           AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_REL_TYPES_ENSURE_SEED                       1u
+#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_REQUEST_LEN                     24u
+#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_RESPONSE_LEN                    24u
+#define AIMEE_DB2_REL_TYPES_ENSURE_SEED_ERROR_LEN                       24u
+#define AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_TRY_ACQUIRE                 AIMEE_DB2_EVENT_CUSTODY
+#define AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE                 AIMEE_DB2_FAMILY_CUSTODY
+#define AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_TRY_ACQUIRE             1u
+#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_REQUEST_LEN           24u
+#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN          28u
+#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_ERROR_LEN             24u
+#define AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_MAX                   1u
+#define AIMEE_DB2_EVENT_VECTOR_REBUILD_LOCK_RELEASE                     AIMEE_DB2_EVENT_CUSTODY
+#define AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_RELEASE                     AIMEE_DB2_FAMILY_CUSTODY
+#define AIMEE_DB2_OPERATION_VECTOR_REBUILD_LOCK_RELEASE                 2u
+#define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_REQUEST_LEN               24u
+#define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_RESPONSE_LEN              24u
+#define AIMEE_DB2_VECTOR_REBUILD_LOCK_RELEASE_ERROR_LEN                 24u
+#define AIMEE_DB2_EVENT_RELEASE_GET_ACTIVE                              AIMEE_DB2_EVENT_CUSTODY
+#define AIMEE_DB2_STAGE_RELEASE_GET_ACTIVE                              AIMEE_DB2_FAMILY_CUSTODY
+#define AIMEE_DB2_OPERATION_RELEASE_GET_ACTIVE                          3u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_REQUEST_LEN                        24u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_RESPONSE_LEN                       32u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_ERROR_LEN                          24u
+#define AIMEE_DB2_RELEASE_GET_ACTIVE_MAX                                9223372036854775807ull
+#define AIMEE_DB2_EVENT_PROSPECTIVE_SWEEP_EXPIRED                       AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_PROSPECTIVE_SWEEP_EXPIRED                       AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_PROSPECTIVE_SWEEP_EXPIRED                   1u
+#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_REQUEST_LEN                 24u
+#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_RESPONSE_LEN                28u
+#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_ERROR_LEN                   24u
+#define AIMEE_DB2_PROSPECTIVE_SWEEP_EXPIRED_MAX                         2147483647u
+#define AIMEE_DB2_EVENT_DIRECTIVE_SWEEP_EXPIRED                         AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_DIRECTIVE_SWEEP_EXPIRED                         AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_DIRECTIVE_SWEEP_EXPIRED                     2u
+#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_REQUEST_LEN                   24u
+#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_RESPONSE_LEN                  28u
+#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_ERROR_LEN                     24u
+#define AIMEE_DB2_DIRECTIVE_SWEEP_EXPIRED_MAX                           2147483647u
+#define AIMEE_DB2_EVENT_MARK_REVISIT_DUE                                AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_MARK_REVISIT_DUE                                AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_MARK_REVISIT_DUE                            3u
+#define AIMEE_DB2_MARK_REVISIT_DUE_REQUEST_LEN                          24u
+#define AIMEE_DB2_MARK_REVISIT_DUE_RESPONSE_LEN                         28u
+#define AIMEE_DB2_MARK_REVISIT_DUE_ERROR_LEN                            24u
+#define AIMEE_DB2_MARK_REVISIT_DUE_MAX                                  2147483647u
+#define AIMEE_DB2_EVENT_INGEST_QUEUE_RESET_RUNNING                      AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_INGEST_QUEUE_RESET_RUNNING                      AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_INGEST_QUEUE_RESET_RUNNING                  4u
+#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_REQUEST_LEN                24u
+#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_RESPONSE_LEN               28u
+#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_ERROR_LEN                  24u
+#define AIMEE_DB2_INGEST_QUEUE_RESET_RUNNING_MAX                        2147483647u
+#define AIMEE_DB2_EVENT_EVIDENCE_REEMBED_ALL                            AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_EVIDENCE_REEMBED_ALL                            AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_EVIDENCE_REEMBED_ALL                        5u
+#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_REQUEST_LEN                      24u
+#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_RESPONSE_LEN                     28u
+#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_ERROR_LEN                        24u
+#define AIMEE_DB2_EVIDENCE_REEMBED_ALL_MAX                              2147483647u
+#define AIMEE_DB2_EVENT_CURATOR_REEMBED_ALL                             AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_CURATOR_REEMBED_ALL                             AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_CURATOR_REEMBED_ALL                         6u
+#define AIMEE_DB2_CURATOR_REEMBED_ALL_REQUEST_LEN                       24u
+#define AIMEE_DB2_CURATOR_REEMBED_ALL_RESPONSE_LEN                      28u
+#define AIMEE_DB2_CURATOR_REEMBED_ALL_ERROR_LEN                         24u
+#define AIMEE_DB2_CURATOR_REEMBED_ALL_MAX                               2147483647u
+#define AIMEE_DB2_EVENT_SYNTH_REENQUEUE_ALL                             AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_SYNTH_REENQUEUE_ALL                             AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_SYNTH_REENQUEUE_ALL                         7u
+#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_REQUEST_LEN                       24u
+#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_RESPONSE_LEN                      28u
+#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_ERROR_LEN                         24u
+#define AIMEE_DB2_SYNTH_REENQUEUE_ALL_MAX                               2147483647u
+#define AIMEE_DB2_EVENT_CURATOR_REENQUEUE_EXTRACT_ALL                   AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_CURATOR_REENQUEUE_EXTRACT_ALL                   AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_CURATOR_REENQUEUE_EXTRACT_ALL               8u
+#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_REQUEST_LEN             24u
+#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_RESPONSE_LEN            28u
+#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_ERROR_LEN               24u
+#define AIMEE_DB2_CURATOR_REENQUEUE_EXTRACT_ALL_MAX                     2147483647u
+#define AIMEE_DB2_EVENT_DIRECTIVE_SUPPRESS                              AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_DIRECTIVE_SUPPRESS                              AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_DIRECTIVE_SUPPRESS                          9u
+#define AIMEE_DB2_DIRECTIVE_SUPPRESS_REQUEST_LEN                        32u
+#define AIMEE_DB2_DIRECTIVE_SUPPRESS_RESPONSE_LEN                       24u
+#define AIMEE_DB2_DIRECTIVE_SUPPRESS_ERROR_LEN                          24u
+#define AIMEE_DB2_DIRECTIVE_SUPPRESS_ID_MAX                             9223372036854775807ull
+#define AIMEE_DB2_EVENT_DIRECTIVE_RECORD_SURFACE                        AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_DIRECTIVE_RECORD_SURFACE                        AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_DIRECTIVE_RECORD_SURFACE                    10u
+#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_REQUEST_LEN                  32u
+#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_RESPONSE_LEN                 24u
+#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ERROR_LEN                    24u
+#define AIMEE_DB2_DIRECTIVE_RECORD_SURFACE_ID_MAX                       9223372036854775807ull
+#define AIMEE_DB2_EVENT_ANTI_PATTERN_BUMP                               AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ANTI_PATTERN_BUMP                               AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ANTI_PATTERN_BUMP                           6u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_REQUEST_LEN                         32u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_RESPONSE_LEN                        24u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_ERROR_LEN                           24u
+#define AIMEE_DB2_ANTI_PATTERN_BUMP_ID_MAX                              9223372036854775807ull
+#define AIMEE_DB2_EVENT_ANTI_PATTERN_DELETE                             AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ANTI_PATTERN_DELETE                             AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ANTI_PATTERN_DELETE                         7u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_REQUEST_LEN                       32u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_RESPONSE_LEN                      24u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_ERROR_LEN                         24u
+#define AIMEE_DB2_ANTI_PATTERN_DELETE_ID_MAX                            9223372036854775807ull
+#define AIMEE_DB2_EVENT_DOC_DELETE                                      AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_DOC_DELETE                                      AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_DOC_DELETE                                  2u
+#define AIMEE_DB2_DOC_DELETE_REQUEST_LEN                                32u
+#define AIMEE_DB2_DOC_DELETE_RESPONSE_LEN                               24u
+#define AIMEE_DB2_DOC_DELETE_ERROR_LEN                                  24u
+#define AIMEE_DB2_DOC_DELETE_ID_MAX                                     9223372036854775807ull
+#define AIMEE_DB2_EVENT_TASK_DELETE                                     AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_TASK_DELETE                                     AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_TASK_DELETE                                 3u
+#define AIMEE_DB2_TASK_DELETE_REQUEST_LEN                               32u
+#define AIMEE_DB2_TASK_DELETE_RESPONSE_LEN                              24u
+#define AIMEE_DB2_TASK_DELETE_ERROR_LEN                                 24u
+#define AIMEE_DB2_TASK_DELETE_ID_MAX                                    9223372036854775807ull
+#define AIMEE_DB2_EVENT_FILE_INDEX_DELETE_PROJECT                       AIMEE_DB2_EVENT_INDEX
+#define AIMEE_DB2_STAGE_FILE_INDEX_DELETE_PROJECT                       AIMEE_DB2_FAMILY_INDEX
+#define AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_PROJECT                   10u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MIN                 29u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_REQUEST_MAX                 155u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_PROJECT_MAX                 127u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_RESPONSE_LEN                28u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_ERROR_LEN                   24u
+#define AIMEE_DB2_FILE_INDEX_DELETE_PROJECT_MAX                         2147483647u
+#define AIMEE_DB2_EVENT_CLEAR_PROJECT                                   AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_CLEAR_PROJECT                                   AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_CLEAR_PROJECT                               4u
+#define AIMEE_DB2_CLEAR_PROJECT_REQUEST_MIN                             29u
+#define AIMEE_DB2_CLEAR_PROJECT_REQUEST_MAX                             155u
+#define AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX                             127u
+#define AIMEE_DB2_CLEAR_PROJECT_RESPONSE_LEN                            28u
+#define AIMEE_DB2_CLEAR_PROJECT_ERROR_LEN                               24u
+#define AIMEE_DB2_CLEAR_PROJECT_MAX                                     2147483647u
+#define AIMEE_DB2_EVENT_CLEAR_CURRENT_PROJECT                           AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_CLEAR_CURRENT_PROJECT                           AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_CLEAR_CURRENT_PROJECT                       5u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MIN                     29u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_REQUEST_MAX                     155u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_PROJECT_MAX                     127u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_RESPONSE_LEN                    28u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_ERROR_LEN                       24u
+#define AIMEE_DB2_CLEAR_CURRENT_PROJECT_MAX                             2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -10328,6 +10412,339 @@ static inline int aimee_db2_purge_files_matching_reply_decode(const uint8_t *inp
    return 0;
 }
 
+static inline int aimee_db2_file_index_delete_current_generation_request_encode(const char *project,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len < AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MIN || project_len > AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_CURRENT_GENERATION, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_file_index_delete_current_generation_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *project, size_t project_capacity)
+{
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!project || project_capacity < (size_t)AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_CURRENT_GENERATION || header.flags != 0u ||
+       input_len < AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (project[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_PROJECT_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_file_index_delete_current_generation_reply_encode(uint32_t deleted,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (deleted > AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_DELETED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, deleted);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_CURRENT_GENERATION, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_file_index_delete_current_generation_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *deleted)
+{
+   if (deleted)
+      *deleted = 0u;
+   if (!deleted)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FILE_INDEX_DELETE_CURRENT_GENERATION ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *deleted = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*deleted > AIMEE_DB2_FILE_INDEX_DELETE_CURRENT_GENERATION_DELETED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_project_delete_request_encode(const char *project,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_PROJECT_DELETE_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len < AIMEE_DB2_PROJECT_DELETE_PROJECT_MIN || project_len > AIMEE_DB2_PROJECT_DELETE_PROJECT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_PROJECT_DELETE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PROJECT_DELETE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_project_delete_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *project, size_t project_capacity)
+{
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!project || project_capacity < (size_t)AIMEE_DB2_PROJECT_DELETE_PROJECT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_PROJECT_DELETE || header.flags != 0u ||
+       input_len < AIMEE_DB2_PROJECT_DELETE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_PROJECT_DELETE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_PROJECT_DELETE_PROJECT_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (project[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_PROJECT_DELETE_PROJECT_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_project_delete_reply_encode(uint32_t deleted,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (deleted > AIMEE_DB2_PROJECT_DELETE_DELETED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_PROJECT_DELETE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, deleted);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PROJECT_DELETE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_project_delete_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *deleted)
+{
+   if (deleted)
+      *deleted = 0u;
+   if (!deleted)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_PROJECT_DELETE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *deleted = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*deleted > AIMEE_DB2_PROJECT_DELETE_DELETED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_minhash_delete_current_generation_request_encode(const char *project,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len < AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MIN || project_len > AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_MINHASH_DELETE_CURRENT_GENERATION, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_minhash_delete_current_generation_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *project, size_t project_capacity)
+{
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!project || project_capacity < (size_t)AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_MINHASH_DELETE_CURRENT_GENERATION || header.flags != 0u ||
+       input_len < AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (project[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_PROJECT_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_minhash_delete_current_generation_reply_encode(uint32_t acknowledged,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (acknowledged > AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_ACKNOWLEDGED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, acknowledged);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_MINHASH_DELETE_CURRENT_GENERATION, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_minhash_delete_current_generation_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *acknowledged)
+{
+   if (acknowledged)
+      *acknowledged = 0u;
+   if (!acknowledged)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_MINHASH_DELETE_CURRENT_GENERATION ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *acknowledged = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*acknowledged > AIMEE_DB2_MINHASH_DELETE_CURRENT_GENERATION_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
 static inline int aimee_db2_trace_mining_record_request_encode(uint64_t last_trace_id, uint8_t *output,
                                                    size_t capacity)
 {
@@ -13184,6 +13601,117 @@ static inline int aimee_db2_collab_rule_propose_reply_decode(const uint8_t *inpu
    return 0;
 }
 
+static inline int aimee_db2_rules_delete_by_directive_type_request_encode(const char *directive_type,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!directive_type || !output || !output_len)
+      return -1;
+   size_t directive_type_len = 0u;
+   while (directive_type_len <= AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MAX && directive_type[directive_type_len])
+      ++directive_type_len;
+   if (directive_type_len < AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MIN || directive_type_len > AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)directive_type_len);
+   memcpy(payload + cursor + 4u, directive_type, directive_type_len);
+   cursor += 4u + (uint32_t)directive_type_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RULES_DELETE_BY_DIRECTIVE_TYPE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_rules_delete_by_directive_type_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *directive_type, size_t directive_type_capacity)
+{
+   if (directive_type && directive_type_capacity)
+      directive_type[0] = '\0';
+   if (!directive_type || directive_type_capacity < (size_t)AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RULES_DELETE_BY_DIRECTIVE_TYPE || header.flags != 0u ||
+       input_len < AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, directive_type,
+                                 AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (directive_type[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DIRECTIVE_TYPE_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_rules_delete_by_directive_type_reply_encode(uint32_t deleted,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (deleted > AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DELETED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, deleted);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_RULES_DELETE_BY_DIRECTIVE_TYPE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_rules_delete_by_directive_type_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *deleted)
+{
+   if (deleted)
+      *deleted = 0u;
+   if (!deleted)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_RULES_DELETE_BY_DIRECTIVE_TYPE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *deleted = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*deleted > AIMEE_DB2_RULES_DELETE_BY_DIRECTIVE_TYPE_DELETED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
 static inline int aimee_db2_document_exists_request_encode(uint64_t document_id, uint8_t *output,
                                                    size_t capacity)
 {
@@ -14055,6 +14583,228 @@ static inline int aimee_db2_release_add_doc_reply_decode(const uint8_t *input, s
    *acknowledged = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*acknowledged > AIMEE_DB2_RELEASE_ADD_DOC_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_approve_request_encode(const char *rel_type,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!rel_type || !output || !output_len)
+      return -1;
+   size_t rel_type_len = 0u;
+   while (rel_type_len <= AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MAX && rel_type[rel_type_len])
+      ++rel_type_len;
+   if (rel_type_len < AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MIN || rel_type_len > AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ONTOLOGY_APPROVE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)rel_type_len);
+   memcpy(payload + cursor + 4u, rel_type, rel_type_len);
+   cursor += 4u + (uint32_t)rel_type_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ONTOLOGY_APPROVE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_approve_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *rel_type, size_t rel_type_capacity)
+{
+   if (rel_type && rel_type_capacity)
+      rel_type[0] = '\0';
+   if (!rel_type || rel_type_capacity < (size_t)AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ONTOLOGY_APPROVE || header.flags != 0u ||
+       input_len < AIMEE_DB2_ONTOLOGY_APPROVE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_ONTOLOGY_APPROVE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rel_type,
+                                 AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (rel_type[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_ONTOLOGY_APPROVE_REL_TYPE_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_approve_reply_encode(uint32_t acknowledged,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (acknowledged > AIMEE_DB2_ONTOLOGY_APPROVE_ACKNOWLEDGED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ONTOLOGY_APPROVE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, acknowledged);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ONTOLOGY_APPROVE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_approve_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *acknowledged)
+{
+   if (acknowledged)
+      *acknowledged = 0u;
+   if (!acknowledged)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ONTOLOGY_APPROVE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *acknowledged = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*acknowledged > AIMEE_DB2_ONTOLOGY_APPROVE_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_reject_request_encode(const char *rel_type,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!rel_type || !output || !output_len)
+      return -1;
+   size_t rel_type_len = 0u;
+   while (rel_type_len <= AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MAX && rel_type[rel_type_len])
+      ++rel_type_len;
+   if (rel_type_len < AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MIN || rel_type_len > AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ONTOLOGY_REJECT_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)rel_type_len);
+   memcpy(payload + cursor + 4u, rel_type, rel_type_len);
+   cursor += 4u + (uint32_t)rel_type_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ONTOLOGY_REJECT, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_reject_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *rel_type, size_t rel_type_capacity)
+{
+   if (rel_type && rel_type_capacity)
+      rel_type[0] = '\0';
+   if (!rel_type || rel_type_capacity < (size_t)AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ONTOLOGY_REJECT || header.flags != 0u ||
+       input_len < AIMEE_DB2_ONTOLOGY_REJECT_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_ONTOLOGY_REJECT_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rel_type,
+                                 AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (rel_type[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_ONTOLOGY_REJECT_REL_TYPE_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_reject_reply_encode(uint32_t acknowledged,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (acknowledged > AIMEE_DB2_ONTOLOGY_REJECT_ACKNOWLEDGED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ONTOLOGY_REJECT_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, acknowledged);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ONTOLOGY_REJECT, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_ontology_reject_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *acknowledged)
+{
+   if (acknowledged)
+      *acknowledged = 0u;
+   if (!acknowledged)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ONTOLOGY_REJECT ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *acknowledged = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*acknowledged > AIMEE_DB2_ONTOLOGY_REJECT_ACKNOWLEDGED_MAX)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -15311,6 +16061,117 @@ static inline int aimee_db2_directive_resolve_reply_decode(const uint8_t *input,
    *acknowledged = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*acknowledged > AIMEE_DB2_DIRECTIVE_RESOLVE_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_css_migration_enumerate_request_encode(const char *project,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project || !output || !output_len)
+      return -1;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (project_len < AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MIN || project_len > AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_CSS_MIGRATION_ENUMERATE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CSS_MIGRATION_ENUMERATE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_css_migration_enumerate_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *project, size_t project_capacity)
+{
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!project || project_capacity < (size_t)AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CSS_MIGRATION_ENUMERATE || header.flags != 0u ||
+       input_len < AIMEE_DB2_CSS_MIGRATION_ENUMERATE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_CSS_MIGRATION_ENUMERATE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (project[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_CSS_MIGRATION_ENUMERATE_PROJECT_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_css_migration_enumerate_reply_encode(uint32_t enumerated,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (enumerated > AIMEE_DB2_CSS_MIGRATION_ENUMERATE_ENUMERATED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_CSS_MIGRATION_ENUMERATE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, enumerated);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CSS_MIGRATION_ENUMERATE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_css_migration_enumerate_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *enumerated)
+{
+   if (enumerated)
+      *enumerated = 0u;
+   if (!enumerated)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CSS_MIGRATION_ENUMERATE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *enumerated = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*enumerated > AIMEE_DB2_CSS_MIGRATION_ENUMERATE_ENUMERATED_MAX)
       return -1;
    if (cursor != payload_len)
       return -1;

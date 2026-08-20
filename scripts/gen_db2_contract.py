@@ -12512,6 +12512,48 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_collab_rules_propose",
         "policy": {"writes": 200},
     },
+    "file_index_delete_current_generation": {
+        "key": ("index", 21),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_file_index_delete_current_project",
+        "policy": {"writes": 200},
+    },
+    "project_delete": {
+        "key": ("index", 22),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_project_delete",
+        "policy": {"writes": 200},
+    },
+    "minhash_delete_current_generation": {
+        "key": ("index", 23),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_sketch_minhash_signature_delete_project",
+        "policy": {"writes": 200},
+    },
+    "css_migration_enumerate": {
+        "key": ("maintenance", 24),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_css_migration_enumerate",
+        "policy": {"writes": 200},
+    },
+    "ontology_approve": {
+        "key": ("organization", 15),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_ontology_approve",
+        "policy": {"writes": 200},
+    },
+    "ontology_reject": {
+        "key": ("organization", 16),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_ontology_reject",
+        "policy": {"writes": 200},
+    },
+    "rules_delete_by_directive_type": {
+        "key": ("learning", 36),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_delete_by_directive_type",
+        "policy": {"writes": 200},
+    },
 }
 
 

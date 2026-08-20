@@ -2985,6 +2985,126 @@
       }
     },
     {
+      "family": "index",
+      "id": 21,
+      "name": "file_index_delete_current_generation",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The file index and the generation it belongs to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_file_index_delete_current_project"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the project name is resolved through its aliases first, and only the current generation is deleted"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 22,
+      "name": "project_delete",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projects and the files indexed under them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_project_delete"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the project row is deleted by its literal name and its aliases, generations and files cascade away with it"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 23,
+      "name": "minhash_delete_current_generation",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Minhash signatures and LSH buckets are relational DB2 rows keyed by project and generation.",
+      "c_symbols": [
+        "db2_sketch_minhash_signature_delete_project"
+      ],
+      "request": {
+        "policy": {
+          "writes": "two deletes run one after the other outside a transaction, so a failure between them leaves signatures gone and their buckets behind"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -4191,6 +4311,46 @@
       }
     },
     {
+      "family": "learning",
+      "id": 36,
+      "name": "rules_delete_by_directive_type",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rules and the directive types they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_rules_delete_by_directive_type"
+      ],
+      "request": {
+        "policy": {
+          "writes": "every rule carrying the directive type is deleted at once, and the module's rules cache is dropped only when something was"
+        },
+        "fields": [
+          {
+            "name": "directive_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -4600,6 +4760,86 @@
             "type": "u64",
             "minimum": 1,
             "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 15,
+      "name": "ontology_approve",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Relationship types and the evaluations that decide them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_ontology_approve"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the name is normalized first, the promotion is best-effort, and the operation fails unless exactly one evaluation row was marked approved"
+        },
+        "fields": [
+          {
+            "name": "rel_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 16,
+      "name": "ontology_reject",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Relationship types and the evaluations that decide them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_ontology_reject"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the name is normalized first, the evaluation must match exactly one row, and the type is then marked rejected best-effort"
+        },
+        "fields": [
+          {
+            "name": "rel_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
           }
         ]
       },
@@ -5362,6 +5602,46 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 24,
+      "name": "css_migration_enumerate",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "CSS migration units and the component files they are derived from are relational DB2 rows.",
+      "c_symbols": [
+        "db2_css_migration_enumerate"
+      ],
+      "request": {
+        "policy": {
+          "writes": "at most 4096 component files are read, and each one is upserted as a migration unit without a transaction around the set"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "enumerated",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4096
           }
         ]
       }

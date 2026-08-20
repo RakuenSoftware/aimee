@@ -4382,9 +4382,15 @@
           "line": 118
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.project_delete operation deletes a whole indexed project. Aliases, generations and files all cascade off the projects row, so the reply's one deleted row stands for everything the project held. Unlike the file-index deletes beside it the name is not resolved through aliases, so naming an alias deletes nothing and reports zero -- the same reply as a project that was already gone."
+      },
       "signature": "int db2_code_index_project_delete ( const char * name )",
       "signature_sha256": "459b52d59931f8937dfdf255b75b95f33274e5eb43ba00c7906f4fd46c66ab9d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_project_delete"
     },
     {
@@ -6102,9 +6108,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.css_migration_enumerate operation refreshes a project's CSS migration units from its component files. Two things the count does not show: it reads at most 4096 component files and stops, so a larger project reports 4096 and silently leaves the rest un-enumerated; and the upserts run one at a time with no transaction, so a failure part way leaves some units refreshed and reports failure for all of them. An existing unit keeps its state and its note; only the token counts are refreshed."
+      },
       "signature": "int db2_css_migration_enumerate ( const char * project )",
       "signature_sha256": "1bc3fa6043b871a822db2321cc5006afd8cbcca102aff451840c970619843fcd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_css_migration_enumerate"
     },
     {
@@ -9938,9 +9950,15 @@
           "line": 354
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.file_index_delete_current_generation operation deletes a project's file index for its current generation only. It is one letter away from index.file_index_delete_project, which deletes every generation, and the names are the only thing telling them apart. The project name goes through a helper called db2_kb_resolve_project which copies it and resolves nothing, so an alias matches no rows. A project with no current generation reports zero, and so does an index that was already empty."
+      },
       "signature": "int db2_kb_file_index_delete_current_project ( const char * project )",
       "signature_sha256": "ce7e7b70b214f1130425b545ab5f667802155eef1982ca64bd87ef5f06bd44b2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_file_index_delete_current_project"
     },
     {
@@ -20091,9 +20109,15 @@
           "line": 51
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.ontology_approve operation approves a proposed relationship type. The name is normalized before anything is matched, so two spellings can reach the same type. Promoting the type to active is best-effort and its result is discarded -- a seeded type is already active -- while marking the evaluation approved must match exactly one row or the whole transaction rolls back. So a refusal means there was no evaluation to approve, never that the type failed to be promoted."
+      },
       "signature": "int db2_ontology_approve ( const char * rel_type )",
       "signature_sha256": "aea184bdb37446a38a0bf8f5d59e36e3941d139d30427c3f36f1be2c3e2b1e1e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_ontology_approve"
     },
     {
@@ -20199,9 +20223,15 @@
           "line": 62
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.ontology_reject operation rejects a proposed relationship type. It writes the same two rows as organization.ontology_approve in the opposite order: the evaluation must match exactly one row first, and marking the type rejected is the best-effort half. Both run in one transaction, so a refusal leaves neither row changed, and as with approve a refusal only ever means there was no evaluation to decide."
+      },
       "signature": "int db2_ontology_reject ( const char * rel_type )",
       "signature_sha256": "b3b46ff86fb67bb350c08d1f6d61682e477b3bf1cacf40831bde3987c8214e71",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_ontology_reject"
     },
     {
@@ -21304,9 +21334,15 @@
           "line": 61
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.rules_delete_by_directive_type operation deletes every rule carrying a directive type -- unlike learning.rules_delete_by_id beside it, one call can remove an unbounded number of rules, and the reply's count is the only record of how many. The rules cache it drops afterwards is a static inside the module process, but it is keyed on a signature read from the rules table, so another process notices the deletion on its next read regardless."
+      },
       "signature": "int db2_rules_delete_by_directive_type ( const char * directive_type )",
       "signature_sha256": "f639e608c35590b89bc727fbda598d8eb88f708188f15d3866d7a0a2e2441630",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_delete_by_directive_type"
     },
     {
@@ -22152,9 +22188,15 @@
           "line": 30
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.minhash_delete_current_generation operation drops a project's minhash signatures and the LSH buckets built from them. The two deletes run one after the other with no transaction around them, so a failure between them leaves the signatures gone and the buckets pointing at nothing, and the reply reports only that the second statement failed. Recorded because the pair reads as one operation and is not one."
+      },
       "signature": "int db2_sketch_minhash_signature_delete_project ( const char * project )",
       "signature_sha256": "ad06a151530be6cb30087286aa9e7f857b271ee938d75040b5f969bdaeb1b41d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_sketch_minhash_signature_delete_project"
     },
     {
@@ -26856,15 +26898,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8ffa1fff44ed5d2f2d86c78963b2e184a27d3ec77ab6a53f08d770fa5f6e83b1",
+  "fingerprint": "ef410c6564c123c8f86ff056daae0fd6959cfa2a02595b21a19f40636f4b6093",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 486,
+    "audit_pending": 479,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 472
+    "reviewed": 479
   }
 }

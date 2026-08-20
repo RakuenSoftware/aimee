@@ -242,6 +242,13 @@ typedef struct
    int (*artifact_link)(const char *from_artifact_id, const char *to_artifact_id, const char *link_kind);
    int (*bandit_promotion_set)(const char *decision_point, const char *arm_id, const char *rollback_arm);
    int (*collab_rule_propose)(const char *rule_text, const char *rule_reason, const char *proposed_by);
+   int (*file_index_delete_current_generation)(const char *project);
+   int (*project_delete)(const char *project);
+   int (*minhash_delete_current_generation)(const char *project);
+   int (*css_migration_enumerate)(const char *project);
+   int (*ontology_approve)(const char *rel_type);
+   int (*ontology_reject)(const char *rel_type);
+   int (*rules_delete_by_directive_type)(const char *directive_type);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

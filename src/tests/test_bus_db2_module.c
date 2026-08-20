@@ -1694,6 +1694,48 @@ int db2_collab_rules_propose(const char *text, const char *reason, const char *p
    return 0;
 }
 
+int db2_kb_file_index_delete_current_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int db2_code_index_project_delete(const char *name)
+{
+   (void)name;
+   return 0;
+}
+
+int db2_sketch_minhash_signature_delete_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int db2_css_migration_enumerate(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int db2_ontology_approve(const char *rel_type)
+{
+   (void)rel_type;
+   return 0;
+}
+
+int db2_ontology_reject(const char *rel_type)
+{
+   (void)rel_type;
+   return 0;
+}
+
+int db2_rules_delete_by_directive_type(const char *directive_type)
+{
+   (void)directive_type;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
