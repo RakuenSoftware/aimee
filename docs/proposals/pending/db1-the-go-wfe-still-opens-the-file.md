@@ -1,7 +1,10 @@
 # Proposal: the Go WFE opens DB1 directly, and it is now the last one that does
 
-- **State:** OPEN. The C migration is finished; this is the other half nobody
-  measured, because the surface that was measured was a count of C call sites.
+- **State:** RESOLVED. The engine reaches DB1 through the module now, and
+  `scripts/validation/db1-module-wfe-coexistence.sh` -- which was written to
+  fail while this was true -- passes. What follows is kept as the record of what
+  was wrong and how it was closed, because the reasoning about WHY two writers
+  was unacceptable is the part worth keeping.
 
 ## What is true
 
@@ -44,6 +47,31 @@ service with its own SQLite handle is not a call site in that count, so the
 proposal that scoped this migration could not see it, and neither could any of
 the sweeps I ran -- until I stopped grepping C and asked which processes open
 the file.
+
+## How it was closed
+
+The first direction: DB1 owns the state, the engine became a client.
+
+Every statement the engine ran against the file is an operation the module
+serves -- 45 of them across five module sources, with each of the engine's
+transactions kept whole as ONE operation rather than decomposed, because a
+transaction assembled from separate calls across a wire is not a transaction.
+The Go client is generated from the same catalog as the C one, for the same
+reason the C one is: hand-writing wire encoders is how a contract and its
+callers drift.
+
+The schema moved with it. lifecycle_work_item's five engine columns, plus
+wfe_convergence, wfe_frozen_create and lifecycle_delegate_job, are declared in
+the module's schema, so the module creates 105 tables where it created 102 --
+exactly what the Go side used to add. There is nothing left for a second writer
+to create or alter.
+
+Porting from the SQL alone was not enough, and the Go tests -- which now run
+against a real module -- caught five behaviours that reading statements had
+lost: reconcile answering the wrong question entirely, budget parks stranding a
+sibling's authorised money, resume clearing pauses only the engine may clear, a
+lost create race reading as a broken store, and a found retry detail reported as
+a miss. Each is in the commit that fixed it.
 
 ## Which module owns workflow state?
 

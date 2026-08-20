@@ -23,18 +23,17 @@
 #   * whether the Go side changes the schema the module created
 #   * whether concurrent writes from both sides produce lock failures
 #
-# THIS SCRIPT IS EXPECTED TO FAIL TODAY, and its failures are the finding rather
-# than a broken test. It asserts the state the doctrine asks for -- one owner of
-# the store -- against an appliance that currently has two. It turns green when
-# the Go WFE moves onto the module bus client, which is tracked in
-# docs/proposals/pending/db1-the-go-wfe-still-opens-the-file.md and is the next
-# project rather than the tail of this one. Until then the value is that the gap
-# is measured on every run instead of being remembered.
+# This script was written to FAIL. It asserted the state the doctrine asks for --
+# one owner of the store -- against an appliance that had two, and its failures
+# were the finding rather than a broken test. On a clean container it reported:
+# two holders of aimee.db, five columns added to lifecycle_work_item by the Go
+# side, and seven tables created by the Go WFE when it started first.
 #
-# Measured on a clean Debian 13 container, server pre-merge-safety-2544:
-# 8 passed, 3 failed, 2 noted -- two holders of aimee.db, five columns added to
-# lifecycle_work_item by the Go side, and seven tables created by the Go WFE
-# when it starts first.
+# It passes now. The engine reaches DB1 through the module, so there is one
+# holder, nothing for a second writer to alter, and nothing for it to create.
+# The script stays exactly as it was, because an assertion that has started
+# passing is worth more than one written after the fact -- it is the same
+# measurement, and it is what would notice the gap reopening.
 #
 # Overridable: MODULE, GRANT, SERVER, WFE.
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"

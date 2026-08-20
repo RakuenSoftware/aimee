@@ -93,6 +93,11 @@ first store call comes directly after readiness and succeeds.
 
 ### `scripts/validation/db1-module-wfe-coexistence.sh` -- the topology that ships
 
+**This section describes what the script found BEFORE the engine was moved onto
+the module.** It is kept because it is the measurement that justified the work;
+the same script passes now, and the closing note at the end of this document
+records that. The finding, in the tense it was found in:
+
 Every script above runs two processes: the daemon and the module. The container
 runs **three**. `server-entrypoint.sh` defaults `AIMEE_WFE_ENGINE=go` and
 launches `aimee-wfe` with `--home` and no `--db`, so `cmd/aimee-server` falls
@@ -208,6 +213,44 @@ the product's -- `/v1/sessions/list` is a POST route, create answers with
 readiness the instant the module's socket appears races the daemon's dial. They
 are noted because a validation script that is wrong in the product's favour is
 worth more suspicion than one that is wrong against it, and two of these were.
+
+## After the engine moved
+
+The section above is the measurement that justified the work. The engine reaches
+DB1 through the module now, and the same script -- unchanged -- is the check
+that says so. What changed underneath it:
+
+- `server-go/internal/db1` is a mapping onto module operations rather than a
+  SQLite driver. Nothing in `server-go` calls `sql.Open` outside tests, and
+  `--db` is gone from `aimee-wfe` because there is no path left to pass it.
+- the module's schema is the only schema: 105 tables and the five
+  `lifecycle_work_item` columns the Go side used to add, so a second writer has
+  nothing left to create or alter.
+- the Go client is generated from the same catalog as the C one, because
+  hand-writing wire encoders is how a contract and its callers drift.
+- the engine waits for the bus and then for the module to answer before it asks
+  anything real. A crash-looping engine is a worse failure than a slow one, and
+  the boot order is not something it controls.
+
+Measured on CT 9077, server `pre-merge-safety-2554-g511e7e18bb`, with the Go WFE
+running beside the module exactly as the container runs it:
+
+    holders of aimee.db: aimee-module-db(6043)
+    holders of aimee.db now: aimee-module-db(6043)
+    tables: 105 -> 105
+    13 passed, 0 failed, 0 noted
+
+One holder before the engine starts and one after. The table count does not move,
+because there is nothing left for the engine to create or alter. The e2e suite is
+unchanged at 23/0.
+
+The Go tests now run against a real module rather than a temp SQLite file, and
+that is what caught the five behaviours the port had lost -- reconcile answering
+the wrong question, budget parks stranding a sibling's authorised money, resume
+clearing pauses only the engine may clear, a lost create race reading as a
+broken store, and a found retry detail reported as a miss. Each is named in the
+commit that fixed it. Reading SQL out of a function is not the same as reading
+the function.
 
 ## Reproducing
 
