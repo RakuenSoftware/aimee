@@ -357,6 +357,9 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
                      memory_t *out);
 int memory_get(int64_t id, memory_t *out);
 int memory_touch(int64_t id);
+/* Batch memory_touch, for the recall path: one statement per chunk of ids
+ * rather than one UPDATE per memory injected into a turn. */
+int memory_touch_many(const int64_t *ids, int n);
 int memory_reject(int64_t id, const char *reason);
 int memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max);
 int memory_stats(memory_stats_t *out);

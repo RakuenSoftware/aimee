@@ -257,6 +257,41 @@ static void test_touch_memory(void)
    teardown();
 }
 
+static void test_touch_many(void)
+{
+   setup();
+   memory_t a, b, c;
+   memory_insert(TIER_L2, KIND_FACT, "batch-a", "alpha", 0.8, "s1", &a);
+   memory_insert(TIER_L2, KIND_FACT, "batch-b", "beta", 0.8, "s1", &b);
+   memory_insert(TIER_L2, KIND_FACT, "batch-c", "gamma", 0.8, "s1", &c);
+
+   /* The recall path collects every memory it injected and touches them in one
+    * call, so the batch form must bump each id exactly once -- ids it cannot
+    * address (0 / negative) are skipped rather than aborting the batch. */
+   int64_t ids[] = {a.id, 0, b.id, -1};
+   assert(memory_touch_many(ids, 4) == 2);
+
+   memory_t got;
+   memory_get(a.id, &got);
+   assert(got.use_count >= 2);
+   assert(got.last_used_at[0] != '\0');
+   memory_get(b.id, &got);
+   assert(got.use_count >= 2);
+
+   /* An id absent from the batch must be left alone. */
+   memory_get(c.id, &got);
+   assert(got.use_count == 1);
+
+   /* Empty and degenerate batches are a no-op, not an error: a turn that
+    * injected nothing must not look like a failed write. */
+   assert(memory_touch_many(NULL, 0) == 0);
+   assert(memory_touch_many(ids, 0) == 0);
+   int64_t none[] = {0, -5};
+   assert(memory_touch_many(none, 2) == 0);
+
+   teardown();
+}
+
 static void test_promote(void)
 {
    setup();
@@ -2551,6 +2586,7 @@ int main(void)
    test_insert_merge();
    test_near_duplicate_numeric_keys_remain_distinct();
    test_touch_memory();
+   test_touch_many();
    test_promote();
    test_memory_promote_uses_calibration_profile();
    test_memory_promote_calibration_ab_slot();

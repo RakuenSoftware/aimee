@@ -1243,13 +1243,15 @@ int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_
    switch (filter)
    {
    case DB2_MEM_CAND_PRIMARY:
-      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count"
+      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
+            " COALESCE(m.last_used_at, ''), m.created_at"
             " FROM memories m WHERE m.tier IN ('L1', 'L2', 'L3', 'L4', "
             "'L5')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
       break;
    case DB2_MEM_CAND_FALLBACK:
-      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count"
+      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
+            " COALESCE(m.last_used_at, ''), m.created_at"
             " FROM memories m WHERE m.tier IN ('L0', 'L1', 'L2', 'L4')" DB2_MEMORY_SCOPE_FILTER_SQL(
                 "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
                                                                        "m.use_count DESC LIMIT ?1";
@@ -1277,6 +1279,10 @@ int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_
       snprintf(rows[n].kind, sizeof(rows[n].kind), "%s", ki ? ki : "");
       rows[n].confidence = aimee_pg_column_double(st, 5);
       rows[n].use_count = aimee_pg_column_int(st, 6);
+      const char *lu = aimee_pg_column_text(st, 7);
+      const char *cr = aimee_pg_column_text(st, 8);
+      snprintf(rows[n].last_used_at, sizeof(rows[n].last_used_at), "%s", lu ? lu : "");
+      snprintf(rows[n].created_at, sizeof(rows[n].created_at), "%s", cr ? cr : "");
       n++;
    }
    aimee_pg_finalize(st);
