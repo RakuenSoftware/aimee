@@ -2217,9 +2217,29 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
-   const char *role =
-       delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
+   const char *requested_role = cJSON_IsString(jrole) ? jrole->valuestring : "execute";
+   const char *role = delegate_role_canonicalize(requested_role);
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
+
+   /* Canonicalization fails CLOSED: with no delegates module registered it
+      answers "" for every role, by design. That empty string used to travel on
+      to the store, which refused it, and the caller was told the delegate JOB
+      could not be created -- sending an operator to look at the store, the
+      database and the bus, when the actual cause is a module that is not
+      running and says so at startup. Name it here, where it is known. */
+   if (requested_role[0] && !role[0])
+   {
+      aimee_log(LOG_ERROR, "delegate",
+                "role '%s' could not be canonicalized: the delegates module is not registered, "
+                "so every role fails closed and no delegation can start",
+                requested_role);
+      compute_ctx_free(cctx);
+      if (err)
+         snprintf(err, errn,
+                  "delegate role '%s' is unavailable: the delegates module is not registered",
+                  requested_role);
+      return -1;
+   }
 
    /* Cheap, request-only pre-flight validation (the persona check lives in the
     * MCP layer and the worker). */
@@ -2251,9 +2271,20 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    int job_id = db1_agent_job_create(role, prompt, initial_agent, lease_owner);
    if (job_id <= 0)
    {
+      /* Say something. This refusal used to be silent everywhere -- the caller
+         got "failed to create delegate job" and the server log had not one line
+         about it, so there was no way to tell a store that refused the write
+         from a store the daemon could not reach at all. The store call is the
+         only thing that can fail here, and its return is the only evidence
+         there is, so record it with the arguments that produced it. */
+      aimee_log(LOG_ERROR, "delegate",
+                "could not create the delegate job (store returned %d): role='%s' agent='%s' "
+                "prompt=%zu bytes -- the delegation store write did not succeed",
+                job_id, role ? role : "", initial_agent ? initial_agent : "",
+                prompt ? strlen(prompt) : (size_t)0);
       compute_ctx_free(cctx);
       if (err)
-         snprintf(err, errn, "failed to create delegate job");
+         snprintf(err, errn, "could not create delegate job (store returned %d)", job_id);
       return -1;
    }
 
