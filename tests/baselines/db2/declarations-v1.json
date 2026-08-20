@@ -21956,6 +21956,19 @@
       "symbol": "db2_test_shim_handle"
     },
     {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_test_shim.h",
+          "line": 47
+        }
+      ],
+      "signature": "int db2_test_shim_is_postgres ( void )",
+      "signature_sha256": "e70c03189a52acb47ef9d01810a20a538467879158f59c163a0c1d203cbf80ca",
+      "status": "internal-unconsumed",
+      "symbol": "db2_test_shim_is_postgres"
+    },
+    {
       "consumers": [
         "src/tests/bench_perf.c",
         "src/tests/fuzz_memory_search.c",
@@ -22077,6 +22090,35 @@
       "signature_sha256": "ad7991115c322c152c5128a38199139f3209b512471868876e5f56ee9b342a1a",
       "status": "private-test-only",
       "symbol": "db2_test_shim_open_path"
+    },
+    {
+      "consumers": [
+        "src/tests/test_curator_code_unit.c",
+        "src/tests/test_curator_contradictions.c",
+        "src/tests/test_curator_index_claims.c",
+        "src/tests/test_curator_index_code_unit.c",
+        "src/tests/test_curator_index_narrative.c",
+        "src/tests/test_curator_invalidate.c",
+        "src/tests/test_curator_link_artifacts.c",
+        "src/tests/test_curator_pipeline.c",
+        "src/tests/test_curator_promote.c",
+        "src/tests/test_curator_queue.c",
+        "src/tests/test_curator_resolve_entities.c",
+        "src/tests/test_curator_serve.c",
+        "src/tests/test_curator_synthesize.c",
+        "src/tests/test_curator_version.c",
+        "src/tests/test_kb_releases_db.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_test_shim.h",
+          "line": 54
+        }
+      ],
+      "signature": "int db2_test_shim_skip_on_postgres ( const char * test_name )",
+      "signature_sha256": "99307390ff5ca7a00f8223e625a790b4899c9c2dece2dc6c799d5eea54644daa",
+      "status": "private-test-only",
+      "symbol": "db2_test_shim_skip_on_postgres"
     },
     {
       "consumers": [],
@@ -25860,15 +25902,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "88f7854ed278a7dcb6a4c8f579dad82be760a8c2b0b09e522a695924619c6407",
+  "fingerprint": "d49755f68094611b7f31248273eaa52c81ef6e512037ab7f035a21677757ae0f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 673,
-    "declarations": 1401,
+    "declarations": 1403,
     "headers": 138,
-    "internal_unconsumed": 153,
-    "private_test_only": 281,
+    "internal_unconsumed": 154,
+    "private_test_only": 282,
     "reviewed": 294
   }
 }
