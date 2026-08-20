@@ -2151,6 +2151,75 @@ int main(int argc, char **argv)
               &callers_find_excluding_project_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(callers_find_excluding_project_count == 0);
 
+   /* The rule, anti-pattern and task listings, against empty tables. Three of
+    * them take nothing at all, and two treat an empty filter as no condition
+    * rather than no match, so the arguments here are the edges rather than the
+    * ordinary cases.
+    */
+   static aimee_db2_rules_list_row_t rules_list_rows[AIMEE_DB2_RULES_LIST_MAX_ROWS];
+   uint32_t rules_list_count = 99;
+   assert(aimee_db2_rules_list_call(call_client, &client, 9321, 0, rules_list_rows,
+                                    AIMEE_DB2_RULES_LIST_MAX_ROWS, &rules_list_count, NULL,
+                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rules_list_count == 0);
+
+   static aimee_db2_rules_list_by_tier_row_t
+       rules_list_by_tier_rows[AIMEE_DB2_RULES_LIST_BY_TIER_MAX_ROWS];
+   uint32_t rules_list_by_tier_count = 99;
+   assert(aimee_db2_rules_list_by_tier_call(
+              call_client, &client, 9322, 0, 3u, rules_list_by_tier_rows,
+              AIMEE_DB2_RULES_LIST_BY_TIER_MAX_ROWS, &rules_list_by_tier_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rules_list_by_tier_count == 0);
+
+   static aimee_db2_rules_list_hard_row_t rules_list_hard_rows[AIMEE_DB2_RULES_LIST_HARD_MAX_ROWS];
+   uint32_t rules_list_hard_count = 99;
+   assert(aimee_db2_rules_list_hard_call(call_client, &client, 9323, 0, rules_list_hard_rows,
+                                         AIMEE_DB2_RULES_LIST_HARD_MAX_ROWS, &rules_list_hard_count,
+                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rules_list_hard_count == 0);
+
+   static aimee_db2_anti_pattern_list_row_t
+       anti_pattern_list_rows[AIMEE_DB2_ANTI_PATTERN_LIST_MAX_ROWS];
+   uint32_t anti_pattern_list_count = 99;
+   assert(aimee_db2_anti_pattern_list_call(call_client, &client, 9324, 0, anti_pattern_list_rows,
+                                           AIMEE_DB2_ANTI_PATTERN_LIST_MAX_ROWS,
+                                           &anti_pattern_list_count, NULL,
+                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(anti_pattern_list_count == 0);
+
+   static aimee_db2_anti_pattern_list_hot_row_t
+       anti_pattern_list_hot_rows[AIMEE_DB2_ANTI_PATTERN_LIST_HOT_MAX_ROWS];
+   uint32_t anti_pattern_list_hot_count = 99;
+   assert(aimee_db2_anti_pattern_list_hot_call(
+              call_client, &client, 9325, 0, 2u, anti_pattern_list_hot_rows,
+              AIMEE_DB2_ANTI_PATTERN_LIST_HOT_MAX_ROWS, &anti_pattern_list_hot_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(anti_pattern_list_hot_count == 0);
+
+   static aimee_db2_anti_pattern_check_row_t
+       anti_pattern_check_rows[AIMEE_DB2_ANTI_PATTERN_CHECK_MAX_ROWS];
+   uint32_t anti_pattern_check_count = 99;
+   assert(aimee_db2_anti_pattern_check_call(
+              call_client, &client, 9326, 0, "src/replay.c", "make replay", anti_pattern_check_rows,
+              AIMEE_DB2_ANTI_PATTERN_CHECK_MAX_ROWS, &anti_pattern_check_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(anti_pattern_check_count == 0);
+
+   static aimee_db2_task_list_row_t task_list_rows[AIMEE_DB2_TASK_LIST_MAX_ROWS];
+   uint32_t task_list_count = 99;
+   assert(aimee_db2_task_list_call(call_client, &client, 9327, 0, "open", "", 8u, task_list_rows,
+                                   AIMEE_DB2_TASK_LIST_MAX_ROWS, &task_list_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(task_list_count == 0);
+
+   static aimee_db2_task_subtasks_row_t task_subtasks_rows[AIMEE_DB2_TASK_SUBTASKS_MAX_ROWS];
+   uint32_t task_subtasks_count = 99;
+   assert(aimee_db2_task_subtasks_call(call_client, &client, 9328, 0, 4242, task_subtasks_rows,
+                                       AIMEE_DB2_TASK_SUBTASKS_MAX_ROWS, &task_subtasks_count, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(task_subtasks_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

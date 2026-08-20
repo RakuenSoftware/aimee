@@ -2181,6 +2181,70 @@ int canonical_index_find_callers_excluding_project(const char *excluded_project,
    return 0;
 }
 
+int db2_rules_list(rule_t *out, int max_rules)
+{
+   (void)out;
+   (void)max_rules;
+   return 0;
+}
+
+int db2_rules_list_by_tier(int min_weight, rule_t *out, int max_rules)
+{
+   (void)min_weight;
+   (void)out;
+   (void)max_rules;
+   return 0;
+}
+
+int db2_rules_list_hard(rule_t *out, int max_rules)
+{
+   (void)out;
+   (void)max_rules;
+   return 0;
+}
+
+int db2_anti_pattern_list(anti_pattern_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_anti_pattern_list_hot(int threshold, anti_pattern_t *out, int max)
+{
+   (void)threshold;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_anti_pattern_check(const char *file_path, const char *command, anti_pattern_t *out, int max)
+{
+   (void)file_path;
+   (void)command;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_task_list(const char *state, const char *session_id, int limit, aimee_task_t *out, int max)
+{
+   (void)state;
+   (void)session_id;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_task_get_subtasks(int64_t parent_id, aimee_task_t *out, int max)
+{
+   (void)parent_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

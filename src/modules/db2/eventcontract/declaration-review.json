@@ -180,6 +180,14 @@
       "reason": "The typed learning.anti_pattern_bump operation increments an anti-pattern's hit count. It reports success whenever the statement ran, so bumping an identifier that does not exist looks exactly like bumping one that does. Recorded because the delete on the same table makes the opposite choice, and a caller using both would otherwise have to discover the difference."
     },
     {
+      "symbol": "db2_anti_pattern_check",
+      "signature_sha256": "ace6347971d7de660ff96c70441d89aea7d6078a3f17feca5aa4d31dade317b1",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_check operation reports which anti-patterns a path and command trip. No condition reaches the database: every anti-pattern is read, normalised and phrase-matched in the module, so the cost grows with the table on every call. The path and the command are joined into one string before matching, so a pattern can match across the join between them."
+    },
+    {
       "symbol": "db2_anti_pattern_delete",
       "signature_sha256": "7677e71319eff0d6d44ac4c77713123208bdfc1ec5b87180b538d0b202e683c3",
       "disposition": "wire-operation",
@@ -202,6 +210,22 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.anti_pattern_exists_exact operation replaces the duplicate check. The match is exact: a pattern that differs by a character is a different pattern, which is what makes this usable as a duplicate guard and is worth stating because the wire cannot show it. A statement that could not run answers false, the same as an absent row."
+    },
+    {
+      "symbol": "db2_anti_pattern_list",
+      "signature_sha256": "a3ea18439a64fd7eb2849091e05847c42faab6e4e9952aeb871dd79e8784b0bd",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_list operation lists every anti-pattern, most hit first and then most confident. Nothing limits the statement, so the wire's row bound is the only stop. The hit count is a running total the bump operation raises, so ordering by it ranks by how often something has been noticed rather than by how much it matters."
+    },
+    {
+      "symbol": "db2_anti_pattern_list_hot",
+      "signature_sha256": "dc1421046f90bf81dc635b4d4a9f5e01fb1f2c7aeb14b6e4b73b2e6a17da7f87",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_list_hot operation lists the anti-patterns hit at least so often. Confidence does not enter the condition or the order, so a pattern hit many times and trusted by nobody is hot here and a rarely hit certainty is not. That is the backend's definition of hot, and it is only visible by reading the rows it returns."
     },
     {
       "symbol": "db2_artifact_citation_count",
@@ -3692,6 +3716,30 @@
       "reason": "The typed learning.rules_delete_by_directive_type operation deletes every rule carrying a directive type -- unlike learning.rules_delete_by_id beside it, one call can remove an unbounded number of rules, and the reply's count is the only record of how many. The rules cache it drops afterwards is a static inside the module process, but it is keyed on a signature read from the rules table, so another process notices the deletion on its next read regardless."
     },
     {
+      "symbol": "db2_rules_list",
+      "signature_sha256": "d4982b016b8869725a9a267656e6403234b574d9f5b5031ad0ea5785dd6866cc",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_list operation lists every rule, heaviest first and then by title. Its statement carries no limit, so the wire's row bound is the only thing that stops it and a caller cannot tell a list cut there from one that ended. An expired rule is listed like any other: the expiry stamp comes back but nothing here filters on it."
+    },
+    {
+      "symbol": "db2_rules_list_by_tier",
+      "signature_sha256": "c4614b19ca91b6f2526406c480ab72d6e7754713f517052c87f6e6208ef11c40",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_list_by_tier operation lists the rules at or above a weight. The floor is inclusive, and a floor of zero makes it learning.rules_list -- same order, same absent limit, same treatment of expired rules. A caller cannot ask for a tier and a limit at once; the row bound is still the only stop."
+    },
+    {
+      "symbol": "db2_rules_list_hard",
+      "signature_sha256": "06f1ee6f0028c35d06d146c7cc6e1927c7d009a5026ee73d0281b18fa27de862",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_list_hard operation lists the rules typed hard. The type is matched as that literal string, so a rule typed anything else is absent however heavy it is -- weight and hardness are separate here, which the shared ordering by weight hides. Like the two listings beside it, nothing limits the statement."
+    },
+    {
       "symbol": "db2_set_embedder_model_id",
       "signature_sha256": "d2b66b580397baf047e9df90d812a1db222a1c4a8ba00e30e90122b5051b4bf8",
       "disposition": "private-db2",
@@ -3810,6 +3858,22 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.task_edges operation lists the edges touching a task. The task may be either end, so the reply's own source and target say which way each edge points. Nothing orders the result, so which edges survive the limit is whatever the database returned first, and a task with no edges and a task that does not exist both answer with nothing."
+    },
+    {
+      "symbol": "db2_task_get_subtasks",
+      "signature_sha256": "c08f9efe84572cb1a5eda9cd660ed95192555921e27e9d42c3c35008bf308671",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_subtasks operation lists a task's immediate children, oldest first. Only one level: a grandchild is not here, so a caller walking a tree has to call again per level and cannot tell a leaf from a task that does not exist. The order is by creation, unlike organization.task_list beside it, which leads with the most recently updated."
+    },
+    {
+      "symbol": "db2_task_list",
+      "signature_sha256": "756ebe7ec7ea82d3fa59db8e962bd595fd831439b782682bdc0fb641581ef4b4",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_list operation lists tasks by state and session. Each filter is dropped when empty rather than matched against the empty string, so sending neither lists every task -- four statements behind one name. The order is by most recently updated, so a task touched by anything moves to the head whatever its state."
     },
     {
       "symbol": "db2_task_update_state",

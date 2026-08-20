@@ -329,6 +329,14 @@ typedef struct
    int (*callers_find)(const char *project, const char *callee, caller_hit_t *out, int max);
    int (*callers_find_scoped)(const char *project, const char *callee, caller_hit_t *out, int max);
    int (*callers_find_excluding_project)(const char *excluded_project, const char *callee, caller_hit_t *out, int max);
+   int (*rules_list)(rule_t *out, int max_rules);
+   int (*rules_list_by_tier)(int min_weight, rule_t *out, int max_rules);
+   int (*rules_list_hard)(rule_t *out, int max_rules);
+   int (*anti_pattern_list)(anti_pattern_t *out, int max);
+   int (*anti_pattern_list_hot)(int hit_threshold, anti_pattern_t *out, int max);
+   int (*anti_pattern_check)(const char *file_path, const char *command, anti_pattern_t *out, int max);
+   int (*task_list)(const char *state, const char *session_id, int limit, aimee_task_t *out, int max);
+   int (*task_subtasks)(int64_t parent_task, aimee_task_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

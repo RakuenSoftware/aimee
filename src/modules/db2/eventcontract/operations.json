@@ -9607,6 +9607,519 @@
       }
     },
     {
+      "family": "learning",
+      "id": 43,
+      "name": "rules_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_rules_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "every rule, heaviest first, with no limit in the statement, so the wire's row bound is what stops the read"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "rule_id",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "rule_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "polarity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "rule_title",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "rule_description",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "domain",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "rule_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "rule_updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "rule_directive_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "expires_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "learning",
+      "id": 44,
+      "name": "rules_list_by_tier",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_rules_list_by_tier"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the weight floor is inclusive, and a floor of zero lists every rule just as the unfiltered listing does"
+        },
+        "fields": [
+          {
+            "name": "min_weight",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "rule_id",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "rule_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "polarity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "rule_title",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "rule_description",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "domain",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "rule_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "rule_updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "rule_directive_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "expires_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "learning",
+      "id": 45,
+      "name": "rules_list_hard",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_rules_list_hard"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the directive type is matched as the literal 'hard', so a rule typed anything else is absent whatever its weight"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "rule_id",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "rule_weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "polarity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "rule_title",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "rule_description",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "domain",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "rule_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "rule_updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "rule_directive_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "expires_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "learning",
+      "id": 46,
+      "name": "anti_pattern_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_anti_pattern_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "every anti-pattern, most hit first and then most confident, with no limit in the statement"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "anti_pattern_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "hit_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4607182418800017408
+            },
+            {
+              "name": "pattern",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "pattern_description",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "pattern_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_ref",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "learning",
+      "id": 47,
+      "name": "anti_pattern_list_hot",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_anti_pattern_list_hot"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the hit floor is inclusive and confidence is not consulted, so a much-hit pattern nobody trusts still counts as hot"
+        },
+        "fields": [
+          {
+            "name": "hit_threshold",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "anti_pattern_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "hit_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4607182418800017408
+            },
+            {
+              "name": "pattern",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "pattern_description",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "pattern_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_ref",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "learning",
+      "id": 48,
+      "name": "anti_pattern_check",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_anti_pattern_check"
+      ],
+      "request": {
+        "policy": {
+          "writes": "every anti-pattern is read and matched in the module against the path and command joined into one normalised string"
+        },
+        "fields": [
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "command",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "anti_pattern_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "hit_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4607182418800017408
+            },
+            {
+              "name": "pattern",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "pattern_description",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "pattern_source",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "source_ref",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -10762,6 +11275,188 @@
               "type": "utf8",
               "minimum_bytes": 0,
               "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "organization",
+      "id": 27,
+      "name": "task_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_task_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "each empty filter drops its condition, so an empty pair lists every task rather than none"
+        },
+        "fields": [
+          {
+            "name": "task_state_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "task_session_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "task_row_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "parent_task_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "task_confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4607182418800017408
+            },
+            {
+              "name": "task_title",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "task_state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "task_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "task_updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "task_session_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "organization",
+      "id": 28,
+      "name": "task_subtasks",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rows this reads are relational DB2 records.",
+      "c_symbols": [
+        "db2_task_get_subtasks"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only the immediate children are listed, oldest first, and a parent that does not exist reads the same as one with no children"
+        },
+        "fields": [
+          {
+            "name": "parent_task",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "task_row_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "parent_task_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "task_confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4607182418800017408
+            },
+            {
+              "name": "task_title",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "task_state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "task_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "task_updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "task_session_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
             }
           ]
         },

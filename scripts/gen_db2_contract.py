@@ -12961,6 +12961,54 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "canonical_index_find_callers_excluding_project",
         "policy": {"reads": 200},
     },
+    "rules_list": {
+        "key": ("learning", 43),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_list",
+        "policy": {"reads": 200},
+    },
+    "rules_list_by_tier": {
+        "key": ("learning", 44),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_list_by_tier",
+        "policy": {"reads": 200},
+    },
+    "rules_list_hard": {
+        "key": ("learning", 45),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_list_hard",
+        "policy": {"reads": 200},
+    },
+    "anti_pattern_list": {
+        "key": ("learning", 46),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_anti_pattern_list",
+        "policy": {"reads": 200},
+    },
+    "anti_pattern_list_hot": {
+        "key": ("learning", 47),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_anti_pattern_list_hot",
+        "policy": {"reads": 200},
+    },
+    "anti_pattern_check": {
+        "key": ("learning", 48),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_anti_pattern_check",
+        "policy": {"writes": 200},
+    },
+    "task_list": {
+        "key": ("organization", 27),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_task_list",
+        "policy": {"reads": 200},
+    },
+    "task_subtasks": {
+        "key": ("organization", 28),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_task_get_subtasks",
+        "policy": {"reads": 200},
+    },
 }
 
 

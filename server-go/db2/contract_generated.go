@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "ce873fa36422b379ef3f7fdfa7a0339e6b2e4d1175cde5bbeeb9a2873c5777fc"
+const ContractSHA256 = "095d4a7f474fbdad6ef63fe9bd4fe4a9b1c70d921a2cf2c396f1a4eb0b499d90"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -5663,6 +5663,247 @@ func DecodeBanditDecisionCloseRequest(request []byte) (string, float64, error) {
 	return banditDecisionID, reward, nil
 }
 
+const EventRulesList = EventLearning
+const StageRulesList = FamilyLearning
+const OperationRulesList uint32 = 43
+
+
+// EncodeRulesListRequest writes the schema rules_list declares, in order.
+func EncodeRulesListRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationRulesList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRulesListRequest reads it back, checking each field against its own bound.
+func DecodeRulesListRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventRulesListByTier = EventLearning
+const StageRulesListByTier = FamilyLearning
+const OperationRulesListByTier uint32 = 44
+const RulesListByTierMinWeightMin uint32 = 0
+const RulesListByTierMinWeightMax uint32 = 4294967295
+
+// EncodeRulesListByTierRequest writes the schema rules_list_by_tier declares, in order.
+func EncodeRulesListByTierRequest(minWeight uint32) ([]byte, error) {
+	if minWeight < RulesListByTierMinWeightMin || minWeight > RulesListByTierMinWeightMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var minWeightBytes [4]byte
+	binary.LittleEndian.PutUint32(minWeightBytes[:], minWeight)
+	payload = append(payload, minWeightBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRulesListByTier, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRulesListByTierRequest reads it back, checking each field against its own bound.
+func DecodeRulesListByTierRequest(request []byte) (uint32, error) {
+	var minWeight uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesListByTier || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	minWeight = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if minWeight < RulesListByTierMinWeightMin || minWeight > RulesListByTierMinWeightMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return minWeight, nil
+}
+
+const EventRulesListHard = EventLearning
+const StageRulesListHard = FamilyLearning
+const OperationRulesListHard uint32 = 45
+
+
+// EncodeRulesListHardRequest writes the schema rules_list_hard declares, in order.
+func EncodeRulesListHardRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationRulesListHard, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRulesListHardRequest reads it back, checking each field against its own bound.
+func DecodeRulesListHardRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesListHard || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventAntiPatternList = EventLearning
+const StageAntiPatternList = FamilyLearning
+const OperationAntiPatternList uint32 = 46
+
+
+// EncodeAntiPatternListRequest writes the schema anti_pattern_list declares, in order.
+func EncodeAntiPatternListRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationAntiPatternList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAntiPatternListRequest reads it back, checking each field against its own bound.
+func DecodeAntiPatternListRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventAntiPatternListHot = EventLearning
+const StageAntiPatternListHot = FamilyLearning
+const OperationAntiPatternListHot uint32 = 47
+const AntiPatternListHotHitThresholdMin uint32 = 0
+const AntiPatternListHotHitThresholdMax uint32 = 4294967295
+
+// EncodeAntiPatternListHotRequest writes the schema anti_pattern_list_hot declares, in order.
+func EncodeAntiPatternListHotRequest(hitThreshold uint32) ([]byte, error) {
+	if hitThreshold < AntiPatternListHotHitThresholdMin || hitThreshold > AntiPatternListHotHitThresholdMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var hitThresholdBytes [4]byte
+	binary.LittleEndian.PutUint32(hitThresholdBytes[:], hitThreshold)
+	payload = append(payload, hitThresholdBytes[:]...)
+	header, err := EncodeRequestHeader(OperationAntiPatternListHot, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAntiPatternListHotRequest reads it back, checking each field against its own bound.
+func DecodeAntiPatternListHotRequest(request []byte) (uint32, error) {
+	var hitThreshold uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternListHot || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	hitThreshold = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if hitThreshold < AntiPatternListHotHitThresholdMin || hitThreshold > AntiPatternListHotHitThresholdMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return hitThreshold, nil
+}
+
+const EventAntiPatternCheck = EventLearning
+const StageAntiPatternCheck = FamilyLearning
+const OperationAntiPatternCheck uint32 = 48
+const AntiPatternCheckFilePathMin = 0
+const AntiPatternCheckFilePathMax = 1023
+const AntiPatternCheckCommandMin = 0
+const AntiPatternCheckCommandMax = 1023
+
+// EncodeAntiPatternCheckRequest writes the schema anti_pattern_check declares, in order.
+func EncodeAntiPatternCheckRequest(filePath string, command string) ([]byte, error) {
+	if len(filePath) < AntiPatternCheckFilePathMin || len(filePath) > AntiPatternCheckFilePathMax || hasNUL(filePath) ||
+		len(command) < AntiPatternCheckCommandMin || len(command) > AntiPatternCheckCommandMax || hasNUL(command) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, filePath, AntiPatternCheckFilePathMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, command, AntiPatternCheckCommandMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAntiPatternCheck, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAntiPatternCheckRequest reads it back, checking each field against its own bound.
+func DecodeAntiPatternCheckRequest(request []byte) (string, string, error) {
+	var filePath string
+	var command string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternCheck || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if filePath, err = takeRowText(payload, &cursor, AntiPatternCheckFilePathMax); err != nil ||
+		len(filePath) < AntiPatternCheckFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if command, err = takeRowText(payload, &cursor, AntiPatternCheckCommandMax); err != nil ||
+		len(command) < AntiPatternCheckCommandMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return filePath, command, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -6912,6 +7153,122 @@ func DecodeTaskEdgesRequest(request []byte) (uint64, uint32, error) {
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return taskID, limit, nil
+}
+
+const EventTaskList = EventOrganization
+const StageTaskList = FamilyOrganization
+const OperationTaskList uint32 = 27
+const TaskListTaskStateFilterMin = 0
+const TaskListTaskStateFilterMax = 15
+const TaskListTaskSessionFilterMin = 0
+const TaskListTaskSessionFilterMax = 127
+const TaskListLimitMin uint32 = 0
+const TaskListLimitMax uint32 = 256
+
+// EncodeTaskListRequest writes the schema task_list declares, in order.
+func EncodeTaskListRequest(taskStateFilter string, taskSessionFilter string, limit uint32) ([]byte, error) {
+	if len(taskStateFilter) < TaskListTaskStateFilterMin || len(taskStateFilter) > TaskListTaskStateFilterMax || hasNUL(taskStateFilter) ||
+		len(taskSessionFilter) < TaskListTaskSessionFilterMin || len(taskSessionFilter) > TaskListTaskSessionFilterMax || hasNUL(taskSessionFilter) ||
+		limit < TaskListLimitMin || limit > TaskListLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, taskStateFilter, TaskListTaskStateFilterMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, taskSessionFilter, TaskListTaskSessionFilterMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationTaskList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTaskListRequest reads it back, checking each field against its own bound.
+func DecodeTaskListRequest(request []byte) (string, string, uint32, error) {
+	var taskStateFilter string
+	var taskSessionFilter string
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if taskStateFilter, err = takeRowText(payload, &cursor, TaskListTaskStateFilterMax); err != nil ||
+		len(taskStateFilter) < TaskListTaskStateFilterMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if taskSessionFilter, err = takeRowText(payload, &cursor, TaskListTaskSessionFilterMax); err != nil ||
+		len(taskSessionFilter) < TaskListTaskSessionFilterMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < TaskListLimitMin || limit > TaskListLimitMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return taskStateFilter, taskSessionFilter, limit, nil
+}
+
+const EventTaskSubtasks = EventOrganization
+const StageTaskSubtasks = FamilyOrganization
+const OperationTaskSubtasks uint32 = 28
+const TaskSubtasksParentTaskMin uint64 = 0
+const TaskSubtasksParentTaskMax uint64 = 9223372036854775807
+
+// EncodeTaskSubtasksRequest writes the schema task_subtasks declares, in order.
+func EncodeTaskSubtasksRequest(parentTask uint64) ([]byte, error) {
+	if parentTask < TaskSubtasksParentTaskMin || parentTask > TaskSubtasksParentTaskMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var parentTaskBytes [8]byte
+	binary.LittleEndian.PutUint64(parentTaskBytes[:], parentTask)
+	payload = append(payload, parentTaskBytes[:]...)
+	header, err := EncodeRequestHeader(OperationTaskSubtasks, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTaskSubtasksRequest reads it back, checking each field against its own bound.
+func DecodeTaskSubtasksRequest(request []byte) (uint64, error) {
+	var parentTask uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskSubtasks || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	parentTask = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if parentTask < TaskSubtasksParentTaskMin || parentTask > TaskSubtasksParentTaskMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return parentTask, nil
 }
 
 const EventEnrollmentActive = EventCustody
