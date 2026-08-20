@@ -200,6 +200,15 @@ extern "C"
    cJSON *db2_kb_service_memory_supersede_json(int64_t old_id, const char *new_content,
                                                double confidence, const char *session_id);
    cJSON *db2_kb_service_memory_fact_history_json(const char *key, int max);
+   /* Typed-fact §4 correction surface. `target` NULL/empty retracts every current
+    * value of (source, relation); `authority` is "user" or "model" (anything else
+    * reads as model). Reports the number of edges affected, so a request that
+    * matched nothing is distinguishable from one that was refused. */
+   cJSON *db2_kb_service_facts_retract_json(const char *source, const char *relation,
+                                            const char *target, const char *authority);
+   /* §3 entity merge/unmerge. merge returns the audit id needed to reverse it. */
+   cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id);
+   cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id);
    cJSON *db2_kb_service_memory_check_drift_json(int64_t task_id, const char *file_path,
                                                  const char *command);
    cJSON *db2_kb_service_memory_list_session_scope_priority_json(int max);

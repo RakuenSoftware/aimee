@@ -1,5 +1,9 @@
 # Proposal: the code graph should carry the architecture, not just the symbols
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived 2026-08-04 as partially implemented. Project lifecycle, graph diff,
   provenance/confidence, task-conditioned context, and language-aware blast radius landed; route and
   storage nodes plus repository orientation remain in

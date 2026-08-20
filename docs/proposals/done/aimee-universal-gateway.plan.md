@@ -1,5 +1,9 @@
 # Implementation plan — Aimee universal gateway
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** draft plan; tracks `aimee-universal-gateway.md` (roundtable-signed). Each
   packet is its own build → live-test → unit-tests → lint → roundtable → PR →
   merge cycle.

@@ -1,5 +1,9 @@
 # P7-reseal-d2b in-process TPM2/Postgres reconciler
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and validated on PostgreSQL 17 plus swtpm (CT260), with
   default and ASAN/UBSAN builds; production-uninvoked until D3 operator
   enablement.

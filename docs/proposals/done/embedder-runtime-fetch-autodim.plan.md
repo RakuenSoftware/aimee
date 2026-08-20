@@ -1,5 +1,9 @@
 # Implementation plan — embedder auto-dimension §2a: recorded-dim precedence
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for [embedder-runtime-fetch-autodim.md](embedder-runtime-fetch-autodim.md),
 **scoped to §2a only**: make the recorded `schema_embedding_dim` an actual
 *source* of the runtime embedding dimension, under the proposal's precedence

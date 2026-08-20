@@ -1,5 +1,9 @@
 # P3b implementation plan — org spend reporting surface (P3 §2-3)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P3b of P3 (cost attribution). Branch off `testing` (P1, P3a, P10 s1/s2/s3b, P2a
 merged). P3a shipped the schema (`org_token_audit`, `org_spend_rollup`, versioned
 `org_model_pricing`) + the team-lead/admin RLS read policies (`is_team_lead`,

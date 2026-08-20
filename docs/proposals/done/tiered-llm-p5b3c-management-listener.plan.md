@@ -1,5 +1,9 @@
 # P5-B3c distinct management listener and two-node closeout
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — implementation and adversarial branch review converged; production CT260→CT262 gate passed.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.plan.md`, P5-B.
 - **Depends on:** P5-B3a health exchange and P5-B3b production wiring.

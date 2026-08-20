@@ -1,5 +1,9 @@
 # P5-D2b0 active-config snapshot reader barrier
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** terminal done; implemented and validated.
 - **Parent:** `tiered-llm-p5d2b-safe-config-projection.plan.md`.
 - **Purpose:** remove a pre-existing C data race before a management endpoint begins copying the

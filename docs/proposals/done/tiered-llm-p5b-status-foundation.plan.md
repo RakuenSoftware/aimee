@@ -1,5 +1,9 @@
 # P5-B management-status foundation
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and fail-disabled pending the P5-B composition slice.
 - **Depends on:** P5-A authoritative registry and role-separated PKI.
 

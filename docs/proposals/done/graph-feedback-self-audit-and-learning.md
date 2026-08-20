@@ -1,5 +1,9 @@
 # Proposal: Graph feedback and coverage expansion — self-audit, snapshot diffing, retrieval that learns, and broader language coverage
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **DONE — the full feedback-loop core (§1–§3), the cache-correctness
   hardening (§5), and all six §6a Tier-1 language grammars shipped to `testing`;
   proposal filed.** Delivered slice-by-slice, each PR build-verified, `make lint`-clean,

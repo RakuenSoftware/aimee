@@ -1,5 +1,9 @@
 # Proposal: auditable correctness for the knowledge base
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE (2026-06-16) — implemented across ~24 PRs. **Landed:** P1
   (turn_id + `X-Aimee-Retrieval-Event` + single-writer `retrieval_event` +
   `aimee audit trace`); P2 (versioned provenance — `/v1/audit/provenance`,

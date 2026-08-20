@@ -1,5 +1,9 @@
 # Proposal: learning-to-rank the retrieval stack from real interactions
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — shipped LTR substrate archived 2026-08-04; activation/IPW residual extracted.
 
 > **Archived after partial delivery.** Retrieval events/outcomes, fused feature persistence, the

@@ -483,6 +483,20 @@ int config_memory_lifecycle_hide_archived(void)
    return v;
 }
 
+int config_memory_typed_facts_speculative_ttl_days(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, memory_typed_facts_speculative_ttl_days), sizeof(v), &v);
+   return v;
+}
+
+int config_memory_typed_facts_promote_threshold(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, memory_typed_facts_promote_threshold), sizeof(v), &v);
+   return v;
+}
+
 int config_memory_lifecycle_ttl_date_days(void)
 {
    int v = 0;

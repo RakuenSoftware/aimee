@@ -1,5 +1,9 @@
 # Proposal: govern and capture the module event bus as one uniform seam
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived 2026-08-04 as partially implemented. Capture/replay and multiple audit,
   guardrail, memory, tool, vault, and sandbox sinks landed; structural all-event capture,
   synchronous action authorization, and attestation integration continue in

@@ -1,5 +1,9 @@
 # Aimee IR as the sole path — finish the response half, retire raw-passthrough, and make modules pluggable
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
 > [`ir-sole-path-residual.md`](../pending/ir-sole-path-residual.md).

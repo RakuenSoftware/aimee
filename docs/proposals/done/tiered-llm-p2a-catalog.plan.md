@@ -1,5 +1,9 @@
 # P2a implementation plan — org model catalog + entitlement (P2 §1, catalog-only)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P2a of P2 (kb egress authority). Branch off `testing` (P1, P3a, P10 s1/s2/s3b
 merged). **Catalog-only — holds NO keys, no egress, no vault.** P7 §0: "No org keys
 exist on either tier at this point"; P2a introduces the org model *offering* + entitlement

@@ -1,5 +1,9 @@
 # Proposal: Agent roundtable residual follow-up
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Status refreshed:** 2026-06-13
 - **Split:** shipped engine, participant-routing, temperature, config, CLI route, and `/v1/delegate/*` work moved to `docs/proposals/done/agent-roundtable-collaborative-drafting.md`.

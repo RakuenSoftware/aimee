@@ -1,5 +1,9 @@
 # C to Go module migration: what is left, and why
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — completed measurement record archived 2026-08-15; not an implementation
   proposal.
 - **Recorded:** 2026-08-06.

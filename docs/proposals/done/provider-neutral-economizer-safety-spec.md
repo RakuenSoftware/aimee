@@ -1,5 +1,9 @@
 # Provider-specific, proof-gated economizer safety specification
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived complete (2026-07-26).** The scoped implementation and safety gates are
 > present on `testing` with dedicated tests.
 

@@ -1,5 +1,9 @@
 # Proposal: Roundtable reliability — get the review gate to 100%
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — diagnosis + first fix (claude-CLI panel exclusion) shipped; follow-ups listed
 - **Author:** JBailes (investigation 2026-06-15)
 - **Motivation:** the roundtable is the project's quality gate, but in practice it

@@ -1,5 +1,9 @@
 # Proposal: audit feature liveness and remove the background skill curator
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — curator removal delivered and archived 2026-08-04; residual audit extracted.
 
 > **Archived after partial delivery.** The background curator's complete touch set is removed again,

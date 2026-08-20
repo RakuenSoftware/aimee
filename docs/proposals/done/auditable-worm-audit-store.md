@@ -1,5 +1,9 @@
 # Proposal: Per-service auditable, verifiable WORM metrics-and-logs store
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 
 ## Thesis

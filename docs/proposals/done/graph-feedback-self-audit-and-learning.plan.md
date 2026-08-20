@@ -1,5 +1,9 @@
 # Implementation plan: Graph feedback and coverage expansion
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `graph-feedback-self-audit-and-learning.md`. Slice-by-slice build
 order, each slice an independently-shippable PR that is roundtable-reviewed
 before merge. Base branch: `origin/testing`. Worktree: `../aimee-graphfb`.

@@ -1,5 +1,9 @@
 # P6c-stream plan — Bedrock Converse stream-event → IR delta parser (P6 §2)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice of P6 (Bedrock). Branch off `testing`. Completes the Bedrock Converse IR mapping: P6c-ir
 did the request + NON-streaming response; this does the STREAMING response — mapping each
 Converse `ConverseStream` event to `aimee_delta_t` events, the direct analogue of the existing

@@ -1,5 +1,9 @@
 # P4a implementation plan — budget/reservation/rate core (P4 §1-4, minus egress wiring)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P4a of P4 (budgets + rate limits). Branch off `testing` (P1, P3a, P2a, P3b, P10
 s1/s2/s3b merged). P4 enforces caps **at kb egress** — but the egress point is P2b
 (deferred). P4a builds the **enforceable core** that P2b will call: the budget/reservation/

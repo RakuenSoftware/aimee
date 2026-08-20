@@ -1,5 +1,9 @@
 # P10/P7 slice 2 implementation plan — kb vault foundation (Postgres store)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice 2 of P10+P7. Branch off `testing` (P1, P3a, P10-slice-1 merged). Goal: give
 aimee-kb a **working credential vault** — the vault core linked into the kb binary, a
 Postgres storage backend, and kb binding it at startup — so later slices (CA-key-in-

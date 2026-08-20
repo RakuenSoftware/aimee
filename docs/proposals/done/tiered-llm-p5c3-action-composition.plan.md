@@ -1,5 +1,9 @@
 # P5-C3 management-action composition
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** complete; plan review converged in jobs 8803 and 8805–8808, implementation review
   converged after jobs 8816 and 8819–8821.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§2–3.

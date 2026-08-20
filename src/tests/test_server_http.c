@@ -2085,16 +2085,15 @@ int main(void)
 
       /* Later write batches: session + rules/collab-rules + skill mutations, all
        * UDS-only at the default remote_writes=off. */
-      const char *write_paths[] = {"/v1/wm/set",
-                                   "/v1/attempts/record",
-                                   "/v1/rules/delete",
-                                   "/v1/collab_rules/approve",
-                                   "/v1/collab_rules/reject",
-                                   "/v1/collab_rules/retire",
-                                   "/v1/skills/create",
-                                   "/v1/skills/edit",
-                                   "/v1/skills/archive",
-                                   "/v1/skills/pin"};
+      const char *write_paths[] = {
+          "/v1/wm/set", "/v1/attempts/record", "/v1/rules/delete", "/v1/collab_rules/approve",
+          "/v1/collab_rules/reject", "/v1/collab_rules/retire", "/v1/skills/create",
+          "/v1/skills/edit", "/v1/skills/archive", "/v1/skills/pin",
+          /* Typed-fact correction surface (§3 / §4). These are
+           * data-plane writes; listing them here is what puts them
+           * behind the write-tier gate rather than leaving them
+           * reachable by anyone holding the shared bearer. */
+          "/v1/facts/retract", "/v1/entities/merge", "/v1/entities/unmerge"};
       for (size_t i = 0; i < sizeof(write_paths) / sizeof(write_paths[0]); i++)
       {
          assert(server_http_route_allowed(0, NULL, "POST", write_paths[i], 0) == 1); /* UDS ok */
@@ -2109,6 +2108,15 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/skills/create") == CAP_TOOL_WRITE);
       /* Skill reads remain TCP-reachable (only the mutations are write-gated). */
       assert(server_http_route_allowed(1, NULL, "GET", "/v1/skills", 0) == 1);
+
+      /* The typed-fact correction surface exists and carries the write capability.
+       * Before this it did not exist at all: the layer could learn a fact and had
+       * no route by which anyone could say it was wrong, and a recorded entity
+       * merge was reversible only from a test. A non-zero cap here is also what
+       * proves the route resolved — an unrouted path reports 0. */
+      assert(server_http_route_caps("POST", "/v1/facts/retract") == CAP_MEMORY_WRITE);
+      assert(server_http_route_caps("POST", "/v1/entities/merge") == CAP_MEMORY_WRITE);
+      assert(server_http_route_caps("POST", "/v1/entities/unmerge") == CAP_MEMORY_WRITE);
    }
 
    /* --- aimee.api.remote_writes lifts the TCP write deny under capability control --- */

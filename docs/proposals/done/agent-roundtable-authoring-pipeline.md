@@ -1,5 +1,9 @@
 # Proposal: Agent roundtable authoring pipeline (idea → reviewed proposal → implementation → reviewed PR)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — implemented and merged to `testing` across 17 commits
   (P0–P4 + 11 implementation-review rounds + chunked-review + first-class MCP;
   PR #193). Full unit suite green (`-Werror`, build-integrity clean); 6 pipeline

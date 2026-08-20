@@ -1,5 +1,9 @@
 # Proposal: User-selectable retrieval fusion mode + a benchmark users run to choose it
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
 > [`user-selectable-fusion-surface-residual.md`](../pending/user-selectable-fusion-surface-residual.md).

@@ -1807,6 +1807,12 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/wm/set", NULL, RM_EXACT, "wm.set", 0, rh_dispatch_op},
     {"POST", "/v1/attempts/record", NULL, RM_EXACT, "attempt.record", 0, rh_dispatch_op},
     {"POST", "/v1/rules/delete", NULL, RM_EXACT, "rules.delete", 0, rh_dispatch_op},
+    /* Typed-fact correction surface (§3 / §4). Data-plane writes, so their ops are
+     * listed in g_v1_write_ops below — without that a caller holding only the
+     * shared bearer would reach them with no write grant at all. */
+    {"POST", "/v1/facts/retract", NULL, RM_EXACT, "facts.retract", 0, rh_dispatch_op},
+    {"POST", "/v1/entities/merge", NULL, RM_EXACT, "entities.merge", 0, rh_dispatch_op},
+    {"POST", "/v1/entities/unmerge", NULL, RM_EXACT, "entities.unmerge", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/approve", NULL, RM_EXACT, "collab_rules.approve", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/reject", NULL, RM_EXACT, "collab_rules.reject", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/retire", NULL, RM_EXACT, "collab_rules.retire", 0, rh_dispatch_op},
@@ -2435,6 +2441,9 @@ static const char *const g_v1_write_ops[] = {"memory.store",
                                              "wm.set",
                                              "attempt.record",
                                              "rules.delete",
+                                             "facts.retract",
+                                             "entities.merge",
+                                             "entities.unmerge",
                                              "collab_rules.approve",
                                              "collab_rules.reject",
                                              "collab_rules.retire",

@@ -1,5 +1,9 @@
 # P5-D2a management-read trust core and bounded agents projection
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** completed 2026-07-23; roundtable-converged and validated on PostgreSQL 17 plus the
   CT260-to-CT262 production mTLS topology.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§2–4.

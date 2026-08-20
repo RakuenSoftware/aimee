@@ -1,5 +1,9 @@
 # Proposal: Roundtable panel composition — diverse personas, wide fan-out
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — implemented 2026-06-15 (per-participant review personas, new
   `reviewer-constructive` built-in, `ensemble.reference_personas` config; engine
   wired in delegate_ensemble.c with unit tests; lint + unit suites green). The

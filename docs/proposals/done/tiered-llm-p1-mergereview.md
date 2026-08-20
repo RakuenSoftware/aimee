@@ -1,5 +1,9 @@
 # P1 — merge-readiness review (tiered-llm-p1-tenancy-identity)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived review artifact for the completed P1 delivery.
 
 Branch `worktree-claude+tiered-llm-p1-tenancy` off `testing`: 25 commits, 57 files,
