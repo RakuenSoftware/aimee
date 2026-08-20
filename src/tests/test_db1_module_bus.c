@@ -2198,6 +2198,147 @@ static void test_the_daemons_work_item_operations_cross_the_bus(void)
    printf("  PASS: the daemon's work-item operations cross the bus\n");
 }
 
+/* The engine's single "commit what this step decided" call, and the two bounded
+   list reads beside it. All three have live callers in the daemon -- the engine
+   at wfe_engine.c, the CLI-facing list helpers in wfe_store_lists.c -- and none
+   of them had ever crossed the bus in a test, from either side.
+
+   record_outcome is the one that matters most. It is a STRUCT in and a
+   transaction inside: several state writes plus their audit lines, all or
+   nothing. A boundary that dropped or reordered one field would produce a work
+   item in a state no single write produces -- a cost recorded without the
+   outcome that justified it, or a stage advanced without the cost -- which is
+   the exact failure its own header says it exists to prevent. */
+static void test_the_engines_step_outcome_crosses_as_one_piece(void)
+{
+   db1_work_item_t item;
+
+   must(db1_work_item_create("oc-1", "repo/oc", "p/oc1", "build", "1", "plan", "autonomous") == 0,
+        "a run to decide about");
+
+   /* ADVANCE: the stage moves, the cost lands, and the audit line goes with it. */
+   db1_work_item_outcome_t adv;
+   memset(&adv, 0, sizeof adv);
+   snprintf(adv.work_item_id, sizeof adv.work_item_id, "oc-1");
+   snprintf(adv.node_id, sizeof adv.node_id, "plan");
+   adv.disposition = DB1_WORK_ITEM_OUTCOME_ADVANCE;
+   snprintf(adv.next_stage, sizeof adv.next_stage, "build");
+   snprintf(adv.pr_ref, sizeof adv.pr_ref, "org/repo#7");
+   adv.cost_usd = 1.25;
+   snprintf(adv.event_kind, sizeof adv.event_kind, "advance");
+   snprintf(adv.event_detail, sizeof adv.event_detail, "plan finished, moving on");
+   snprintf(adv.event_hash, sizeof adv.event_hash, "hash-advance");
+   must(db1_work_item_record_outcome(&adv) == 0, "an advance is recorded");
+   must(db1_work_item_get("oc-1", &item) == 1, "read it back");
+   must(strcmp(item.current_stage, "build") == 0, "the stage advanced");
+   must(strcmp(item.pr_ref, "org/repo#7") == 0, "the pr ref crossed with it");
+   must(item.cum_cost_usd > 1.24 && item.cum_cost_usd < 1.26,
+        "and the cost was added, not rounded away by the wire");
+
+   /* The events the outcome wrote come back through the bounded list read --
+      the second uncovered operation, checked against the write that produced
+      the rows rather than against rows invented for the test. */
+   db1_lifecycle_event_t *events = NULL;
+   int n = db1_lifecycle_event_list_bounded("oc-1", &events, 16);
+   must(n >= 1, "the outcome's audit line is listed");
+   int saw_advance = 0;
+   for (int i = 0; i < n; i++)
+      if (strcmp(events[i].kind, "advance") == 0 &&
+          strcmp(events[i].detail, "plan finished, moving on") == 0 && events[i].cost_usd > 1.24 &&
+          events[i].cost_usd < 1.26)
+         saw_advance = 1;
+   must(saw_advance == 1, "with its kind, its detail and its cost intact");
+   free(events);
+   events = NULL;
+   must(db1_lifecycle_event_list_bounded("oc-no-such-run", &events, 16) == 0,
+        "a run with no events lists none rather than failing");
+   free(events);
+   events = NULL;
+
+   /* ADVANCE carrying a park: the step advanced AND crossed its cap, so the run
+      moves and then parks. Both halves are one outcome; a boundary that applied
+      only the first would leave a run running past its budget. */
+   db1_work_item_outcome_t capped;
+   memset(&capped, 0, sizeof capped);
+   snprintf(capped.work_item_id, sizeof capped.work_item_id, "oc-1");
+   snprintf(capped.node_id, sizeof capped.node_id, "build");
+   capped.disposition = DB1_WORK_ITEM_OUTCOME_ADVANCE;
+   snprintf(capped.next_stage, sizeof capped.next_stage, "review");
+   snprintf(capped.event_kind, sizeof capped.event_kind, "advance");
+   snprintf(capped.park_reason, sizeof capped.park_reason, "budget_exceeded");
+   must(db1_work_item_record_outcome(&capped) == 0, "an advance that crossed its cap");
+   must(db1_work_item_get("oc-1", &item) == 1, "read");
+   must(strcmp(item.current_stage, "review") == 0, "advanced");
+   must(strcmp(item.pause_reason, "budget_exceeded") == 0, "and parked in the same outcome");
+
+   /* PAUSE. */
+   must(db1_work_item_clear_pause("oc-1") == 0, "clear the park first");
+   db1_work_item_outcome_t pause;
+   memset(&pause, 0, sizeof pause);
+   snprintf(pause.work_item_id, sizeof pause.work_item_id, "oc-1");
+   snprintf(pause.node_id, sizeof pause.node_id, "review");
+   pause.disposition = DB1_WORK_ITEM_OUTCOME_PAUSE;
+   snprintf(pause.pause_reason, sizeof pause.pause_reason, "pending_human");
+   snprintf(pause.pause_stage, sizeof pause.pause_stage, "review");
+   snprintf(pause.event_kind, sizeof pause.event_kind, "pause");
+   must(db1_work_item_record_outcome(&pause) == 0, "a pause is recorded");
+   must(db1_work_item_get("oc-1", &item) == 1, "read");
+   must(strcmp(item.pause_reason, "pending_human") == 0, "the run is parked for a person");
+
+   /* TERMINAL, with children to abandon: the parent ends and its slices end
+      with it, in the one transaction. */
+   must(db1_work_item_create("oc-kid", "repo/oc", "p/ockid", "slice", "1", "work", "autonomous") ==
+            0,
+        "a child slice");
+   must(db1_work_item_set_parent("oc-kid", "oc-1") == 0, "linked to the parent");
+   db1_work_item_outcome_t term;
+   memset(&term, 0, sizeof term);
+   snprintf(term.work_item_id, sizeof term.work_item_id, "oc-1");
+   snprintf(term.node_id, sizeof term.node_id, "review");
+   term.disposition = DB1_WORK_ITEM_OUTCOME_TERMINAL;
+   snprintf(term.state, sizeof term.state, "accepted");
+   term.abandon_children = 1;
+   snprintf(term.event_kind, sizeof term.event_kind, "accept");
+   must(db1_work_item_record_outcome(&term) == 0, "a terminal outcome is recorded");
+   must(db1_work_item_get("oc-1", &item) == 1, "read");
+   must(strcmp(item.state, "accepted") == 0, "the run is accepted");
+   must(db1_work_item_get("oc-kid", &item) == 1 && strcmp(item.state, "abandoned") == 0,
+        "and the child went terminal in the same outcome");
+
+   /* A disposition the store does not define is refused rather than guessed at.
+      This is the fail-closed edge: the enum crosses the wire as an integer, so
+      a value outside it must not be treated as one of the three. */
+   db1_work_item_outcome_t bogus;
+   memset(&bogus, 0, sizeof bogus);
+   snprintf(bogus.work_item_id, sizeof bogus.work_item_id, "oc-1");
+   bogus.disposition = 99;
+   must(db1_work_item_record_outcome(&bogus) == -1, "an unknown disposition is refused");
+   db1_work_item_outcome_t nameless;
+   memset(&nameless, 0, sizeof nameless);
+   nameless.disposition = DB1_WORK_ITEM_OUTCOME_PAUSE;
+   must(db1_work_item_record_outcome(&nameless) == -1, "and an outcome with no run is refused");
+
+   /* The third uncovered operation: the bounded work-item list. The bound is
+      the point -- it is what stops a store with thousands of runs answering
+      with all of them -- so it is checked, not just the shape. */
+   db1_work_item_t *rows = NULL;
+   int rc = db1_work_item_list_bounded(&rows, 512);
+   must(rc >= 2, "the list read answers with the runs that exist");
+   int saw_oc1 = 0;
+   for (int i = 0; i < rc; i++)
+      if (strcmp(rows[i].work_item_id, "oc-1") == 0)
+         saw_oc1 =
+             strcmp(rows[i].state, "accepted") == 0 && strcmp(rows[i].current_stage, "review") == 0;
+   must(saw_oc1 == 1, "and each row carries the state and stage the writes left");
+   free(rows);
+   rows = NULL;
+   int bounded = db1_work_item_list_bounded(&rows, 1);
+   must(bounded == 1, "the caller's bound is honoured, not treated as a hint");
+   free(rows);
+
+   printf("  PASS: the engine's step outcome crosses as one piece\n");
+}
+
 static void test_a_first_user_claim_says_how_it_went(void)
 {
    /* The claim validates its inputs: a webuser principal, and a bearer that is
@@ -2534,6 +2675,7 @@ int main(int argc, char **argv)
    test_convergence_distinguishes_no_progress_from_too_many_rounds();
    test_the_whole_work_item_row_survives_the_wire();
    test_the_daemons_work_item_operations_cross_the_bus();
+   test_the_engines_step_outcome_crosses_as_one_piece();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();
