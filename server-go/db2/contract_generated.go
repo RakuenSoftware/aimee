@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "f5a59229eb728481fb321c4743e1ca6005562f874d6aa2763cfe3ba1638c0031"
+const ContractSHA256 = "151c2eef9c7870fa017cb1fca616d89ab09956369db2a5abb7542b20f6776583"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1929,6 +1929,79 @@ func DecodeL2FactDecisionPairsRequest(request []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return maxPairs, nil
+}
+
+const EventMemoryLinkCreate = EventMemory
+const StageMemoryLinkCreate = FamilyMemory
+const OperationMemoryLinkCreate uint32 = 90
+const MemoryLinkCreateLinkSourceIDMin uint64 = 1
+const MemoryLinkCreateLinkSourceIDMax uint64 = 9223372036854775807
+const MemoryLinkCreateLinkTargetIDMin uint64 = 1
+const MemoryLinkCreateLinkTargetIDMax uint64 = 9223372036854775807
+const MemoryLinkCreateLinkRelationMin = 1
+const MemoryLinkCreateLinkRelationMax = 63
+
+// EncodeMemoryLinkCreateRequest writes the schema memory_link_create declares, in order.
+func EncodeMemoryLinkCreateRequest(linkSourceID uint64, linkTargetID uint64, linkRelation string) ([]byte, error) {
+	if linkSourceID < MemoryLinkCreateLinkSourceIDMin || linkSourceID > MemoryLinkCreateLinkSourceIDMax ||
+		linkTargetID < MemoryLinkCreateLinkTargetIDMin || linkTargetID > MemoryLinkCreateLinkTargetIDMax ||
+		len(linkRelation) < MemoryLinkCreateLinkRelationMin || len(linkRelation) > MemoryLinkCreateLinkRelationMax || hasNUL(linkRelation) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var linkSourceIDBytes [8]byte
+	binary.LittleEndian.PutUint64(linkSourceIDBytes[:], linkSourceID)
+	payload = append(payload, linkSourceIDBytes[:]...)
+	var linkTargetIDBytes [8]byte
+	binary.LittleEndian.PutUint64(linkTargetIDBytes[:], linkTargetID)
+	payload = append(payload, linkTargetIDBytes[:]...)
+	if err := putRowText(&payload, linkRelation, MemoryLinkCreateLinkRelationMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryLinkCreate, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryLinkCreateRequest reads it back, checking each field against its own bound.
+func DecodeMemoryLinkCreateRequest(request []byte) (uint64, uint64, string, error) {
+	var linkSourceID uint64
+	var linkTargetID uint64
+	var linkRelation string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryLinkCreate || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	linkSourceID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if linkSourceID < MemoryLinkCreateLinkSourceIDMin || linkSourceID > MemoryLinkCreateLinkSourceIDMax {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	linkTargetID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if linkTargetID < MemoryLinkCreateLinkTargetIDMin || linkTargetID > MemoryLinkCreateLinkTargetIDMax {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if linkRelation, err = takeRowText(payload, &cursor, MemoryLinkCreateLinkRelationMax); err != nil ||
+		len(linkRelation) < MemoryLinkCreateLinkRelationMin {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	return linkSourceID, linkTargetID, linkRelation, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -7707,6 +7780,79 @@ func DecodeTaskSubtasksRequest(request []byte) (uint64, error) {
 	return parentTask, nil
 }
 
+const EventTaskAddEdge = EventOrganization
+const StageTaskAddEdge = FamilyOrganization
+const OperationTaskAddEdge uint32 = 29
+const TaskAddEdgeEdgeSourceTaskMin uint64 = 1
+const TaskAddEdgeEdgeSourceTaskMax uint64 = 9223372036854775807
+const TaskAddEdgeEdgeTargetTaskMin uint64 = 1
+const TaskAddEdgeEdgeTargetTaskMax uint64 = 9223372036854775807
+const TaskAddEdgeEdgeRelationMin = 1
+const TaskAddEdgeEdgeRelationMax = 31
+
+// EncodeTaskAddEdgeRequest writes the schema task_add_edge declares, in order.
+func EncodeTaskAddEdgeRequest(edgeSourceTask uint64, edgeTargetTask uint64, edgeRelation string) ([]byte, error) {
+	if edgeSourceTask < TaskAddEdgeEdgeSourceTaskMin || edgeSourceTask > TaskAddEdgeEdgeSourceTaskMax ||
+		edgeTargetTask < TaskAddEdgeEdgeTargetTaskMin || edgeTargetTask > TaskAddEdgeEdgeTargetTaskMax ||
+		len(edgeRelation) < TaskAddEdgeEdgeRelationMin || len(edgeRelation) > TaskAddEdgeEdgeRelationMax || hasNUL(edgeRelation) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var edgeSourceTaskBytes [8]byte
+	binary.LittleEndian.PutUint64(edgeSourceTaskBytes[:], edgeSourceTask)
+	payload = append(payload, edgeSourceTaskBytes[:]...)
+	var edgeTargetTaskBytes [8]byte
+	binary.LittleEndian.PutUint64(edgeTargetTaskBytes[:], edgeTargetTask)
+	payload = append(payload, edgeTargetTaskBytes[:]...)
+	if err := putRowText(&payload, edgeRelation, TaskAddEdgeEdgeRelationMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationTaskAddEdge, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTaskAddEdgeRequest reads it back, checking each field against its own bound.
+func DecodeTaskAddEdgeRequest(request []byte) (uint64, uint64, string, error) {
+	var edgeSourceTask uint64
+	var edgeTargetTask uint64
+	var edgeRelation string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskAddEdge || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	edgeSourceTask = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if edgeSourceTask < TaskAddEdgeEdgeSourceTaskMin || edgeSourceTask > TaskAddEdgeEdgeSourceTaskMax {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	edgeTargetTask = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if edgeTargetTask < TaskAddEdgeEdgeTargetTaskMin || edgeTargetTask > TaskAddEdgeEdgeTargetTaskMax {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if edgeRelation, err = takeRowText(payload, &cursor, TaskAddEdgeEdgeRelationMax); err != nil ||
+		len(edgeRelation) < TaskAddEdgeEdgeRelationMin {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	return edgeSourceTask, edgeTargetTask, edgeRelation, nil
+}
+
 const EventEnrollmentActive = EventCustody
 const StageEnrollmentActive = FamilyCustody
 const OperationEnrollmentActive uint32 = 4
@@ -9245,6 +9391,137 @@ func DecodeDecisionLogListScopedRequest(request []byte) (string, string, uint32,
 		return "", "", 0, ErrMalformedEnvelope
 	}
 	return decisionSubjectFilter, statusFilter, limit, nil
+}
+
+const EventKBDirectiveResolve = EventMaintenance
+const StageKBDirectiveResolve = FamilyMaintenance
+const OperationKBDirectiveResolve uint32 = 38
+const KBDirectiveResolveDirectiveIDMin uint64 = 1
+const KBDirectiveResolveDirectiveIDMax uint64 = 9223372036854775807
+const KBDirectiveResolveResolutionMemoryIDMin uint64 = 0
+const KBDirectiveResolveResolutionMemoryIDMax uint64 = 9223372036854775807
+const KBDirectiveResolveResolutionNoteMin = 0
+const KBDirectiveResolveResolutionNoteMax = 1023
+
+// EncodeKBDirectiveResolveRequest writes the schema kb_directive_resolve declares, in order.
+func EncodeKBDirectiveResolveRequest(directiveID uint64, resolutionMemoryID uint64, resolutionNote string) ([]byte, error) {
+	if directiveID < KBDirectiveResolveDirectiveIDMin || directiveID > KBDirectiveResolveDirectiveIDMax ||
+		resolutionMemoryID < KBDirectiveResolveResolutionMemoryIDMin || resolutionMemoryID > KBDirectiveResolveResolutionMemoryIDMax ||
+		len(resolutionNote) < KBDirectiveResolveResolutionNoteMin || len(resolutionNote) > KBDirectiveResolveResolutionNoteMax || hasNUL(resolutionNote) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var directiveIDBytes [8]byte
+	binary.LittleEndian.PutUint64(directiveIDBytes[:], directiveID)
+	payload = append(payload, directiveIDBytes[:]...)
+	var resolutionMemoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(resolutionMemoryIDBytes[:], resolutionMemoryID)
+	payload = append(payload, resolutionMemoryIDBytes[:]...)
+	if err := putRowText(&payload, resolutionNote, KBDirectiveResolveResolutionNoteMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBDirectiveResolve, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDirectiveResolveRequest reads it back, checking each field against its own bound.
+func DecodeKBDirectiveResolveRequest(request []byte) (uint64, uint64, string, error) {
+	var directiveID uint64
+	var resolutionMemoryID uint64
+	var resolutionNote string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDirectiveResolve || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	directiveID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if directiveID < KBDirectiveResolveDirectiveIDMin || directiveID > KBDirectiveResolveDirectiveIDMax {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	resolutionMemoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if resolutionMemoryID < KBDirectiveResolveResolutionMemoryIDMin || resolutionMemoryID > KBDirectiveResolveResolutionMemoryIDMax {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if resolutionNote, err = takeRowText(payload, &cursor, KBDirectiveResolveResolutionNoteMax); err != nil ||
+		len(resolutionNote) < KBDirectiveResolveResolutionNoteMin {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, "", ErrMalformedEnvelope
+	}
+	return directiveID, resolutionMemoryID, resolutionNote, nil
+}
+
+const EventDecisionLogActiveID = EventMaintenance
+const StageDecisionLogActiveID = FamilyMaintenance
+const OperationDecisionLogActiveID uint32 = 39
+const DecisionLogActiveIDDecisionSubjectMin = 1
+const DecisionLogActiveIDDecisionSubjectMax = 255
+const DecisionLogActiveIDLinkedPolicyMin uint64 = 0
+const DecisionLogActiveIDLinkedPolicyMax uint64 = 9223372036854775807
+
+// EncodeDecisionLogActiveIDRequest writes the schema decision_log_active_id declares, in order.
+func EncodeDecisionLogActiveIDRequest(decisionSubject string, linkedPolicy uint64) ([]byte, error) {
+	if len(decisionSubject) < DecisionLogActiveIDDecisionSubjectMin || len(decisionSubject) > DecisionLogActiveIDDecisionSubjectMax || hasNUL(decisionSubject) ||
+		linkedPolicy < DecisionLogActiveIDLinkedPolicyMin || linkedPolicy > DecisionLogActiveIDLinkedPolicyMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionSubject, DecisionLogActiveIDDecisionSubjectMax); err != nil {
+		return nil, err
+	}
+	var linkedPolicyBytes [8]byte
+	binary.LittleEndian.PutUint64(linkedPolicyBytes[:], linkedPolicy)
+	payload = append(payload, linkedPolicyBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDecisionLogActiveID, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogActiveIDRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogActiveIDRequest(request []byte) (string, uint64, error) {
+	var decisionSubject string
+	var linkedPolicy uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogActiveID || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionSubject, err = takeRowText(payload, &cursor, DecisionLogActiveIDDecisionSubjectMax); err != nil ||
+		len(decisionSubject) < DecisionLogActiveIDDecisionSubjectMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	linkedPolicy = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if linkedPolicy < DecisionLogActiveIDLinkedPolicyMin || linkedPolicy > DecisionLogActiveIDLinkedPolicyMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return decisionSubject, linkedPolicy, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

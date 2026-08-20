@@ -13084,6 +13084,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_l2_fact_vs_decision_pairs",
         "policy": {"reads": 200},
     },
+    "kb_directive_resolve": {
+        "key": ("maintenance", 38),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_directive_resolve",
+        "policy": {"writes": 200},
+    },
+    "memory_link_create": {
+        "key": ("memory", 90),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_link_create",
+        "policy": {"writes": 200},
+    },
+    "task_add_edge": {
+        "key": ("organization", 29),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_task_add_edge",
+        "policy": {"writes": 200},
+    },
+    "decision_log_active_id": {
+        "key": ("maintenance", 39),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_active_id",
+        "policy": {"reads": 200},
+    },
 }
 
 

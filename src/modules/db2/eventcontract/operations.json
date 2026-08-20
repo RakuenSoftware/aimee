@@ -5769,6 +5769,58 @@
       }
     },
     {
+      "family": "memory",
+      "id": 90,
+      "name": "memory_link_create",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and the links between them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_link_create"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the link is directional and the relation is stored unchecked, and creating one that exists does nothing and is acknowledged"
+        },
+        "fields": [
+          {
+            "name": "link_source_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "link_target_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "link_relation",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -12030,6 +12082,58 @@
       }
     },
     {
+      "family": "organization",
+      "id": 29,
+      "name": "task_add_edge",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Tasks and the edges between them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_task_add_edge"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates, so adding the same edge twice stores it twice"
+        },
+        "fields": [
+          {
+            "name": "edge_source_task",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "edge_target_task",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "edge_relation",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "custody",
       "id": 1,
       "name": "vector_rebuild_lock_try_acquire",
@@ -14275,6 +14379,104 @@
           ]
         },
         "maximum_rows": 256
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 38,
+      "name": "kb_directive_resolve",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Epistemic directives and their resolutions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_service_directive_resolve"
+      ],
+      "request": {
+        "policy": {
+          "writes": "openness is read in one statement and the resolution written in another, so a directive resolved in between is resolved twice, and the note is discarded"
+        },
+        "fields": [
+          {
+            "name": "directive_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "resolution_memory_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "resolution_note",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 39,
+      "name": "decision_log_active_id",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Logged decisions and their statuses are relational DB2 rows.",
+      "c_symbols": [
+        "db2_decision_log_active_id"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one active decision is returned even when several match, and which one is arbitrary"
+        },
+        "fields": [
+          {
+            "name": "decision_subject",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "linked_policy",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "decision_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
       }
     }
   ]

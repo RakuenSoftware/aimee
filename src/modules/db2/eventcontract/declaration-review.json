@@ -708,6 +708,14 @@
       "reason": "The same shape as the gap-type predicate beside it: a pure comparison against a fixed state list, no statement, no state read. Shared as a definition rather than as a call, for the same reason -- a caller with a different idea of the valid states stores rows the sweeps skip."
     },
     {
+      "symbol": "db2_decision_log_active_id",
+      "signature_sha256": "ae709594fa202a180ff9e3c033cf136fcb3d510a8366fdeeb496175ed9c971b8",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.decision_log_active_id operation finds the active decision for a subject and policy. Nothing guarantees there is only one: the statement takes the first of however many match, in no particular order, so a subject with two active decisions answers with an arbitrary one and never says there was a choice. Zero means none is active; decision identifiers start at one."
+    },
+    {
       "symbol": "db2_decision_log_list",
       "signature_sha256": "6e52cdcaf44c1fda26b984af3145ac502ff5cf788e0eb309847004636ad5961f",
       "disposition": "wire-operation",
@@ -1586,6 +1594,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The cJSON directive-list facade cannot define the stable contract; DB2 returns bounded state- and cause-filtered typed records."
+    },
+    {
+      "symbol": "db2_kb_service_directive_resolve",
+      "signature_sha256": "fe3ea67d8fee74516903787bb9493d2146521a90d3480ad3f3e98bda1adf7b92",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_directive_resolve operation resolves a directive. It differs from maintenance.directive_resolve in two ways the identical reply cannot show. It checks openness in one statement and writes in another rather than resolving only an open directive in one, so a directive resolved between the two is resolved again and its earlier resolution overwritten. And the note is discarded: the backend takes it and voids it, so nothing a caller writes there is ever stored."
     },
     {
       "symbol": "db2_kb_service_directive_suppress",
@@ -3044,6 +3060,14 @@
       "reason": "The typed memory.lifecycle_sweep_expired operation replaces the pending time-to-live archival pass; the source state, target state, and archive reason stay fixed policy behind the handler so no caller can archive a different set of rows."
     },
     {
+      "symbol": "db2_memory_link_create",
+      "signature_sha256": "92caf6689844003ea3101627c7b0acfc65e87bda1c7dd8a7c0ff1779d757f419",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.memory_link_create operation links one memory to another. The link is directional and the relation is stored without being checked against anything, so a caller can record a relationship no reader understands. Creating a link that already exists does nothing and is acknowledged, so a repeat is indistinguishable from a first -- which is what makes it safe to retry."
+    },
+    {
       "symbol": "db2_memory_link_delete",
       "signature_sha256": "1bfa3b6e1cc6270bbaa0a291044e810a1f8dd15720184d91c077499bb9abb3c3",
       "disposition": "wire-operation",
@@ -3922,6 +3946,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.synth_reenqueue_all operation replaces the reset that requeues every learning synthesis operation after a learning version change. Its reach and its discard are identical to the evidence reset already on the bus: no predicate, attempts back to zero, last error cleared. Both are triggered by the same version bump and both are recorded as fixed policy, so the pair cannot drift apart without the gate noticing."
+    },
+    {
+      "symbol": "db2_task_add_edge",
+      "signature_sha256": "b1acf6f9a8e743f37e4a2ea33cc9eb9c9d1fae5ac0201cceb9f216b1522e8c5a",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_add_edge operation links one task to another. Unlike memory.memory_link_create beside it, which does the same thing for memories, nothing deduplicates here: adding the same edge twice stores it twice, and organization.task_edges then returns it twice. The relation is stored unchecked, so an unknown relation is recorded rather than refused."
     },
     {
       "symbol": "db2_task_delete",

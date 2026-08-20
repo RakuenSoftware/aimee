@@ -6736,9 +6736,15 @@
           "line": 92
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.decision_log_active_id operation finds the active decision for a subject and policy. Nothing guarantees there is only one: the statement takes the first of however many match, in no particular order, so a subject with two active decisions answers with an arbitrary one and never says there was a choice. Zero means none is active; decision identifiers start at one."
+      },
       "signature": "int64_t db2_decision_log_active_id ( const char * subject , int64_t linked_policy_id )",
       "signature_sha256": "ae709594fa202a180ff9e3c033cf136fcb3d510a8366fdeeb496175ed9c971b8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_active_id"
     },
     {
@@ -12034,9 +12040,15 @@
           "line": 109
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_directive_resolve operation resolves a directive. It differs from maintenance.directive_resolve in two ways the identical reply cannot show. It checks openness in one statement and writes in another rather than resolving only an open directive in one, so a directive resolved between the two is resolved again and its earlier resolution overwritten. And the note is discarded: the backend takes it and voids it, so nothing a caller writes there is ever stored."
+      },
       "signature": "int db2_kb_service_directive_resolve ( int64_t id , int64_t resolution_memory_id , const char * note )",
       "signature_sha256": "fe3ea67d8fee74516903787bb9493d2146521a90d3480ad3f3e98bda1adf7b92",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_directive_resolve"
     },
     {
@@ -18015,9 +18027,15 @@
           "line": 19
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.memory_link_create operation links one memory to another. The link is directional and the relation is stored without being checked against anything, so a caller can record a relationship no reader understands. Creating a link that already exists does nothing and is acknowledged, so a repeat is indistinguishable from a first -- which is what makes it safe to retry."
+      },
       "signature": "int db2_memory_link_create ( int64_t source_id , int64_t target_id , const char * relation )",
       "signature_sha256": "92caf6689844003ea3101627c7b0acfc65e87bda1c7dd8a7c0ff1779d757f419",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_link_create"
     },
     {
@@ -22899,9 +22917,15 @@
           "line": 49
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.task_add_edge operation links one task to another. Unlike memory.memory_link_create beside it, which does the same thing for memories, nothing deduplicates here: adding the same edge twice stores it twice, and organization.task_edges then returns it twice. The relation is stored unchecked, so an unknown relation is recorded rather than refused."
+      },
       "signature": "int db2_task_add_edge ( int64_t source , int64_t target , const char * relation )",
       "signature_sha256": "b1acf6f9a8e743f37e4a2ea33cc9eb9c9d1fae5ac0201cceb9f216b1522e8c5a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_task_add_edge"
     },
     {
@@ -27438,15 +27462,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "80ab4759ab79828156bf466da5d1865783f3e45c4a80d6f7c14778654f1f010f",
+  "fingerprint": "f3648f94c339bb58afd5f3a346ef8dd3abdf01c4cc9617d438277d59311c4b57",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 390,
+    "audit_pending": 386,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 569
+    "reviewed": 573
   }
 }

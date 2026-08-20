@@ -16,6 +16,9 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "kb_service_backend.h"
+#include "memory_relations.h"
+#include "tasks.h"
 #include "memory_query.h"
 #include "memory_health.h"
 #include "memory_promotion.h"
@@ -357,6 +360,10 @@ typedef struct
    int (*recall_section)(db2_memory_recall_section_t section, db2_memory_cand_row_t *rows, int max);
    int (*l2_cross_key_pairs)(int max_pairs, db2_memory_pair_row_t *out, int max);
    int (*l2_fact_decision_pairs)(int max_pairs, db2_memory_pair_row_t *out, int max);
+   int (*kb_directive_resolve)(int64_t directive_id, int64_t resolution_memory_id, const char *note);
+   int (*memory_link_create)(int64_t source_id, int64_t target_id, const char *relation);
+   int (*task_add_edge)(int64_t source, int64_t target, const char *relation);
+   int64_t (*decision_log_active_id)(const char *subject, int64_t linked_policy_id);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

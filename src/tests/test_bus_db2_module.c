@@ -2350,6 +2350,37 @@ int db2_memory_l2_fact_vs_decision_pairs(int max_pairs, db2_memory_pair_row_t *o
    return 0;
 }
 
+int db2_kb_service_directive_resolve(int64_t id, int64_t resolution_memory_id, const char *note)
+{
+   (void)id;
+   (void)resolution_memory_id;
+   (void)note;
+   return 0;
+}
+
+int db2_memory_link_create(int64_t source_id, int64_t target_id, const char *relation)
+{
+   (void)source_id;
+   (void)target_id;
+   (void)relation;
+   return 0;
+}
+
+int db2_task_add_edge(int64_t source, int64_t target, const char *relation)
+{
+   (void)source;
+   (void)target;
+   (void)relation;
+   return 0;
+}
+
+int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id)
+{
+   (void)subject;
+   (void)linked_policy_id;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

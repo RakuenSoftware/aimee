@@ -641,6 +641,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t max_pairs, aimee_db2_l2_fact_decision_pairs_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_memory_link_create_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t link_source_id, uint64_t link_target_id, const char *link_relation, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_observation_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *entity_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
@@ -1075,6 +1079,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t parent_task, aimee_db2_task_subtasks_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_task_add_edge_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t edge_source_task, uint64_t edge_target_task, const char *edge_relation, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_enrollment_active_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *cert_issuer, const char *cert_serial_norm, uint32_t *active,
@@ -1188,5 +1196,13 @@ extern "C"
    aimee_module_call_result_t aimee_db2_decision_log_list_scoped_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *decision_subject_filter, const char *status_filter, uint32_t limit, aimee_db2_decision_log_list_scoped_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_directive_resolve_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t directive_id, uint64_t resolution_memory_id, const char *resolution_note, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_decision_log_active_id_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *decision_subject, uint64_t linked_policy, uint64_t *decision_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

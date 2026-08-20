@@ -2335,6 +2335,33 @@ int main(int argc, char **argv)
                                     AIMEE_DB2_KV_SECTION_MAX_ROWS, &kv_section_count, NULL,
                                     NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* kb_directive_resolve reads openness in one statement and writes in
+    * another, where maintenance.directive_resolve does both at once. On a
+    * schema with no directive both refuse, which is the only state in which
+    * the two agree -- the difference needs two callers racing to show, and a
+    * single-threaded replay cannot produce that. */
+   acknowledged = 9;
+   assert(aimee_db2_kb_directive_resolve_call(call_client, &client, 9351, 0, 4242, 4243, "replayed",
+                                              &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+
+   acknowledged = 9;
+   assert(aimee_db2_memory_link_create_call(call_client, &client, 9352, 0, 4242, 4243, "relates",
+                                            &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+
+   acknowledged = 9;
+   assert(aimee_db2_task_add_edge_call(call_client, &client, 9353, 0, 4242, 4243, "blocks",
+                                       &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+
+   /* Zero means no active decision, not a decision numbered zero. */
+   uint64_t active_decision = 99;
+   assert(aimee_db2_decision_log_active_id_call(call_client, &client, 9354, 0, "replay-subject",
+                                                4242, &active_decision, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(active_decision == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
