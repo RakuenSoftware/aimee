@@ -2144,6 +2144,22 @@ int db2_entity_edge_top_targets_by_relation(const char *source, const char *rela
    return 0;
 }
 
+int db2_code_index_file_definitions(const char *project, const char *file_path, definition_t *out,
+                                    int max)
+{
+   (void)project;
+   (void)file_path;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int canonical_index_structure(const char *project, const char *file_path, definition_t *out,
+                              int max)
+{
+   return db2_code_index_file_definitions(project, file_path, out, max);
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

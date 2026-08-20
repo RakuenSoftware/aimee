@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "d6f6698873523cc1180256f88f03377367b1b0ad",
-  "source_fingerprint": "3c7935d994aac4469fba57d21b3d91ccc383879ad1358a9aee33c98e2fcad3f3",
+  "source_revision": "a2619a1abbbc01a38c0683fa288f34428ebda318",
+  "source_fingerprint": "768d1ad467ef6138e90e814f8c3fdf953b1dc43cbcb0dc8b06f2dcf7c2ac785e",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -3190,5 +3190,5 @@
       "system-link": 139
     }
   },
-  "fingerprint": "7ba169ace9a3fdefa2c64943976e51df55b84aa36ebda88763c83fd4a6912790"
+  "fingerprint": "6f268e235378584c95466c8fad98c160a45e871f4d2575c7c37b3ecca1d6eab1"
 }

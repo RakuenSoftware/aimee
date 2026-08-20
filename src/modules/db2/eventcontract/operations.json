@@ -5524,6 +5524,74 @@
       }
     },
     {
+      "family": "index",
+      "id": 35,
+      "name": "file_definitions",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed files and the terms extracted from them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_file_definitions",
+        "canonical_index_structure"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the file must be in the project's current generation, and a line_end of zero means the symbol's extent was never recorded"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "symbol_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "symbol_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "line_end",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",

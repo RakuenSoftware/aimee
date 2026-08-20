@@ -871,6 +871,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_outbound_neighbors = db2_entity_edge_outbound_neighbors,
        .entity_top_partners = db2_entity_edge_top_partners_by_relation,
        .entity_top_targets = db2_entity_edge_top_targets_by_relation,
+       .file_definitions = db2_code_index_file_definitions,
    };
    return &backend;
 }
@@ -3190,6 +3191,43 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_entity_top_targets_reply_encode(rows, count, response_body,
                                                           response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_FILE_DEFINITIONS_PROJECT_MAX + 1] = "";
+         char file_path[AIMEE_DB2_FILE_DEFINITIONS_FILE_PATH_MAX + 1] = "";
+         if (aimee_db2_file_definitions_request_decode(request_body, request_len, project,
+                                                       sizeof(project), file_path,
+                                                       sizeof(file_path)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_FILE_DEFINITIONS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->file_definitions)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_file_definitions_row_t rows[AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               definition_t found[AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS];
+               int written = backend->file_definitions(project, file_path, found,
+                                                       AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  snprintf(rows[index].symbol_name, sizeof(rows[index].symbol_name), "%s",
+                           found[index].name);
+                  snprintf(rows[index].symbol_kind, sizeof(rows[index].symbol_kind), "%s",
+                           found[index].kind);
+                  rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+                  rows[index].line_end =
+                      found[index].line_end < 0 ? 0u : (uint32_t)found[index].line_end;
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_file_definitions_reply_encode(rows, count, response_body,
+                                                        response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

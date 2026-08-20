@@ -1765,6 +1765,15 @@ int main(int argc, char **argv)
                                             NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(target_count == 0);
 
+   /* No file is indexed, so nothing is defined in it. The row here carries two
+    * strings and two numbers, the widest row shape replayed so far. */
+   static aimee_db2_file_definitions_row_t definition_rows[AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS];
+   uint32_t definition_count = 99;
+   assert(aimee_db2_file_definitions_call(call_client, &client, 9273, 0, "demo", "src/replay.c",
+                                          definition_rows, AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS,
+                                          &definition_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(definition_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

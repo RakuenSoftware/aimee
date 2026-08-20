@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "baf140b10fbfa8a69bdd486943a63c9cf56f565340176cee1f6a83b7312b8115"
+const ContractSHA256 = "813cd1cb9e0fcd779cf3da73de2743cff465706bcf3afad6c368ee8f19b473e0"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2136,6 +2136,60 @@ func DecodeEntityTopTargetsRequest(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return entity, relation, nil
+}
+
+const EventFileDefinitions = EventIndex
+const StageFileDefinitions = FamilyIndex
+const OperationFileDefinitions uint32 = 35
+const FileDefinitionsProjectMin = 1
+const FileDefinitionsProjectMax = 127
+const FileDefinitionsFilePathMin = 1
+const FileDefinitionsFilePathMax = 1023
+
+// EncodeFileDefinitionsRequest writes the schema file_definitions declares, in order.
+func EncodeFileDefinitionsRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < FileDefinitionsProjectMin || len(project) > FileDefinitionsProjectMax || hasNUL(project) ||
+		len(filePath) < FileDefinitionsFilePathMin || len(filePath) > FileDefinitionsFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, FileDefinitionsProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, FileDefinitionsFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationFileDefinitions, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeFileDefinitionsRequest reads it back, checking each field against its own bound.
+func DecodeFileDefinitionsRequest(request []byte) (string, string, error) {
+	var project string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFileDefinitions || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, FileDefinitionsProjectMax); err != nil ||
+		len(project) < FileDefinitionsProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, FileDefinitionsFilePathMax); err != nil ||
+		len(filePath) < FileDefinitionsFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
 }
 
 const EventTraceMiningRecord = EventLearning

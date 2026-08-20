@@ -41,7 +41,8 @@ BUS_TEST = Path("src/tests/test_bus_db2_module.c")
 
 REQUIRED = {"name", "family", "id", "symbol", "request", "reply", "policy", "reason", "call",
             "vtable", "stub"}
-OPTIONAL = {"scope", "transaction", "idempotency", "results", "db3_reason", "handler_extra"}
+OPTIONAL = {"scope", "transaction", "idempotency", "results", "db3_reason", "handler_extra",
+            "also"}
 
 
 def fail(message: str) -> None:
@@ -112,7 +113,8 @@ def catalog_entry(operation: dict[str, object]) -> str:
         "results": operation.get("results", ["ok"]),
         "db3_placement": "retained-db2",
         "db3_reason": operation.get("db3_reason", operation["reason"][:200]),
-        "c_symbols": [operation["symbol"]],
+        "c_symbols": [operation["symbol"]] + [str(item["symbol"])
+                                              for item in operation.get("also", [])],
         "request": {"policy": operation["policy"], "fields": operation["request"]},
         "reply": operation["reply"],
     }
@@ -167,20 +169,35 @@ def apply_review(batch: list[dict[str, object]]) -> None:
         fail("the review ledger is not sorted by symbol")
     additions = []
     for operation in batch:
-        symbol = str(operation["symbol"])
-        block = ('    {\n'
-                 f'      "symbol": "{symbol}",\n'
-                 f'      "signature_sha256": "{ledger[symbol]["signature_sha256"]}",\n'
-                 '      "disposition": "wire-operation",\n'
-                 f'      "family": "{operation["family"]}",\n'
-                 '      "db3_placement": "retained-db2",\n'
-                 f'      "reason": {json.dumps(operation["reason"])}\n'
-                 '    }')
-        additions.append((bisect.bisect_left(symbols, symbol), symbol, block))
+        # An operation's own symbol first, then any name that is a forward to
+        # it: each needs its own review row, because the ledger is a list of
+        # declarations and a forward is one.
+        reviewed = [(str(operation["symbol"]), operation["reason"])]
+        reviewed += [(str(item["symbol"]), item["reason"])
+                     for item in operation.get("also", [])]
+        for symbol, reason in reviewed:
+            block = ('    {\n'
+                     f'      "symbol": "{symbol}",\n'
+                     f'      "signature_sha256": "{ledger[symbol]["signature_sha256"]}",\n'
+                     '      "disposition": "wire-operation",\n'
+                     f'      "family": "{operation["family"]}",\n'
+                     '      "db3_placement": "retained-db2",\n'
+                     f'      "reason": {json.dumps(reason)}\n'
+                     '    }')
+            additions.append((bisect.bisect_left(symbols, symbol), symbol, block))
     for position, _symbol, block in sorted(additions, reverse=True):
         text = text[:blocks[position].start()] + block + ",\n" + text[blocks[position].start():]
     json.loads(text)
     REVIEW.write_text(text, encoding="utf-8")
+
+
+def _forwards(operation: dict[str, object]) -> str:
+    """The generator table's list of names that forward to this backend."""
+    names = [str(item["symbol"]) for item in operation.get("also", [])]
+    if not names:
+        return ""
+    joined = ", ".join(repr(name) for name in names)
+    return f'\n        "forwards": ({joined},),'
 
 
 def apply_generator(batch: list[dict[str, object]]) -> None:
@@ -189,7 +206,7 @@ def apply_generator(batch: list[dict[str, object]]) -> None:
         "key": ("{operation['family']}", {operation['id']}),
         "format": "db2-envelope-generic-v1",
         "symbol": "{operation['symbol']}",
-        "policy": {{{", ".join(f'"{key}": 200' for key in operation["policy"])}}},
+        "policy": {{{", ".join(f'"{key}": 200' for key in operation["policy"])}}},{_forwards(operation)}
     }},
 ''' for operation in batch)
     anchor = "}\n\n\ndef _check_derived("
@@ -221,7 +238,12 @@ def apply_adapter(batch: list[dict[str, object]]) -> None:
 
 def apply_stubs(batch: list[dict[str, object]]) -> None:
     anchor = "int db2_anti_pattern_exists_exact(const char *pattern)\n"
-    stubs = "".join(f"{operation['stub']}\n\n" for operation in batch)
+    stubs = ""
+    for operation in batch:
+        stubs += f"{operation['stub']}\n\n"
+        # A forward is a separate C symbol, so the tests need it linked too.
+        for item in operation.get("also", []):
+            stubs += f"{item['stub']}\n\n"
     for path in (CONTRACT_TEST, BUS_TEST):
         text = path.read_text(encoding="utf-8")
         if text.count(anchor) != 1:

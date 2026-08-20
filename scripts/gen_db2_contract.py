@@ -12722,6 +12722,13 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_entity_edge_top_targets_by_relation",
         "policy": {"reads": 200},
     },
+    "file_definitions": {
+        "key": ("index", 35),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_file_definitions",
+        "forwards": ("canonical_index_structure",),
+        "policy": {"reads": 200},
+    },
 }
 
 
@@ -12731,7 +12738,10 @@ def _check_derived(operation: dict[str, object], name: str, key: tuple[str, int]
     rule = name.replace("_", "-")
     if key != row["key"] or operation["wire_format"] != row["format"]:
         fail("unsupported-operation", f"{name} is not where the table says it is")
-    if operation["c_symbols"] != [row["symbol"]]:
+    # The first symbol is the backend the vtable binds; any after it are names
+    # that forward to it, which the table lists so a forward cannot quietly
+    # become a second implementation.
+    if operation["c_symbols"] != [row["symbol"]] + list(row.get("forwards", ())):
         fail("operation-c-symbols", f"{name} C symbol differs from the reviewed backend")
     if operation["results"] != ["ok"]:
         fail("operation-results", f"{name} results must equal ['ok']")

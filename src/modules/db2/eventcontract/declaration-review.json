@@ -108,6 +108,14 @@
       "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
     },
     {
+      "symbol": "canonical_index_structure",
+      "signature_sha256": "e9339286dea7fa79c9bc9186df5664eebf66bb3501c5eed45e2638633b5dd48d",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "canonical_index_structure is index.file_definitions under another name. It used to run its own copy of the query without selecting line_end, leaving that member of every row it wrote uninitialised for its callers to read; it forwards now, so the two cannot drift again. Reviewed as the same operation rather than a second one, because a forward is not a boundary."
+    },
+    {
       "symbol": "db2_anti_pattern_bump",
       "signature_sha256": "7dcb238fd67595c2cab8ed4f626ccecff7bd5f7e8c9a4d2b9f5742e8e5c0d4a0",
       "disposition": "wire-operation",
@@ -274,6 +282,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.drift_candidates operation counts the projects index.requeue_drifted would enqueue. The two share one predicate in the backend, and the catalog records that so the pair cannot drift apart: a count that no longer matches what the requeue acts on would be worse than no count, because it would look like a preview."
+    },
+    {
+      "symbol": "db2_code_index_file_definitions",
+      "signature_sha256": "3b7ae5d0ced860c3ed2fcd842b09c2a7527571da8b5a3d6786872ad9f2404c04",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.file_definitions operation lists the symbols defined in one file, in line order. Both the project and the file must be in the current generation, so a file indexed under an older one has no definitions here rather than an error. A line_end of zero means the extractor never recorded where the symbol ended, which reads the same as a symbol ending at line zero; the pair is only meaningful when line_end is at least line."
     },
     {
       "symbol": "db2_code_index_project_count",

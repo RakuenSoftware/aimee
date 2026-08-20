@@ -168,44 +168,6 @@ static void *ci_conn(void)
    return db2_conn();
 }
 
-/* ---- Project / file resolution --------------------------------- */
-
-static int64_t ci_resolve_project_id(void *conn, const char *name)
-{
-   char err[CI_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT id FROM projects WHERE name = ?1 AND lifecycle_state = 'current'", err,
-       sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", name);
-   int64_t id = -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      id = aimee_pg_column_int64(st, 0);
-   aimee_pg_finalize(st);
-   return id;
-}
-
-static int64_t ci_resolve_file_id(void *conn, int64_t project_id, const char *rel_path)
-{
-   char err[CI_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "SELECT f.id FROM files f JOIN projects p ON p.id=f.project_id"
-                        " WHERE f.project_id = ?1 AND f.path = ?2"
-                        " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
-                        err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_int64(st, "?1", project_id);
-   aimee_pg_bind_text(st, "?2", rel_path);
-   int64_t id = -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      id = aimee_pg_column_int64(st, 0);
-   aimee_pg_finalize(st);
-   return id;
-}
-
 static int64_t ci_upsert_project(void *conn, const char *name, const char *root)
 {
    (void)conn;
@@ -1789,43 +1751,14 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
    return 0;
 }
 
+/* Forwards to db2_code_index_file_definitions: same query, same connection,
+ * and resolvers that are line-for-line the same. This one used to run its own
+ * copy of the statement without selecting line_end, which left that member of
+ * every row it wrote uninitialised for its callers to read. */
 int canonical_index_structure(const char *project, const char *file_path, definition_t *out,
                               int max)
 {
-   void *conn = ci_conn();
-   if (!conn)
-      return -1;
-
-   int64_t project_id = ci_resolve_project_id(conn, project);
-   if (project_id < 0)
-      return 0;
-   int64_t file_id = ci_resolve_file_id(conn, project_id, file_path);
-   if (file_id < 0)
-      return 0;
-
-   char err[CI_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
-                                          "SELECT name, kind, line FROM terms"
-                                          " WHERE file_id = ?1 AND kind = 'definition'"
-                                          " ORDER BY line",
-                                          err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_int64(st, "?1", file_id);
-
-   int count = 0;
-   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *n = aimee_pg_column_text(st, 0);
-      const char *k = aimee_pg_column_text(st, 1);
-      int line = aimee_pg_column_int(st, 2);
-      snprintf(out[count].name, sizeof(out[count].name), "%s", n ? n : "");
-      snprintf(out[count].kind, sizeof(out[count].kind), "%s", k ? k : "");
-      out[count].line = line;
-      count++;
-   }
-   aimee_pg_finalize(st);
-   return count;
+   return db2_code_index_file_definitions(project, file_path, out, max);
 }
 
 static int ci_find_callers_scoped(const char *project, const char *excluded_project,
