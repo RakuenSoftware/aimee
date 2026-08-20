@@ -323,6 +323,12 @@ typedef struct
    int (*projection_edges)(const char *project, code_projection_edge_t *out, int max);
    int (*projection_edges_for_generation)(int64_t generation, code_projection_edge_t *out, int max);
    int (*task_edges)(int64_t task_id, task_edge_t *out, int max);
+   int (*term_find)(const char *identifier, term_hit_t *out, int max);
+   int (*term_find_in_project)(const char *project, const char *identifier, term_hit_t *out, int max);
+   int (*term_find_excluding_project)(const char *excluded_project, const char *identifier, term_hit_t *out, int max);
+   int (*callers_find)(const char *project, const char *callee, caller_hit_t *out, int max);
+   int (*callers_find_scoped)(const char *project, const char *callee, caller_hit_t *out, int max);
+   int (*callers_find_excluding_project)(const char *excluded_project, const char *callee, caller_hit_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

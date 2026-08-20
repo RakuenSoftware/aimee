@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/canonical_index.h"
 #include "c/corpus_jobs.h"
 #include "c/memory_briefing.h"
 #include "c/css_migration.h"
@@ -905,6 +906,12 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .projection_edges = db2_code_projection_list_edges,
        .projection_edges_for_generation = db2_code_projection_list_edges_for_gen,
        .task_edges = db2_task_get_edges,
+       .term_find = db2_code_index_term_find,
+       .term_find_in_project = canonical_index_find_project,
+       .term_find_excluding_project = canonical_index_find_excluding_project,
+       .callers_find = db2_code_index_callers_find,
+       .callers_find_scoped = canonical_index_find_callers,
+       .callers_find_excluding_project = canonical_index_find_callers_excluding_project,
    };
    return &backend;
 }
@@ -4566,6 +4573,333 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             }
             if (aimee_db2_projection_edges_for_generation_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char identifier[AIMEE_DB2_TERM_FIND_IDENTIFIER_MAX + 1] = "";
+         if (aimee_db2_term_find_request_decode(request_body, request_len, identifier,
+                                                sizeof(identifier)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TERM_FIND_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->term_find)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_term_find_row_t *rows = malloc(sizeof(*rows) * AIMEE_DB2_TERM_FIND_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               term_hit_t *found = malloc(sizeof(*found) * AIMEE_DB2_TERM_FIND_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->term_find(identifier, found, AIMEE_DB2_TERM_FIND_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+                  rows[index].line_end =
+                      found[index].line_end < 0 ? 0u : (uint32_t)found[index].line_end;
+                  snprintf(rows[index].hit_project, sizeof(rows[index].hit_project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].hit_file_path, sizeof(rows[index].hit_file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].term_kind, sizeof(rows[index].term_kind), "%s",
+                           found[index].kind);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_term_find_reply_encode(rows, count, response_body, response_capacity,
+                                                 response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_TERM_FIND_IN_PROJECT_PROJECT_MAX + 1] = "";
+         char identifier[AIMEE_DB2_TERM_FIND_IN_PROJECT_IDENTIFIER_MAX + 1] = "";
+         if (aimee_db2_term_find_in_project_request_decode(request_body, request_len, project,
+                                                           sizeof(project), identifier,
+                                                           sizeof(identifier)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TERM_FIND_IN_PROJECT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->term_find_in_project)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_term_find_in_project_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               term_hit_t *found = malloc(sizeof(*found) * AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->term_find_in_project(project, identifier, found,
+                                                           AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+                  rows[index].line_end =
+                      found[index].line_end < 0 ? 0u : (uint32_t)found[index].line_end;
+                  snprintf(rows[index].hit_project, sizeof(rows[index].hit_project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].hit_file_path, sizeof(rows[index].hit_file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].term_kind, sizeof(rows[index].term_kind), "%s",
+                           found[index].kind);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_term_find_in_project_reply_encode(rows, count, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char excluded_project[AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_EXCLUDED_PROJECT_MAX + 1] = "";
+         char identifier[AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_IDENTIFIER_MAX + 1] = "";
+         if (aimee_db2_term_find_excluding_project_request_decode(
+                 request_body, request_len, excluded_project, sizeof(excluded_project), identifier,
+                 sizeof(identifier)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->term_find_excluding_project)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_term_find_excluding_project_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               term_hit_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->term_find_excluding_project(
+                   excluded_project, identifier, found,
+                   AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+                  rows[index].line_end =
+                      found[index].line_end < 0 ? 0u : (uint32_t)found[index].line_end;
+                  snprintf(rows[index].hit_project, sizeof(rows[index].hit_project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].hit_file_path, sizeof(rows[index].hit_file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].term_kind, sizeof(rows[index].term_kind), "%s",
+                           found[index].kind);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_term_find_excluding_project_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_CALLERS_FIND_PROJECT_MAX + 1] = "";
+         char callee[AIMEE_DB2_CALLERS_FIND_CALLEE_MAX + 1] = "";
+         if (aimee_db2_callers_find_request_decode(request_body, request_len, project,
+                                                   sizeof(project), callee, sizeof(callee)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CALLERS_FIND_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->callers_find)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_callers_find_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CALLERS_FIND_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               caller_hit_t *found = malloc(sizeof(*found) * AIMEE_DB2_CALLERS_FIND_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written =
+                   backend->callers_find(project, callee, found, AIMEE_DB2_CALLERS_FIND_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].caller_line =
+                      found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+                  snprintf(rows[index].caller_project, sizeof(rows[index].caller_project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].caller_file_path, sizeof(rows[index].caller_file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].caller_symbol, sizeof(rows[index].caller_symbol), "%s",
+                           found[index].caller);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_callers_find_reply_encode(rows, count, response_body, response_capacity,
+                                                    response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_CALLERS_FIND_SCOPED_PROJECT_MAX + 1] = "";
+         char callee[AIMEE_DB2_CALLERS_FIND_SCOPED_CALLEE_MAX + 1] = "";
+         if (aimee_db2_callers_find_scoped_request_decode(
+                 request_body, request_len, project, sizeof(project), callee, sizeof(callee)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CALLERS_FIND_SCOPED_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->callers_find_scoped)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_callers_find_scoped_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               caller_hit_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->callers_find_scoped(project, callee, found,
+                                                          AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].caller_line =
+                      found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+                  snprintf(rows[index].caller_project, sizeof(rows[index].caller_project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].caller_file_path, sizeof(rows[index].caller_file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].caller_symbol, sizeof(rows[index].caller_symbol), "%s",
+                           found[index].caller);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_callers_find_scoped_reply_encode(rows, count, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char excluded_project[AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_EXCLUDED_PROJECT_MAX + 1] =
+             "";
+         char callee[AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_CALLEE_MAX + 1] = "";
+         if (aimee_db2_callers_find_excluding_project_request_decode(
+                 request_body, request_len, excluded_project, sizeof(excluded_project), callee,
+                 sizeof(callee)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->callers_find_excluding_project)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_callers_find_excluding_project_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               caller_hit_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int written = backend->callers_find_excluding_project(
+                   excluded_project, callee, found,
+                   AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+               for (int index = 0; index < written; index++)
+               {
+                  rows[index].caller_line =
+                      found[index].line < 0 ? 0u : (uint32_t)found[index].line;
+                  snprintf(rows[index].caller_project, sizeof(rows[index].caller_project), "%s",
+                           found[index].project);
+                  snprintf(rows[index].caller_file_path, sizeof(rows[index].caller_file_path), "%s",
+                           found[index].file_path);
+                  snprintf(rows[index].caller_symbol, sizeof(rows[index].caller_symbol), "%s",
+                           found[index].caller);
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_callers_find_excluding_project_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
             {
                free(rows);

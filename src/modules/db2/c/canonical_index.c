@@ -1538,7 +1538,7 @@ static void ci_make_like_pattern(const char *id, int leading_pct, int trailing_p
    buf[j] = '\0';
 }
 
-static const char *ci_find_sql = "SELECT p.name, f.path, t.line, t.kind"
+static const char *ci_find_sql = "SELECT p.name, f.path, t.line, t.kind, t.line_end"
                                  " FROM terms t"
                                  " JOIN files f ON f.id = t.file_id"
                                  " JOIN projects p ON p.id = f.project_id"
@@ -1549,12 +1549,12 @@ static const char *ci_find_sql = "SELECT p.name, f.path, t.line, t.kind"
                                  "   AND f.path NOT LIKE '.%'"
                                  "   AND f.path NOT LIKE '%/.%'"
                                  "   AND p.root NOT LIKE '%/.%'"
-                                 " GROUP BY p.name, f.path, t.line, t.kind"
+                                 " GROUP BY p.name, f.path, t.line, t.kind, t.line_end"
                                  " ORDER BY CASE WHEN t.kind = 'definition' THEN 0 ELSE 1 END,"
                                  " p.name, f.path"
                                  " LIMIT ?2";
 
-static const char *ci_find_like_sql = "SELECT p.name, f.path, t.line, t.kind"
+static const char *ci_find_like_sql = "SELECT p.name, f.path, t.line, t.kind, t.line_end"
                                       " FROM terms t"
                                       " JOIN files f ON f.id = t.file_id"
                                       " JOIN projects p ON p.id = f.project_id"
@@ -1565,13 +1565,13 @@ static const char *ci_find_like_sql = "SELECT p.name, f.path, t.line, t.kind"
                                       "   AND f.path NOT LIKE '.%'"
                                       "   AND f.path NOT LIKE '%/.%'"
                                       "   AND p.root NOT LIKE '%/.%'"
-                                      " GROUP BY p.name, f.path, t.line, t.kind"
+                                      " GROUP BY p.name, f.path, t.line, t.kind, t.line_end"
                                       " ORDER BY CASE WHEN t.kind = 'definition' THEN 0 ELSE 1 END,"
                                       " p.name, f.path"
                                       " LIMIT ?2";
 
 static const char *ci_find_excluding_sql =
-    "SELECT p.name, f.path, t.line, t.kind"
+    "SELECT p.name, f.path, t.line, t.kind, t.line_end"
     " FROM terms t"
     " JOIN files f ON f.id = t.file_id"
     " JOIN projects p ON p.id = f.project_id"
@@ -1582,13 +1582,13 @@ static const char *ci_find_excluding_sql =
     "   AND f.path NOT LIKE '.%'"
     "   AND f.path NOT LIKE '%/.%'"
     "   AND p.root NOT LIKE '%/.%'"
-    " GROUP BY p.name, f.path, t.line, t.kind"
+    " GROUP BY p.name, f.path, t.line, t.kind, t.line_end"
     " ORDER BY CASE WHEN t.kind = 'definition' THEN 0 ELSE 1 END,"
     " p.name, f.path"
     " LIMIT ?2";
 
 static const char *ci_find_like_excluding_sql =
-    "SELECT p.name, f.path, t.line, t.kind"
+    "SELECT p.name, f.path, t.line, t.kind, t.line_end"
     " FROM terms t"
     " JOIN files f ON f.id = t.file_id"
     " JOIN projects p ON p.id = f.project_id"
@@ -1599,7 +1599,7 @@ static const char *ci_find_like_excluding_sql =
     "   AND f.path NOT LIKE '.%'"
     "   AND f.path NOT LIKE '%/.%'"
     "   AND p.root NOT LIKE '%/.%'"
-    " GROUP BY p.name, f.path, t.line, t.kind"
+    " GROUP BY p.name, f.path, t.line, t.kind, t.line_end"
     " ORDER BY CASE WHEN t.kind = 'definition' THEN 0 ELSE 1 END, p.name, f.path"
     " LIMIT ?2";
 
@@ -1616,6 +1616,10 @@ static int ci_drain_term_hits(aimee_pg_stmt_t *st, term_hit_t *out, int max, cha
       snprintf(out[count].project, sizeof(out[count].project), "%s", p ? p : "");
       snprintf(out[count].file_path, sizeof(out[count].file_path), "%s", f ? f : "");
       out[count].line = line;
+      /* Selected and copied because the struct carries it: leaving it alone
+       * handed callers whatever was on their stack, which is the defect
+       * canonical_index_structure had before it was folded away. */
+      out[count].line_end = aimee_pg_column_int(st, 4);
       snprintf(out[count].kind, sizeof(out[count].kind), "%s", k ? k : "");
       count++;
    }

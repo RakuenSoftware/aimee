@@ -12923,6 +12923,44 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_task_get_edges",
         "policy": {"reads": 200},
     },
+    "term_find": {
+        "key": ("index", 48),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_term_find",
+        "policy": {"reads": 200},
+    },
+    "term_find_in_project": {
+        "key": ("index", 49),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "canonical_index_find_project",
+        "forwards": ("canonical_index_find",),
+        "policy": {"reads": 200},
+        "forwards": ('canonical_index_find',),
+    },
+    "term_find_excluding_project": {
+        "key": ("index", 50),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "canonical_index_find_excluding_project",
+        "policy": {"reads": 200},
+    },
+    "callers_find": {
+        "key": ("index", 51),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_callers_find",
+        "policy": {"reads": 200},
+    },
+    "callers_find_scoped": {
+        "key": ("index", 52),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "canonical_index_find_callers",
+        "policy": {"reads": 200},
+    },
+    "callers_find_excluding_project": {
+        "key": ("index", 53),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "canonical_index_find_callers_excluding_project",
+        "policy": {"reads": 200},
+    },
 }
 
 

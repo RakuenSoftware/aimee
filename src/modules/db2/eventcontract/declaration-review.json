@@ -116,6 +116,46 @@
       "reason": "canonical_index_code_search_excluding_project is index.code_search_excluding_project under another name, forwarding to db2_code_index_code_search_excluding_project. It was the only caller of that backend, which is why the backend read as unconsumed while the search itself was in use. Reviewed as the same operation, and listed as a forward so the two cannot drift."
     },
     {
+      "symbol": "canonical_index_find",
+      "signature_sha256": "abb45dde5d69a07f8221577feb99d8125c2155c2dde14a5ea50c4fd45ae88eaa",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "canonical_index_find is index.term_find_in_project with no project: its whole body calls canonical_index_find_project with a null one, which the statement then drops. Reviewed as the same operation, and listed as a forward so the two cannot drift."
+    },
+    {
+      "symbol": "canonical_index_find_callers",
+      "signature_sha256": "9b0f0d631339801a6e96d64b5d52e76abae6977d1b6efa3afd3fe2817097a6dd",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.callers_find_scoped operation lists the recorded calls to a symbol, in one project or in all of them. The empty project is what separates it from index.callers_find beside it, which always names one. The two order differently as a result: this one leads with the project name when it is searching all of them, and with the path when it is not."
+    },
+    {
+      "symbol": "canonical_index_find_callers_excluding_project",
+      "signature_sha256": "4acd37b3042e94e5bb8bc0a96acde9f04b52e60ac3f4e4c03670714798638ec5",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.callers_find_excluding_project operation lists the recorded calls to a symbol everywhere but one project. The exclusion is required -- an empty name is refused -- so it is not index.callers_find_scoped with a filter inverted, and naming a project to search and one to exclude at once is refused."
+    },
+    {
+      "symbol": "canonical_index_find_excluding_project",
+      "signature_sha256": "64bc1451f652c46655d171f707161161d95bf51e1adfb9f6d21068e32bf520b8",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.term_find_excluding_project operation finds an identifier everywhere but one project. The exclusion is required -- an empty name is refused -- so this is not index.term_find_in_project with a filter inverted, and the two cannot be combined. The same three tiers apply, so a reply here may also be about a name the caller did not ask for."
+    },
+    {
+      "symbol": "canonical_index_find_project",
+      "signature_sha256": "8be1389f8f07d782edb75fc7a3ede92d2af3cd76d4dfec527c9eec1e02630b09",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.term_find_in_project operation finds an identifier within one project, or within all of them when the project is empty. The tiers are the same as index.term_find's -- exact, then prefix, then substring -- and with an empty project the two run the same statement, which is why one of them should eventually go. Its callers reach them separately today."
+    },
+    {
       "symbol": "canonical_index_set_exec_capture",
       "signature_sha256": "1e99a1701424fe709b6626d44151681f875541924a23045c4226c93dfe964cac",
       "disposition": "private-db2",
@@ -308,6 +348,14 @@
       "reason": "Reorders a result set the caller already holds so local dependents sort first. It is presentation applied to memory the caller owns, issues no statement, and has nothing to do with the database once the results exist."
     },
     {
+      "symbol": "db2_code_index_callers_find",
+      "signature_sha256": "d6b752f4267e3cc7c1fc0e0af302f658219b0441bf672a6f39d5fe2306485dbe",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.callers_find operation lists the recorded calls to a symbol within a project. The callee is matched exactly, so an overload or a differently qualified name is a different symbol here. What it lists is what the extractor recorded, so a call it could not see -- through a pointer, a macro, a dynamic dispatch -- is absent rather than reported as unknown."
+    },
+    {
       "symbol": "db2_code_index_code_search",
       "signature_sha256": "464ad397727fd789120b01121f56c7beb0b0bb64ff8c65606e0d8d264dd34036",
       "disposition": "wire-operation",
@@ -394,6 +442,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.requeue_drifted operation replaces the maintenance enqueue that re-ingests projects whose files have drifted. The forced re-ingest, the status the new rows carry and the pending-or-running dedup are fixed policy: without the dedup a repeated sweep would pile duplicate work onto the ingest drain, and the operation could not claim safe idempotency."
+    },
+    {
+      "symbol": "db2_code_index_term_find",
+      "signature_sha256": "16f1e79622aba043552cc388ee287c4024029ce9f2757b7eaf256a5816a0a385",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.term_find operation finds where an identifier is defined or used, across every current project. It answers in tiers: exact first, then prefix, then substring, each only when the one before found nothing -- so a reply may be about a name the caller did not ask for, and nothing in it says which tier answered. Definitions sort before uses. Dotted paths and projects rooted under a dotted directory are excluded."
     },
     {
       "symbol": "db2_code_index_unique_file_basename",

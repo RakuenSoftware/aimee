@@ -2119,6 +2119,68 @@ int db2_task_get_edges(int64_t task_id, task_edge_t *out, int max)
    return 0;
 }
 
+int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
+{
+   (void)identifier;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int canonical_index_find_project(const char *project, const char *identifier, term_hit_t *out,
+                                 int max)
+{
+   (void)project;
+   (void)identifier;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int canonical_index_find(const char *identifier, term_hit_t *out, int max)
+{
+   return canonical_index_find_project(NULL, identifier, out, max);
+}
+
+int canonical_index_find_excluding_project(const char *excluded_project, const char *identifier,
+                                           term_hit_t *out, int max)
+{
+   (void)excluded_project;
+   (void)identifier;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_code_index_callers_find(const char *project, const char *symbol, caller_hit_t *out, int max)
+{
+   (void)project;
+   (void)symbol;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int canonical_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
+                                 int max)
+{
+   (void)project;
+   (void)symbol;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int canonical_index_find_callers_excluding_project(const char *excluded_project, const char *symbol,
+                                                   caller_hit_t *out, int max)
+{
+   (void)excluded_project;
+   (void)symbol;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

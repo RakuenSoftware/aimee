@@ -2095,6 +2095,62 @@ int main(int argc, char **argv)
                                     NULL) == AIMEE_MODULE_CALL_OK);
    assert(task_edges_count == 0);
 
+   /* The term and caller listings, against an index with no files in it.
+    * term_find answers in tiers -- exact, then prefix, then substring -- and
+    * nothing in the reply says which one answered, so an empty index is the
+    * only state in which the three are indistinguishable for a good reason.
+    */
+   static aimee_db2_term_find_row_t term_find_rows[AIMEE_DB2_TERM_FIND_MAX_ROWS];
+   uint32_t term_find_count = 99;
+   assert(aimee_db2_term_find_call(call_client, &client, 9311, 0, "replay_symbol", term_find_rows,
+                                   AIMEE_DB2_TERM_FIND_MAX_ROWS, &term_find_count, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(term_find_count == 0);
+
+   static aimee_db2_term_find_in_project_row_t
+       term_find_in_project_rows[AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS];
+   uint32_t term_find_in_project_count = 99;
+   assert(aimee_db2_term_find_in_project_call(
+              call_client, &client, 9312, 0, "demo", "replay_symbol", term_find_in_project_rows,
+              AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS, &term_find_in_project_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(term_find_in_project_count == 0);
+
+   static aimee_db2_term_find_excluding_project_row_t
+       term_find_excluding_project_rows[AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS];
+   uint32_t term_find_excluding_project_count = 99;
+   assert(aimee_db2_term_find_excluding_project_call(
+              call_client, &client, 9313, 0, "demo", "replay_symbol",
+              term_find_excluding_project_rows, AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS,
+              &term_find_excluding_project_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(term_find_excluding_project_count == 0);
+
+   static aimee_db2_callers_find_row_t callers_find_rows[AIMEE_DB2_CALLERS_FIND_MAX_ROWS];
+   uint32_t callers_find_count = 99;
+   assert(aimee_db2_callers_find_call(call_client, &client, 9314, 0, "demo", "replay_symbol",
+                                      callers_find_rows, AIMEE_DB2_CALLERS_FIND_MAX_ROWS,
+                                      &callers_find_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(callers_find_count == 0);
+
+   static aimee_db2_callers_find_scoped_row_t
+       callers_find_scoped_rows[AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS];
+   uint32_t callers_find_scoped_count = 99;
+   assert(aimee_db2_callers_find_scoped_call(
+              call_client, &client, 9315, 0, "", "replay_symbol", callers_find_scoped_rows,
+              AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS, &callers_find_scoped_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(callers_find_scoped_count == 0);
+
+   static aimee_db2_callers_find_excluding_project_row_t
+       callers_find_excluding_project_rows[AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS];
+   uint32_t callers_find_excluding_project_count = 99;
+   assert(aimee_db2_callers_find_excluding_project_call(
+              call_client, &client, 9316, 0, "demo", "replay_symbol",
+              callers_find_excluding_project_rows,
+              AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS,
+              &callers_find_excluding_project_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(callers_find_excluding_project_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

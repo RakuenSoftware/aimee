@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "4b999764042e75e6331c00de98d16d547e3b2d3bc4dbe97058fb1e2d9aaca144"
+const ContractSHA256 = "ce873fa36422b379ef3f7fdfa7a0339e6b2e4d1175cde5bbeeb9a2873c5777fc"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -3398,6 +3398,319 @@ func DecodeProjectionEdgesForGenerationRequest(request []byte) (uint64, uint32, 
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return projectionGeneration, limit, nil
+}
+
+const EventTermFind = EventIndex
+const StageTermFind = FamilyIndex
+const OperationTermFind uint32 = 48
+const TermFindIdentifierMin = 1
+const TermFindIdentifierMax = 255
+
+// EncodeTermFindRequest writes the schema term_find declares, in order.
+func EncodeTermFindRequest(identifier string) ([]byte, error) {
+	if len(identifier) < TermFindIdentifierMin || len(identifier) > TermFindIdentifierMax || hasNUL(identifier) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, identifier, TermFindIdentifierMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationTermFind, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTermFindRequest reads it back, checking each field against its own bound.
+func DecodeTermFindRequest(request []byte) (string, error) {
+	var identifier string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTermFind || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if identifier, err = takeRowText(payload, &cursor, TermFindIdentifierMax); err != nil ||
+		len(identifier) < TermFindIdentifierMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return identifier, nil
+}
+
+const EventTermFindInProject = EventIndex
+const StageTermFindInProject = FamilyIndex
+const OperationTermFindInProject uint32 = 49
+const TermFindInProjectProjectMin = 0
+const TermFindInProjectProjectMax = 127
+const TermFindInProjectIdentifierMin = 1
+const TermFindInProjectIdentifierMax = 255
+
+// EncodeTermFindInProjectRequest writes the schema term_find_in_project declares, in order.
+func EncodeTermFindInProjectRequest(project string, identifier string) ([]byte, error) {
+	if len(project) < TermFindInProjectProjectMin || len(project) > TermFindInProjectProjectMax || hasNUL(project) ||
+		len(identifier) < TermFindInProjectIdentifierMin || len(identifier) > TermFindInProjectIdentifierMax || hasNUL(identifier) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, TermFindInProjectProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, identifier, TermFindInProjectIdentifierMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationTermFindInProject, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTermFindInProjectRequest reads it back, checking each field against its own bound.
+func DecodeTermFindInProjectRequest(request []byte) (string, string, error) {
+	var project string
+	var identifier string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTermFindInProject || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, TermFindInProjectProjectMax); err != nil ||
+		len(project) < TermFindInProjectProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if identifier, err = takeRowText(payload, &cursor, TermFindInProjectIdentifierMax); err != nil ||
+		len(identifier) < TermFindInProjectIdentifierMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, identifier, nil
+}
+
+const EventTermFindExcludingProject = EventIndex
+const StageTermFindExcludingProject = FamilyIndex
+const OperationTermFindExcludingProject uint32 = 50
+const TermFindExcludingProjectExcludedProjectMin = 1
+const TermFindExcludingProjectExcludedProjectMax = 127
+const TermFindExcludingProjectIdentifierMin = 1
+const TermFindExcludingProjectIdentifierMax = 255
+
+// EncodeTermFindExcludingProjectRequest writes the schema term_find_excluding_project declares, in order.
+func EncodeTermFindExcludingProjectRequest(excludedProject string, identifier string) ([]byte, error) {
+	if len(excludedProject) < TermFindExcludingProjectExcludedProjectMin || len(excludedProject) > TermFindExcludingProjectExcludedProjectMax || hasNUL(excludedProject) ||
+		len(identifier) < TermFindExcludingProjectIdentifierMin || len(identifier) > TermFindExcludingProjectIdentifierMax || hasNUL(identifier) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, excludedProject, TermFindExcludingProjectExcludedProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, identifier, TermFindExcludingProjectIdentifierMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationTermFindExcludingProject, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTermFindExcludingProjectRequest reads it back, checking each field against its own bound.
+func DecodeTermFindExcludingProjectRequest(request []byte) (string, string, error) {
+	var excludedProject string
+	var identifier string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTermFindExcludingProject || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if excludedProject, err = takeRowText(payload, &cursor, TermFindExcludingProjectExcludedProjectMax); err != nil ||
+		len(excludedProject) < TermFindExcludingProjectExcludedProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if identifier, err = takeRowText(payload, &cursor, TermFindExcludingProjectIdentifierMax); err != nil ||
+		len(identifier) < TermFindExcludingProjectIdentifierMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return excludedProject, identifier, nil
+}
+
+const EventCallersFind = EventIndex
+const StageCallersFind = FamilyIndex
+const OperationCallersFind uint32 = 51
+const CallersFindProjectMin = 0
+const CallersFindProjectMax = 127
+const CallersFindCalleeMin = 1
+const CallersFindCalleeMax = 255
+
+// EncodeCallersFindRequest writes the schema callers_find declares, in order.
+func EncodeCallersFindRequest(project string, callee string) ([]byte, error) {
+	if len(project) < CallersFindProjectMin || len(project) > CallersFindProjectMax || hasNUL(project) ||
+		len(callee) < CallersFindCalleeMin || len(callee) > CallersFindCalleeMax || hasNUL(callee) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, CallersFindProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, callee, CallersFindCalleeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCallersFind, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCallersFindRequest reads it back, checking each field against its own bound.
+func DecodeCallersFindRequest(request []byte) (string, string, error) {
+	var project string
+	var callee string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCallersFind || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, CallersFindProjectMax); err != nil ||
+		len(project) < CallersFindProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if callee, err = takeRowText(payload, &cursor, CallersFindCalleeMax); err != nil ||
+		len(callee) < CallersFindCalleeMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, callee, nil
+}
+
+const EventCallersFindScoped = EventIndex
+const StageCallersFindScoped = FamilyIndex
+const OperationCallersFindScoped uint32 = 52
+const CallersFindScopedProjectMin = 0
+const CallersFindScopedProjectMax = 127
+const CallersFindScopedCalleeMin = 1
+const CallersFindScopedCalleeMax = 255
+
+// EncodeCallersFindScopedRequest writes the schema callers_find_scoped declares, in order.
+func EncodeCallersFindScopedRequest(project string, callee string) ([]byte, error) {
+	if len(project) < CallersFindScopedProjectMin || len(project) > CallersFindScopedProjectMax || hasNUL(project) ||
+		len(callee) < CallersFindScopedCalleeMin || len(callee) > CallersFindScopedCalleeMax || hasNUL(callee) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, CallersFindScopedProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, callee, CallersFindScopedCalleeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCallersFindScoped, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCallersFindScopedRequest reads it back, checking each field against its own bound.
+func DecodeCallersFindScopedRequest(request []byte) (string, string, error) {
+	var project string
+	var callee string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCallersFindScoped || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, CallersFindScopedProjectMax); err != nil ||
+		len(project) < CallersFindScopedProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if callee, err = takeRowText(payload, &cursor, CallersFindScopedCalleeMax); err != nil ||
+		len(callee) < CallersFindScopedCalleeMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, callee, nil
+}
+
+const EventCallersFindExcludingProject = EventIndex
+const StageCallersFindExcludingProject = FamilyIndex
+const OperationCallersFindExcludingProject uint32 = 53
+const CallersFindExcludingProjectExcludedProjectMin = 1
+const CallersFindExcludingProjectExcludedProjectMax = 127
+const CallersFindExcludingProjectCalleeMin = 1
+const CallersFindExcludingProjectCalleeMax = 255
+
+// EncodeCallersFindExcludingProjectRequest writes the schema callers_find_excluding_project declares, in order.
+func EncodeCallersFindExcludingProjectRequest(excludedProject string, callee string) ([]byte, error) {
+	if len(excludedProject) < CallersFindExcludingProjectExcludedProjectMin || len(excludedProject) > CallersFindExcludingProjectExcludedProjectMax || hasNUL(excludedProject) ||
+		len(callee) < CallersFindExcludingProjectCalleeMin || len(callee) > CallersFindExcludingProjectCalleeMax || hasNUL(callee) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, excludedProject, CallersFindExcludingProjectExcludedProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, callee, CallersFindExcludingProjectCalleeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCallersFindExcludingProject, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCallersFindExcludingProjectRequest reads it back, checking each field against its own bound.
+func DecodeCallersFindExcludingProjectRequest(request []byte) (string, string, error) {
+	var excludedProject string
+	var callee string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCallersFindExcludingProject || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if excludedProject, err = takeRowText(payload, &cursor, CallersFindExcludingProjectExcludedProjectMax); err != nil ||
+		len(excludedProject) < CallersFindExcludingProjectExcludedProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if callee, err = takeRowText(payload, &cursor, CallersFindExcludingProjectCalleeMax); err != nil ||
+		len(callee) < CallersFindExcludingProjectCalleeMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return excludedProject, callee, nil
 }
 
 const EventTraceMiningRecord = EventLearning

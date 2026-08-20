@@ -7481,6 +7481,421 @@
       }
     },
     {
+      "family": "index",
+      "id": 48,
+      "name": "term_find",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed terms, calls and the files they were found in are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_term_find"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an exact match is tried first, then a prefix, then a substring, and only when the tier before it found nothing"
+        },
+        "fields": [
+          {
+            "name": "identifier",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "line_end",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "hit_project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "hit_file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "term_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 128
+      }
+    },
+    {
+      "family": "index",
+      "id": 49,
+      "name": "term_find_in_project",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed terms, calls and the files they were found in are relational DB2 rows.",
+      "c_symbols": [
+        "canonical_index_find_project",
+        "canonical_index_find"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty project searches every project, and the same three tiers apply as in the unscoped find"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "identifier",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "line_end",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "hit_project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "hit_file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "term_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 128
+      }
+    },
+    {
+      "family": "index",
+      "id": 50,
+      "name": "term_find_excluding_project",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed terms, calls and the files they were found in are relational DB2 rows.",
+      "c_symbols": [
+        "canonical_index_find_excluding_project"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the excluded project must be named, so this is every project but one rather than a filter that can be switched off"
+        },
+        "fields": [
+          {
+            "name": "excluded_project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "identifier",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "line_end",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "hit_project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "hit_file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "term_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 128
+      }
+    },
+    {
+      "family": "index",
+      "id": 51,
+      "name": "callers_find",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed terms, calls and the files they were found in are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_callers_find"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the callee is matched exactly and only recorded calls count, so a call the extractor did not see is not a miss but an absence"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "callee",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "caller_line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "caller_project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "caller_file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "caller_symbol",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 128
+      }
+    },
+    {
+      "family": "index",
+      "id": 52,
+      "name": "callers_find_scoped",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed terms, calls and the files they were found in are relational DB2 rows.",
+      "c_symbols": [
+        "canonical_index_find_callers"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty project searches every project, which the operation beside it cannot do"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "callee",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "caller_line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "caller_project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "caller_file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "caller_symbol",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 128
+      }
+    },
+    {
+      "family": "index",
+      "id": 53,
+      "name": "callers_find_excluding_project",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed terms, calls and the files they were found in are relational DB2 rows.",
+      "c_symbols": [
+        "canonical_index_find_callers_excluding_project"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the excluded project must be named, so this is every project but one rather than a filter that can be switched off"
+        },
+        "fields": [
+          {
+            "name": "excluded_project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "callee",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "caller_line",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "caller_project",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "caller_file_path",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "caller_symbol",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 128
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",

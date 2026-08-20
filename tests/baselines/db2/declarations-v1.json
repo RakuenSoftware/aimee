@@ -2739,9 +2739,15 @@
           "line": 89
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "canonical_index_find is index.term_find_in_project with no project: its whole body calls canonical_index_find_project with a null one, which the statement then drops. Reviewed as the same operation, and listed as a forward so the two cannot drift."
+      },
       "signature": "int canonical_index_find ( const char * identifier , term_hit_t * out , int max )",
       "signature_sha256": "abb45dde5d69a07f8221577feb99d8125c2155c2dde14a5ea50c4fd45ae88eaa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "canonical_index_find"
     },
     {
@@ -2755,9 +2761,15 @@
           "line": 109
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.callers_find_scoped operation lists the recorded calls to a symbol, in one project or in all of them. The empty project is what separates it from index.callers_find beside it, which always names one. The two order differently as a result: this one leads with the project name when it is searching all of them, and with the path when it is not."
+      },
       "signature": "int canonical_index_find_callers ( const char * project , const char * symbol , caller_hit_t * out , int max )",
       "signature_sha256": "9b0f0d631339801a6e96d64b5d52e76abae6977d1b6efa3afd3fe2817097a6dd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "canonical_index_find_callers"
     },
     {
@@ -2771,9 +2783,15 @@
           "line": 111
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.callers_find_excluding_project operation lists the recorded calls to a symbol everywhere but one project. The exclusion is required -- an empty name is refused -- so it is not index.callers_find_scoped with a filter inverted, and naming a project to search and one to exclude at once is refused."
+      },
       "signature": "int canonical_index_find_callers_excluding_project ( const char * excluded_project , const char * symbol , caller_hit_t * out , int max )",
       "signature_sha256": "4acd37b3042e94e5bb8bc0a96acde9f04b52e60ac3f4e4c03670714798638ec5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "canonical_index_find_callers_excluding_project"
     },
     {
@@ -2788,9 +2806,15 @@
           "line": 97
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.term_find_excluding_project operation finds an identifier everywhere but one project. The exclusion is required -- an empty name is refused -- so this is not index.term_find_in_project with a filter inverted, and the two cannot be combined. The same three tiers apply, so a reply here may also be about a name the caller did not ask for."
+      },
       "signature": "int canonical_index_find_excluding_project ( const char * excluded_project , const char * identifier , term_hit_t * out , int max )",
       "signature_sha256": "64bc1451f652c46655d171f707161161d95bf51e1adfb9f6d21068e32bf520b8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "canonical_index_find_excluding_project"
     },
     {
@@ -2805,9 +2829,15 @@
           "line": 93
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.term_find_in_project operation finds an identifier within one project, or within all of them when the project is empty. The tiers are the same as index.term_find's -- exact, then prefix, then substring -- and with an empty project the two run the same statement, which is why one of them should eventually go. Its callers reach them separately today."
+      },
       "signature": "int canonical_index_find_project ( const char * project , const char * identifier , term_hit_t * out , int max )",
       "signature_sha256": "8be1389f8f07d782edb75fc7a3ede92d2af3cd76d4dfec527c9eec1e02630b09",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "canonical_index_find_project"
     },
     {
@@ -4208,9 +4238,15 @@
           "line": 68
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.callers_find operation lists the recorded calls to a symbol within a project. The callee is matched exactly, so an overload or a differently qualified name is a different symbol here. What it lists is what the extractor recorded, so a call it could not see -- through a pointer, a macro, a dynamic dispatch -- is absent rather than reported as unknown."
+      },
       "signature": "int db2_code_index_callers_find ( const char * project , const char * symbol , caller_hit_t * out , int max )",
       "signature_sha256": "d6b752f4267e3cc7c1fc0e0af302f658219b0441bf672a6f39d5fe2306485dbe",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_callers_find"
     },
     {
@@ -4611,9 +4647,15 @@
           "line": 40
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.term_find operation finds where an identifier is defined or used, across every current project. It answers in tiers: exact first, then prefix, then substring, each only when the one before found nothing -- so a reply may be about a name the caller did not ask for, and nothing in it says which tier answered. Definitions sort before uses. Dotted paths and projects rooted under a dotted directory are excluded."
+      },
       "signature": "int db2_code_index_term_find ( const char * identifier , term_hit_t * out , int max )",
       "signature_sha256": "16f1e79622aba043552cc388ee287c4024029ce9f2757b7eaf256a5816a0a385",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_term_find"
     },
     {
@@ -27276,15 +27318,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "240d9e7bfae98350c12489afd0bd0539619312268f0768379f8c171d28c18488",
+  "fingerprint": "15ce21bab1385fbad8d1e48f6762473bcc073903fc5c56a17f8a6de4088f5bf2",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 417,
+    "audit_pending": 410,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 542
+    "reviewed": 549
   }
 }
