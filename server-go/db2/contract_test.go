@@ -84,6 +84,12 @@ type wireBaseline struct {
 			StateKey                   string   `json:"state_key"`
 			FinishedAt                 string   `json:"finished_at"`
 			JobID                      string   `json:"job_id"`
+			State                      string   `json:"state"`
+			Collection                 string   `json:"collection"`
+			LastError                  string   `json:"last_error"`
+			StateValue                 string   `json:"state_value"`
+			Version                    string   `json:"version"`
+			UpdatedAt                  string   `json:"updated_at"`
 			Project                    string   `json:"project"`
 			StaleL1Tier                string   `json:"stale_l1_tier"`
 			MaximumKinds               uint32   `json:"maximum_kinds"`
@@ -318,7 +324,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 126 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 133 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -416,34 +422,41 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[95].Name != "commits_in_last_7_days" ||
 		baseline.Operations[96].Name != "fidelity_attribution_count" ||
 		baseline.Operations[98].Name != "failed_query_bump" ||
-		baseline.Operations[99].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[100].Name != "doc_delete" ||
-		baseline.Operations[101].Name != "task_delete" ||
-		baseline.Operations[102].Name != "clear_project" ||
-		baseline.Operations[103].Name != "clear_current_project" ||
-		baseline.Operations[104].Name != "document_exists" ||
-		baseline.Operations[105].Name != "blob_referenced" ||
-		baseline.Operations[106].Name != "fence_active" ||
-		baseline.Operations[107].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[108].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[109].Name != "release_get_active" ||
-		baseline.Operations[110].Name != "prospective_sweep_expired" ||
-		baseline.Operations[111].Name != "directive_sweep_expired" ||
-		baseline.Operations[112].Name != "mark_revisit_due" ||
-		baseline.Operations[113].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[114].Name != "evidence_reembed_all" ||
-		baseline.Operations[115].Name != "curator_reembed_all" ||
-		baseline.Operations[116].Name != "synth_reenqueue_all" ||
-		baseline.Operations[117].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[118].Name != "directive_suppress" ||
-		baseline.Operations[119].Name != "directive_record_surface" ||
-		baseline.Operations[120].Name != "async_pending_count" ||
+		baseline.Operations[102].Name != "evidence_mark_failed" ||
+		baseline.Operations[103].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[104].Name != "doc_delete" ||
+		baseline.Operations[105].Name != "task_delete" ||
+		baseline.Operations[106].Name != "clear_project" ||
+		baseline.Operations[107].Name != "clear_current_project" ||
+		baseline.Operations[108].Name != "document_exists" ||
+		baseline.Operations[109].Name != "blob_referenced" ||
+		baseline.Operations[110].Name != "fence_active" ||
+		baseline.Operations[111].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[112].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[113].Name != "release_get_active" ||
+		baseline.Operations[114].Name != "prospective_sweep_expired" ||
+		baseline.Operations[115].Name != "directive_sweep_expired" ||
+		baseline.Operations[116].Name != "mark_revisit_due" ||
+		baseline.Operations[117].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[118].Name != "evidence_reembed_all" ||
+		baseline.Operations[119].Name != "curator_reembed_all" ||
+		baseline.Operations[120].Name != "synth_reenqueue_all" ||
+		baseline.Operations[121].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[122].Name != "directive_suppress" ||
+		baseline.Operations[123].Name != "directive_record_surface" ||
+		baseline.Operations[124].Name != "async_pending_count" ||
 		baseline.Operations[97].Name != "artifact_stamp_reflected" ||
-		baseline.Operations[121].Name != "runtime_state_touch" ||
-		baseline.Operations[122].Name != "synth_enqueue" ||
-		baseline.Operations[123].Name != "synth_mark_done" ||
-		baseline.Operations[124].Name != "reembed_mark_finished" ||
-		baseline.Operations[125].Name != "mining_job_try_lock" {
+		baseline.Operations[125].Name != "runtime_state_touch" ||
+		baseline.Operations[126].Name != "synth_enqueue" ||
+		baseline.Operations[127].Name != "synth_mark_done" ||
+		baseline.Operations[128].Name != "reembed_mark_finished" ||
+		baseline.Operations[129].Name != "mining_job_try_lock" ||
+		baseline.Operations[99].Name != "artifact_set_state" ||
+		baseline.Operations[100].Name != "artifact_register_exemplar" ||
+		baseline.Operations[101].Name != "evidence_enqueue" ||
+		baseline.Operations[130].Name != "synth_mark_failed" ||
+		baseline.Operations[131].Name != "runtime_state_set" ||
+		baseline.Operations[132].Name != "set_active_embedder_version" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -686,7 +699,7 @@ func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
 
 func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	operation := baseline.Operations[116]
+	operation := baseline.Operations[120]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -1000,9 +1013,9 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 			EncodeAntiPatternBumpRequest, DecodeAntiPatternBumpRequest, DecodeAntiPatternBumpReply},
 		{90, "anti_pattern_delete", "learning", 42,
 			EncodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteReply},
-		{100, "doc_delete", "organization", 43,
+		{104, "doc_delete", "organization", 43,
 			EncodeDocDeleteRequest, DecodeDocDeleteRequest, DecodeDocDeleteReply},
-		{101, "task_delete", "organization", 44,
+		{105, "task_delete", "organization", 44,
 			EncodeTaskDeleteRequest, DecodeTaskDeleteRequest, DecodeTaskDeleteReply},
 	} {
 		entry := baseline.Operations[operation.index]
@@ -1036,8 +1049,8 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 
 func TestDirectiveIDOperationsMatchEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	suppress := baseline.Operations[118]
-	surface := baseline.Operations[119]
+	suppress := baseline.Operations[122]
+	surface := baseline.Operations[123]
 	if suppress.Family != "maintenance" || surface.Family != "maintenance" {
 		t.Fatalf("families = %q/%q, want maintenance", suppress.Family, surface.Family)
 	}
@@ -1209,8 +1222,8 @@ func TestReleaseGetActiveMatchesEverySharedCVector(t *testing.T) {
 
 func TestVectorRebuildLockMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	acquire := baseline.Operations[107]
-	release := baseline.Operations[108]
+	acquire := baseline.Operations[111]
+	release := baseline.Operations[112]
 	if acquire.Family != "custody" || release.Family != "custody" {
 		t.Fatalf("families = %q/%q, want custody", acquire.Family, release.Family)
 	}
@@ -2578,6 +2591,104 @@ func singleStringAckVectors(t *testing.T, index int, want string,
 	}
 	for _, vector := range operation.Request.Negative {
 		if _, err := decodeRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+
+	for _, vector := range operation.Reply.Positive {
+		reply, err := encodeReply()
+		if err != nil || hex.EncodeToString(reply) != vector.Hex {
+			t.Fatalf("reply encode: %v %x", err, reply)
+		}
+		if err := decodeReply(reply); err != nil {
+			t.Fatalf("reply decode: %v", err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if err := decodeReply(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("reply %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestArtifactSetStateMatchesEverySharedCVector(t *testing.T) {
+	stringPairAckVectors(t, operationIndex(t, "artifact_set_state"),
+		loadWireBaseline(t).Operations[operationIndex(t, "artifact_set_state")].Request.State,
+		loadWireBaseline(t).Operations[operationIndex(t, "artifact_set_state")].Request.ArtifactID,
+		EncodeArtifactSetStateRequest, DecodeArtifactSetStateRequest,
+		EncodeArtifactSetStateReply, DecodeArtifactSetStateReply)
+}
+
+func TestArtifactRegisterExemplarMatchesEverySharedCVector(t *testing.T) {
+	stringPairAckVectors(t, operationIndex(t, "artifact_register_exemplar"),
+		loadWireBaseline(t).Operations[operationIndex(t, "artifact_register_exemplar")].Request.ArtifactID,
+		loadWireBaseline(t).Operations[operationIndex(t, "artifact_register_exemplar")].Request.Collection,
+		EncodeArtifactRegisterExemplarRequest, DecodeArtifactRegisterExemplarRequest,
+		EncodeArtifactRegisterExemplarReply, DecodeArtifactRegisterExemplarReply)
+}
+
+func TestEvidenceEnqueueMatchesEverySharedCVector(t *testing.T) {
+	stringPairAckVectors(t, operationIndex(t, "evidence_enqueue"),
+		loadWireBaseline(t).Operations[operationIndex(t, "evidence_enqueue")].Request.ArtifactID,
+		loadWireBaseline(t).Operations[operationIndex(t, "evidence_enqueue")].Request.Collection,
+		EncodeEvidenceEnqueueRequest, DecodeEvidenceEnqueueRequest,
+		EncodeEvidenceEnqueueReply, DecodeEvidenceEnqueueReply)
+}
+
+func TestEvidenceMarkFailedMatchesEverySharedCVector(t *testing.T) {
+	stringPairAckVectors(t, operationIndex(t, "evidence_mark_failed"),
+		loadWireBaseline(t).Operations[operationIndex(t, "evidence_mark_failed")].Request.ArtifactID,
+		loadWireBaseline(t).Operations[operationIndex(t, "evidence_mark_failed")].Request.LastError,
+		EncodeEvidenceMarkFailedRequest, DecodeEvidenceMarkFailedRequest,
+		EncodeEvidenceMarkFailedReply, DecodeEvidenceMarkFailedReply)
+}
+
+func TestSynthMarkFailedMatchesEverySharedCVector(t *testing.T) {
+	stringPairAckVectors(t, operationIndex(t, "synth_mark_failed"),
+		loadWireBaseline(t).Operations[operationIndex(t, "synth_mark_failed")].Request.ArtifactID,
+		loadWireBaseline(t).Operations[operationIndex(t, "synth_mark_failed")].Request.LastError,
+		EncodeSynthMarkFailedRequest, DecodeSynthMarkFailedRequest,
+		EncodeSynthMarkFailedReply, DecodeSynthMarkFailedReply)
+}
+
+func TestRuntimeStateSetMatchesEverySharedCVector(t *testing.T) {
+	stringPairAckVectors(t, operationIndex(t, "runtime_state_set"),
+		loadWireBaseline(t).Operations[operationIndex(t, "runtime_state_set")].Request.StateKey,
+		loadWireBaseline(t).Operations[operationIndex(t, "runtime_state_set")].Request.StateValue,
+		EncodeRuntimeStateSetRequest, DecodeRuntimeStateSetRequest,
+		EncodeRuntimeStateSetReply, DecodeRuntimeStateSetReply)
+}
+
+func TestSetActiveEmbedderVersionMatchesEverySharedCVector(t *testing.T) {
+	stringPairAckVectors(t, operationIndex(t, "set_active_embedder_version"),
+		loadWireBaseline(t).Operations[operationIndex(t, "set_active_embedder_version")].Request.Version,
+		loadWireBaseline(t).Operations[operationIndex(t, "set_active_embedder_version")].Request.UpdatedAt,
+		EncodeSetActiveEmbedderVersionRequest, DecodeSetActiveEmbedderVersionRequest,
+		EncodeSetActiveEmbedderVersionReply, DecodeSetActiveEmbedderVersionReply)
+}
+
+// stringPairAckVectors drives one db2-envelope-string-pair-ack-v1 operation
+// through every vector. Both strings are compared on decode: a decoder that
+// read them in the wrong order would still decode, and the round trip alone
+// would not notice.
+func stringPairAckVectors(t *testing.T, index int, wantFirst string, wantSecond string,
+	encodeRequest func(string, string) ([]byte, error),
+	decodeRequest func([]byte) (string, string, error),
+	encodeReply func() ([]byte, error),
+	decodeReply func([]byte) error) {
+	t.Helper()
+	operation := loadWireBaseline(t).Operations[index]
+
+	request, err := encodeRequest(wantFirst, wantSecond)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	first, second, err := decodeRequest(request)
+	if err != nil || first != wantFirst || second != wantSecond {
+		t.Fatalf("request decode: %v %q %q", err, first, second)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := decodeRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}

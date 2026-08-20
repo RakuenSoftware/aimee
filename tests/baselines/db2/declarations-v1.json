@@ -3477,9 +3477,15 @@
           "line": 89
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_register_exemplar operation replaces the exemplar insert. Unlike the queue inserts beside it, this one has no conflict clause, so registering the same artifact and collection twice fails rather than being ignored -- a difference worth recording because both look identical from the wire."
+      },
       "signature": "int db2_artifact_register_exemplar ( const char * artifact_id , const char * collection )",
       "signature_sha256": "f2f0c6014383b7a62830e3c6abba57a3bceaccca6a0c4b29aa2657849aafe9d1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_register_exemplar"
     },
     {
@@ -3534,9 +3540,15 @@
           "line": 78
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_set_state operation replaces the state write. The statement stores whatever state it is given -- nothing checks the value against a set of legal states -- so a caller can put an artifact into a state no reader understands. That is the backend's behaviour and is on the record because the wire, which bounds only the length, cannot show it."
+      },
       "signature": "int db2_artifact_set_state ( const char * id , const char * new_state )",
       "signature_sha256": "8b37c5aec52f41a89ddc43835bd016e1bbc6c9c5fa04ea64978fc91e17324117",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_set_state"
     },
     {
@@ -8353,9 +8365,15 @@
           "line": 16
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.evidence_enqueue operation replaces the evidence queue insert. Enqueuing something already queued does nothing and is acknowledged, so a caller cannot tell a new job from a repeat."
+      },
       "signature": "int db2_evidence_enqueue ( const char * artifact_id , const char * collection )",
       "signature_sha256": "37928e1972a0f07035a37a7de325f942191c33449e2b99c057b006b629651689",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_evidence_enqueue"
     },
     {
@@ -8385,9 +8403,15 @@
           "line": 25
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.evidence_mark_failed operation replaces the failure write. The attempt counter is incremented by the statement rather than supplied, so a caller can record that something failed but neither set the count nor read it back. An empty error text is allowed, which is how a failure with nothing to say is recorded."
+      },
       "signature": "int db2_evidence_mark_failed ( const char * artifact_id , const char * error )",
       "signature_sha256": "18f331c25d89d55218bdaa4f9403d950224448815edb03bbdb6887ccfdb6fbb9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_evidence_mark_failed"
     },
     {
@@ -10422,9 +10446,15 @@
           "line": 22
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.runtime_state_set operation replaces the runtime-state write. Unlike runtime_state_touch beside it, the value is the caller's rather than DB2's clock, and an existing key is overwritten rather than refused -- this sets, it does not create."
+      },
       "signature": "int db2_kb_runtime_state_set ( const char * key , const char * value )",
       "signature_sha256": "a7aae30e0d25e3ef38271b3a9ab426e1d1f130544d38f86a8197c7a6fb4545e6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_runtime_state_set"
     },
     {
@@ -13612,9 +13642,15 @@
           "line": 90
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.set_active_embedder_version operation replaces the version write. It targets one fixed row, so this switches the active version rather than adding one, and the stamp is the caller's. What it does not do is check that the version has any embeddings; the count that was supposed to gate that is recorded as broken at db2_kb_service_count_embeddings_for_version."
+      },
       "signature": "int db2_kb_service_set_active_embedder_version ( const char * version , const char * updated_at )",
       "signature_sha256": "75cb37b38aaf01c9a9cfbd2ac6a9bcedb3c2efbcf1d33e6709914c598f864216",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_set_active_embedder_version"
     },
     {
@@ -22024,9 +22060,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.synth_mark_failed operation replaces the synthesis failure write. It is the mirror of evidence_mark_failed against the other queue, and shares its property: the attempt count is the statement's, not the caller's."
+      },
       "signature": "int db2_synth_mark_failed ( const char * artifact_id , const char * error )",
       "signature_sha256": "979783f444dd5be95895eda4229380485ea35242a1ccd6063da89678256247c2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_synth_mark_failed"
     },
     {
@@ -26580,15 +26622,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "5ff681c14f3219562cffcd430cf3a846a88f7e929527dcb0df5f8a8d4b7baf43",
+  "fingerprint": "4fd8aec40468beca4e73e47d57d762f3842b7a8b302a282e16ef442659842af4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 532,
+    "audit_pending": 525,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 426
+    "reviewed": 433
   }
 }

@@ -1542,6 +1542,55 @@ int db2_mining_job_try_lock(const char *job_id)
    return 0;
 }
 
+int db2_artifact_set_state(const char *state, const char *artifact_id)
+{
+   (void)state;
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_artifact_register_exemplar(const char *artifact_id, const char *collection)
+{
+   (void)artifact_id;
+   (void)collection;
+   return 0;
+}
+
+int db2_evidence_enqueue(const char *artifact_id, const char *collection)
+{
+   (void)artifact_id;
+   (void)collection;
+   return 0;
+}
+
+int db2_evidence_mark_failed(const char *artifact_id, const char *last_error)
+{
+   (void)artifact_id;
+   (void)last_error;
+   return 0;
+}
+
+int db2_synth_mark_failed(const char *artifact_id, const char *last_error)
+{
+   (void)artifact_id;
+   (void)last_error;
+   return 0;
+}
+
+int db2_kb_runtime_state_set(const char *state_key, const char *state_value)
+{
+   (void)state_key;
+   (void)state_value;
+   return 0;
+}
+
+int db2_kb_service_set_active_embedder_version(const char *version, const char *updated_at)
+{
+   (void)version;
+   (void)updated_at;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

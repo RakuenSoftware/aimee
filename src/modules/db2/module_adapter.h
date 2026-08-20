@@ -92,6 +92,13 @@ typedef struct
    int (*synth_mark_done)(const char *artifact_id);
    int (*reembed_mark_finished)(const char *finished_at);
    int (*mining_job_try_lock)(const char *job_id);
+   int (*artifact_set_state)(const char *state, const char *artifact_id);
+   int (*artifact_register_exemplar)(const char *artifact_id, const char *collection);
+   int (*evidence_enqueue)(const char *artifact_id, const char *collection);
+   int (*evidence_mark_failed)(const char *artifact_id, const char *last_error);
+   int (*synth_mark_failed)(const char *artifact_id, const char *last_error);
+   int (*runtime_state_set)(const char *state_key, const char *state_value);
+   int (*set_active_embedder_version)(const char *version, const char *updated_at);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);

@@ -156,6 +156,22 @@
       "reason": "Generates a random artifact identifier in the caller's buffer, touching no database. It stays private, and one property is worth recording while looking at it: when the platform random source fails the bytes are zeroed rather than the failure reported, so every caller in that state generates the same all-zero identifier."
     },
     {
+      "symbol": "db2_artifact_register_exemplar",
+      "signature_sha256": "f2f0c6014383b7a62830e3c6abba57a3bceaccca6a0c4b29aa2657849aafe9d1",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_register_exemplar operation replaces the exemplar insert. Unlike the queue inserts beside it, this one has no conflict clause, so registering the same artifact and collection twice fails rather than being ignored -- a difference worth recording because both look identical from the wire."
+    },
+    {
+      "symbol": "db2_artifact_set_state",
+      "signature_sha256": "8b37c5aec52f41a89ddc43835bd016e1bbc6c9c5fa04ea64978fc91e17324117",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_set_state operation replaces the state write. The statement stores whatever state it is given -- nothing checks the value against a set of legal states -- so a caller can put an artifact into a state no reader understands. That is the backend's behaviour and is on the record because the wire, which bounds only the length, cannot show it."
+    },
+    {
       "symbol": "db2_artifact_stamp_reflected",
       "signature_sha256": "a7da3057cbd990cbf240f21db0985b847c801a0e9ca2868dcae205e9bef98602",
       "disposition": "wire-operation",
@@ -404,6 +420,22 @@
       "reason": "The symbol counterpart of the file key builder, and private for the same reason. Both encode their components the same way and both must stay that way; a divergence produces keys that look valid and match nothing."
     },
     {
+      "symbol": "db2_evidence_enqueue",
+      "signature_sha256": "37928e1972a0f07035a37a7de325f942191c33449e2b99c057b006b629651689",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.evidence_enqueue operation replaces the evidence queue insert. Enqueuing something already queued does nothing and is acknowledged, so a caller cannot tell a new job from a repeat."
+    },
+    {
+      "symbol": "db2_evidence_mark_failed",
+      "signature_sha256": "18f331c25d89d55218bdaa4f9403d950224448815edb03bbdb6887ccfdb6fbb9",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.evidence_mark_failed operation replaces the failure write. The attempt counter is incremented by the statement rather than supplied, so a caller can record that something failed but neither set the count nor read it back. An empty error text is allowed, which is how a failure with nothing to say is recorded."
+    },
+    {
       "symbol": "db2_evidence_reembed_all",
       "signature_sha256": "035c143627d98f44fe725f139c22c1704f5e545911052c7be5d3ba5204e20444",
       "disposition": "wire-operation",
@@ -514,6 +546,14 @@
       "family": "custody",
       "db3_placement": "retained-db2",
       "reason": "The typed custody.release_get_active operation reads the pointer to the release the system currently answers as. Zero covers three different situations: no key, a value that does not parse, and a value that is not positive. The parse happens through atoll, which returns zero for garbage without saying so, and the catalog records both collapses rather than letting a zero read as a confident no release."
+    },
+    {
+      "symbol": "db2_kb_runtime_state_set",
+      "signature_sha256": "a7aae30e0d25e3ef38271b3a9ab426e1d1f130544d38f86a8197c7a6fb4545e6",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.runtime_state_set operation replaces the runtime-state write. Unlike runtime_state_touch beside it, the value is the caller's rather than DB2's clock, and an existing key is overwritten rather than refused -- this sets, it does not create."
     },
     {
       "symbol": "db2_kb_runtime_state_set_now",
@@ -1578,6 +1618,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The session-directive cJSON array is caller presentation; a typed bounded briefing query returns directive records."
+    },
+    {
+      "symbol": "db2_kb_service_set_active_embedder_version",
+      "signature_sha256": "75cb37b38aaf01c9a9cfbd2ac6a9bcedb3c2efbcf1d33e6709914c598f864216",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.set_active_embedder_version operation replaces the version write. It targets one fixed row, so this switches the active version rather than adding one, and the stamp is the caller's. What it does not do is check that the version has any embeddings; the count that was supposed to gate that is recorded as broken at db2_kb_service_count_embeddings_for_version."
     },
     {
       "symbol": "db2_kb_service_task_add_edge_json",
@@ -2818,6 +2866,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.synth_mark_done operation replaces the completion update. Marking something already done, or never queued at all, updates nothing and is acknowledged just the same; the reply says the statement ran, not that it changed anything."
+    },
+    {
+      "symbol": "db2_synth_mark_failed",
+      "signature_sha256": "979783f444dd5be95895eda4229380485ea35242a1ccd6063da89678256247c2",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.synth_mark_failed operation replaces the synthesis failure write. It is the mirror of evidence_mark_failed against the other queue, and shares its property: the attempt count is the statement's, not the caller's."
     },
     {
       "symbol": "db2_synth_reenqueue_all",

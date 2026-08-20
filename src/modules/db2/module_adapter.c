@@ -689,6 +689,13 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .synth_mark_done = db2_synth_mark_done,
        .reembed_mark_finished = db2_kb_service_mark_reembed_finished,
        .mining_job_try_lock = db2_mining_job_try_lock,
+       .artifact_set_state = db2_artifact_set_state,
+       .artifact_register_exemplar = db2_artifact_register_exemplar,
+       .evidence_enqueue = db2_evidence_enqueue,
+       .evidence_mark_failed = db2_evidence_mark_failed,
+       .synth_mark_failed = db2_synth_mark_failed,
+       .runtime_state_set = db2_kb_runtime_state_set,
+       .set_active_embedder_version = db2_kb_service_set_active_embedder_version,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -799,9 +806,11 @@ typedef struct
    uint32_t bound;
 } db2_string_count_binding_t;
 
-/* The argument buffer is sized for the widest string any of these operations
- * accepts; each decoder still enforces its own narrower bound. */
-#define DB2_STRING_COUNT_ARGUMENT_MAX AIMEE_DB2_ANTI_PATTERN_EXISTS_EXACT_ARGUMENT_MAX
+/* The buffers below are sized by the generator from every operation on their
+ * format, because sizing them by naming one operation's bound is correct only
+ * until a wider one joins -- which is how a decode that should have succeeded
+ * was refused by its own capacity check. */
+#define DB2_STRING_COUNT_ARGUMENT_MAX AIMEE_DB2_STRING_COUNT_ARGUMENT_MAX
 
 static aimee_module_status_t
 db2_dispatch_string_count(const db2_string_count_binding_t *bindings, size_t count,
@@ -850,7 +859,7 @@ db2_dispatch_string_ack(const db2_string_ack_binding_t *bindings, size_t count,
                         size_t response_capacity, uint32_t *response_len,
                         const aimee_module_invocation_t *invocation, int *handled)
 {
-   char argument[DB2_STRING_COUNT_ARGUMENT_MAX + 1];
+   char argument[AIMEE_DB2_STRING_ACK_ARGUMENT_MAX + 1];
    *handled = 0;
    for (size_t index = 0; index < count; index++)
    {
@@ -863,6 +872,52 @@ db2_dispatch_string_ack(const db2_string_ack_binding_t *bindings, size_t count,
       if (!binding->write)
          return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
       int written = binding->write(argument);
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (written != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      if (binding->encode(response_body, response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+   return AIMEE_MODULE_STATUS_OK;
+}
+
+/* db2-envelope-string-pair-ack-v1: two bounded strings in, an acknowledgement
+ * out. The second buffer is sized independently of the first because these
+ * carry an error text or a reason, which is wider than the identifier beside
+ * it. */
+typedef struct
+{
+   int (*decode)(const uint8_t *input, size_t input_len, char *first, size_t first_capacity,
+                 char *second, size_t second_capacity);
+   int (*encode)(uint8_t *output, size_t capacity, uint32_t *output_len);
+   int (*write)(const char *first, const char *second);
+} db2_string_pair_ack_binding_t;
+
+#define DB2_STRING_PAIR_FIRST_MAX  AIMEE_DB2_STRING_PAIR_FIRST_MAX
+#define DB2_STRING_PAIR_SECOND_MAX AIMEE_DB2_STRING_PAIR_SECOND_MAX
+
+static aimee_module_status_t db2_dispatch_string_pair_ack(
+    const db2_string_pair_ack_binding_t *bindings, size_t count, const uint8_t *request_body,
+    uint32_t request_len, uint8_t *response_body, size_t response_capacity, uint32_t *response_len,
+    const aimee_module_invocation_t *invocation, int *handled)
+{
+   char first[DB2_STRING_PAIR_FIRST_MAX + 1];
+   char second[DB2_STRING_PAIR_SECOND_MAX + 1];
+   *handled = 0;
+   for (size_t index = 0; index < count; index++)
+   {
+      const db2_string_pair_ack_binding_t *binding = &bindings[index];
+      if (binding->decode(request_body, request_len, first, sizeof(first), second,
+                          sizeof(second)) != 0)
+         continue;
+      *handled = 1;
+      if (response_capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!binding->write)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int written = binding->write(first, second);
       if (aimee_module_invocation_cancelled(invocation))
          return AIMEE_MODULE_STATUS_CANCELLED;
       if (written != 0)
@@ -2923,6 +2978,28 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (handled)
             return status;
       }
+      {
+         /* Every db2-envelope-string-pair-ack-v1 operation this family owns. */
+         const db2_string_pair_ack_binding_t bindings[] = {
+             {aimee_db2_artifact_set_state_request_decode,
+              aimee_db2_artifact_set_state_reply_encode,
+              backend ? backend->artifact_set_state : NULL},
+             {aimee_db2_artifact_register_exemplar_request_decode,
+              aimee_db2_artifact_register_exemplar_reply_encode,
+              backend ? backend->artifact_register_exemplar : NULL},
+             {aimee_db2_evidence_enqueue_request_decode, aimee_db2_evidence_enqueue_reply_encode,
+              backend ? backend->evidence_enqueue : NULL},
+             {aimee_db2_evidence_mark_failed_request_decode,
+              aimee_db2_evidence_mark_failed_reply_encode,
+              backend ? backend->evidence_mark_failed : NULL},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_pair_ack(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
@@ -3049,6 +3126,24 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          };
          int handled = 0;
          aimee_module_status_t status = db2_dispatch_string_ack(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
+      {
+         /* Every db2-envelope-string-pair-ack-v1 operation this family owns. */
+         const db2_string_pair_ack_binding_t bindings[] = {
+             {aimee_db2_synth_mark_failed_request_decode, aimee_db2_synth_mark_failed_reply_encode,
+              backend ? backend->synth_mark_failed : NULL},
+             {aimee_db2_runtime_state_set_request_decode, aimee_db2_runtime_state_set_reply_encode,
+              backend ? backend->runtime_state_set : NULL},
+             {aimee_db2_set_active_embedder_version_request_decode,
+              aimee_db2_set_active_embedder_version_reply_encode,
+              backend ? backend->set_active_embedder_version : NULL},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_pair_ack(
              bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
              response_body, response_capacity, response_len, invocation, &handled);
          if (handled)

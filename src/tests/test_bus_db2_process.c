@@ -539,6 +539,33 @@ int main(int argc, char **argv)
    assert(aimee_db2_mining_job_try_lock_call(call_client, &client, 9147, 0, "replay-argument",
                                              &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
 
+   /* Seven pair statements against real tables. Two of them insert into tables
+    * whose artifact column references artifacts(id), so on an empty schema the
+    * database refuses them -- which the expected result states rather than
+    * hides. */
+   assert(aimee_db2_artifact_set_state_call(call_client, &client, 9160, 0, "proposed",
+                                            "replay-artifact", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
+   assert(aimee_db2_artifact_register_exemplar_call(call_client, &client, 9161, 0,
+                                                    "replay-artifact", "case_exemplars", NULL,
+                                                    NULL) == AIMEE_MODULE_CALL_INTERNAL);
+
+   assert(aimee_db2_evidence_enqueue_call(call_client, &client, 9162, 0, "replay-artifact",
+                                          "evidence", NULL, NULL) == AIMEE_MODULE_CALL_INTERNAL);
+
+   assert(aimee_db2_evidence_mark_failed_call(call_client, &client, 9163, 0, "replay-artifact",
+                                              "replay error", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
+   assert(aimee_db2_synth_mark_failed_call(call_client, &client, 9164, 0, "replay-artifact",
+                                           "replay error", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
+   assert(aimee_db2_runtime_state_set_call(call_client, &client, 9165, 0, "replay-key",
+                                           "replay-value", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+
+   assert(aimee_db2_set_active_embedder_version_call(call_client, &client, 9166, 0,
+                                                     "replay-version", "2026-01-01T00:00:00Z", NULL,
+                                                     NULL) == AIMEE_MODULE_CALL_OK);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

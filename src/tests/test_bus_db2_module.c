@@ -101,6 +101,13 @@ typedef struct
    int (*synth_mark_done)(const char *artifact_id);
    int (*reembed_mark_finished)(const char *finished_at);
    int (*mining_job_try_lock)(const char *job_id);
+   int (*artifact_set_state)(const char *state, const char *artifact_id);
+   int (*artifact_register_exemplar)(const char *artifact_id, const char *collection);
+   int (*evidence_enqueue)(const char *artifact_id, const char *collection);
+   int (*evidence_mark_failed)(const char *artifact_id, const char *last_error);
+   int (*synth_mark_failed)(const char *artifact_id, const char *last_error);
+   int (*runtime_state_set)(const char *state_key, const char *state_value);
+   int (*set_active_embedder_version)(const char *version, const char *updated_at);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -323,6 +330,9 @@ static int mining_calls;
 static int string_read_calls[4];
 static int cross_family_calls[4];
 static int batch8_calls[8];
+static int pair_calls[7];
+static char pair_first_seen[64];
+static char pair_second_seen[64];
 static char string_read_argument_seen[64];
 static int64_t mining_watermark_seen;
 static int corpus_limit_seen;
@@ -775,6 +785,49 @@ static int batch8_impl(int which, const char *argument)
    snprintf(string_read_argument_seen, sizeof(string_read_argument_seen), "%s",
             argument ? argument : "");
    return BATCH8_ACKNOWLEDGES[which] ? 0 : which;
+}
+
+static int pair_impl(int which, const char *first, const char *second)
+{
+   pair_calls[which]++;
+   snprintf(pair_first_seen, sizeof(pair_first_seen), "%s", first ? first : "");
+   snprintf(pair_second_seen, sizeof(pair_second_seen), "%s", second ? second : "");
+   return 0;
+}
+
+static int artifact_set_state(const char *state, const char *artifact_id)
+{
+   return pair_impl(0, state, artifact_id);
+}
+
+static int artifact_register_exemplar(const char *artifact_id, const char *collection)
+{
+   return pair_impl(1, artifact_id, collection);
+}
+
+static int evidence_enqueue(const char *artifact_id, const char *collection)
+{
+   return pair_impl(2, artifact_id, collection);
+}
+
+static int evidence_mark_failed(const char *artifact_id, const char *last_error)
+{
+   return pair_impl(3, artifact_id, last_error);
+}
+
+static int synth_mark_failed(const char *artifact_id, const char *last_error)
+{
+   return pair_impl(4, artifact_id, last_error);
+}
+
+static int runtime_state_set(const char *state_key, const char *state_value)
+{
+   return pair_impl(5, state_key, state_value);
+}
+
+static int set_active_embedder_version(const char *version, const char *updated_at)
+{
+   return pair_impl(6, version, updated_at);
 }
 
 static int artifact_stamp_reflected(const char *artifact_id)
@@ -1260,6 +1313,55 @@ int db2_kb_service_mark_reembed_finished(const char *finished_at)
 int db2_mining_job_try_lock(const char *job_id)
 {
    (void)job_id;
+   return 0;
+}
+
+int db2_artifact_set_state(const char *state, const char *artifact_id)
+{
+   (void)state;
+   (void)artifact_id;
+   return 0;
+}
+
+int db2_artifact_register_exemplar(const char *artifact_id, const char *collection)
+{
+   (void)artifact_id;
+   (void)collection;
+   return 0;
+}
+
+int db2_evidence_enqueue(const char *artifact_id, const char *collection)
+{
+   (void)artifact_id;
+   (void)collection;
+   return 0;
+}
+
+int db2_evidence_mark_failed(const char *artifact_id, const char *last_error)
+{
+   (void)artifact_id;
+   (void)last_error;
+   return 0;
+}
+
+int db2_synth_mark_failed(const char *artifact_id, const char *last_error)
+{
+   (void)artifact_id;
+   (void)last_error;
+   return 0;
+}
+
+int db2_kb_runtime_state_set(const char *state_key, const char *state_value)
+{
+   (void)state_key;
+   (void)state_value;
+   return 0;
+}
+
+int db2_kb_service_set_active_embedder_version(const char *version, const char *updated_at)
+{
+   (void)version;
+   (void)updated_at;
    return 0;
 }
 
@@ -2602,6 +2704,13 @@ int main(void)
        .synth_mark_done = synth_mark_done,
        .reembed_mark_finished = reembed_mark_finished,
        .mining_job_try_lock = mining_job_try_lock,
+       .artifact_set_state = artifact_set_state,
+       .artifact_register_exemplar = artifact_register_exemplar,
+       .evidence_enqueue = evidence_enqueue,
+       .evidence_mark_failed = evidence_mark_failed,
+       .synth_mark_failed = synth_mark_failed,
+       .runtime_state_set = runtime_state_set,
+       .set_active_embedder_version = set_active_embedder_version,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -3195,6 +3304,53 @@ int main(void)
    assert(aimee_db2_mining_job_try_lock_call(call_client, &client, 7187, 0, "probe-argument",
                                              &string_answer, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(string_answer == 1 && batch8_calls[7] == 1);
+
+   /* Seven on the string-pair format. Both strings are checked on arrival
+    * because a decoder that read them in the wrong order would still decode. */
+   assert(aimee_db2_artifact_set_state_call(call_client, &client, 7200, 0, "probe-first",
+                                            "probe-second", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[0] == 1 && strcmp(pair_first_seen, "probe-first") == 0 &&
+          strcmp(pair_second_seen, "probe-second") == 0);
+
+   assert(aimee_db2_artifact_register_exemplar_call(call_client, &client, 7201, 0, "probe-first",
+                                                    "probe-second", NULL,
+                                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[1] == 1 && strcmp(pair_first_seen, "probe-first") == 0 &&
+          strcmp(pair_second_seen, "probe-second") == 0);
+
+   assert(aimee_db2_evidence_enqueue_call(call_client, &client, 7202, 0, "probe-first",
+                                          "probe-second", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[2] == 1 && strcmp(pair_first_seen, "probe-first") == 0 &&
+          strcmp(pair_second_seen, "probe-second") == 0);
+
+   assert(aimee_db2_evidence_mark_failed_call(call_client, &client, 7203, 0, "probe-first",
+                                              "probe-second", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[3] == 1 && strcmp(pair_first_seen, "probe-first") == 0 &&
+          strcmp(pair_second_seen, "probe-second") == 0);
+
+   assert(aimee_db2_synth_mark_failed_call(call_client, &client, 7204, 0, "probe-first",
+                                           "probe-second", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[4] == 1 && strcmp(pair_first_seen, "probe-first") == 0 &&
+          strcmp(pair_second_seen, "probe-second") == 0);
+
+   assert(aimee_db2_runtime_state_set_call(call_client, &client, 7205, 0, "probe-first",
+                                           "probe-second", NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[5] == 1 && strcmp(pair_first_seen, "probe-first") == 0 &&
+          strcmp(pair_second_seen, "probe-second") == 0);
+
+   assert(aimee_db2_set_active_embedder_version_call(call_client, &client, 7206, 0, "probe-first",
+                                                     "probe-second", NULL,
+                                                     NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[6] == 1 && strcmp(pair_first_seen, "probe-first") == 0 &&
+          strcmp(pair_second_seen, "probe-second") == 0);
+
+   /* An empty first string is refused; an empty second is allowed where the
+    * operation says so, which is what evidence_mark_failed is for. */
+   assert(aimee_db2_artifact_set_state_call(call_client, &client, 7210, 0, "", "artifact", NULL,
+                                            NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(aimee_db2_evidence_mark_failed_call(call_client, &client, 7211, 0, "artifact", "", NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(pair_calls[3] == 2 && pair_second_seen[0] == '\0');
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

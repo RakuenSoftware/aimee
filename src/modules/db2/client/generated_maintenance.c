@@ -408,3 +408,83 @@ aimee_db2_mining_job_try_lock_call(aimee_db2_call_fn call, void *call_context, u
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_synth_mark_failed_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                 uint64_t deadline_ns, const char *artifact_id,
+                                 const char *last_error, aimee_module_cancelled_fn cancelled,
+                                 void *cancel_context)
+{
+   if (!call || !artifact_id || !last_error)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_SYNTH_MARK_FAILED_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SYNTH_MARK_FAILED_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_synth_mark_failed_request_encode(artifact_id, last_error, request, sizeof(request),
+                                                  &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SYNTH_MARK_FAILED, AIMEE_DB2_STAGE_SYNTH_MARK_FAILED,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_synth_mark_failed_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_runtime_state_set_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                 uint64_t deadline_ns, const char *state_key,
+                                 const char *state_value, aimee_module_cancelled_fn cancelled,
+                                 void *cancel_context)
+{
+   if (!call || !state_key || !state_value)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RUNTIME_STATE_SET_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RUNTIME_STATE_SET_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_runtime_state_set_request_encode(state_key, state_value, request, sizeof(request),
+                                                  &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RUNTIME_STATE_SET, AIMEE_DB2_STAGE_RUNTIME_STATE_SET,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_runtime_state_set_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_set_active_embedder_version_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *version, const char *updated_at, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call || !version || !updated_at)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SET_ACTIVE_EMBEDDER_VERSION_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_set_active_embedder_version_request_encode(version, updated_at, request,
+                                                            sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SET_ACTIVE_EMBEDDER_VERSION,
+            AIMEE_DB2_STAGE_SET_ACTIVE_EMBEDDER_VERSION, trace_id, deadline_ns, request,
+            request_len, response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_set_active_embedder_version_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}

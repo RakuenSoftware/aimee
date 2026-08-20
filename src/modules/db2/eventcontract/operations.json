@@ -2858,6 +2858,122 @@
       }
     },
     {
+      "family": "learning",
+      "id": 16,
+      "name": "artifact_set_state",
+      "wire_format": "db2-envelope-string-pair-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifacts and their lifecycle state are relational DB2 rows.",
+      "c_symbols": ["db2_artifact_set_state"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 222,
+        "policy": {"writes": "the state is written as given; which states are legal is not checked here, so an unknown one is stored"},
+        "fields": [
+          {"name": "state", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 63},
+          {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "learning",
+      "id": 17,
+      "name": "artifact_register_exemplar",
+      "wire_format": "db2-envelope-string-pair-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Exemplar vectors are relational DB2 rows keyed by the artifact they were drawn from.",
+      "c_symbols": ["db2_artifact_register_exemplar"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 222,
+        "policy": {"writes": "the insert is plain, so registering the same artifact and collection twice fails rather than being ignored"},
+        "fields": [
+          {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127},
+          {"name": "collection", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 63}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "learning",
+      "id": 18,
+      "name": "evidence_enqueue",
+      "wire_format": "db2-envelope-string-pair-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The evidence index queue is relational DB2 state keyed by the artifact it will read.",
+      "c_symbols": ["db2_evidence_enqueue"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 222,
+        "policy": {"writes": "enqueuing something already queued does nothing and is acknowledged"},
+        "fields": [
+          {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127},
+          {"name": "collection", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 63}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "learning",
+      "id": 19,
+      "name": "evidence_mark_failed",
+      "wire_format": "db2-envelope-string-pair-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The evidence queue and the failure text on its rows are relational DB2 state.",
+      "c_symbols": ["db2_evidence_mark_failed"],
+      "request": {
+        "encoded_size_min": 33,
+        "encoded_size_max": 670,
+        "policy": {"writes": "the attempt counter is incremented by the statement, so a caller cannot set it or read it back"},
+        "fields": [
+          {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127},
+          {"name": "last_error", "type": "utf8", "minimum_bytes": 0,
+           "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -3540,6 +3656,93 @@
         "encoded_size_error": 24,
         "field": {"name": "acquired", "type": "u32", "minimum": 0,
                   "maximum": 1}
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 17,
+      "name": "synth_mark_failed",
+      "wire_format": "db2-envelope-string-pair-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The synthesis queue and the failure text on its rows are relational DB2 state.",
+      "c_symbols": ["db2_synth_mark_failed"],
+      "request": {
+        "encoded_size_min": 33,
+        "encoded_size_max": 670,
+        "policy": {"writes": "the attempt counter is incremented by the statement, so a caller cannot set it or read it back"},
+        "fields": [
+          {"name": "artifact_id", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127},
+          {"name": "last_error", "type": "utf8", "minimum_bytes": 0,
+           "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 18,
+      "name": "runtime_state_set",
+      "wire_format": "db2-envelope-string-pair-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Runtime state keys and values are relational DB2 bookkeeping.",
+      "c_symbols": ["db2_kb_runtime_state_set"],
+      "request": {
+        "encoded_size_min": 33,
+        "encoded_size_max": 798,
+        "policy": {"writes": "an existing key is overwritten rather than refused, so this sets rather than creates"},
+        "fields": [
+          {"name": "state_key", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 255},
+          {"name": "state_value", "type": "utf8", "minimum_bytes": 0,
+           "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 19,
+      "name": "set_active_embedder_version",
+      "wire_format": "db2-envelope-string-pair-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The active embedder version is relational DB2 state governing DB2's own vector rows.",
+      "c_symbols": ["db2_kb_service_set_active_embedder_version"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 190,
+        "policy": {"writes": "the stamp is the caller's, and the row is a single fixed row that is overwritten"},
+        "fields": [
+          {"name": "version", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127},
+          {"name": "updated_at", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 31}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
       }
     }
   ]
