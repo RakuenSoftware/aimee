@@ -524,8 +524,18 @@ func (s *Store) ParkRunnerFailure(ctx context.Context, workItemID, stage, owner,
 	if actual < 0 || math.IsNaN(actual) || math.IsInf(actual, 0) {
 		return errors.New("runner failure cost must be finite and non-negative")
 	}
-	return s.client.WfeParkRunnerFailure(ctx, workItemID, stage, owner, reason, detail,
-		boolToInt(dispatched), boolToInt(costKnown), actual)
+	// The store refuses this when its UPDATE matches no row, which has one
+	// cause: the reservation this invocation held is no longer the one on the
+	// row -- a sweep or another transition moved it while the runner was still
+	// out. That is a recognised outcome, not a fault, and it used to say so.
+	// Crossing the module boundary it became "refused with status 4", which
+	// tells an operator reading the log nothing at all, so name it again here.
+	if err := s.client.WfeParkRunnerFailure(ctx, workItemID, stage, owner, reason, detail,
+		boolToInt(dispatched), boolToInt(costKnown), actual); err != nil {
+		return fmt.Errorf("runner failure reservation changed concurrently "+
+			"(work item %s, stage %s): %w", workItemID, stage, err)
+	}
+	return nil
 }
 
 func (s *Store) RecoverLostReplay(ctx context.Context, workItemID, stage,
