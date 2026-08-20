@@ -256,6 +256,11 @@ typedef struct
    int (*doc_assets_delete_for_doc)(const char *project, const char *document_key);
    int (*ontology_map)(const char *rel_type, const char *mapped_to);
    int (*minhash_delete_file)(const char *project, const char *file_path);
+   int (*project_current_generation)(const char *project, int64_t *generation_out);
+   int64_t (*projection_generation_create)(const char *project);
+   int64_t (*projection_visible_id)(const char *project);
+   int64_t (*release_create)(const char *release_name);
+   int (*css_migration_rules_doc)(const char *exemplar_project, char *out, size_t capacity);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

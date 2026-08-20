@@ -104,6 +104,77 @@ or a confined export that takes a name rather than a path and decides the
 directory itself, which changes the service API. Both are decisions for whoever
 owns the KB service.
 
+## Sixty-six declarations read and write under a tenant scope the request has no way to carry
+
+This is the largest single item here, and it is a shape rather than a symbol.
+Seventy DB2 functions sit behind `db2_tenant_require_pg()` or the tenant scope;
+four are already `private-db2` and the other sixty-six are unreviewed.
+
+The tables they touch are protected by row-level security keyed on a session
+setting. `kb_team_membership` is the clearest case -- RLS enabled and FORCEd,
+with a self-read policy of:
+
+    identity_key = current_setting('aimee.principal', true)
+
+Nothing in a request says who is asking. The setting lives on a connection, and
+`db2_tenant_scope_begin(principal, team)` is what puts it there: it leases a
+connection, opens a transaction, sets the GUCs, and the caller then does its
+work and commits. Callers outside DB2 use it exactly that way:
+
+    src/kb/kb_identity_resolve.c:27
+    src/kb/kb_vault_key_use.c:32
+    src/kb/kb_vault_rotation_ops.c:125
+    src/kb/http/kb_http_telemetry.c:82
+
+So the scope, like the purge guard above, is a transaction that already spans
+the boundary -- and every operation inside it depends on state the envelope does
+not carry.
+
+Publishing one of these on its own would be worse than leaving it. The reply
+would look ordinary and the read would be evaluated against whatever principal
+the module's pooled connection happened to hold, which is none: the self policy
+would match nothing and the answer would be a confident "no rows". Worse, the
+answer depends on the database role. The replay connects as a superuser, which
+bypasses RLS entirely, so a tenancy operation replayed there returns everything
+and looks correct; a production role would return nothing. A test environment
+that is more permissive than production is the one arrangement that cannot
+catch this.
+
+Two ways out, and neither belongs to a migration working one symbol at a time.
+The envelope could carry an authenticated principal and team, which the module
+sets on its connection for the life of the request -- a wire-format change, and
+a decision about whether the module may be told who the caller is or must
+establish it. Or the scope stays inside DB2 and each unit of tenant work
+becomes one composite operation that opens the scope, does the work and
+commits, which means enumerating those units rather than the functions they
+call.
+
+Until one of those exists the sixty-six stay unreviewed, and the count is worth
+watching: it is roughly one in seven of what is left.
+
+## Six declarations run whatever the host process installed into them
+
+`src/modules/db2/include/aimee/db2/host_contracts.h` lets the surrounding
+process hand DB2 three function pointers: one to embed a text, one to extract
+facts from it, one to scan a turn for a retraction cue. Three registration
+functions and three consumers make up the set:
+
+    aimee_db2_register_embed_provider        db2_kb_embed_text
+    aimee_db2_register_fact_extract_provider db2_fact_ingest_text
+    aimee_db2_register_fact_scan_provider    db2_typed_fact_ingress
+
+The providers live in the process that installed them, and the module process
+installs none. `db2_typed_fact_ingress` treats a missing scanner as "no answer"
+and declines to retract, which is the safe direction and also a silent one: the
+operation would work, return zero, and never say that the reason was an absent
+provider rather than an absent fact.
+
+This is a smaller problem than the tenant scope and a different kind. The seam
+is deliberate and documented; what is undecided is which side of the boundary
+each provider belongs on once DB2 is its own process. Embedding in particular
+is a question about where model inference runs, not about DB2. Recorded here so
+that these six are not migrated as though they were ordinary reads and writes.
+
 ## Operation ids are unique per family, and the envelope does not say the family
 
 Every operation carries an id that is unique within its family, so

@@ -284,6 +284,14 @@
       "reason": "The typed index.project_count operation replaces the current-project tally used by the doctor surface. Only projects in the current lifecycle state are counted and that state is fixed policy, so a caller cannot include detached projects in the number."
     },
     {
+      "symbol": "db2_code_index_project_current_generation",
+      "signature_sha256": "a3472a3a98650fcd474e4c43865e9880cf577b19cda50f5d7ef82f530d47d893",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.project_current_generation operation reads a project's current generation. It matches only a project in the current lifecycle state, so a retired project answers zero -- and so does one that never existed, and so does a read that failed, because the backend clears the output before doing anything. A caller cannot tell those apart, which matters because the generation is what the project-scoped deletes key on."
+    },
+    {
       "symbol": "db2_code_index_project_delete",
       "signature_sha256": "459b52d59931f8937dfdf255b75b95f33274e5eb43ba00c7906f4fd46c66ab9d",
       "disposition": "wire-operation",
@@ -324,6 +332,14 @@
       "reason": "The typed index.generation_abort operation replaces the abort. Only a pending generation is touched, so aborting one that is already visible does nothing -- which is the safety the condition exists for, and is invisible in an acknowledgement that looks the same either way."
     },
     {
+      "symbol": "db2_code_projection_generation_create",
+      "signature_sha256": "4cd116dabe64d633ce0c22a4f41a24361791b5488daa666d70565e244b137cfe",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.projection_generation_create operation opens a pending projection generation. It stamps the running build as both the extractor and the pipeline version, and over the bus that is the DB2 module's build, not the caller's -- the snapshot-diff route refuses to compare across extractor versions, so a module and daemon at different builds would make every generation incomparable with the ones before it. A project that is not current creates nothing and answers zero."
+    },
+    {
       "symbol": "db2_code_projection_generation_publish",
       "signature_sha256": "3eb7f11c2c8d51b7bd57683b17552dc4492ee001cb692afd3fc89c1c13f324e5",
       "disposition": "wire-operation",
@@ -346,6 +362,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.project_fingerprint operation replaces the fingerprint read. The value is an md5 DB2 computes over the file paths and hashes of the project's current generation, so it is a summary of that generation rather than an identifier: it changes when the generation does, and comparing one project's fingerprint against another's is meaningless. A project with no files fingerprints the empty string rather than failing."
+    },
+    {
+      "symbol": "db2_code_projection_visible_id",
+      "signature_sha256": "a67b8d69eedfb0b93121dfe6424c69a67759e3ed329c3527cedf85bb2ef593a4",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.projection_visible_id operation reads which projection generation is visible for a project. Both halves must be current: the generation must be visible and the project must be in the current lifecycle state, so a visible generation belonging to a retired project reads back as none. Zero is that answer, and also the answer for a project nobody has projected, and also what a failed read gives."
     },
     {
       "symbol": "db2_code_projection_visible_source_hash",
@@ -434,6 +458,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.css_migration_enumerate operation refreshes a project's CSS migration units from its component files. Two things the count does not show: it reads at most 4096 component files and stops, so a larger project reports 4096 and silently leaves the rest un-enumerated; and the upserts run one at a time with no transaction, so a failure part way leaves some units refreshed and reports failure for all of them. An existing unit keeps its state and its note; only the token counts are refreshed."
+    },
+    {
+      "symbol": "db2_css_migration_rules_doc",
+      "signature_sha256": "05da34598199b82d9f5f4444f8f644bb6503d4285290fbc24aec684a5fc2cf59",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.css_migration_rules_doc operation writes a conventions document derived from a project's indexed CSS. Most of it is a fixed template; three counts and a naming verdict come from the database, and a project with nothing indexed still gets the whole document with zeros in it, which reads as a specification rather than as an absence. The naming verdict is a heuristic on selector delimiters, not a fact anyone recorded."
     },
     {
       "symbol": "db2_curator_invalidate_doc",
@@ -826,6 +858,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.release_add_doc operation replaces the release membership insert. Both ends are foreign keys, so an unknown release or an unknown document is refused and the reply says so -- this is not a write that always succeeds. Adding a document already in the release does nothing and is still acknowledged, so a caller cannot tell a repeat from a first add, which is what makes a retry safe."
+    },
+    {
+      "symbol": "db2_kb_release_create",
+      "signature_sha256": "61a342f44e73c77164166b973d3ed62721c7190fa7d58d45b6b4fcf73ebab7ea",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.release_create operation opens a document release. The name is unique, so a second create with a name already taken is refused and answers zero -- the same zero as any other failure, and the operation gives no way to ask for the identifier the existing release has. Identifiers start at one, so zero never names a release. It pairs with organization.release_add_doc, which takes the identifier this returns."
     },
     {
       "symbol": "db2_kb_release_get_active",

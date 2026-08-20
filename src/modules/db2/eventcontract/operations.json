@@ -4936,6 +4936,126 @@
       }
     },
     {
+      "family": "index",
+      "id": 25,
+      "name": "project_current_generation",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projects and the generation they are on are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_project_current_generation"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only a project in the current lifecycle state answers, and zero comes back for one that is not, one that does not exist, and one whose generation really is zero"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "generation",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 27,
+      "name": "projection_generation_create",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projection generations and the projects they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_generation_create"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the extractor and pipeline versions written are the build version of whichever process runs the statement, which over the bus is the module's and not the caller's"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "generation",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 28,
+      "name": "projection_visible_id",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projection generations and their visibility are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_visible_id"
+      ],
+      "request": {
+        "policy": {
+          "reads": "both the generation and the project it names must be current, so a visible generation on a retired project reads back as none"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "generation",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -7326,6 +7446,46 @@
       }
     },
     {
+      "family": "organization",
+      "id": 19,
+      "name": "release_create",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Releases and the documents they gather are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_release_create"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the release name is unique, so creating one whose name is taken is refused rather than returning the existing release"
+        },
+        "fields": [
+          {
+            "name": "release_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "release_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "custody",
       "id": 1,
       "name": "vector_rebuild_lock_try_acquire",
@@ -8451,6 +8611,46 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 2
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 27,
+      "name": "css_migration_rules_doc",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "CSS rules and declarations are relational DB2 rows; the document is derived from them.",
+      "c_symbols": [
+        "db2_css_migration_rules_doc"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the document is a fixed template with three derived numbers in it, so it is written even for a project with nothing indexed"
+        },
+        "fields": [
+          {
+            "name": "exemplar_project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "rules_doc",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
           }
         ]
       }

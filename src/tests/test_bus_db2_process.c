@@ -1566,6 +1566,52 @@ int main(int argc, char **argv)
                                               NULL) == AIMEE_MODULE_CALL_OK);
    assert(eval_status[0] == '\0');
 
+   /* A release round trip: create returns the identifier that add_doc takes,
+    * and adding a document to it is still refused because the document is a
+    * foreign key too. The name is unique, so the second create with the same
+    * name is refused and answers zero -- which is what this pair is here to
+    * pin, the first draft of the review having claimed the opposite. */
+   uint64_t first_release = 0, second_release = 99;
+   assert(aimee_db2_release_create_call(call_client, &client, 9247, 0, "replay-release",
+                                        &first_release, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(first_release > 0);
+   assert(aimee_db2_release_create_call(call_client, &client, 9248, 0, "replay-release",
+                                        &second_release, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(second_release == 0);
+   acknowledged = 9;
+   assert(aimee_db2_release_add_doc_call(call_client, &client, 9249, 0, first_release, 4242,
+                                         &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+
+   /* No project of this name is indexed, so its generation reads as none, no
+    * projection generation can be opened for it, and none is visible. All
+    * three answer zero, which each of them also answers for a project that
+    * exists but is not current. */
+   uint64_t generation = 99;
+   assert(aimee_db2_project_current_generation_call(call_client, &client, 9250, 0, "demo",
+                                                    &generation, NULL,
+                                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(generation == 0);
+   generation = 99;
+   assert(aimee_db2_projection_generation_create_call(call_client, &client, 9251, 0, "demo",
+                                                      &generation, NULL,
+                                                      NULL) == AIMEE_MODULE_CALL_OK);
+   assert(generation == 0);
+   generation = 99;
+   assert(aimee_db2_projection_visible_id_call(call_client, &client, 9252, 0, "demo", &generation,
+                                               NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(generation == 0);
+
+   /* The conventions document is written whether or not anything is indexed,
+    * which is the point of replaying it: a project with no CSS still gets the
+    * whole template back, with zeros in it. */
+   static char rules_doc[AIMEE_DB2_CSS_MIGRATION_RULES_DOC_RULES_DOC_MAX + 1];
+   rules_doc[0] = '\0';
+   assert(aimee_db2_css_migration_rules_doc_call(call_client, &client, 9253, 0, "demo", rules_doc,
+                                                 sizeof(rules_doc), NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(strstr(rules_doc, "Indexed rules in exemplar: **0**") != NULL);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

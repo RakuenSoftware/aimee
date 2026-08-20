@@ -1958,6 +1958,40 @@ int db2_sketch_minhash_signature_delete(const char *project, const char *file_pa
    return 0;
 }
 
+int db2_code_index_project_current_generation(const char *name, int64_t *generation_out)
+{
+   (void)name;
+   if (generation_out)
+      *generation_out = 0;
+   return -1;
+}
+
+int64_t db2_code_projection_generation_create(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int64_t db2_code_projection_visible_id(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int64_t db2_kb_release_create(const char *name)
+{
+   (void)name;
+   return 0;
+}
+
+int db2_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t cap)
+{
+   (void)exemplar_project;
+   if (buf && cap)
+      buf[0] = '\0';
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

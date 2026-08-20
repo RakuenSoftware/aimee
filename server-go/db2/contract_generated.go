@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "fb44b336973f697dae87dc1ec5eb39e1f7df1e798a099ff4085df3a86a474b17"
+const ContractSHA256 = "d7c979d20e1f26d9af2e178a94d454a62d033998d486f5c783c9a37488743e15"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1497,6 +1497,135 @@ func DecodeMinhashDeleteFileRequest(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return project, filePath, nil
+}
+
+const EventProjectCurrentGeneration = EventIndex
+const StageProjectCurrentGeneration = FamilyIndex
+const OperationProjectCurrentGeneration uint32 = 25
+const ProjectCurrentGenerationProjectMin = 1
+const ProjectCurrentGenerationProjectMax = 127
+
+// EncodeProjectCurrentGenerationRequest writes the schema project_current_generation declares, in order.
+func EncodeProjectCurrentGenerationRequest(project string) ([]byte, error) {
+	if len(project) < ProjectCurrentGenerationProjectMin || len(project) > ProjectCurrentGenerationProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, ProjectCurrentGenerationProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProjectCurrentGeneration, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectCurrentGenerationRequest reads it back, checking each field against its own bound.
+func DecodeProjectCurrentGenerationRequest(request []byte) (string, error) {
+	var project string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectCurrentGeneration || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, ProjectCurrentGenerationProjectMax); err != nil ||
+		len(project) < ProjectCurrentGenerationProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return project, nil
+}
+
+const EventProjectionGenerationCreate = EventIndex
+const StageProjectionGenerationCreate = FamilyIndex
+const OperationProjectionGenerationCreate uint32 = 27
+const ProjectionGenerationCreateProjectMin = 1
+const ProjectionGenerationCreateProjectMax = 127
+
+// EncodeProjectionGenerationCreateRequest writes the schema projection_generation_create declares, in order.
+func EncodeProjectionGenerationCreateRequest(project string) ([]byte, error) {
+	if len(project) < ProjectionGenerationCreateProjectMin || len(project) > ProjectionGenerationCreateProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, ProjectionGenerationCreateProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProjectionGenerationCreate, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectionGenerationCreateRequest reads it back, checking each field against its own bound.
+func DecodeProjectionGenerationCreateRequest(request []byte) (string, error) {
+	var project string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectionGenerationCreate || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, ProjectionGenerationCreateProjectMax); err != nil ||
+		len(project) < ProjectionGenerationCreateProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return project, nil
+}
+
+const EventProjectionVisibleID = EventIndex
+const StageProjectionVisibleID = FamilyIndex
+const OperationProjectionVisibleID uint32 = 28
+const ProjectionVisibleIDProjectMin = 1
+const ProjectionVisibleIDProjectMax = 127
+
+// EncodeProjectionVisibleIDRequest writes the schema projection_visible_id declares, in order.
+func EncodeProjectionVisibleIDRequest(project string) ([]byte, error) {
+	if len(project) < ProjectionVisibleIDProjectMin || len(project) > ProjectionVisibleIDProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, ProjectionVisibleIDProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProjectionVisibleID, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectionVisibleIDRequest reads it back, checking each field against its own bound.
+func DecodeProjectionVisibleIDRequest(request []byte) (string, error) {
+	var project string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectionVisibleID || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, ProjectionVisibleIDProjectMax); err != nil ||
+		len(project) < ProjectionVisibleIDProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return project, nil
 }
 
 const EventTraceMiningRecord = EventLearning
@@ -4158,6 +4287,49 @@ func DecodeOntologyMapRequest(request []byte) (string, string, error) {
 	return relType, mappedTo, nil
 }
 
+const EventReleaseCreate = EventOrganization
+const StageReleaseCreate = FamilyOrganization
+const OperationReleaseCreate uint32 = 19
+const ReleaseCreateReleaseNameMin = 1
+const ReleaseCreateReleaseNameMax = 255
+
+// EncodeReleaseCreateRequest writes the schema release_create declares, in order.
+func EncodeReleaseCreateRequest(releaseName string) ([]byte, error) {
+	if len(releaseName) < ReleaseCreateReleaseNameMin || len(releaseName) > ReleaseCreateReleaseNameMax || hasNUL(releaseName) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, releaseName, ReleaseCreateReleaseNameMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationReleaseCreate, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeReleaseCreateRequest reads it back, checking each field against its own bound.
+func DecodeReleaseCreateRequest(request []byte) (string, error) {
+	var releaseName string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationReleaseCreate || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if releaseName, err = takeRowText(payload, &cursor, ReleaseCreateReleaseNameMax); err != nil ||
+		len(releaseName) < ReleaseCreateReleaseNameMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return releaseName, nil
+}
+
 const EventEnrollmentActive = EventCustody
 const StageEnrollmentActive = FamilyCustody
 const OperationEnrollmentActive uint32 = 4
@@ -5128,6 +5300,49 @@ func DecodeCssMigrationAssertConventionsRequest(request []byte) (string, string,
 		return "", "", ErrMalformedEnvelope
 	}
 	return project, nowIso, nil
+}
+
+const EventCssMigrationRulesDoc = EventMaintenance
+const StageCssMigrationRulesDoc = FamilyMaintenance
+const OperationCssMigrationRulesDoc uint32 = 27
+const CssMigrationRulesDocExemplarProjectMin = 1
+const CssMigrationRulesDocExemplarProjectMax = 127
+
+// EncodeCssMigrationRulesDocRequest writes the schema css_migration_rules_doc declares, in order.
+func EncodeCssMigrationRulesDocRequest(exemplarProject string) ([]byte, error) {
+	if len(exemplarProject) < CssMigrationRulesDocExemplarProjectMin || len(exemplarProject) > CssMigrationRulesDocExemplarProjectMax || hasNUL(exemplarProject) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, exemplarProject, CssMigrationRulesDocExemplarProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCssMigrationRulesDoc, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCssMigrationRulesDocRequest reads it back, checking each field against its own bound.
+func DecodeCssMigrationRulesDocRequest(request []byte) (string, error) {
+	var exemplarProject string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCssMigrationRulesDoc || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if exemplarProject, err = takeRowText(payload, &cursor, CssMigrationRulesDocExemplarProjectMax); err != nil ||
+		len(exemplarProject) < CssMigrationRulesDocExemplarProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return exemplarProject, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

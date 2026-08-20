@@ -4378,9 +4378,15 @@
           "line": 28
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.project_current_generation operation reads a project's current generation. It matches only a project in the current lifecycle state, so a retired project answers zero -- and so does one that never existed, and so does a read that failed, because the backend clears the output before doing anything. A caller cannot tell those apart, which matters because the generation is what the project-scoped deletes key on."
+      },
       "signature": "int db2_code_index_project_current_generation ( const char * name , int64_t * generation_out )",
       "signature_sha256": "a3472a3a98650fcd474e4c43865e9880cf577b19cda50f5d7ef82f530d47d893",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_project_current_generation"
     },
     {
@@ -4768,9 +4774,15 @@
           "line": 31
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.projection_generation_create operation opens a pending projection generation. It stamps the running build as both the extractor and the pipeline version, and over the bus that is the DB2 module's build, not the caller's -- the snapshot-diff route refuses to compare across extractor versions, so a module and daemon at different builds would make every generation incomparable with the ones before it. A project that is not current creates nothing and answers zero."
+      },
       "signature": "int64_t db2_code_projection_generation_create ( const char * project )",
       "signature_sha256": "4cd116dabe64d633ce0c22a4f41a24361791b5488daa666d70565e244b137cfe",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_generation_create"
     },
     {
@@ -4952,9 +4964,15 @@
           "line": 45
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.projection_visible_id operation reads which projection generation is visible for a project. Both halves must be current: the generation must be visible and the project must be in the current lifecycle state, so a visible generation belonging to a retired project reads back as none. Zero is that answer, and also the answer for a project nobody has projected, and also what a failed read gives."
+      },
       "signature": "int64_t db2_code_projection_visible_id ( const char * project )",
       "signature_sha256": "a67b8d69eedfb0b93121dfe6424c69a67759e3ed329c3527cedf85bb2ef593a4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_visible_id"
     },
     {
@@ -6165,9 +6183,15 @@
           "line": 72
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.css_migration_rules_doc operation writes a conventions document derived from a project's indexed CSS. Most of it is a fixed template; three counts and a naming verdict come from the database, and a project with nothing indexed still gets the whole document with zeros in it, which reads as a specification rather than as an absence. The naming verdict is a heuristic on selector delimiters, not a fact anyone recorded."
+      },
       "signature": "int db2_css_migration_rules_doc ( const char * exemplar_project , char * buf , size_t cap )",
       "signature_sha256": "05da34598199b82d9f5f4444f8f644bb6503d4285290fbc24aec684a5fc2cf59",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_css_migration_rules_doc"
     },
     {
@@ -10516,9 +10540,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.release_create operation opens a document release. The name is unique, so a second create with a name already taken is refused and answers zero -- the same zero as any other failure, and the operation gives no way to ask for the identifier the existing release has. Identifiers start at one, so zero never names a release. It pairs with organization.release_add_doc, which takes the identifier this returns."
+      },
       "signature": "int64_t db2_kb_release_create ( const char * name )",
       "signature_sha256": "61a342f44e73c77164166b973d3ed62721c7190fa7d58d45b6b4fcf73ebab7ea",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_release_create"
     },
     {
@@ -26940,15 +26970,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9cb645a1c8b6e0f8653d13f5edb8b2adf9eca0546175a61d02e122a184cda541",
+  "fingerprint": "59fcadecff341eb41fe3426c25b5f908eec875955c5a2bb0d970f2a12ad42f25",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 472,
+    "audit_pending": 467,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 486
+    "reviewed": 491
   }
 }

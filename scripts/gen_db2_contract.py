@@ -12596,6 +12596,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_sketch_minhash_signature_delete",
         "policy": {"writes": 200},
     },
+    "project_current_generation": {
+        "key": ("index", 25),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_project_current_generation",
+        "policy": {"reads": 200},
+    },
+    "projection_generation_create": {
+        "key": ("index", 27),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_generation_create",
+        "policy": {"writes": 200},
+    },
+    "projection_visible_id": {
+        "key": ("index", 28),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_visible_id",
+        "policy": {"reads": 200},
+    },
+    "release_create": {
+        "key": ("organization", 19),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_release_create",
+        "policy": {"writes": 200},
+    },
+    "css_migration_rules_doc": {
+        "key": ("maintenance", 27),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_css_migration_rules_doc",
+        "policy": {"reads": 200},
+    },
 }
 
 
