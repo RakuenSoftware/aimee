@@ -130,7 +130,14 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
        * "does the CLI context carry a config" guard no longer decides anything. */
       msg = aux_call("commit_message", prompt, 128);
 
-      /* Fall back to cheapest configured agent */
+      /* Fall back to the cheapest configured agent.
+       *
+       * This said "cheapest" and then took agents[0], which is registry order,
+       * not cost order -- and it took it without checking agent_count, so an
+       * empty roster handed a zeroed agent_t to the executor and the request
+       * went out with no endpoint. Ask the router: it applies cost order and
+       * eligibility, and it is the seam the routing module owns, so a routing
+       * outage refuses here too instead of quietly using whatever sits first. */
       if (!msg)
       {
          agent_config_t acfg;
@@ -138,8 +145,14 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
          memset(&result, 0, sizeof(result));
          if (agent_load_config(&acfg) == 0)
          {
-            agent_t *ag = &acfg.agents[0];
-            if (agent_execute(ag, NULL, prompt, 128, 0.0, &result) == 0)
+            agent_t *ag = agent_route(&acfg, "execute");
+            if (!ag)
+            {
+               char why[256];
+               agent_route_failure_message("execute", why, sizeof(why));
+               fprintf(stderr, "Auto-message unavailable: %s\n", why);
+            }
+            else if (agent_execute(ag, NULL, prompt, 128, 0.0, &result) == 0)
                msg = result.response;
          }
       }
