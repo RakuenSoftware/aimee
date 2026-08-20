@@ -225,7 +225,11 @@ int db2_test_shim_is_postgres(void)
 
 int db2_test_shim_skip_on_postgres(const char *test_name)
 {
-   if (!g_pg_mode)
+   /* Keyed off the environment, not g_pg_mode: callers check this at the top of
+    * main(), before any shim open has set g_pg_mode, precisely so they can bail
+    * out before touching a handle that will not exist. */
+   const char *url = getenv("AIMEE_TEST_DB2_TEMPLATE_URL");
+   if (!g_pg_mode && !(url && url[0]))
       return 0;
    printf("  SKIP %s: seeds through the raw sqlite handle (postgres mode)\n",
           test_name ? test_name : "test");
@@ -254,10 +258,9 @@ void db2_test_shim_open_path(const char *path)
     * cannot work: db2_init("shim") would try to reach a database literally named
     * "shim" and the assert would fire with nothing explaining why. Say what is
     * actually wrong instead. */
-   fprintf(stderr,
-           "db2 test shim: this binary was built with AIMEE_TEST_PG=1 (real libpq),\n"
-           "  but AIMEE_TEST_DB2_TEMPLATE_URL is unset, so there is no database to\n"
-           "  clone. Set it, or rebuild without AIMEE_TEST_PG for the sqlite shim.\n");
+   fprintf(stderr, "db2 test shim: this binary was built with AIMEE_TEST_PG=1 (real libpq),\n"
+                   "  but AIMEE_TEST_DB2_TEMPLATE_URL is unset, so there is no database to\n"
+                   "  clone. Set it, or rebuild without AIMEE_TEST_PG for the sqlite shim.\n");
    abort();
 #endif
 

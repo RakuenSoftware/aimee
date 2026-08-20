@@ -105,6 +105,9 @@ static void test_restore_fragment_record(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_synthesize"))
+      return 0;
+
    test_gated_empty();
    test_pick_seeded();
    test_restore_fragment_record();

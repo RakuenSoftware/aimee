@@ -215,6 +215,9 @@ static void test_resolve_cross_scope(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_resolve_entities"))
+      return 0;
+
    db2_test_shim_open();
    test_embed_text();
    test_point_id();
