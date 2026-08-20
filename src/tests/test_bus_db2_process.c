@@ -1612,6 +1612,50 @@ int main(int argc, char **argv)
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(strstr(rules_doc, "Indexed rules in exemplar: **0**") != NULL);
 
+   /* Nothing is indexed for this project, so the basename resolves to nothing
+    * -- which is also the answer when two files share a name, and the reason
+    * this operation exists. */
+   char resolved_path[AIMEE_DB2_UNIQUE_FILE_BASENAME_FILE_PATH_MAX + 1] = "unset";
+   assert(aimee_db2_unique_file_basename_call(call_client, &client, 9254, 0, "demo", "replay.c",
+                                              resolved_path, sizeof(resolved_path), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(resolved_path[0] == '\0');
+
+   /* Both fence operations refuse: no fence names this generation and purge.
+    * The refusal is the whole point -- each holds its own transaction, takes
+    * the advisory lock and checks before writing, so a caller cannot clear or
+    * refresh a fence that belongs to someone else. */
+   uint32_t fence_applied = 9;
+   assert(aimee_db2_purge_fence_heartbeat_call(call_client, &client, 9255, 0, "demo", "7",
+                                               "replay-purge", &fence_applied, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   assert(fence_applied == 0);
+   fence_applied = 9;
+   assert(aimee_db2_purge_fence_clear_call(call_client, &client, 9256, 0, "demo", "7",
+                                           "replay-purge", &fence_applied, NULL,
+                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(fence_applied == 0);
+
+   /* The three document reads, against a project holding no documents. Each
+    * answers empty, and each would answer empty for a document that exists in
+    * an older generation, which is what their reasons record. */
+   char stored_hash[AIMEE_DB2_DOCUMENT_STORED_HASH_FILE_HASH_MAX + 1] = "unset";
+   assert(aimee_db2_document_stored_hash_call(call_client, &client, 9257, 0, "demo", "docs/a.md",
+                                              stored_hash, sizeof(stored_hash), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(stored_hash[0] == '\0');
+   uint32_t hash_present = 9;
+   char sample_path[AIMEE_DB2_DOCUMENT_HASH_EXISTS_SAMPLE_PATH_MAX + 1] = "unset";
+   assert(aimee_db2_document_hash_exists_call(call_client, &client, 9258, 0, "demo", "deadbeef",
+                                              &hash_present, sample_path, sizeof(sample_path), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(hash_present == 0 && sample_path[0] == '\0');
+   char tsr_state[AIMEE_DB2_PDF_TSR_STATE_TSR_STATE_MAX + 1] = "unset";
+   assert(aimee_db2_pdf_tsr_state_call(call_client, &client, 9259, 0, "demo", "docs/a.pdf",
+                                       tsr_state, sizeof(tsr_state), NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(tsr_state[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

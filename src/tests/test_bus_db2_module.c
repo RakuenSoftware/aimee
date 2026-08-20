@@ -1819,6 +1819,61 @@ int db2_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t 
    return 0;
 }
 
+int db2_code_index_unique_file_basename(const char *project, const char *basename, char *out,
+                                        size_t out_cap)
+{
+   (void)project;
+   (void)basename;
+   if (out && out_cap)
+      out[0] = '\0';
+   return 0;
+}
+
+int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, const char *purge_id)
+{
+   (void)project;
+   (void)generation;
+   (void)purge_id;
+   return 0;
+}
+
+int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
+{
+   (void)project;
+   (void)generation;
+   (void)purge_id;
+   return 0;
+}
+
+int db2_kb_documents_get_stored_hash(const char *project, const char *file_path, char *out,
+                                     size_t out_len)
+{
+   (void)project;
+   (void)file_path;
+   if (out && out_len)
+      out[0] = '\0';
+   return -1;
+}
+
+int db2_kb_documents_hash_exists(const char *project, const char *file_hash, char *sample_path,
+                                 size_t sample_path_len)
+{
+   (void)project;
+   (void)file_hash;
+   if (sample_path && sample_path_len)
+      sample_path[0] = '\0';
+   return 0;
+}
+
+int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *out, size_t out_len)
+{
+   (void)project;
+   (void)document_key;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -4572,9 +4572,15 @@
           "line": 55
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.unique_file_basename operation resolves a bare file name to a path. It answers only when exactly one file matches: two files with the same name give the empty answer, the same as no file at all, which is the point -- an ambiguous name must not resolve. The match is made in the module over every path in the project's current generation, so the cost is the whole file list on each call and no index helps."
+      },
       "signature": "int db2_code_index_unique_file_basename ( const char * project , const char * basename , char * out , size_t out_cap )",
       "signature_sha256": "ba2560bf70402874ca6613ece19b31e734814ad26925e2f1d34495b24d37ea3a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_unique_file_basename"
     },
     {
@@ -9841,9 +9847,15 @@
           "line": 80
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.document_stored_hash operation reads the hash recorded for a document. Only the project's current generation answers, so a document indexed under an older generation reads back empty -- the same empty as a path nobody has indexed, and the same as a failed read. A caller using this to decide whether a file changed sees an unchanged file as a new one across a generation bump."
+      },
       "signature": "int db2_kb_documents_get_stored_hash ( const char * project , const char * file_path , char * out , size_t out_len )",
       "signature_sha256": "94810bc8c9cab32c68d6aa4537fc075de44e6511f7a1125b322a2f011faed598",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_documents_get_stored_hash"
     },
     {
@@ -9856,9 +9868,15 @@
           "line": 86
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.document_hash_exists operation asks whether a project's current generation already holds content with this hash. Two tables are searched and one path comes back, so the sample names one file with that content and never says how many there are, nor which of the two tables it came from. Both halves are scoped to the current generation, so identical content indexed under an older one does not count as present."
+      },
       "signature": "int db2_kb_documents_hash_exists ( const char * project , const char * file_hash , char * sample_path , size_t sample_path_len )",
       "signature_sha256": "9d88fa3f32e37b2aa30a1a41385ff599d5300f2b3ee4fd483726fdd254ce3a46",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_documents_hash_exists"
     },
     {
@@ -10379,9 +10397,15 @@
           "line": 301
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.pdf_tsr_state operation reads a PDF's text-scan state. The statement narrows three ways the arguments do not show: the document must be a PDF, it must be in the project's current generation, and it must not still be awaiting a quarantine decision. A document held in pending quarantine therefore reads back empty, which is also what a document of another kind reads back, and what a missing one reads back."
+      },
       "signature": "int db2_kb_pdf_tsr_state ( const char * project , const char * document_key , char * out , size_t out_len )",
       "signature_sha256": "c1809bcf52e0c215387ea9193500fbe36631c875901c48e29f114b9d7422a84f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_pdf_tsr_state"
     },
     {
@@ -10436,9 +10460,15 @@
           "line": 96
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.purge_fence_clear operation removes a purge fence. It checks the fence still names this generation and purge before deleting, inside the transaction it holds, so a caller cannot clear someone else's fence. The two rows go in the order identity then timestamp, which is the reverse of how they are written: an interrupted clear leaves an orphan timestamp, which the fence check treats as no fence, so the failure direction is open rather than stuck."
+      },
       "signature": "int db2_kb_purge_fence_clear ( const char * project , const char * generation , const char * purge_id )",
       "signature_sha256": "7e170ed1a87f403cdb6fe5c0e6052bfb3bf4d5fee2e154d5602fb90e97632b7b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_purge_fence_clear"
     },
     {
@@ -10453,9 +10483,15 @@
           "line": 90
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.purge_fence_heartbeat operation refreshes a purge fence's timestamp. Unlike the bare advisory guard it uses, this operation opens the transaction, takes the lock, checks the fence still names this generation and purge, writes and commits -- all inside the module -- so it is one of the few purge-route pieces that crosses the boundary intact. A fence naming a different purge is refused, and so is one that has been cleared; the reply cannot tell those from a database error."
+      },
       "signature": "int db2_kb_purge_fence_heartbeat ( const char * project , const char * generation , const char * purge_id )",
       "signature_sha256": "6c09f29bc4ef4ef28e98b169038e5560af5a58a4c839a7d30b48b5f6ba22a286",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_purge_fence_heartbeat"
     },
     {
@@ -26970,15 +27006,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "59fcadecff341eb41fe3426c25b5f908eec875955c5a2bb0d970f2a12ad42f25",
+  "fingerprint": "a7078ef99c3d908dc301e56a90dffe0cf7f260f9a98f4a17b1bcb475c37523bf",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 467,
+    "audit_pending": 461,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 491
+    "reviewed": 497
   }
 }

@@ -324,6 +324,14 @@
       "reason": "The typed index.requeue_drifted operation replaces the maintenance enqueue that re-ingests projects whose files have drifted. The forced re-ingest, the status the new rows carry and the pending-or-running dedup are fixed policy: without the dedup a repeated sweep would pile duplicate work onto the ingest drain, and the operation could not claim safe idempotency."
     },
     {
+      "symbol": "db2_code_index_unique_file_basename",
+      "signature_sha256": "ba2560bf70402874ca6613ece19b31e734814ad26925e2f1d34495b24d37ea3a",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.unique_file_basename operation resolves a bare file name to a path. It answers only when exactly one file matches: two files with the same name give the empty answer, the same as no file at all, which is the point -- an ambiguous name must not resolve. The match is made in the module over every path in the project's current generation, so the cost is the whole file list on each call and no index helps."
+    },
+    {
       "symbol": "db2_code_projection_generation_abort",
       "signature_sha256": "93e202271604998f81a554377c447c30915c4148395d993899c67b1238312156",
       "disposition": "wire-operation",
@@ -788,6 +796,22 @@
       "reason": "The typed organization.doc_exists_by_hash operation replaces the content probe. The hash is matched exactly and within one scope, so the same content in another scope does not count -- which is what makes this usable as a per-scope duplicate check rather than a global one."
     },
     {
+      "symbol": "db2_kb_documents_get_stored_hash",
+      "signature_sha256": "94810bc8c9cab32c68d6aa4537fc075de44e6511f7a1125b322a2f011faed598",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.document_stored_hash operation reads the hash recorded for a document. Only the project's current generation answers, so a document indexed under an older generation reads back empty -- the same empty as a path nobody has indexed, and the same as a failed read. A caller using this to decide whether a file changed sees an unchanged file as a new one across a generation bump."
+    },
+    {
+      "symbol": "db2_kb_documents_hash_exists",
+      "signature_sha256": "9d88fa3f32e37b2aa30a1a41385ff599d5300f2b3ee4fd483726fdd254ce3a46",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.document_hash_exists operation asks whether a project's current generation already holds content with this hash. Two tables are searched and one path comes back, so the sample names one file with that content and never says how many there are, nor which of the two tables it came from. Both halves are scoped to the current generation, so identical content indexed under an older one does not count as present."
+    },
+    {
       "symbol": "db2_kb_file_index_delete_current_project",
       "signature_sha256": "ce7e7b70b214f1130425b545ab5f667802155eef1982ca64bd87ef5f06bd44b2",
       "disposition": "wire-operation",
@@ -844,12 +868,36 @@
       "reason": "The typed organization.pdf_quarantine_reject operation replaces the reject. It is the mirror of confirm and deletes rather than clears, under the same generation and pending conditions; the count is rows removed."
     },
     {
+      "symbol": "db2_kb_pdf_tsr_state",
+      "signature_sha256": "c1809bcf52e0c215387ea9193500fbe36631c875901c48e29f114b9d7422a84f",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.pdf_tsr_state operation reads a PDF's text-scan state. The statement narrows three ways the arguments do not show: the document must be a PDF, it must be in the project's current generation, and it must not still be awaiting a quarantine decision. A document held in pending quarantine therefore reads back empty, which is also what a document of another kind reads back, and what a missing one reads back."
+    },
+    {
       "symbol": "db2_kb_purge_fence_active",
       "signature_sha256": "ecdd5c8d8d8620b81e3dab1fb8c81319548431fae50b873fd0b1ad92f6f39d3d",
       "disposition": "wire-operation",
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.fence_active operation replaces the fence probe. It composes two runtime-state reads and fails closed: an identity row with no heartbeat reads as active, so a partially written fence is never reported inactive. That rule is the whole point of the probe and is not visible in the Boolean it answers with."
+    },
+    {
+      "symbol": "db2_kb_purge_fence_clear",
+      "signature_sha256": "7e170ed1a87f403cdb6fe5c0e6052bfb3bf4d5fee2e154d5602fb90e97632b7b",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.purge_fence_clear operation removes a purge fence. It checks the fence still names this generation and purge before deleting, inside the transaction it holds, so a caller cannot clear someone else's fence. The two rows go in the order identity then timestamp, which is the reverse of how they are written: an interrupted clear leaves an orphan timestamp, which the fence check treats as no fence, so the failure direction is open rather than stuck."
+    },
+    {
+      "symbol": "db2_kb_purge_fence_heartbeat",
+      "signature_sha256": "6c09f29bc4ef4ef28e98b169038e5560af5a58a4c839a7d30b48b5f6ba22a286",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.purge_fence_heartbeat operation refreshes a purge fence's timestamp. Unlike the bare advisory guard it uses, this operation opens the transaction, takes the lock, checks the fence still names this generation and purge, writes and commits -- all inside the module -- so it is one of the few purge-route pieces that crosses the boundary intact. A fence naming a different purge is refused, and so is one that has been cleared; the reply cannot tell those from a database error."
     },
     {
       "symbol": "db2_kb_release_add_doc",

@@ -12626,6 +12626,42 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_css_migration_rules_doc",
         "policy": {"reads": 200},
     },
+    "unique_file_basename": {
+        "key": ("index", 29),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_unique_file_basename",
+        "policy": {"reads": 200},
+    },
+    "purge_fence_heartbeat": {
+        "key": ("organization", 20),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_purge_fence_heartbeat",
+        "policy": {"writes": 200},
+    },
+    "purge_fence_clear": {
+        "key": ("organization", 21),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_purge_fence_clear",
+        "policy": {"writes": 200},
+    },
+    "document_stored_hash": {
+        "key": ("organization", 22),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_documents_get_stored_hash",
+        "policy": {"reads": 200},
+    },
+    "document_hash_exists": {
+        "key": ("organization", 23),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_documents_hash_exists",
+        "policy": {"reads": 200},
+    },
+    "pdf_tsr_state": {
+        "key": ("organization", 24),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_pdf_tsr_state",
+        "policy": {"reads": 200},
+    },
 }
 
 

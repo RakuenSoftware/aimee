@@ -5056,6 +5056,52 @@
       }
     },
     {
+      "family": "index",
+      "id": 29,
+      "name": "unique_file_basename",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed files and the generation they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_unique_file_basename"
+      ],
+      "request": {
+        "policy": {
+          "reads": "every path in the project's current generation is read and the basename compared in the module, and a path is returned only when exactly one file matches"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "basename",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -7481,6 +7527,254 @@
             "type": "u64",
             "minimum": 0,
             "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 20,
+      "name": "purge_fence_heartbeat",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Purge fences are relational DB2 runtime-state rows.",
+      "c_symbols": [
+        "db2_kb_purge_fence_heartbeat"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the whole read-check-write runs in one transaction the module holds, and the heartbeat lands only if the fence still names this generation and purge"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "generation",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "purge_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "applied",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 21,
+      "name": "purge_fence_clear",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Purge fences are relational DB2 runtime-state rows.",
+      "c_symbols": [
+        "db2_kb_purge_fence_clear"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the identity row is deleted before its timestamp row, so an interrupted clear can leave the timestamp behind"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "generation",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "purge_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "applied",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 22,
+      "name": "document_stored_hash",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Documents and the hashes recorded for them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_documents_get_stored_hash"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only a document in the project's current generation answers, so a document from an older generation reads back as absent"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "file_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 23,
+      "name": "document_hash_exists",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Documents, the file index and the hashes on both are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_documents_hash_exists"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the documents and the file index are both searched and one path is returned, so the sample is an example rather than the only file with that content"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "file_hash",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "exists",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "sample_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 24,
+      "name": "pdf_tsr_state",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Documents, their kind and their quarantine and scan states are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_pdf_tsr_state"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the document must be a PDF in the current generation and not still awaiting a quarantine decision, so a pending document reads back as absent"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "document_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "tsr_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
           }
         ]
       }

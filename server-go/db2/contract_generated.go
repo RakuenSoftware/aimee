@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "d7c979d20e1f26d9af2e178a94d454a62d033998d486f5c783c9a37488743e15"
+const ContractSHA256 = "d620ff3f4e1be1104eb906856b5cd28dc9d0df3c5dca555dd131f93cd75ced85"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1626,6 +1626,60 @@ func DecodeProjectionVisibleIDRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return project, nil
+}
+
+const EventUniqueFileBasename = EventIndex
+const StageUniqueFileBasename = FamilyIndex
+const OperationUniqueFileBasename uint32 = 29
+const UniqueFileBasenameProjectMin = 1
+const UniqueFileBasenameProjectMax = 127
+const UniqueFileBasenameBasenameMin = 1
+const UniqueFileBasenameBasenameMax = 255
+
+// EncodeUniqueFileBasenameRequest writes the schema unique_file_basename declares, in order.
+func EncodeUniqueFileBasenameRequest(project string, basename string) ([]byte, error) {
+	if len(project) < UniqueFileBasenameProjectMin || len(project) > UniqueFileBasenameProjectMax || hasNUL(project) ||
+		len(basename) < UniqueFileBasenameBasenameMin || len(basename) > UniqueFileBasenameBasenameMax || hasNUL(basename) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, UniqueFileBasenameProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, basename, UniqueFileBasenameBasenameMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationUniqueFileBasename, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeUniqueFileBasenameRequest reads it back, checking each field against its own bound.
+func DecodeUniqueFileBasenameRequest(request []byte) (string, string, error) {
+	var project string
+	var basename string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationUniqueFileBasename || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, UniqueFileBasenameProjectMax); err != nil ||
+		len(project) < UniqueFileBasenameProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if basename, err = takeRowText(payload, &cursor, UniqueFileBasenameBasenameMax); err != nil ||
+		len(basename) < UniqueFileBasenameBasenameMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, basename, nil
 }
 
 const EventTraceMiningRecord = EventLearning
@@ -4328,6 +4382,298 @@ func DecodeReleaseCreateRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return releaseName, nil
+}
+
+const EventPurgeFenceHeartbeat = EventOrganization
+const StagePurgeFenceHeartbeat = FamilyOrganization
+const OperationPurgeFenceHeartbeat uint32 = 20
+const PurgeFenceHeartbeatProjectMin = 1
+const PurgeFenceHeartbeatProjectMax = 127
+const PurgeFenceHeartbeatGenerationMin = 0
+const PurgeFenceHeartbeatGenerationMax = 63
+const PurgeFenceHeartbeatPurgeIDMin = 0
+const PurgeFenceHeartbeatPurgeIDMax = 127
+
+// EncodePurgeFenceHeartbeatRequest writes the schema purge_fence_heartbeat declares, in order.
+func EncodePurgeFenceHeartbeatRequest(project string, generation string, purgeID string) ([]byte, error) {
+	if len(project) < PurgeFenceHeartbeatProjectMin || len(project) > PurgeFenceHeartbeatProjectMax || hasNUL(project) ||
+		len(generation) < PurgeFenceHeartbeatGenerationMin || len(generation) > PurgeFenceHeartbeatGenerationMax || hasNUL(generation) ||
+		len(purgeID) < PurgeFenceHeartbeatPurgeIDMin || len(purgeID) > PurgeFenceHeartbeatPurgeIDMax || hasNUL(purgeID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, PurgeFenceHeartbeatProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, generation, PurgeFenceHeartbeatGenerationMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, purgeID, PurgeFenceHeartbeatPurgeIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationPurgeFenceHeartbeat, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodePurgeFenceHeartbeatRequest reads it back, checking each field against its own bound.
+func DecodePurgeFenceHeartbeatRequest(request []byte) (string, string, string, error) {
+	var project string
+	var generation string
+	var purgeID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPurgeFenceHeartbeat || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, PurgeFenceHeartbeatProjectMax); err != nil ||
+		len(project) < PurgeFenceHeartbeatProjectMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if generation, err = takeRowText(payload, &cursor, PurgeFenceHeartbeatGenerationMax); err != nil ||
+		len(generation) < PurgeFenceHeartbeatGenerationMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if purgeID, err = takeRowText(payload, &cursor, PurgeFenceHeartbeatPurgeIDMax); err != nil ||
+		len(purgeID) < PurgeFenceHeartbeatPurgeIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return project, generation, purgeID, nil
+}
+
+const EventPurgeFenceClear = EventOrganization
+const StagePurgeFenceClear = FamilyOrganization
+const OperationPurgeFenceClear uint32 = 21
+const PurgeFenceClearProjectMin = 1
+const PurgeFenceClearProjectMax = 127
+const PurgeFenceClearGenerationMin = 0
+const PurgeFenceClearGenerationMax = 63
+const PurgeFenceClearPurgeIDMin = 0
+const PurgeFenceClearPurgeIDMax = 127
+
+// EncodePurgeFenceClearRequest writes the schema purge_fence_clear declares, in order.
+func EncodePurgeFenceClearRequest(project string, generation string, purgeID string) ([]byte, error) {
+	if len(project) < PurgeFenceClearProjectMin || len(project) > PurgeFenceClearProjectMax || hasNUL(project) ||
+		len(generation) < PurgeFenceClearGenerationMin || len(generation) > PurgeFenceClearGenerationMax || hasNUL(generation) ||
+		len(purgeID) < PurgeFenceClearPurgeIDMin || len(purgeID) > PurgeFenceClearPurgeIDMax || hasNUL(purgeID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, PurgeFenceClearProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, generation, PurgeFenceClearGenerationMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, purgeID, PurgeFenceClearPurgeIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationPurgeFenceClear, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodePurgeFenceClearRequest reads it back, checking each field against its own bound.
+func DecodePurgeFenceClearRequest(request []byte) (string, string, string, error) {
+	var project string
+	var generation string
+	var purgeID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPurgeFenceClear || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, PurgeFenceClearProjectMax); err != nil ||
+		len(project) < PurgeFenceClearProjectMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if generation, err = takeRowText(payload, &cursor, PurgeFenceClearGenerationMax); err != nil ||
+		len(generation) < PurgeFenceClearGenerationMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if purgeID, err = takeRowText(payload, &cursor, PurgeFenceClearPurgeIDMax); err != nil ||
+		len(purgeID) < PurgeFenceClearPurgeIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return project, generation, purgeID, nil
+}
+
+const EventDocumentStoredHash = EventOrganization
+const StageDocumentStoredHash = FamilyOrganization
+const OperationDocumentStoredHash uint32 = 22
+const DocumentStoredHashProjectMin = 1
+const DocumentStoredHashProjectMax = 127
+const DocumentStoredHashFilePathMin = 1
+const DocumentStoredHashFilePathMax = 1023
+
+// EncodeDocumentStoredHashRequest writes the schema document_stored_hash declares, in order.
+func EncodeDocumentStoredHashRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < DocumentStoredHashProjectMin || len(project) > DocumentStoredHashProjectMax || hasNUL(project) ||
+		len(filePath) < DocumentStoredHashFilePathMin || len(filePath) > DocumentStoredHashFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, DocumentStoredHashProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, DocumentStoredHashFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDocumentStoredHash, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDocumentStoredHashRequest reads it back, checking each field against its own bound.
+func DecodeDocumentStoredHashRequest(request []byte) (string, string, error) {
+	var project string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocumentStoredHash || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, DocumentStoredHashProjectMax); err != nil ||
+		len(project) < DocumentStoredHashProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, DocumentStoredHashFilePathMax); err != nil ||
+		len(filePath) < DocumentStoredHashFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
+}
+
+const EventDocumentHashExists = EventOrganization
+const StageDocumentHashExists = FamilyOrganization
+const OperationDocumentHashExists uint32 = 23
+const DocumentHashExistsProjectMin = 1
+const DocumentHashExistsProjectMax = 127
+const DocumentHashExistsFileHashMin = 1
+const DocumentHashExistsFileHashMax = 127
+
+// EncodeDocumentHashExistsRequest writes the schema document_hash_exists declares, in order.
+func EncodeDocumentHashExistsRequest(project string, fileHash string) ([]byte, error) {
+	if len(project) < DocumentHashExistsProjectMin || len(project) > DocumentHashExistsProjectMax || hasNUL(project) ||
+		len(fileHash) < DocumentHashExistsFileHashMin || len(fileHash) > DocumentHashExistsFileHashMax || hasNUL(fileHash) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, DocumentHashExistsProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, fileHash, DocumentHashExistsFileHashMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDocumentHashExists, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDocumentHashExistsRequest reads it back, checking each field against its own bound.
+func DecodeDocumentHashExistsRequest(request []byte) (string, string, error) {
+	var project string
+	var fileHash string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocumentHashExists || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, DocumentHashExistsProjectMax); err != nil ||
+		len(project) < DocumentHashExistsProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if fileHash, err = takeRowText(payload, &cursor, DocumentHashExistsFileHashMax); err != nil ||
+		len(fileHash) < DocumentHashExistsFileHashMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, fileHash, nil
+}
+
+const EventPdfTsrState = EventOrganization
+const StagePdfTsrState = FamilyOrganization
+const OperationPdfTsrState uint32 = 24
+const PdfTsrStateProjectMin = 1
+const PdfTsrStateProjectMax = 127
+const PdfTsrStateDocumentKeyMin = 1
+const PdfTsrStateDocumentKeyMax = 1023
+
+// EncodePdfTsrStateRequest writes the schema pdf_tsr_state declares, in order.
+func EncodePdfTsrStateRequest(project string, documentKey string) ([]byte, error) {
+	if len(project) < PdfTsrStateProjectMin || len(project) > PdfTsrStateProjectMax || hasNUL(project) ||
+		len(documentKey) < PdfTsrStateDocumentKeyMin || len(documentKey) > PdfTsrStateDocumentKeyMax || hasNUL(documentKey) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, PdfTsrStateProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, documentKey, PdfTsrStateDocumentKeyMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationPdfTsrState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodePdfTsrStateRequest reads it back, checking each field against its own bound.
+func DecodePdfTsrStateRequest(request []byte) (string, string, error) {
+	var project string
+	var documentKey string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPdfTsrState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, PdfTsrStateProjectMax); err != nil ||
+		len(project) < PdfTsrStateProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if documentKey, err = takeRowText(payload, &cursor, PdfTsrStateDocumentKeyMax); err != nil ||
+		len(documentKey) < PdfTsrStateDocumentKeyMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, documentKey, nil
 }
 
 const EventEnrollmentActive = EventCustody

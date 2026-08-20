@@ -855,6 +855,12 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .projection_visible_id = db2_code_projection_visible_id,
        .release_create = db2_kb_release_create,
        .css_migration_rules_doc = db2_css_migration_rules_doc,
+       .unique_file_basename = db2_code_index_unique_file_basename,
+       .purge_fence_heartbeat = db2_kb_purge_fence_heartbeat,
+       .purge_fence_clear = db2_kb_purge_fence_clear,
+       .document_stored_hash = db2_kb_documents_get_stored_hash,
+       .document_hash_exists = db2_kb_documents_hash_exists,
+       .pdf_tsr_state = db2_kb_pdf_tsr_state,
    };
    return &backend;
 }
@@ -2913,6 +2919,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char project[AIMEE_DB2_UNIQUE_FILE_BASENAME_PROJECT_MAX + 1] = "";
+         char basename[AIMEE_DB2_UNIQUE_FILE_BASENAME_BASENAME_MAX + 1] = "";
+         if (aimee_db2_unique_file_basename_request_decode(request_body, request_len, project,
+                                                           sizeof(project), basename,
+                                                           sizeof(basename)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_UNIQUE_FILE_BASENAME_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->unique_file_basename)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char file_path[AIMEE_DB2_UNIQUE_FILE_BASENAME_FILE_PATH_MAX + 1] = "";
+            (void)backend->unique_file_basename(project, basename, file_path, sizeof(file_path));
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_unique_file_basename_reply_encode(file_path, response_body,
+                                                            response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -3455,6 +3482,117 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_release_create_reply_encode(release_id, response_body, response_capacity,
                                                       response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_PURGE_FENCE_HEARTBEAT_PROJECT_MAX + 1] = "";
+         char generation[AIMEE_DB2_PURGE_FENCE_HEARTBEAT_GENERATION_MAX + 1] = "";
+         char purge_id[AIMEE_DB2_PURGE_FENCE_HEARTBEAT_PURGE_ID_MAX + 1] = "";
+         if (aimee_db2_purge_fence_heartbeat_request_decode(
+                 request_body, request_len, project, sizeof(project), generation,
+                 sizeof(generation), purge_id, sizeof(purge_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PURGE_FENCE_HEARTBEAT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->purge_fence_heartbeat)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t applied = 0u;
+            applied = backend->purge_fence_heartbeat(project, generation, purge_id) == 1 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_purge_fence_heartbeat_reply_encode(applied, response_body,
+                                                             response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_PURGE_FENCE_CLEAR_PROJECT_MAX + 1] = "";
+         char generation[AIMEE_DB2_PURGE_FENCE_CLEAR_GENERATION_MAX + 1] = "";
+         char purge_id[AIMEE_DB2_PURGE_FENCE_CLEAR_PURGE_ID_MAX + 1] = "";
+         if (aimee_db2_purge_fence_clear_request_decode(
+                 request_body, request_len, project, sizeof(project), generation,
+                 sizeof(generation), purge_id, sizeof(purge_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PURGE_FENCE_CLEAR_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->purge_fence_clear)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t applied = 0u;
+            applied = backend->purge_fence_clear(project, generation, purge_id) == 1 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_purge_fence_clear_reply_encode(applied, response_body, response_capacity,
+                                                         response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_DOCUMENT_STORED_HASH_PROJECT_MAX + 1] = "";
+         char file_path[AIMEE_DB2_DOCUMENT_STORED_HASH_FILE_PATH_MAX + 1] = "";
+         if (aimee_db2_document_stored_hash_request_decode(request_body, request_len, project,
+                                                           sizeof(project), file_path,
+                                                           sizeof(file_path)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DOCUMENT_STORED_HASH_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->document_stored_hash)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char file_hash[AIMEE_DB2_DOCUMENT_STORED_HASH_FILE_HASH_MAX + 1] = "";
+            (void)backend->document_stored_hash(project, file_path, file_hash, sizeof(file_hash));
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_document_stored_hash_reply_encode(file_hash, response_body,
+                                                            response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_DOCUMENT_HASH_EXISTS_PROJECT_MAX + 1] = "";
+         char file_hash[AIMEE_DB2_DOCUMENT_HASH_EXISTS_FILE_HASH_MAX + 1] = "";
+         if (aimee_db2_document_hash_exists_request_decode(request_body, request_len, project,
+                                                           sizeof(project), file_hash,
+                                                           sizeof(file_hash)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DOCUMENT_HASH_EXISTS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->document_hash_exists)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t exists = 0u;
+            char sample_path[AIMEE_DB2_DOCUMENT_HASH_EXISTS_SAMPLE_PATH_MAX + 1] = "";
+            exists = backend->document_hash_exists(project, file_hash, sample_path,
+                                                   sizeof(sample_path)) > 0
+                         ? 1u
+                         : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_document_hash_exists_reply_encode(exists, sample_path, response_body,
+                                                            response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project[AIMEE_DB2_PDF_TSR_STATE_PROJECT_MAX + 1] = "";
+         char document_key[AIMEE_DB2_PDF_TSR_STATE_DOCUMENT_KEY_MAX + 1] = "";
+         if (aimee_db2_pdf_tsr_state_request_decode(request_body, request_len, project,
+                                                    sizeof(project), document_key,
+                                                    sizeof(document_key)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PDF_TSR_STATE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->pdf_tsr_state)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char tsr_state[AIMEE_DB2_PDF_TSR_STATE_TSR_STATE_MAX + 1] = "";
+            (void)backend->pdf_tsr_state(project, document_key, tsr_state, sizeof(tsr_state));
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_pdf_tsr_state_reply_encode(tsr_state, response_body, response_capacity,
+                                                     response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

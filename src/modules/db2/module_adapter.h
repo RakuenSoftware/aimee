@@ -261,6 +261,12 @@ typedef struct
    int64_t (*projection_visible_id)(const char *project);
    int64_t (*release_create)(const char *release_name);
    int (*css_migration_rules_doc)(const char *exemplar_project, char *out, size_t capacity);
+   int (*unique_file_basename)(const char *project, const char *basename, char *out, size_t capacity);
+   int (*purge_fence_heartbeat)(const char *project, const char *generation, const char *purge_id);
+   int (*purge_fence_clear)(const char *project, const char *generation, const char *purge_id);
+   int (*document_stored_hash)(const char *project, const char *file_path, char *out, size_t capacity);
+   int (*document_hash_exists)(const char *project, const char *file_hash, char *sample, size_t capacity);
+   int (*pdf_tsr_state)(const char *project, const char *document_key, char *out, size_t capacity);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
