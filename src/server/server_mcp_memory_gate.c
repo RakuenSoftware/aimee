@@ -34,3 +34,12 @@ uint32_t mcp_memory_maintain_required_cap(unsigned int modes)
    return (effective & MEMORY_MAINTENANCE_MODE_PRUNE) ? (uint32_t)CAP_MEMORY_ADMIN
                                                       : (uint32_t)CAP_MEMORY_WRITE;
 }
+
+unsigned int mcp_memory_maintain_model_modes(unsigned int modes, int *dropped_prune_out)
+{
+   unsigned int effective = modes ? modes : (unsigned int)MEMORY_MAINTENANCE_MODES_DEFAULT;
+   int had_prune = (effective & MEMORY_MAINTENANCE_MODE_PRUNE) ? 1 : 0;
+   if (dropped_prune_out)
+      *dropped_prune_out = had_prune;
+   return effective & ~(unsigned int)MEMORY_MAINTENANCE_MODE_PRUNE;
+}

@@ -34,4 +34,23 @@ const char *mcp_mutate_verb_method(const char *verb);
  * would move the bypass rather than close it. */
 uint32_t mcp_memory_maintain_required_cap(unsigned int modes);
 
+/* The maintenance modes a MODEL-initiated call may actually run: the requested
+ * set (or MODES_DEFAULT when `modes` is 0) with prune removed. When
+ * `dropped_prune_out` is non-NULL it reports whether prune was taken out, so the
+ * caller can say so rather than silently doing less than asked.
+ *
+ * Why the capability gate alone is not enough. Reaching ANY MCP tool requires
+ * CAP_TOOL_EXECUTE, which exists only in CAPS_AUTHENTICATED and CAPS_ALL -- and
+ * both of those also contain CAP_MEMORY_ADMIN. So every caller that can invoke
+ * memory_maintain at all already clears an admin-graded gate, and grading alone
+ * would leave a model able to bulk-delete: prune wipes every L0 row and its
+ * provenance, deletes stale L1 rows, and drops restricted/sensitive memories
+ * past retention.
+ *
+ * So the model's door does not prune, for the same reason its `forget` retires
+ * rather than destroys. Pruning stays available to the operator, who has a
+ * separate path to it (`aimee memory maintain`, which reaches the knowledge
+ * service directly), and to the scheduler that runs the cycle internally. */
+unsigned int mcp_memory_maintain_model_modes(unsigned int modes, int *dropped_prune_out);
+
 #endif /* SERVER_MCP_MEMORY_GATE_H */

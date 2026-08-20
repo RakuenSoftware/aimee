@@ -549,8 +549,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *m = cJSON_AddObjectToObject(p, "modes");
       cJSON_AddStringToObject(m, "type", "string");
       cJSON_AddStringToObject(m, "description",
-                              "Comma-separated subset of replay|compact|prune|summarize. "
-                              "Empty = replay,compact,prune (default).");
+                              "Comma-separated subset of replay|compact|summarize. Empty = "
+                              "replay,compact. `prune` is NOT available here: it permanently "
+                              "deletes memories, so it is an operator action "
+                              "(`aimee memory maintain`); asking for it is declined, and an "
+                              "empty request omits it rather than running it.");
       cJSON *dr = cJSON_AddObjectToObject(p, "dry_run");
       cJSON_AddStringToObject(dr, "type", "boolean");
       cJSON_AddStringToObject(dr, "description",
@@ -560,8 +563,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(fc, "description", "Bypass the idle-guard so the cycle always runs.");
       cJSON_AddItemToArray(
           tools, mcp_tool_new("memory_maintain",
-                              "Run a memory maintenance cycle (replay/compact/prune/summarize) and "
-                              "return the summary. Idempotent; idle cycles short-circuit.",
+                              "Run a memory maintenance cycle (replay/compact/summarize) and "
+                              "return the summary. Idempotent; idle cycles short-circuit. This "
+                              "tool never deletes: the destructive `prune` mode is an operator "
+                              "action and is excluded here.",
                               s));
    }
 

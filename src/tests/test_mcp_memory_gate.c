@@ -94,6 +94,70 @@ static void test_maintain_non_destructive_modes_require_write(void)
    printf("  PASS: non-destructive modes require only memory:write\n");
 }
 
+/* The gate alone cannot stop a model from bulk-deleting, and this is the reason:
+ * reaching ANY MCP tool needs CAP_TOOL_EXECUTE, which exists only in
+ * CAPS_AUTHENTICATED and CAPS_ALL -- and both of those also carry
+ * CAP_MEMORY_ADMIN. So every caller that can invoke memory_maintain at all
+ * already clears an admin-graded gate. Pin the property, because it is the
+ * justification for stripping prune rather than merely grading it: if the
+ * capability sets are ever separated, that is a deliberate change and this
+ * assertion should be revisited, not silently invalidated. */
+static void test_every_mcp_caller_already_clears_the_admin_gate(void)
+{
+   uint32_t mcp = server_capability_for_method("mcp.call");
+   assert(mcp == CAP_TOOL_EXECUTE);
+
+   /* The only cap sets a connection can hold are CAPS_ALL, CAPS_AUTHENTICATED,
+    * and the read-only set (see server_http_conn_caps). */
+   assert((CAPS_READ_ONLY & CAP_TOOL_EXECUTE) == 0); /* read-only cannot reach MCP at all */
+   assert((CAPS_AUTHENTICATED & CAP_TOOL_EXECUTE) == CAP_TOOL_EXECUTE);
+   assert((CAPS_ALL & CAP_TOOL_EXECUTE) == CAP_TOOL_EXECUTE);
+   /* ...and both MCP-capable sets already hold the destroy grant. */
+   assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
+   assert((CAPS_ALL & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
+   printf("  PASS: every MCP-capable caller already holds memory:admin\n");
+}
+
+/* Which is why the model's door does not prune at all. */
+static void test_model_modes_never_prune(void)
+{
+   int dropped = -1;
+
+   /* Explicit prune is removed, and reported. */
+   unsigned int m = mcp_memory_maintain_model_modes(MEMORY_MAINTENANCE_MODE_PRUNE, &dropped);
+   assert((m & MEMORY_MAINTENANCE_MODE_PRUNE) == 0);
+   assert(m == 0); /* nothing else was asked for */
+   assert(dropped == 1);
+
+   /* A bare call -- modes 0 -> MODES_DEFAULT, which includes prune -- loses only
+    * prune and still runs the rest. This is the case that silently destroyed. */
+   dropped = -1;
+   m = mcp_memory_maintain_model_modes(0, &dropped);
+   assert((m & MEMORY_MAINTENANCE_MODE_PRUNE) == 0);
+   assert(dropped == 1);
+   assert((m & MEMORY_MAINTENANCE_MODE_REPLAY) == MEMORY_MAINTENANCE_MODE_REPLAY);
+   assert((m & MEMORY_MAINTENANCE_MODE_COMPACT) == MEMORY_MAINTENANCE_MODE_COMPACT);
+
+   /* Prune mixed with real work keeps the work. */
+   dropped = -1;
+   m = mcp_memory_maintain_model_modes(
+       MEMORY_MAINTENANCE_MODE_PRUNE | MEMORY_MAINTENANCE_MODE_SUMMARIZE, &dropped);
+   assert(m == MEMORY_MAINTENANCE_MODE_SUMMARIZE);
+   assert(dropped == 1);
+
+   /* A request with no prune in it is passed through untouched and not reported
+    * as narrowed. */
+   dropped = -1;
+   m = mcp_memory_maintain_model_modes(MEMORY_MAINTENANCE_MODE_REPLAY, &dropped);
+   assert(m == MEMORY_MAINTENANCE_MODE_REPLAY);
+   assert(dropped == 0);
+
+   /* Whatever survives is never admin-graded, since prune is what made it so. */
+   assert(mcp_memory_maintain_required_cap(mcp_memory_maintain_model_modes(0, NULL)) ==
+          CAP_MEMORY_WRITE);
+   printf("  PASS: the model's maintenance door never prunes\n");
+}
+
 /* Neither gate may be satisfiable by a read-only caller. */
 static void test_no_gate_is_read_only(void)
 {
@@ -112,6 +176,8 @@ int main(void)
    test_maintain_prune_requires_admin();
    test_maintain_default_modes_require_admin();
    test_maintain_non_destructive_modes_require_write();
+   test_every_mcp_caller_already_clears_the_admin_gate();
+   test_model_modes_never_prune();
    test_no_gate_is_read_only();
    printf("mcp_memory_gate: all tests passed\n");
    return 0;

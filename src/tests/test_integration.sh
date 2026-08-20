@@ -926,9 +926,85 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     else
         check_output "memory.get without --as-of emits no verdict" "ok" echo "ok"
     fi
+
+    # ------------------------------------------------------------------
+    # The MCP mutate verbs must not destroy a stored memory.
+    #
+    # tool_memory_mutate's `forget` reached a hard DELETE (row AND provenance,
+    # with the audit event carrying only the id, so the content was gone for
+    # good) and `update` overwrote content with no prior value kept -- neither
+    # behind any capability check. Both verbs now carry MODEL authority: forget
+    # retires, update supersedes.
+    #
+    # The unit tests cover the routing and the capability grading. Only a live
+    # server shows the thing that actually matters: after the model forgets it,
+    # the memory is still there. Assert it on the real wire.
+    # ------------------------------------------------------------------
+    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-forget","content":"value that must survive forget","tier":"L2","kind":"fact"}') || true
+    check_output "memory.store (mcp forget subject)" '"status":"ok"' echo "$RESP"
+    FORGET_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
+
+    if [ -n "${FORGET_ID:-}" ]; then
+        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"verb\":\"forget\",\"id\":$FORGET_ID}}}") || true
+        check_output "mcp mutate forget is allowed for an authorized caller" '"content"' echo "$RESP"
+        check_output "mcp mutate forget retires rather than destroys" 'retired, not destroyed' echo "$RESP"
+
+        # The row survives with its content intact -- a mistaken forget is
+        # recoverable. This is the assertion the whole change exists for.
+        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$FORGET_ID}") || true
+        check_output "a forgotten memory still exists" '"status":"ok"' echo "$RESP"
+        check_output "a forgotten memory kept its content" "value that must survive forget" echo "$RESP"
+    else
+        echo "SKIP: mcp forget round-trip (no id from memory.store)"
+        SKIP=$((SKIP + 4))
+    fi
+
+    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-update","content":"the original value","tier":"L2","kind":"fact"}') || true
+    UPDATE_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
+
+    if [ -n "${UPDATE_ID:-}" ]; then
+        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"verb\":\"update\",\"id\":$UPDATE_ID,\"content\":\"the corrected value\"}}}") || true
+        check_output "mcp mutate update versions the previous value" 'previous content kept as a version' echo "$RESP"
+
+        # The row the model edited still holds the OLD content; the new value
+        # lives on a new row. An overwrite would have lost the original.
+        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$UPDATE_ID}") || true
+        check_output "the superseded row kept the original content" "the original value" echo "$RESP"
+    else
+        echo "SKIP: mcp update round-trip (no id from memory.store)"
+        SKIP=$((SKIP + 2))
+    fi
+
+    # memory_maintain's prune mode bulk-deletes (every L0 row and its provenance,
+    # stale L1 rows, retention-expired restricted/sensitive memories) and had no
+    # gate at all. It is now graded, so confirm the gate admits an authorized
+    # caller rather than bricking ordinary upkeep -- a gate that refuses everyone
+    # would pass every unit test and break the running system.
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"memory_maintain","arguments":{"modes":"replay","dry_run":true}}}') || true
+    check_output "mcp memory_maintain still runs for an authorized caller" '"content"' echo "$RESP"
+    if echo "$RESP" | grep -qF 'insufficient capabilities'; then
+        check_output "mcp memory_maintain was not refused" "ok" echo "REFUSED an authorized caller"
+    else
+        check_output "mcp memory_maintain was not refused" "ok" echo "ok"
+    fi
+
+    # ...but prune -- which hard-deletes in bulk -- must not run from the model's
+    # door at all. Grading it was not enough: reaching any MCP tool requires
+    # CAP_TOOL_EXECUTE, which only CAPS_AUTHENTICATED and CAPS_ALL carry, and
+    # both of those also carry CAP_MEMORY_ADMIN. So every caller that can reach
+    # this tool already clears an admin gate, and only removing prune actually
+    # stops it. A bare `{}` call is the dangerous one: modes 0 means
+    # MODES_DEFAULT, which includes prune.
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"memory_maintain","arguments":{"modes":"prune"}}}') || true
+    check_output "mcp memory_maintain refuses an explicit prune" 'not available through this tool' echo "$RESP"
+
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"memory_maintain","arguments":{"dry_run":true}}}') || true
+    check_output "mcp memory_maintain drops prune from a bare call and says so" 'prune was NOT run' echo "$RESP"
 else
     echo "SKIP: memory write/read round-trip (aimee-kb is not configured)"
     SKIP=$((SKIP + 6))
+    echo "SKIP: mcp mutate forget/update non-destruction (aimee-kb is not configured)"
+    SKIP=$((SKIP + 12))
 fi
 
 # ============================================================

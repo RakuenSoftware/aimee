@@ -561,23 +561,41 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
    if (cJSON_IsBool(jf))
       force = cJSON_IsTrue(jf) ? 1 : 0;
 
-   /* Capability gate, for the same reason `mutate` has one. The prune mode is
-    * the bulk twin of memory.delete: memory_expire() wipes every L0 row and its
-    * provenance and deletes stale L1 rows, and memory_enforce_retention() hard-
-    * deletes restricted/sensitive memories past their retention window. There is
-    * no RPC method twin to inherit a grade from — memory.maintenance_run is a
-    * KB-service method the server never dispatches — so this tool was the ONLY
-    * door to bulk memory destruction, and it was ungated.
+   /* The prune mode is the bulk twin of memory.delete: memory_expire() wipes
+    * every L0 row and its provenance and deletes stale L1 rows, and
+    * memory_enforce_retention() hard-deletes restricted/sensitive memories past
+    * their retention window. This tool is the model's door to it, and it was
+    * ungated -- there is not even an RPC method twin to inherit a grade from
+    * (memory.maintenance_run is a KB-service method the server never dispatches).
     *
-    * The grade itself (including the modes-of-0 defaulting, which INCLUDES
-    * prune, so a bare `memory_maintain {}` grades as destructive) is
-    * mcp_memory_maintain_required_cap. */
-   uint32_t required = mcp_memory_maintain_required_cap(modes);
-   if (!c->conn || (c->conn->capabilities & required) == 0)
-      return text_content("error: forbidden: insufficient capabilities for memory maintenance "
-                          "(the prune mode permanently deletes memories)");
+    * Grading it is NOT sufficient on its own, and it is worth being explicit
+    * about why: reaching any MCP tool requires CAP_TOOL_EXECUTE, which lives
+    * only in CAPS_AUTHENTICATED and CAPS_ALL -- and both also carry
+    * CAP_MEMORY_ADMIN. Every caller that can invoke this tool therefore already
+    * clears an admin-graded gate, so a gate alone would still leave a model able
+    * to bulk-delete.
+    *
+    * So the model's door does not prune at all, for the same reason its `forget`
+    * retires rather than destroys. The operator keeps prune via
+    * `aimee memory maintain`, and the scheduler still runs the full cycle. The
+    * capability gate stays as defence in depth on the modes actually run. */
+   int dropped_prune = 0;
+   unsigned int run_modes = mcp_memory_maintain_model_modes(modes, &dropped_prune);
 
-   char *envelope = kb_client_memory_maintenance_run_json(modes, force, dry_run);
+   uint32_t required = mcp_memory_maintain_required_cap(run_modes);
+   if (!c->conn || (c->conn->capabilities & required) == 0)
+      return text_content("error: forbidden: insufficient capabilities for memory maintenance");
+
+   /* Nothing left to do once prune is removed (a bare call asking only for it):
+    * say so rather than running an empty cycle and reporting success. */
+   if (run_modes == 0)
+      return text_content("memory maintenance: nothing run. The prune mode permanently deletes "
+                          "memories (all L0 rows, stale L1 rows, and restricted/sensitive rows "
+                          "past retention) and is not available through this tool; it is an "
+                          "operator action (`aimee memory maintain`). Other modes: replay, "
+                          "compact, summarize.");
+
+   char *envelope = kb_client_memory_maintenance_run_json(run_modes, force, dry_run);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *summary = resp ? cJSON_GetObjectItemCaseSensitive(resp, "summary") : NULL;
@@ -589,6 +607,25 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
+   /* Say when the request was narrowed. Running less than asked and reporting
+    * plain success would read as "pruned" to the caller. */
+   if (dropped_prune)
+   {
+      const char *body = rendered ? rendered : "{}";
+      size_t need = strlen(body) + 256;
+      char *note = (char *)malloc(need);
+      if (note)
+      {
+         snprintf(note, need,
+                  "%s\n(prune was NOT run: it permanently deletes memories and is an operator "
+                  "action, `aimee memory maintain`. The other requested modes ran.)",
+                  body);
+         cJSON *content = text_content(note);
+         free(note);
+         free(rendered);
+         return content;
+      }
+   }
    cJSON *content = rendered ? text_content(rendered) : text_content("{}");
    free(rendered);
    return content;
