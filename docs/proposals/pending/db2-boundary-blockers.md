@@ -200,66 +200,42 @@ the envelope should carry an explicit family discriminator is a wire-format
 decision, and changing it later is a breaking change; recorded now while the
 wire is still only spoken by this repository.
 
-## Sixty-three list operations return more rows than one reply can hold
+## Four list operations still return more rows than one reply can hold
 
-The generated client declares its reply buffer as a local array, so a whole
-list crosses in a single envelope and the generator refuses any schema whose
-widest reply passes 65536 bytes. That is a deliberate bound -- sixty-four
-memory rows do not belong on a caller's stack -- and it decides which list
-operations can be published as they stand.
+This entry used to name sixty-three. The bound was not the boundary's: a
+generated client declared its response buffer as a local array, so the reply
+ceiling was set at what a caller's stack should hold, 65536 bytes. The
+transport was never the limit -- the module protocol carries sixteen megabytes
+and the bus wire one.
 
-The arithmetic is fixed. A string field costs four bytes of length plus its
-declared maximum, a 32-bit number four, a 64-bit number or a double eight, and
-the envelope and row count take 28. So a row type's widest encoding divides
-65508 to give the rows one reply holds.
+A reply wider than sixteen kilobytes is now allocated by the generated client
+rather than declared, and the same in the module's handler, whose row buffer
+and backend row array sit on a handler thread's stack. The ceiling is what the
+wire carries, one megabyte less the envelope. Every operation that already
+crossed is unchanged: it stays on the stack, with no allocation it did not
+have.
 
-Measured against what callers actually ask for -- the size of the arrays they
-declare of that row type, which is what they pass as the maximum -- the 132
-pending declarations returning a struct row divide as:
+Two of those handler arrays had been written `static` to keep them off the
+stack, which two concurrent calls would have shared -- handlers run on their
+own threads. They are allocated now, with the rest.
 
-    49  fit what their callers ask for
-    63  hold fewer rows than a caller asks for
-    20  could not be measured from the headers
+That leaves four declarations whose callers ask for more rows than a megabyte
+holds:
 
-The forty pending declarations returning bare identifiers are not affected: at
-eight bytes a row, one reply holds more than eight thousand.
+    row type                bytes/row   rows per reply   caller asks for   n
+    project_info_t               4265              245               512   2
+    css_migration_unit_t         4405              238              1024   1
+    db2_org_spend_row_t           338             3102              4096   1
 
-The short ones are short by a lot, not a little:
+Each is wide for its own reason -- a project row carries a 4KB path, a CSS
+migration unit carries two -- and each caller's number is the size of an array
+it declared, which is a ceiling it chose rather than a count it needs. The
+honest options are unchanged and now apply to four operations rather than
+sixty-three: page the reply, narrow the row to the fields the caller reads, or
+establish that the caller's array is larger than any real result.
 
-    row type                bytes/row   rows per reply   caller asks for
-    project_info_t               4265               15               512
-    term_hit_t                   4273               15               128
-    caller_hit_t                 4365               15               128
-    db2_memory_pair_row_t        4118               15               200
-    db2_decision_log_row_t       3382               19               256
-    memory_directive_t           1823               35               256
-    memory_prospective_t         2125               30               256
-    anti_pattern_t               1664               39               256
-    rule_t                       1568               41               256
-
-The row types are wide because their string fields are declared at the largest
-size the column allows -- a directive's question is 512 bytes and its evidence
-another 512, whether or not any real directive fills them. The wire has to
-budget for the maximum; the database rarely returns it.
-
-Three ways out, and they are not exclusive:
-
-Page the reply. The request grows a cursor and the reply says whether more
-follows. This is the honest answer for a list whose length the caller does not
-control, and it is a change every caller of a paged operation has to make.
-
-Narrow the rows. Several of these operations are read for two or three of their
-fields and hand back twenty. A projection with the fields the caller uses would
-put most of the short list back under the bound, at the cost of a schema per
-caller rather than per table.
-
-Raise the bound. Sixty-four kilobytes on a caller's stack is already generous;
-a heap reply would lift the limit and change what a generated client is. That
-is a decision about the client, not about any operation.
-
-Nothing here is blocked on a defect. It is blocked on choosing, once, how this
-boundary carries a list that does not fit -- and the choice should be made
-before sixty-three operations are written to whichever convention came first.
+Twenty more could not be measured because their row type is not a plain struct
+of scalars and fixed strings; they need reading one at a time.
 
 ## Two declarations list projects, and one of them should go
 

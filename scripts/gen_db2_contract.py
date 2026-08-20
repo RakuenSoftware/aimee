@@ -38,6 +38,12 @@ RESULT_CODES = ("ok", "not_found", "conflict", "denied", "retryable", "invalid_s
 ENVELOPE_REQUEST_MAGIC = 0x51523244  # "D2RQ", little-endian
 ENVELOPE_REPLY_MAGIC = 0x52523244  # "D2RR", little-endian
 ENVELOPE_HEADER_LEN = 24
+# What the bus wire carries in one payload (BUS_WIRE_MAX_PAYLOAD), less the
+# envelope: the ceiling on a reply that crosses whole.
+WIRE_REPLY_MAX = (1 << 20) - ENVELOPE_HEADER_LEN
+# At or below this a generated client declares its response buffer; past it the
+# buffer is allocated, because a caller's stack is not the right place for it.
+STACK_REPLY_MAX = 16384
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 # The rolling health-window aggregate, in the order the reviewed struct declares
 # it. Wire order is part of the contract, so it lives here rather than being
@@ -12838,12 +12844,12 @@ def _check_derived(operation: dict[str, object], name: str, key: tuple[str, int]
             maximum_rows = reply["maximum_rows"]
             if not isinstance(maximum_rows, int) or not 1 <= maximum_rows <= 4096:
                 fail(f"{rule}-reply", "a row list must be bounded between one and 4096 rows")
-            # A reply the generated client cannot hold on a caller's stack is
-            # not a reply this boundary can carry, whatever the schema says.
+            # The bus wire carries a megabyte; anything past the stack bound
+            # below is allocated by the generated client rather than declared.
             widest = ENVELOPE_HEADER_LEN + 4 + maximum_rows * _generic_widest_bytes(row_fields)
-            if widest > 65536:
+            if widest > WIRE_REPLY_MAX:
                 fail(f"{rule}-reply",
-                     f"the widest reply is {widest} bytes, past what a caller can hold")
+                     f"the widest reply is {widest} bytes, past what the wire carries")
         else:
             _generic_fields(reply, f"{name}.reply")
         return
@@ -13013,6 +13019,18 @@ def _derived_go(catalog: dict[str, object]) -> str:
     return "".join(emitted)
 
 
+def _generic_response_max(operation: dict[str, object]) -> int:
+    """The widest reply one described operation can produce."""
+    reply = operation["reply"]
+    row = reply.get("row")
+    if row is not None:
+        row_fields = _generic_fields(row, f"{operation['name']}.reply.row")
+        return (ENVELOPE_HEADER_LEN + 4
+                + int(reply["maximum_rows"]) * _generic_widest_bytes(row_fields))
+    return ENVELOPE_HEADER_LEN + _generic_widest_bytes(
+        _generic_fields(reply, f"{operation['name']}.reply"))
+
+
 def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
     """The call wrapper declaration and definition for every table-driven operation.
 
@@ -13060,6 +13078,35 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
        {arguments}{outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 """)
+            # A reply wider than a stack should hold is allocated. The two
+            # shapes are written out rather than sharing one path, because a
+            # small call should not grow an allocation it never needed.
+            response_max = _generic_response_max(operation)
+            if response_max > STACK_REPLY_MAX:
+                response_setup = f"""   uint8_t *response = malloc(AIMEE_DB2_{upper}_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_{upper}_RESPONSE_MAX_LEN;"""
+                encode_fail = """   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }"""
+                transport_fail = """   {
+      free(response);
+      return transport;
+   }"""
+                decode_fail = """   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }"""
+                release = "   free(response);\n"
+            else:
+                response_setup = (f"   uint8_t response[AIMEE_DB2_{upper}_RESPONSE_MAX_LEN];\n"
+                                  f"   const size_t response_capacity = sizeof(response);")
+                encode_fail = "      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;"
+                transport_fail = "      return transport;"
+                decode_fail = "      return AIMEE_MODULE_CALL_PROTOCOL;"
+                release = ""
             definitions.append(f"""aimee_module_call_result_t aimee_db2_{name}_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
     {arguments}{outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context)
@@ -13068,20 +13115,21 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
 
    uint8_t request[AIMEE_DB2_{upper}_REQUEST_MAX_LEN];
-   uint8_t response[AIMEE_DB2_{upper}_RESPONSE_MAX_LEN];
+{response_setup}
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
    if (aimee_db2_{name}_request_encode({encode_names}request, sizeof(request),
                                        &request_len) != 0)
-      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+{encode_fail}
    aimee_module_call_result_t transport =
        call(call_context, AIMEE_DB2_EVENT_{upper}, AIMEE_DB2_STAGE_{upper}, trace_id, deadline_ns,
-            request, request_len, response, sizeof(response), &response_len, cancelled,
+            request, request_len, response, response_capacity, &response_len, cancelled,
             cancel_context);
    if (transport != AIMEE_MODULE_CALL_OK)
-      return transport;
+{transport_fail}
    if ({decode} != 0)
-      return AIMEE_MODULE_CALL_PROTOCOL;
+{decode_fail}
+{release}
    return AIMEE_MODULE_CALL_OK;
 }}
 
@@ -22859,6 +22907,7 @@ def client_source_bytes(catalog: dict[str, object]) -> bytes:
     text = '''/* Generated by scripts/gen_db2_contract.py; do not edit. */
 #include <aimee/db2/client.h>
 #include <aimee/db2/module_api.h>
+#include <stdlib.h>
 
 aimee_module_call_result_t
 aimee_db2_health_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,

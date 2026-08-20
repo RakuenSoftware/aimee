@@ -2032,11 +2032,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->briefing_active_entities)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_briefing_active_entities_row_t
-                rows[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS];
+            aimee_db2_briefing_active_entities_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               db2_memory_briefing_entity_t found[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS];
+               db2_memory_briefing_entity_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int requested = (int)limit;
                if (requested > (int)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS)
                   requested = (int)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS;
@@ -2050,12 +2058,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                            found[index].last_seen);
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_briefing_active_entities_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3091,10 +3107,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->entity_neighbors)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_entity_neighbors_row_t rows[AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS];
+            aimee_db2_entity_neighbors_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               db2_entity_neighbor_t found[AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS];
+               db2_entity_neighbor_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->entity_neighbors(
                    entity, found, AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS, (int)limit);
                for (int index = 0; index < written; index++)
@@ -3103,12 +3128,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].weight = found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_entity_neighbors_reply_encode(rows, count, response_body,
                                                         response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3126,11 +3159,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->entity_neighbors_filtered)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_entity_neighbors_filtered_row_t
-                rows[AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS];
+            aimee_db2_entity_neighbors_filtered_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               db2_entity_neighbor_t found[AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS];
+               db2_entity_neighbor_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->entity_neighbors_filtered(
                    entity, relation_a, relation_b, (int)order_by_weight, found,
                    AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS, (int)limit);
@@ -3140,12 +3181,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].weight = found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_entity_neighbors_filtered_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3159,11 +3208,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->entity_outbound_neighbors)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_entity_outbound_neighbors_row_t
-                rows[AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS];
+            aimee_db2_entity_outbound_neighbors_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               db2_entity_neighbor_t found[AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS];
+               db2_entity_neighbor_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->entity_outbound_neighbors(
                    entity, found, AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS, (int)limit);
                for (int index = 0; index < written; index++)
@@ -3172,12 +3229,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].weight = found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_entity_outbound_neighbors_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3192,10 +3257,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->entity_top_partners)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_entity_top_partners_row_t rows[AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS];
+            aimee_db2_entity_top_partners_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               db2_entity_neighbor_t found[AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS];
+               db2_entity_neighbor_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->entity_top_partners(entity, relation, found,
                                                           AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS);
                for (int index = 0; index < written; index++)
@@ -3204,12 +3278,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].weight = found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_entity_top_partners_reply_encode(rows, count, response_body,
                                                            response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3224,10 +3306,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->entity_top_targets)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_entity_top_targets_row_t rows[AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS];
+            aimee_db2_entity_top_targets_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               db2_entity_neighbor_t found[AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS];
+               db2_entity_neighbor_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->entity_top_targets(entity, relation, found,
                                                          AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS);
                for (int index = 0; index < written; index++)
@@ -3236,12 +3327,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].weight = found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_entity_top_targets_reply_encode(rows, count, response_body,
                                                           response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3256,10 +3355,18 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->file_definitions)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_file_definitions_row_t rows[AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS];
+            aimee_db2_file_definitions_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               definition_t found[AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS];
+               definition_t *found = malloc(sizeof(*found) * AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->file_definitions(project, file_path, found,
                                                        AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS);
                for (int index = 0; index < written; index++)
@@ -3273,12 +3380,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                       found[index].line_end < 0 ? 0u : (uint32_t)found[index].line_end;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_file_definitions_reply_encode(rows, count, response_body,
                                                         response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3293,10 +3408,18 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->code_search)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_code_search_row_t rows[AIMEE_DB2_CODE_SEARCH_MAX_ROWS];
+            aimee_db2_code_search_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CODE_SEARCH_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               static code_search_hit_t found[AIMEE_DB2_CODE_SEARCH_MAX_ROWS];
+               code_search_hit_t *found = malloc(sizeof(*found) * AIMEE_DB2_CODE_SEARCH_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->code_search(query, project, found,
                                                   AIMEE_DB2_CODE_SEARCH_MAX_ROWS, (int)enrich);
                for (int index = 0; index < written; index++)
@@ -3313,12 +3436,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_code_search_reply_encode(rows, count, response_body, response_capacity,
                                                    response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3335,11 +3466,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->code_search_excluding_project)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_code_search_excluding_project_row_t
-                rows[AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS];
+            aimee_db2_code_search_excluding_project_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               static code_search_hit_t found[AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS];
+               code_search_hit_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->code_search_excluding_project(
                    query, excluded_project, found, AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS,
                    (int)enrich);
@@ -3357,12 +3496,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_code_search_excluding_project_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -3491,12 +3638,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->entity_neighbors_weighted)
                return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            aimee_db2_entity_neighbors_weighted_row_t
-                rows[AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS];
+            aimee_db2_entity_neighbors_weighted_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS);
             uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
             {
-               db2_entity_edge_weighted_neighbor_t
-                   found[AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS];
+               db2_entity_edge_weighted_neighbor_t *found =
+                   malloc(sizeof(*found) * AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS);
+               if (!found)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
                int written = backend->entity_neighbors_weighted(
                    entity, found, AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS, (int)limit,
                    (int)utility_scoring_enabled);
@@ -3508,12 +3662,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                   rows[index].effective_utility = found[index].effective_utility;
                }
                count = written < 0 ? 0u : (uint32_t)written;
+               free(found);
             }
             if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_CANCELLED;
+            }
             if (aimee_db2_entity_neighbors_weighted_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }

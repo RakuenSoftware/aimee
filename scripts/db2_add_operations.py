@@ -275,6 +275,26 @@ def _c_locals(operation: dict[str, object], fields: list[dict[str, object]],
     return "\n".join(declarations), ", ".join(arguments)
 
 
+# What a row's widest encoding may reach before the handler allocates it
+# instead of declaring it. Matches the client's own bound.
+STACK_ROW_MAX = 16384
+
+
+def _row_bytes(operation: dict[str, object]) -> int:
+    """The widest row list one described operation fills."""
+    row = operation["reply"]["row"]
+    total = 0
+    for field in row["fields"]:
+        kind = field["type"]
+        if kind == "utf8":
+            total += 4 + int(field["maximum_bytes"])
+        elif kind == "u32":
+            total += 4
+        else:
+            total += 8
+    return total * int(operation["reply"]["maximum_rows"])
+
+
 def handler_block(operation: dict[str, object]) -> str:
     """The adapter branch one described operation needs."""
     name = str(operation["name"])
@@ -287,9 +307,20 @@ def handler_block(operation: dict[str, object]) -> str:
     request_declarations = f"{request_declarations}\n" if request_declarations else ""
 
     reply = operation["reply"]
+    release = ""
     if "row" in reply:
-        reply_declarations = (f"         aimee_db2_{name}_row_t rows[AIMEE_DB2_{upper}_MAX_ROWS];\n"
-                              "         uint32_t count = 0u;")
+        if _row_bytes(operation) > STACK_ROW_MAX:
+            reply_declarations = (
+                f"         aimee_db2_{name}_row_t *rows =\n"
+                f"             malloc(sizeof(*rows) * AIMEE_DB2_{upper}_MAX_ROWS);\n"
+                "         uint32_t count = 0u;\n"
+                "         if (!rows)\n"
+                "            return AIMEE_MODULE_STATUS_INTERNAL;")
+            release = "            free(rows);\n"
+        else:
+            reply_declarations = (
+                f"         aimee_db2_{name}_row_t rows[AIMEE_DB2_{upper}_MAX_ROWS];\n"
+                "         uint32_t count = 0u;")
         encode = (f"aimee_db2_{name}_reply_encode(rows, count, response_body, "
                   "response_capacity, response_len)")
     else:
@@ -323,10 +354,14 @@ def handler_block(operation: dict[str, object]) -> str:
 {reply_declarations}
 {operation['call']}
             if (aimee_module_invocation_cancelled(invocation))
-               return AIMEE_MODULE_STATUS_CANCELLED;{extra}
+            {{
+{release}               return AIMEE_MODULE_STATUS_CANCELLED;
+            }}{extra}
             if ({encode} != 0)
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            return AIMEE_MODULE_STATUS_OK;
+            {{
+{release}               return AIMEE_MODULE_STATUS_INTERNAL;
+            }}
+{release}            return AIMEE_MODULE_STATUS_OK;
          }}
       }}
 """
