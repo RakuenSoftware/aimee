@@ -104,6 +104,9 @@ typedef struct
    int (*pdf_quarantine_confirm)(const char *project, const char *file_path);
    int (*pdf_quarantine_reject)(const char *project, const char *file_path);
    int (*enrollment_active)(const char *cert_issuer, const char *cert_serial_norm);
+   /* The described format's operations carry their own shapes, so each is
+    * bound by the signature its schema implies rather than a shared one. */
+   int (*runtime_state_get)(const char *state_key, char *state_value, size_t capacity);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);

@@ -702,6 +702,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .pdf_quarantine_confirm = db2_kb_pdf_quarantine_confirm,
        .pdf_quarantine_reject = db2_kb_pdf_quarantine_reject,
        .enrollment_active = db2_enrollment_is_active_by_key,
+       .runtime_state_get = db2_kb_runtime_state_get,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -3248,6 +3249,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
              response_body, response_capacity, response_len, invocation, &handled);
          if (handled)
             return status;
+      }
+      {
+         char state_key[AIMEE_DB2_RUNTIME_STATE_GET_STATE_KEY_MAX + 1];
+         if (aimee_db2_runtime_state_get_request_decode(request_body, request_len, state_key,
+                                                        sizeof(state_key)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RUNTIME_STATE_GET_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->runtime_state_get)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char state_value[AIMEE_DB2_RUNTIME_STATE_GET_STATE_VALUE_MAX + 1] = "";
+            /* A key that is not set reads back empty rather than failing, which
+             * is what the operation promises: it has one result. */
+            backend->runtime_state_get(state_key, state_value, sizeof(state_value));
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_runtime_state_get_reply_encode(state_value, response_body,
+                                                         response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
       }
       if (aimee_db2_prospective_sweep_expired_request_decode(request_body, request_len) == 0)
       {

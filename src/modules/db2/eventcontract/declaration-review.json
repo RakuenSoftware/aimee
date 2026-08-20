@@ -588,6 +588,14 @@
       "reason": "The typed custody.release_get_active operation reads the pointer to the release the system currently answers as. Zero covers three different situations: no key, a value that does not parse, and a value that is not positive. The parse happens through atoll, which returns zero for garbage without saying so, and the catalog records both collapses rather than letting a zero read as a confident no release."
     },
     {
+      "symbol": "db2_kb_runtime_state_get",
+      "signature_sha256": "198befae8a0e7d7e3b5292c44fbd81bb9dcadfa37939f837d7957ed0a6a56791",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.runtime_state_get operation replaces the runtime-state read, and is the first on the described wire format: its request and reply are a schema in the catalog rather than a shape someone wrote codecs for. A key that is not set reads back as the empty value, so a caller cannot tell an unset key from one set to nothing -- which matters because runtime_state_touch writes a stamp and reading nothing back looks the same as never having touched it."
+    },
+    {
       "symbol": "db2_kb_runtime_state_set",
       "signature_sha256": "a7aae30e0d25e3ef38271b3a9ab426e1d1f130544d38f86a8197c7a6fb4545e6",
       "disposition": "wire-operation",

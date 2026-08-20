@@ -3889,6 +3889,30 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 20,
+      "name": "runtime_state_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Runtime state keys and values are relational DB2 bookkeeping, so reading one back is DB2 authority.",
+      "c_symbols": ["db2_kb_runtime_state_get"],
+      "request": {
+        "policy": {"reads": "a key that is not set reads back as the empty value, so a caller cannot tell an unset key from one set to nothing"},
+        "fields": [
+          {"name": "state_key", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 255}
+        ]
+      },
+      "reply": {
+        "fields": [
+          {"name": "state_value", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      }
     }
   ]
 }

@@ -113,6 +113,7 @@ typedef struct
    int (*pdf_quarantine_confirm)(const char *project, const char *file_path);
    int (*pdf_quarantine_reject)(const char *project, const char *file_path);
    int (*enrollment_active)(const char *cert_issuer, const char *cert_serial_norm);
+   int (*runtime_state_get)(const char *state_key, char *state_value, size_t capacity);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -337,6 +338,8 @@ static int cross_family_calls[4];
 static int batch8_calls[8];
 static int pair_calls[7];
 static int pair_read_calls[5];
+static int runtime_state_get_calls;
+static char runtime_state_key_seen[64];
 static char pair_first_seen[64];
 static char pair_second_seen[64];
 static char string_read_argument_seen[64];
@@ -809,6 +812,15 @@ static int pair_read_impl(int which, const char *first, const char *second)
    snprintf(pair_first_seen, sizeof(pair_first_seen), "%s", first ? first : "");
    snprintf(pair_second_seen, sizeof(pair_second_seen), "%s", second ? second : "");
    return which + 1;
+}
+
+static int runtime_state_get(const char *state_key, char *state_value, size_t capacity)
+{
+   runtime_state_get_calls++;
+   snprintf(runtime_state_key_seen, sizeof(runtime_state_key_seen), "%s",
+            state_key ? state_key : "");
+   snprintf(state_value, capacity, "%s", "probe-value");
+   return 0;
 }
 
 static int entity_profile_fresh(const char *entity_id, const char *window)
@@ -1438,6 +1450,14 @@ int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_se
 {
    (void)cert_issuer;
    (void)cert_serial_norm;
+   return 0;
+}
+
+int db2_kb_runtime_state_get(const char *key, char *out, size_t out_len)
+{
+   (void)key;
+   if (out && out_len)
+      out[0] = '\0';
    return 0;
 }
 
@@ -2792,6 +2812,7 @@ int main(void)
        .pdf_quarantine_confirm = pdf_quarantine_confirm,
        .pdf_quarantine_reject = pdf_quarantine_reject,
        .enrollment_active = enrollment_active,
+       .runtime_state_get = runtime_state_get,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -3469,6 +3490,25 @@ int main(void)
                                            NULL) == AIMEE_MODULE_CALL_OK);
    assert(string_answer == 1 && pair_read_calls[4] == 1 &&
           strcmp(pair_first_seen, "probe-first") == 0);
+
+   /* The first operation on the described format: its request and reply are a
+    * schema in the catalog rather than codecs someone wrote, so this checks the
+    * value survives the round trip rather than only that the call succeeded. */
+   {
+      char state_value[AIMEE_DB2_RUNTIME_STATE_GET_STATE_VALUE_MAX + 1] = "";
+      assert(aimee_db2_runtime_state_get_call(call_client, &client, 7240, 0, "probe-key",
+                                              state_value, sizeof(state_value), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+      assert(strcmp(state_value, "probe-value") == 0 && runtime_state_get_calls == 1 &&
+             strcmp(runtime_state_key_seen, "probe-key") == 0);
+
+      /* An empty key is refused before the bus: the schema says one byte at
+       * least, and an empty key names nothing. */
+      assert(aimee_db2_runtime_state_get_call(call_client, &client, 7241, 0, "", state_value,
+                                              sizeof(state_value), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+      assert(runtime_state_get_calls == 1);
+   }
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

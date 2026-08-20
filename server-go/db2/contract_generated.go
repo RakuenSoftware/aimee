@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "4760d5fc7bf53cb5ba128416be5c01256eab0a5843091231d5c24c355e7e660b"
+const ContractSHA256 = "0c1b97e821a97fddf5502ba96bb66f46ca8c44910728bcbd61acdb307d96212c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2637,6 +2637,49 @@ func DecodeSetActiveEmbedderVersionReply(reply []byte) error {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+const EventRuntimeStateGet = EventMaintenance
+const StageRuntimeStateGet = FamilyMaintenance
+const OperationRuntimeStateGet uint32 = 20
+const RuntimeStateGetStateKeyMin = 1
+const RuntimeStateGetStateKeyMax = 255
+
+// EncodeRuntimeStateGetRequest writes the schema runtime_state_get declares, in order.
+func EncodeRuntimeStateGetRequest(stateKey string) ([]byte, error) {
+	if len(stateKey) < RuntimeStateGetStateKeyMin || len(stateKey) > RuntimeStateGetStateKeyMax || hasNUL(stateKey) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, stateKey, RuntimeStateGetStateKeyMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationRuntimeStateGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRuntimeStateGetRequest reads it back, checking each field against its own bound.
+func DecodeRuntimeStateGetRequest(request []byte) (string, error) {
+	var stateKey string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRuntimeStateGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if stateKey, err = takeRowText(payload, &cursor, RuntimeStateGetStateKeyMax); err != nil ||
+		len(stateKey) < RuntimeStateGetStateKeyMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return stateKey, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

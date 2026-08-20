@@ -599,6 +599,16 @@ int main(int argc, char **argv)
                                            NULL) == AIMEE_MODULE_CALL_OK);
    assert(string_answer == 0);
 
+   /* runtime_state_set wrote this key earlier in the run, so reading it back is
+    * a round trip through two operations on two different formats. */
+   {
+      char state_value[AIMEE_DB2_RUNTIME_STATE_GET_STATE_VALUE_MAX + 1] = "";
+      assert(aimee_db2_runtime_state_get_call(call_client, &client, 9190, 0, "replay-key",
+                                              state_value, sizeof(state_value), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+      assert(strcmp(state_value, "replay-value") == 0);
+   }
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

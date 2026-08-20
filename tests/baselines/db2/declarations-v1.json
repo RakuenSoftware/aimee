@@ -10451,9 +10451,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.runtime_state_get operation replaces the runtime-state read, and is the first on the described wire format: its request and reply are a schema in the catalog rather than a shape someone wrote codecs for. A key that is not set reads back as the empty value, so a caller cannot tell an unset key from one set to nothing -- which matters because runtime_state_touch writes a stamp and reading nothing back looks the same as never having touched it."
+      },
       "signature": "int db2_kb_runtime_state_get ( const char * key , char * out , size_t out_len )",
       "signature_sha256": "198befae8a0e7d7e3b5292c44fbd81bb9dcadfa37939f837d7957ed0a6a56791",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_runtime_state_get"
     },
     {
@@ -26652,15 +26658,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c80fa0252f315c557222629033dc5565094d855a8da85c57e5e243fed51711e9",
+  "fingerprint": "d9899951308b879f83949c541ca826aadac36927d58fcc3a50ded8fafbaac5ed",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 520,
+    "audit_pending": 519,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 438
+    "reviewed": 439
   }
 }

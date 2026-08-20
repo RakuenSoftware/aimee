@@ -3595,56 +3595,16 @@ def validate_catalog(value: object) -> dict[str, object]:
                      "reply must contain one bounded u32 deletion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 138 or [item["name"] for item in raw_operations] != [
-            "health", "embedding_dimension", "pool_status", "embedding_refusals",
-            "postgres_status", "reembed_status", "reembed_clear",
-            "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
-            "level3_count", "level2_count", "orphaned_l0_count", "total_count",
-            "session_l2_count", "key_exists", "find_id_by_key_kind",
-            "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
-            "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
-            "health_record", "health_retention", "health_counters", "stats_counts",
-            "expire", "demote", "promote_stable", "reclassify_directives",
-            "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
-            "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
-            "valid_at", "has_scope_type", "reject", "update_content", "decay_confidence",
-            "workspace_tag_insert", "set_cognified_kind", "set_source_session",
-            "negation_tokens_update", "get_content", "get_source_session",
-            "pick_first_temporal_ref", "count_and_max_updated", "top_l2_facts",
-            "list_session_scope_priority", "collect_alias_matches", "collect_entity_matches",
-            "collect_event_frame_matches", "collect_relation_token_matches",
-            "collect_summary_matches", "collect_temporal_matches", "find_facts_like",
-            "list_session_scope_priority_like", "negation_fts_search",
-            "session_neighbors_before", "session_neighbors_after", "row_get",
-            "row_get_by_unit_id", "search_facts_patterns_by_keyword", "fact_history", "list_rows",
-            "aggregate", "load_eval_corpus", "record_exists",
-            "entity_edge_prune_orphans", "entity_edge_normalize_weights", "project_count",
-            "purge_hidden_pollution", "requeue_drifted", "cross_repo_rebuild_routes",
-            "cross_repo_rebuild_identities", "cross_repo_rebuild_build_deps",
-            "drift_candidates", "file_index_delete_project", "entity_observation_count", "entity_profile_fresh",
-            "rules_decay", "curiosity_rescore_all", "mining_seed_job_defaults",
-            "proposals_archive_expired", "trace_mining_last_id", "anti_pattern_bump",
-            "anti_pattern_delete", "trace_mining_record", "anti_pattern_exists_exact",
-            "anti_pattern_exists_by_source_ref", "artifact_citation_count",
-            "commits_in_last_7_days", "fidelity_attribution_count",
-            "artifact_stamp_reflected", "failed_query_bump",
-            "artifact_set_state", "artifact_register_exemplar", "evidence_enqueue", "evidence_mark_failed",
-            "rel_types_ensure_seed",
-            "doc_delete", "task_delete",
-            "clear_project", "clear_current_project", "document_exists", "blob_referenced",
-            "fence_active", "doc_exists_by_hash",
-            "pdf_quarantine_confirm", "pdf_quarantine_reject",
-            "vector_rebuild_lock_try_acquire", "vector_rebuild_lock_release",
-            "release_get_active", "enrollment_active", "prospective_sweep_expired",
-            "directive_sweep_expired", "mark_revisit_due", "ingest_queue_reset_running",
-            "evidence_reembed_all", "curator_reembed_all", "synth_reenqueue_all",
-            "curator_reenqueue_extract_all", "directive_suppress",
-            "directive_record_surface", "async_pending_count",
-            "runtime_state_touch", "synth_enqueue", "synth_mark_done",
-            "reembed_mark_finished", "mining_job_try_lock",
-            "synth_mark_failed", "runtime_state_set", "set_active_embedder_version"]:
-        fail("unsupported-operation",
-             "the partial generator requires the one hundred and thirty-eight supported operations exactly once")
+    # Every catalog operation has to have been recognised by the walk above,
+    # which fails on anything it does not know -- so reaching the end of it for
+    # each entry is what "the generator supports this operation" means. This
+    # replaces a transcribed list of every operation name in order: the list
+    # checked the same property, but by transcription, so adding an operation
+    # meant inserting a name at the right point and getting it wrong failed with
+    # a message about the list rather than about the operation. The order the
+    # fixtures come out in is pinned separately, by the baseline-order gate.
+    if len(seen_names) != len(raw_operations):
+        fail("unsupported-operation", "an operation name is repeated in the catalog")
     return catalog
 
 
@@ -12333,6 +12293,10 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "reply": "rejected", "reply_max": 2147483647,
         "policy": {"reads": 200},
     },
+    "runtime_state_get": {
+        "key": ("maintenance", 20), "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_runtime_state_get", "policy": {"reads": 200},
+    },
 }
 
 
@@ -12346,6 +12310,34 @@ def _check_derived(operation: dict[str, object], name: str, key: tuple[str, int]
         fail("operation-c-symbols", f"{name} C symbol differs from the reviewed backend")
     if operation["results"] != ["ok"]:
         fail("operation-results", f"{name} results must equal ['ok']")
+
+    if row["format"] == "db2-envelope-generic-v1":
+        # A described format: the schema is the contract, so the gate checks the
+        # schema is sound and that the sizes it implies are the ones declared.
+        request = _keys(operation["request"], {"policy", "fields"}, f"{name}.request")
+        request_fields = _generic_fields(request, f"{name}.request")
+        policy = request["policy"]
+        wanted = row["policy"]
+        if not isinstance(policy, dict) or set(policy) != set(wanted):
+            fail(f"{rule}-request", f"request policy must carry exactly {sorted(wanted)}")
+        for policy_key, limit in wanted.items():
+            _string(policy[policy_key], f"{name}.request.policy.{policy_key}", limit)
+        reply = operation["reply"]
+        if "row" in reply:
+            _keys(reply, {"row", "maximum_rows"}, f"{name}.reply")
+            row_fields = _generic_fields(reply["row"], f"{name}.reply.row")
+            maximum_rows = reply["maximum_rows"]
+            if not isinstance(maximum_rows, int) or not 1 <= maximum_rows <= 4096:
+                fail(f"{rule}-reply", "a row list must be bounded between one and 4096 rows")
+            # A reply the generated client cannot hold on a caller's stack is
+            # not a reply this boundary can carry, whatever the schema says.
+            widest = ENVELOPE_HEADER_LEN + 4 + maximum_rows * _generic_widest_bytes(row_fields)
+            if widest > 65536:
+                fail(f"{rule}-reply",
+                     f"the widest reply is {widest} bytes, past what a caller can hold")
+        else:
+            _generic_fields(reply, f"{name}.reply")
+        return
 
     request = operation["request"]
     policy = request.get("policy")
@@ -12435,6 +12427,8 @@ def _derived_constants(catalog: dict[str, object]) -> list[tuple[str, str]]:
             rows += _string_pair_count_constants(operation)
         elif wire == "db2-envelope-string-pair-ack-v1":
             rows += _string_pair_ack_constants(operation)
+        elif wire == "db2-envelope-generic-v1":
+            rows += _generic_constants(operation)
         elif wire == "db2-envelope-string-ack-v1":
             rows += _string_ack_constants(operation)
         elif wire == "db2-envelope-u64-ack-v1":
@@ -12455,6 +12449,8 @@ def _derived_codecs(catalog: dict[str, object]) -> str:
             emitted.append(_string_pair_count_codecs(operation))
         elif wire == "db2-envelope-string-pair-ack-v1":
             emitted.append(_string_pair_ack_codecs(operation))
+        elif wire == "db2-envelope-generic-v1":
+            emitted.append(_generic_codecs(operation))
         elif wire == "db2-envelope-string-ack-v1":
             emitted.append(_string_ack_codecs(operation))
         elif wire == "db2-envelope-u64-ack-v1":
@@ -12475,6 +12471,8 @@ def _derived_vectors(catalog: dict[str, object]) -> list[dict[str, object]]:
             emitted.append(_string_pair_count_vectors(catalog, operation))
         elif wire == "db2-envelope-string-pair-ack-v1":
             emitted.append(_string_pair_ack_vectors(catalog, operation))
+        elif wire == "db2-envelope-generic-v1":
+            emitted.append(_generic_vectors(catalog, operation))
         elif wire == "db2-envelope-string-ack-v1":
             emitted.append(_string_ack_vectors(catalog, operation))
         elif wire == "db2-envelope-u64-ack-v1":
@@ -12495,6 +12493,8 @@ def _derived_go(catalog: dict[str, object]) -> str:
             emitted.append(_string_pair_count_go(operation))
         elif wire == "db2-envelope-string-pair-ack-v1":
             emitted.append(_string_pair_ack_go(operation))
+        elif wire == "db2-envelope-generic-v1":
+            emitted.append(_generic_go(operation))
         elif wire == "db2-envelope-string-ack-v1":
             emitted.append(_string_ack_go(operation))
         elif wire == "db2-envelope-u64-ack-v1":
@@ -12518,7 +12518,62 @@ def _derived_client(catalog: dict[str, object]) -> tuple[str, str]:
         row = DERIVED_OPERATIONS[name]
         upper = name.upper()
         wire = row["format"]
-        argument = str(row["argument"])
+        # A described operation names its arguments in its schema rather than in
+        # the table row, so there is no single argument to read here.
+        argument = str(row["argument"]) if "argument" in row else ""
+        if wire == "db2-envelope-generic-v1":
+            # The wrapper takes the request schema's fields and hands back the
+            # reply's, so its signature is the schema rather than a shape.
+            request_fields = _generic_fields(operation["request"], f"{name}.request")
+            arguments = _generic_c_parameters(operation, request_fields, writing=False)
+            reply_row = operation["reply"].get("row")
+            if reply_row is not None:
+                outputs = (f"aimee_db2_{name}_row_t *rows, uint32_t capacity, uint32_t *count")
+                decode = f"aimee_db2_{name}_reply_decode(response, response_len, rows, capacity, count)"
+                guard = "!call || !count || (capacity > 0u && !rows)"
+                prelude = "   if (count)\n      *count = 0u;\n"
+            else:
+                reply_fields = _generic_fields(operation["reply"], f"{name}.reply")
+                outputs = _generic_c_parameters(operation, reply_fields, writing=True)
+                names = ", ".join(
+                    f"{field['name']}, {field['name']}_capacity" if field["type"] == "utf8"
+                    else str(field["name"]) for field in reply_fields)
+                decode = f"aimee_db2_{name}_reply_decode(response, response_len, {names})"
+                guard = "!call"
+                prelude = ""
+            encode_names = ", ".join(str(field["name"]) for field in request_fields)
+            declarations.append(f"""   aimee_module_call_result_t aimee_db2_{name}_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       {arguments}, {outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+""")
+            definitions.append(f"""aimee_module_call_result_t aimee_db2_{name}_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    {arguments}, {outputs}, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{{
+{prelude}   if ({guard})
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_{upper}_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_{upper}_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_{name}_request_encode({encode_names}, request, sizeof(request),
+                                       &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_{upper}, AIMEE_DB2_STAGE_{upper}, trace_id, deadline_ns,
+            request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if ({decode} != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}}
+
+""")
+            continue
         if wire == "db2-envelope-string-pair-u32-v1":
             second = str(row["second"])
             answer = str(row["reply"])
@@ -13333,6 +13388,767 @@ func Decode{name}Reply(reply []byte) (uint32, error) {{
 }}
 
 """
+
+
+
+def _generic_fields(section: dict[str, object], where: str) -> list[dict[str, object]]:
+    """Check a field list and return it.
+
+    Every field carries its own bounds, because a bound that lives anywhere but
+    beside the field it constrains is a bound someone will forget to update.
+    """
+    fields = section.get("fields")
+    if not isinstance(fields, list) or not fields:
+        fail("generic-fields", f"{where} must carry at least one field")
+    for index, field in enumerate(fields):
+        kind = field.get("type")
+        if kind == "utf8":
+            checked = _keys(field, {"name", "type", "minimum_bytes", "maximum_bytes"},
+                            f"{where}[{index}]")
+            if not (0 <= checked["minimum_bytes"] <= checked["maximum_bytes"] <= 4096):
+                fail("generic-fields", f"{where}[{index}] has impossible byte bounds")
+        elif kind in ("u32", "u64"):
+            checked = _keys(field, {"name", "type", "minimum", "maximum"}, f"{where}[{index}]")
+            ceiling = 0xffffffff if kind == "u32" else 0x7fffffffffffffff
+            if not (0 <= checked["minimum"] <= checked["maximum"] <= ceiling):
+                fail("generic-fields", f"{where}[{index}] has impossible bounds")
+        elif kind == "f64":
+            checked = _keys(field, {"name", "type", "encoding", "minimum_binary64_bits",
+                                    "maximum_binary64_bits"}, f"{where}[{index}]")
+            if checked["encoding"] != "ieee754-binary64-le":
+                fail("generic-fields", f"{where}[{index}] must be little-endian binary64")
+        else:
+            fail("generic-fields", f"{where}[{index}] has unknown type {kind!r}")
+        if not NAME.fullmatch(str(field["name"])):
+            fail("generic-fields", f"{where}[{index}] is not a usable identifier")
+    names = [str(field["name"]) for field in fields]
+    if len(set(names)) != len(names):
+        fail("generic-fields", f"{where} repeats a field name")
+    return fields
+
+
+def _generic_fixed_bytes(fields: list[dict[str, object]]) -> int:
+    """Bytes a field list occupies when every string is empty."""
+    total = 0
+    for field in fields:
+        kind = field["type"]
+        total += 4 if kind in ("u32", "utf8") else 8
+    return total
+
+
+def _generic_widest_bytes(fields: list[dict[str, object]]) -> int:
+    """Bytes a field list occupies when every string is at its bound."""
+    total = _generic_fixed_bytes(fields)
+    for field in fields:
+        if field["type"] == "utf8":
+            total += int(field["maximum_bytes"])
+    return total
+
+
+def _generic_row_struct(operation: dict[str, object]) -> str:
+    """The C type one row of a generic reply is read into."""
+    row = operation["reply"].get("row")
+    if row is None:
+        return ""
+    upper = str(operation["name"]).upper()
+    members = []
+    for field in row["fields"]:
+        name, kind = str(field["name"]), field["type"]
+        if kind == "utf8":
+            members.append(f"   char {name}[AIMEE_DB2_{upper}_{name.upper()}_MAX + 1];")
+        elif kind == "u32":
+            members.append(f"   uint32_t {name};")
+        elif kind == "u64":
+            members.append(f"   uint64_t {name};")
+        else:
+            members.append(f"   double {name};")
+    joined = "\n".join(members)
+    return f"""
+typedef struct
+{{
+{joined}
+}} aimee_db2_{operation['name']}_row_t;
+"""
+
+
+def _generic_field_constants(operation: dict[str, object], fields: list[dict[str, object]],
+                             prefix: str) -> list[tuple[str, str]]:
+    """One bound per field, named after the field it constrains."""
+    upper = str(operation["name"]).upper()
+    rows: list[tuple[str, str]] = []
+    for field in fields:
+        name = str(field["name"]).upper()
+        kind = field["type"]
+        if kind == "utf8":
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MIN", f"{field['minimum_bytes']}u"))
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MAX", f"{field['maximum_bytes']}u"))
+        elif kind == "u32":
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MIN", f"{field['minimum']}u"))
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MAX", f"{field['maximum']}u"))
+        elif kind == "u64":
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MIN", f"{field['minimum']}ull"))
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MAX", f"{field['maximum']}ull"))
+        else:
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MIN_BITS",
+                         f"{field['minimum_binary64_bits']}ull"))
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MAX_BITS",
+                         f"{field['maximum_binary64_bits']}ull"))
+    return rows
+
+
+def _generic_constants(operation: dict[str, object]) -> list[tuple[str, str]]:
+    """Constant rows for db2-envelope-generic-v1."""
+    upper = str(operation["name"]).upper()
+    family = str(operation["family"]).upper()
+    request, reply = operation["request"], operation["reply"]
+    request_fields = _generic_fields(request, f"{operation['name']}.request")
+    rows = [
+        (f"AIMEE_DB2_EVENT_{upper}", f"AIMEE_DB2_EVENT_{family}"),
+        (f"AIMEE_DB2_STAGE_{upper}", f"AIMEE_DB2_FAMILY_{family}"),
+        (f"AIMEE_DB2_OPERATION_{upper}", f"{operation['id']}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MIN_LEN",
+         f"{ENVELOPE_HEADER_LEN + _generic_fixed_bytes(request_fields)}u"),
+        (f"AIMEE_DB2_{upper}_REQUEST_MAX_LEN",
+         f"{ENVELOPE_HEADER_LEN + _generic_widest_bytes(request_fields)}u"),
+    ]
+    rows += _generic_field_constants(operation, request_fields, "REQUEST")
+
+    row = reply.get("row")
+    if row is not None:
+        maximum_rows = int(reply["maximum_rows"])
+        row_fields = _generic_fields(row, f"{operation['name']}.reply.row")
+        rows += _generic_field_constants(operation, row_fields, "ROW")
+        rows += [
+            (f"AIMEE_DB2_{upper}_MAX_ROWS", f"{maximum_rows}u"),
+            (f"AIMEE_DB2_{upper}_RESPONSE_MIN_LEN", f"{ENVELOPE_HEADER_LEN + 4}u"),
+            (f"AIMEE_DB2_{upper}_RESPONSE_MAX_LEN",
+             f"{ENVELOPE_HEADER_LEN + 4 + maximum_rows * _generic_widest_bytes(row_fields)}u"),
+        ]
+    else:
+        reply_fields = _generic_fields(reply, f"{operation['name']}.reply")
+        rows += _generic_field_constants(operation, reply_fields, "REPLY")
+        rows += [
+            (f"AIMEE_DB2_{upper}_RESPONSE_MIN_LEN",
+             f"{ENVELOPE_HEADER_LEN + _generic_fixed_bytes(reply_fields)}u"),
+            (f"AIMEE_DB2_{upper}_RESPONSE_MAX_LEN",
+             f"{ENVELOPE_HEADER_LEN + _generic_widest_bytes(reply_fields)}u"),
+        ]
+    rows.append((f"AIMEE_DB2_{upper}_ERROR_LEN", f"{ENVELOPE_HEADER_LEN}u"))
+    return rows
+
+
+
+def _generic_c_parameters(operation: dict[str, object], fields: list[dict[str, object]],
+                          writing: bool) -> str:
+    """The C parameters a field list becomes, in declaration order."""
+    parts = []
+    for field in fields:
+        name, kind = str(field["name"]), field["type"]
+        if kind == "utf8":
+            parts.append(f"char *{name}, size_t {name}_capacity" if writing
+                         else f"const char *{name}")
+        elif kind == "u32":
+            parts.append(f"uint32_t *{name}" if writing else f"uint32_t {name}")
+        elif kind == "u64":
+            parts.append(f"uint64_t *{name}" if writing else f"uint64_t {name}")
+        else:
+            parts.append(f"double *{name}" if writing else f"double {name}")
+    return ", ".join(parts)
+
+
+def _generic_c_encode_body(operation: dict[str, object], fields: list[dict[str, object]],
+                           source: str) -> tuple[str, str]:
+    """Validation and writing for one field list.
+
+    `source` is the expression each field is read from: an empty string for
+    plain parameters, or a struct pointer for a row.
+    """
+    upper = str(operation["name"]).upper()
+    checks, writes, lengths = [], [], []
+    for field in fields:
+        name, kind = str(field["name"]), field["type"]
+        bound = f"AIMEE_DB2_{upper}_{name.upper()}"
+        value = f"{source}{name}"
+        if kind == "utf8":
+            lengths.append(f"""   size_t {name}_len = 0u;
+   while ({name}_len <= {bound}_MAX && {value}[{name}_len])
+      ++{name}_len;""")
+            floor = int(field["minimum_bytes"])
+            checks.append(f"{name}_len < {bound}_MIN || {name}_len > {bound}_MAX" if floor
+                          else f"{name}_len > {bound}_MAX")
+            writes.append(f"""   aimee_db2_put_u32(payload + cursor, (uint32_t){name}_len);
+   memcpy(payload + cursor + 4u, {value}, {name}_len);
+   cursor += 4u + (uint32_t){name}_len;""")
+        elif kind == "u32":
+            checks.append(f"{value} < {bound}_MIN || {value} > {bound}_MAX"
+                          if int(field["minimum"]) else f"{value} > {bound}_MAX")
+            writes.append(f"""   aimee_db2_put_u32(payload + cursor, {value});
+   cursor += 4u;""")
+        elif kind == "u64":
+            checks.append(f"{value} < {bound}_MIN || {value} > {bound}_MAX"
+                          if int(field["minimum"]) else f"{value} > {bound}_MAX")
+            writes.append(f"""   aimee_db2_put_u64(payload + cursor, {value});
+   cursor += 8u;""")
+        else:
+            checks.append(f"aimee_db2_binary64_bits({value}) < {bound}_MIN_BITS || "
+                          f"aimee_db2_binary64_bits({value}) > {bound}_MAX_BITS")
+            writes.append(f"""   aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits({value}));
+   cursor += 8u;""")
+    return ("\n".join(lengths), " ||\n       ".join(checks)), "\n".join(writes)
+
+
+def _generic_c_decode_body(operation: dict[str, object], fields: list[dict[str, object]],
+                           target: str, capacities: bool) -> str:
+    """Reading and validation for one field list."""
+    upper = str(operation["name"]).upper()
+    steps = []
+    for field in fields:
+        name, kind = str(field["name"]), field["type"]
+        bound = f"AIMEE_DB2_{upper}_{name.upper()}"
+        value = f"{target}{name}"
+        floor = (f"{value} < {bound}_MIN || " if kind in ("u32", "u64")
+                 and int(field.get("minimum", 0)) else "")
+        if kind == "utf8":
+            # A string out-parameter is already a pointer; only the scalars take
+            # the dereference that `target` carries.
+            destination = f"{target[:-1] if target.endswith('*') else target}{name}"
+            floor = (int(field["minimum_bytes"]) if "minimum_bytes" in field else 0)
+            check = (f"""
+   {{
+      size_t taken = 0u;
+      while ({destination}[taken])
+         ++taken;
+      if (taken < {bound}_MIN)
+         return -1;
+   }}""" if floor else "")
+            steps.append(f"""   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, {destination},
+                                 {bound}_MAX) != 0)
+      return -1;{check}""")
+        elif kind == "u32":
+            steps.append(f"""   if (cursor + 4u > payload_len)
+      return -1;
+   {value} = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if ({floor}{value} > {bound}_MAX)
+      return -1;""")
+        elif kind == "u64":
+            steps.append(f"""   if (cursor + 8u > payload_len)
+      return -1;
+   {value} = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if ({floor}{value} > {bound}_MAX)
+      return -1;""")
+        else:
+            steps.append(f"""   if (cursor + 8u > payload_len)
+      return -1;
+   {{
+      uint64_t bits = aimee_db2_get_u64(payload + cursor);
+      cursor += 8u;
+      if (bits < {bound}_MIN_BITS || bits > {bound}_MAX_BITS)
+         return -1;
+      {value} = aimee_db2_binary64_value(bits);
+   }}""")
+    return "\n".join(steps)
+
+
+def _generic_codecs(operation: dict[str, object]) -> str:
+    """The four codecs for one db2-envelope-generic-v1 operation."""
+    lower = str(operation["name"])
+    upper = lower.upper()
+    request_fields = _generic_fields(operation["request"], f"{lower}.request")
+    (lengths, checks), writes = _generic_c_encode_body(operation, request_fields, "")
+    request_guard = " || ".join(f"!{field['name']}" for field in request_fields
+                                if field["type"] == "utf8")
+    request_guard = f"{request_guard} || " if request_guard else ""
+
+    decode_params = _generic_c_parameters(operation, request_fields, writing=True)
+    decode_clear = "\n".join(
+        f"""   if ({field['name']} && {field['name']}_capacity)
+      {field['name']}[0] = '\\0';""" if field["type"] == "utf8"
+        else f"""   if ({field['name']})
+      *{field['name']} = {'0.0' if field['type'] == 'f64' else '0u'};"""
+        for field in request_fields)
+    decode_guard = " || ".join(
+        (f"!{field['name']} || {field['name']}_capacity < "
+         f"(size_t)AIMEE_DB2_{upper}_{str(field['name']).upper()}_MAX + 1u")
+        if field["type"] == "utf8" else f"!{field['name']}"
+        for field in request_fields)
+    decode_steps = _generic_c_decode_body(operation, request_fields, "*", capacities=True)
+
+    text = f"""
+static inline int aimee_db2_{lower}_request_encode({_generic_c_parameters(operation, request_fields, writing=False)},
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if ({request_guard}!output || !output_len)
+      return -1;
+{lengths}
+   if ({checks})
+      return -1;
+   uint8_t scratch[AIMEE_DB2_{upper}_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+{writes}
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_{upper}, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_request_decode(const uint8_t *input, size_t input_len,
+                                                   {decode_params})
+{{
+{decode_clear}
+   if ({decode_guard})
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} || header.flags != 0u ||
+       input_len < AIMEE_DB2_{upper}_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_{upper}_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+{decode_steps}
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}}
+"""
+
+    row = operation["reply"].get("row")
+    if row is not None:
+        row_fields = _generic_fields(row, f"{lower}.reply.row")
+        (row_lengths, row_checks), row_writes = _generic_c_encode_body(
+            operation, row_fields, "rows[index].")
+        row_reads = _generic_c_decode_body(operation, row_fields, "rows[index].",
+                                           capacities=False)
+        text += f"""{_generic_row_struct(operation)}
+static inline int aimee_db2_{lower}_reply_encode(const aimee_db2_{lower}_row_t *rows,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !rows) || count > AIMEE_DB2_{upper}_MAX_ROWS)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_{upper}_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   aimee_db2_put_u32(payload, count);
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < count; index++)
+   {{
+{row_lengths}
+      if ({row_checks})
+         return -1;
+{row_writes}
+   }}
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 aimee_db2_{lower}_row_t *rows, uint32_t capacity,
+                                                 uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !rows))
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_{upper}_MAX_ROWS || decoded > capacity)
+      return -1;
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {{
+      memset(&rows[index], 0, sizeof(rows[index]));
+{row_reads}
+   }}
+   if (cursor != payload_len)
+      return -1;
+   *count = decoded;
+   return 0;
+}}
+"""
+    else:
+        reply_fields = _generic_fields(operation["reply"], f"{lower}.reply")
+        (reply_lengths, reply_checks), reply_writes = _generic_c_encode_body(
+            operation, reply_fields, "")
+        reply_guard = " || ".join(f"!{field['name']}" for field in reply_fields
+                                  if field["type"] == "utf8")
+        reply_guard = f"{reply_guard} || " if reply_guard else ""
+        out_params = _generic_c_parameters(operation, reply_fields, writing=True)
+        out_clear = "\n".join(
+            f"""   if ({field['name']} && {field['name']}_capacity)
+      {field['name']}[0] = '\\0';""" if field["type"] == "utf8"
+            else f"""   if ({field['name']})
+      *{field['name']} = {'0.0' if field['type'] == 'f64' else '0u'};"""
+            for field in reply_fields)
+        out_guard = " || ".join(
+            (f"!{field['name']} || {field['name']}_capacity < "
+             f"(size_t)AIMEE_DB2_{upper}_{str(field['name']).upper()}_MAX + 1u")
+            if field["type"] == "utf8" else f"!{field['name']}"
+            for field in reply_fields)
+        out_steps = _generic_c_decode_body(operation, reply_fields, "*", capacities=True)
+        text += f"""
+static inline int aimee_db2_{lower}_reply_encode({_generic_c_parameters(operation, reply_fields, writing=False)},
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if ({reply_guard}!output || !output_len)
+      return -1;
+{reply_lengths}
+   if ({reply_checks})
+      return -1;
+   uint8_t scratch[AIMEE_DB2_{upper}_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+{reply_writes}
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_{upper}, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}}
+
+static inline int aimee_db2_{lower}_reply_decode(const uint8_t *input, size_t input_len,
+                                                 {out_params})
+{{
+{out_clear}
+   if ({out_guard})
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_{upper} ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+{out_steps}
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}}
+"""
+    return text
+
+
+
+def _generic_sample(field: dict[str, object], index: int) -> object:
+    """A value inside a field's bounds, distinct per position.
+
+    Distinct matters: a fixture whose fields all carry the same value passes
+    even when a codec reads them in the wrong order.
+    """
+    kind = field["type"]
+    if kind == "utf8":
+        floor, ceiling = int(field["minimum_bytes"]), int(field["maximum_bytes"])
+        text = f"value-{index}"[:ceiling]
+        return text if len(text) >= floor else "v" * floor
+    if kind == "f64":
+        return int(field["maximum_binary64_bits"])
+    floor, ceiling = int(field["minimum"]), int(field["maximum"])
+    return min(ceiling, max(floor, index + 1))
+
+
+def _generic_pack(fields: list[dict[str, object]], values: list[object]) -> bytes:
+    """Encode one field list from Python values."""
+    payload = b""
+    for field, value in zip(fields, values):
+        kind = field["type"]
+        if kind == "utf8":
+            encoded = str(value).encode("utf-8")
+            payload += _put_u32(len(encoded)) + encoded
+        elif kind == "u32":
+            payload += _put_u32(int(value))
+        else:
+            payload += _put_u64(int(value))
+    return payload
+
+
+def _generic_json(fields: list[dict[str, object]], values: list[object]) -> dict[str, object]:
+    """The fixture's own record of what it encoded."""
+    named: dict[str, object] = {}
+    for field, value in zip(fields, values):
+        name = str(field["name"])
+        named[f"{name}_binary64_bits" if field["type"] == "f64" else name] = value
+    return named
+
+
+def _generic_vectors(catalog: dict[str, object],
+                     operation: dict[str, object]) -> dict[str, object]:
+    """Fixtures for one db2-envelope-generic-v1 operation."""
+    identifier = int(operation["id"])
+    request_fields = _generic_fields(operation["request"], "request")
+    request_values = [_generic_sample(field, index)
+                      for index, field in enumerate(request_fields)]
+    request = _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0,
+                        _generic_pack(request_fields, request_values))
+
+    negative = [
+        {"mutation": "bad_flags", "hex": _mutate_u32(request, 12, 1).hex()},
+        {"mutation": "payload_length", "hex": _mutate_u32(request, 16, 1).hex()},
+        {"mutation": "short", "hex": request[:-1].hex()},
+        {"mutation": "long", "hex": (request + b"\0").hex()},
+    ]
+    # One mutation per field, aimed at whatever that field's own bound is: a
+    # fixture that only mutates the envelope tests the header, not the schema.
+    offset = ENVELOPE_HEADER_LEN
+    for index, (field, value) in enumerate(zip(request_fields, request_values)):
+        name, kind = str(field["name"]), field["type"]
+        if kind == "utf8":
+            encoded = str(value).encode("utf-8")
+            if int(field["minimum_bytes"]) > 0:
+                broken = list(request_values)
+                broken[index] = ""
+                negative.append({
+                    "mutation": f"{name}_empty",
+                    "hex": _envelope(catalog, ENVELOPE_REQUEST_MAGIC, identifier, 0,
+                                     _generic_pack(request_fields, broken)).hex()})
+            negative.append({
+                "mutation": f"{name}_length_exceeds_payload",
+                "hex": _mutate_u32(request, offset, len(encoded) + 1).hex()})
+            offset += 4 + len(encoded)
+        elif kind == "u32":
+            if int(field["maximum"]) < 0xffffffff:
+                negative.append({
+                    "mutation": f"{name}_above_maximum",
+                    "hex": _mutate_u32(request, offset, int(field["maximum"]) + 1).hex()})
+            offset += 4
+        else:
+            ceiling = (int(field["maximum"]) if kind == "u64"
+                       else int(field["maximum_binary64_bits"]))
+            if ceiling < 0xffffffffffffffff:
+                negative.append({
+                    "mutation": f"{name}_above_maximum",
+                    "hex": (request[:offset] + _put_u64(ceiling + 1) +
+                            request[offset + 8:]).hex()})
+            offset += 8
+
+    row = operation["reply"].get("row")
+    if row is not None:
+        row_fields = _generic_fields(row, "reply.row")
+        first = [_generic_sample(field, index) for index, field in enumerate(row_fields)]
+        second = [_generic_sample(field, index + 1) for index, field in enumerate(row_fields)]
+        body = (_put_u32(2) + _generic_pack(row_fields, first) +
+                _generic_pack(row_fields, second))
+        populated = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, body)
+        empty = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0, _put_u32(0))
+        reply = {
+            "positive": [
+                {"result": 0, "rows": [_generic_json(row_fields, first),
+                                       _generic_json(row_fields, second)],
+                 "hex": populated.hex()},
+                {"result": 0, "rows": [], "hex": empty.hex()},
+            ],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(populated, 8, 0).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(populated, 12, 5).hex()},
+                {"mutation": "count_above_maximum", "hex":
+                 _mutate_u32(populated, ENVELOPE_HEADER_LEN,
+                             int(operation["reply"]["maximum_rows"]) + 1).hex()},
+                {"mutation": "count_exceeds_payload", "hex":
+                 _mutate_u32(populated, ENVELOPE_HEADER_LEN, 3).hex()},
+                {"mutation": "short", "hex": populated[:-1].hex()},
+                {"mutation": "long", "hex": (populated + b"\0").hex()},
+            ],
+        }
+    else:
+        reply_fields = _generic_fields(operation["reply"], "reply")
+        values = [_generic_sample(field, index) for index, field in enumerate(reply_fields)]
+        record = _envelope(catalog, ENVELOPE_REPLY_MAGIC, identifier, 0,
+                           _generic_pack(reply_fields, values))
+        reply = {
+            "positive": [{"result": 0, **_generic_json(reply_fields, values),
+                          "hex": record.hex()}],
+            "negative": [
+                {"mutation": "wrong_operation", "hex": _mutate_u32(record, 8, 0).hex()},
+                {"mutation": "unsupported_result", "hex": _mutate_u32(record, 12, 5).hex()},
+                {"mutation": "short", "hex": record[:-1].hex()},
+                {"mutation": "long", "hex": (record + b"\0").hex()},
+            ],
+        }
+
+    return {
+        "family": operation["family"],
+        "id": operation["id"],
+        "name": operation["name"],
+        "request": {"positive": request.hex(),
+                    **_generic_json(request_fields, request_values),
+                    "negative": negative},
+        "reply": reply,
+    }
+
+
+def _generic_go_type(field: dict[str, object]) -> str:
+    return {"utf8": "string", "u32": "uint32", "u64": "uint64", "f64": "float64"}[field["type"]]
+
+
+def _generic_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for one db2-envelope-generic-v1 operation.
+
+    The Go side mirrors the C one field for field; it exists so a Go caller and
+    a C module cannot disagree about a schema neither of them wrote.
+    """
+    name = _go_name(str(operation["name"]))
+    family = _go_name(str(operation["family"]))
+    lower = str(operation["name"])
+    request_fields = _generic_fields(operation["request"], "request")
+
+    bounds = []
+    for field in request_fields:
+        upper = _go_name(str(field["name"]))
+        if field["type"] == "utf8":
+            bounds.append(f"const {name}{upper}Min = {field['minimum_bytes']}")
+            bounds.append(f"const {name}{upper}Max = {field['maximum_bytes']}")
+        elif field["type"] == "f64":
+            bounds.append(f"const {name}{upper}MinBits uint64 = {field['minimum_binary64_bits']}")
+            bounds.append(f"const {name}{upper}MaxBits uint64 = {field['maximum_binary64_bits']}")
+        else:
+            kind = "uint32" if field["type"] == "u32" else "uint64"
+            bounds.append(f"const {name}{upper}Min {kind} = {field['minimum']}")
+            bounds.append(f"const {name}{upper}Max {kind} = {field['maximum']}")
+
+    parameters = ", ".join(f"{_go_lower(str(field['name']))} {_generic_go_type(field)}"
+                           for field in request_fields)
+    results = ", ".join(_generic_go_type(field) for field in request_fields)
+    zeros = ", ".join({"string": '""', "uint32": "0", "uint64": "0",
+                       "float64": "0"}[_generic_go_type(field)] for field in request_fields)
+
+    writes, reads, checks = [], [], []
+    for field in request_fields:
+        upper = _go_name(str(field["name"]))
+        local = _go_lower(str(field["name"]))
+        if field["type"] == "utf8":
+            checks.append(f"len({local}) < {name}{upper}Min || len({local}) > {name}{upper}Max || "
+                          f"hasNUL({local})")
+            writes.append(f"""	if err := putRowText(&payload, {local}, {name}{upper}Max); err != nil {{
+		return nil, err
+	}}""")
+            reads.append(f"""	if {local}, err = takeRowText(payload, &cursor, {name}{upper}Max); err != nil ||
+		len({local}) < {name}{upper}Min {{
+		return {zeros}, ErrMalformedEnvelope
+	}}""")
+        elif field["type"] == "u32":
+            checks.append(f"{local} < {name}{upper}Min || {local} > {name}{upper}Max")
+            writes.append(f"""	var {local}Bytes [4]byte
+	binary.LittleEndian.PutUint32({local}Bytes[:], {local})
+	payload = append(payload, {local}Bytes[:]...)""")
+            reads.append(f"""	if cursor+4 > len(payload) {{
+		return {zeros}, ErrMalformedEnvelope
+	}}
+	{local} = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if {local} < {name}{upper}Min || {local} > {name}{upper}Max {{
+		return {zeros}, ErrMalformedEnvelope
+	}}""")
+        elif field["type"] == "u64":
+            checks.append(f"{local} < {name}{upper}Min || {local} > {name}{upper}Max")
+            writes.append(f"""	var {local}Bytes [8]byte
+	binary.LittleEndian.PutUint64({local}Bytes[:], {local})
+	payload = append(payload, {local}Bytes[:]...)""")
+            reads.append(f"""	if cursor+8 > len(payload) {{
+		return {zeros}, ErrMalformedEnvelope
+	}}
+	{local} = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if {local} < {name}{upper}Min || {local} > {name}{upper}Max {{
+		return {zeros}, ErrMalformedEnvelope
+	}}""")
+        else:
+            checks.append(f"math.Float64bits({local}) < {name}{upper}MinBits || "
+                          f"math.Float64bits({local}) > {name}{upper}MaxBits")
+            writes.append(f"""	var {local}Bytes [8]byte
+	binary.LittleEndian.PutUint64({local}Bytes[:], math.Float64bits({local}))
+	payload = append(payload, {local}Bytes[:]...)""")
+            reads.append(f"""	if cursor+8 > len(payload) {{
+		return {zeros}, ErrMalformedEnvelope
+	}}
+	{{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits < {name}{upper}MinBits || bits > {name}{upper}MaxBits {{
+			return {zeros}, ErrMalformedEnvelope
+		}}
+		{local} = math.Float64frombits(bits)
+	}}""")
+
+    declarations = "\n".join(f"\tvar {_go_lower(str(field['name']))} {_generic_go_type(field)}"
+                              for field in request_fields)
+    joined_bounds = "\n".join(bounds)
+    joined_writes = "\n".join(writes)
+    joined_reads = "\n".join(reads)
+    joined_checks = " ||\n\t\t".join(checks)
+
+    return f"""const Event{name} = Event{family}
+const Stage{name} = Family{family}
+const Operation{name} uint32 = {operation['id']}
+{joined_bounds}
+
+// Encode{name}Request writes the schema {lower} declares, in order.
+func Encode{name}Request({parameters}) ([]byte, error) {{
+	if {joined_checks} {{
+		return nil, ErrMalformedEnvelope
+	}}
+	var payload []byte
+{joined_writes}
+	header, err := EncodeRequestHeader(Operation{name}, 0, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Request reads it back, checking each field against its own bound.
+func Decode{name}Request(request []byte) ({results}, error) {{
+{declarations}
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return {zeros}, ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+{joined_reads}
+	if cursor != len(payload) {{
+		return {zeros}, ErrMalformedEnvelope
+	}}
+	return {", ".join(_go_lower(str(field["name"])) for field in request_fields)}, nil
+}}
+
+"""
+
+
+def _go_lower(value: str) -> str:
+    """The Go local name for a field."""
+    name = _go_name(value)
+    return name[0].lower() + name[1:]
 
 
 def header_bytes(catalog: dict[str, object]) -> bytes:

@@ -1626,6 +1626,14 @@ int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_se
    return 0;
 }
 
+int db2_kb_runtime_state_get(const char *key, char *out, size_t out_len)
+{
+   (void)key;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -337,7 +337,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 138 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 139 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -474,7 +474,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[136].Name != "runtime_state_set" ||
 		baseline.Operations[137].Name != "set_active_embedder_version" ||
 		baseline.Operations[112].Name != "doc_exists_by_hash" ||
-		baseline.Operations[113].Name != "pdf_quarantine_confirm" {
+		baseline.Operations[113].Name != "pdf_quarantine_confirm" ||
+		baseline.Operations[138].Name != "runtime_state_get" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -2814,6 +2815,29 @@ func stringPairCountVectors(t *testing.T, index int, wantFirst string, wantSecon
 	for _, vector := range operation.Reply.Negative {
 		if _, err := decodeReply(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("reply %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestRuntimeStateGetMatchesEverySharedCVector(t *testing.T) {
+	// The first operation whose codecs are generated from a schema rather than
+	// written, so this drives the generated request codec against the fixtures
+	// the same generator produced -- which is worth doing precisely because
+	// both sides came from one description and could be wrong together only if
+	// the description is.
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "runtime_state_get")]
+
+	request, err := EncodeRuntimeStateGetRequest(operation.Request.StateKey)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	if got, err := DecodeRuntimeStateGetRequest(request); err != nil ||
+		got != operation.Request.StateKey {
+		t.Fatalf("request decode: %v %q", err, got)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeRuntimeStateGetRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
 }
