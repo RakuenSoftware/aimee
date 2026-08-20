@@ -1668,6 +1668,49 @@ int main(int argc, char **argv)
                                           NULL) == AIMEE_MODULE_CALL_OK);
    assert(matched_count == 0);
 
+   /* Four more row lists, against a schema holding nothing to list. Each is
+    * replayed for its decoder and its handler rather than its value: an empty
+    * list is what a working operation and a broken one both return here, which
+    * is why the populated case for this reply format lives in the hosted bus
+    * test where the backend can be told what to return. */
+   aimee_db2_document_chunk_ids_row_t chunk_rows[AIMEE_DB2_DOCUMENT_CHUNK_IDS_MAX_ROWS];
+   uint32_t chunk_count = 99;
+   assert(aimee_db2_document_chunk_ids_call(call_client, &client, 9262, 0, "demo", "docs/a.md",
+                                            chunk_rows, AIMEE_DB2_DOCUMENT_CHUNK_IDS_MAX_ROWS,
+                                            &chunk_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(chunk_count == 0);
+
+   static aimee_db2_memory_ids_by_updated_row_t
+       updated_rows[AIMEE_DB2_MEMORY_IDS_BY_UPDATED_MAX_ROWS];
+   uint32_t updated_count = 99;
+   assert(aimee_db2_memory_ids_by_updated_call(call_client, &client, 9263, 0, 8u, updated_rows,
+                                               AIMEE_DB2_MEMORY_IDS_BY_UPDATED_MAX_ROWS,
+                                               &updated_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(updated_count == 0);
+   /* Zero is not "no rows": it is "no LIMIT clause", and on this schema both
+    * come back empty. Replayed so the argument is exercised at its edge. */
+   updated_count = 99;
+   assert(aimee_db2_memory_ids_by_updated_call(call_client, &client, 9264, 0, 0u, updated_rows,
+                                               AIMEE_DB2_MEMORY_IDS_BY_UPDATED_MAX_ROWS,
+                                               &updated_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(updated_count == 0);
+
+   static aimee_db2_unit_ids_for_memory_row_t unit_rows[AIMEE_DB2_UNIT_IDS_FOR_MEMORY_MAX_ROWS];
+   uint32_t unit_count = 99;
+   assert(aimee_db2_unit_ids_for_memory_call(call_client, &client, 9265, 0, 4242, unit_rows,
+                                             AIMEE_DB2_UNIT_IDS_FOR_MEMORY_MAX_ROWS, &unit_count,
+                                             NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(unit_count == 0);
+
+   static aimee_db2_retryable_index_failures_row_t
+       retry_rows[AIMEE_DB2_RETRYABLE_INDEX_FAILURES_MAX_ROWS];
+   uint32_t retry_count = 99;
+   assert(aimee_db2_retryable_index_failures_call(call_client, &client, 9266, 0, 3u, 8u, retry_rows,
+                                                  AIMEE_DB2_RETRYABLE_INDEX_FAILURES_MAX_ROWS,
+                                                  &retry_count, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(retry_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

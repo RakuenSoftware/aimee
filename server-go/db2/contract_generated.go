@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "78735171cef28ccc8d8ccfcee25a3bed0a1c9eb82b4d2829d4513674a3de30a1"
+const ContractSHA256 = "d9d6fd38b2a65ca16750d06910fe31f9f6792aef07225ab6a3366e7f4b38a98f"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -846,6 +846,100 @@ func DecodeMatchErrorKeysRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return errorLowered, nil
+}
+
+const EventMemoryIdsByUpdated = EventMemory
+const StageMemoryIdsByUpdated = FamilyMemory
+const OperationMemoryIdsByUpdated uint32 = 69
+const MemoryIdsByUpdatedLimitMin uint32 = 0
+const MemoryIdsByUpdatedLimitMax uint32 = 1024
+
+// EncodeMemoryIdsByUpdatedRequest writes the schema memory_ids_by_updated declares, in order.
+func EncodeMemoryIdsByUpdatedRequest(limit uint32) ([]byte, error) {
+	if limit < MemoryIdsByUpdatedLimitMin || limit > MemoryIdsByUpdatedLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryIdsByUpdated, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryIdsByUpdatedRequest reads it back, checking each field against its own bound.
+func DecodeMemoryIdsByUpdatedRequest(request []byte) (uint32, error) {
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryIdsByUpdated || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < MemoryIdsByUpdatedLimitMin || limit > MemoryIdsByUpdatedLimitMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return limit, nil
+}
+
+const EventUnitIdsForMemory = EventMemory
+const StageUnitIdsForMemory = FamilyMemory
+const OperationUnitIdsForMemory uint32 = 70
+const UnitIdsForMemoryMemoryIDMin uint64 = 1
+const UnitIdsForMemoryMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeUnitIdsForMemoryRequest writes the schema unit_ids_for_memory declares, in order.
+func EncodeUnitIdsForMemoryRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < UnitIdsForMemoryMemoryIDMin || memoryID > UnitIdsForMemoryMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationUnitIdsForMemory, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeUnitIdsForMemoryRequest reads it back, checking each field against its own bound.
+func DecodeUnitIdsForMemoryRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationUnitIdsForMemory || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < UnitIdsForMemoryMemoryIDMin || memoryID > UnitIdsForMemoryMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -4719,6 +4813,60 @@ func DecodePdfTsrStateRequest(request []byte) (string, string, error) {
 	return project, documentKey, nil
 }
 
+const EventDocumentChunkIds = EventOrganization
+const StageDocumentChunkIds = FamilyOrganization
+const OperationDocumentChunkIds uint32 = 25
+const DocumentChunkIdsProjectMin = 1
+const DocumentChunkIdsProjectMax = 127
+const DocumentChunkIdsFilePathMin = 1
+const DocumentChunkIdsFilePathMax = 1023
+
+// EncodeDocumentChunkIdsRequest writes the schema document_chunk_ids declares, in order.
+func EncodeDocumentChunkIdsRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < DocumentChunkIdsProjectMin || len(project) > DocumentChunkIdsProjectMax || hasNUL(project) ||
+		len(filePath) < DocumentChunkIdsFilePathMin || len(filePath) > DocumentChunkIdsFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, DocumentChunkIdsProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, DocumentChunkIdsFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDocumentChunkIds, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDocumentChunkIdsRequest reads it back, checking each field against its own bound.
+func DecodeDocumentChunkIdsRequest(request []byte) (string, string, error) {
+	var project string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocumentChunkIds || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, DocumentChunkIdsProjectMax); err != nil ||
+		len(project) < DocumentChunkIdsProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, DocumentChunkIdsFilePathMax); err != nil ||
+		len(filePath) < DocumentChunkIdsFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
+}
+
 const EventEnrollmentActive = EventCustody
 const StageEnrollmentActive = FamilyCustody
 const OperationEnrollmentActive uint32 = 4
@@ -5732,6 +5880,68 @@ func DecodeCssMigrationRulesDocRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return exemplarProject, nil
+}
+
+const EventRetryableIndexFailures = EventMaintenance
+const StageRetryableIndexFailures = FamilyMaintenance
+const OperationRetryableIndexFailures uint32 = 28
+const RetryableIndexFailuresMaxAttemptsMin uint32 = 1
+const RetryableIndexFailuresMaxAttemptsMax uint32 = 1024
+const RetryableIndexFailuresLimitMin uint32 = 0
+const RetryableIndexFailuresLimitMax uint32 = 1024
+
+// EncodeRetryableIndexFailuresRequest writes the schema retryable_index_failures declares, in order.
+func EncodeRetryableIndexFailuresRequest(maxAttempts uint32, limit uint32) ([]byte, error) {
+	if maxAttempts < RetryableIndexFailuresMaxAttemptsMin || maxAttempts > RetryableIndexFailuresMaxAttemptsMax ||
+		limit < RetryableIndexFailuresLimitMin || limit > RetryableIndexFailuresLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var maxAttemptsBytes [4]byte
+	binary.LittleEndian.PutUint32(maxAttemptsBytes[:], maxAttempts)
+	payload = append(payload, maxAttemptsBytes[:]...)
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRetryableIndexFailures, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRetryableIndexFailuresRequest reads it back, checking each field against its own bound.
+func DecodeRetryableIndexFailuresRequest(request []byte) (uint32, uint32, error) {
+	var maxAttempts uint32
+	var limit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRetryableIndexFailures || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	maxAttempts = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if maxAttempts < RetryableIndexFailuresMaxAttemptsMin || maxAttempts > RetryableIndexFailuresMaxAttemptsMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < RetryableIndexFailuresLimitMin || limit > RetryableIndexFailuresLimitMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return maxAttempts, limit, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

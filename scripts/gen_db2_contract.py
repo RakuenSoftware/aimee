@@ -12668,6 +12668,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_promotion_match_error_keys",
         "policy": {"reads": 200},
     },
+    "document_chunk_ids": {
+        "key": ("organization", 25),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_documents_list_chunk_ids_for_file",
+        "policy": {"reads": 200},
+    },
+    "memory_ids_by_updated": {
+        "key": ("memory", 69),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_list_memory_ids_by_updated",
+        "policy": {"reads": 200},
+    },
+    "unit_ids_for_memory": {
+        "key": ("memory", 70),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_unit_list_ids",
+        "policy": {"reads": 200},
+    },
+    "retryable_index_failures": {
+        "key": ("maintenance", 28),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_retryable_index_failures",
+        "policy": {"reads": 200},
+    },
 }
 
 

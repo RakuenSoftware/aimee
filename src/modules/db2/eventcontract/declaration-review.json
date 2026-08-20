@@ -812,6 +812,14 @@
       "reason": "The typed organization.document_hash_exists operation asks whether a project's current generation already holds content with this hash. Two tables are searched and one path comes back, so the sample names one file with that content and never says how many there are, nor which of the two tables it came from. Both halves are scoped to the current generation, so identical content indexed under an older one does not count as present."
     },
     {
+      "symbol": "db2_kb_documents_list_chunk_ids_for_file",
+      "signature_sha256": "ff2c5761418e43ba5aaadbda19604c0c0a8f2357d22c9b3c245469f036b89e77",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.document_chunk_ids operation lists the chunks a file was split into. Only the project's current generation is listed, so a file indexed under an older one has no chunks as far as this operation is concerned. The list stops at the row bound and says nothing about having stopped, which matters because its caller, the curator invalidation, uses the list to decide what to stale -- a file with more chunks than the bound leaves the rest valid."
+    },
+    {
       "symbol": "db2_kb_file_index_delete_current_project",
       "signature_sha256": "ce7e7b70b214f1130425b545ab5f667802155eef1982ca64bd87ef5f06bd44b2",
       "disposition": "wire-operation",
@@ -1322,6 +1330,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
+    },
+    {
+      "symbol": "db2_kb_service_list_memory_ids_by_updated",
+      "signature_sha256": "dce2ee59521ae70d54c2a950dc99c0091a4030fb002270ae9dd268d5b08860de",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.memory_ids_by_updated operation lists memories newest-updated first. A limit of zero does not mean no rows: the backend builds its statement without a LIMIT clause at all, so the whole table is read and the row bound is the only thing that stops it. Every tier is included, unlike the other memory listings beside it, and a caller cannot tell a list cut at the bound from one that ended."
     },
     {
       "symbol": "db2_kb_service_mark_reembed_finished",
@@ -2700,6 +2716,14 @@
       "reason": "The typed memory.list_rows operation replaces the tier and kind listing. It is the only read here whose statement is assembled: the tier and kind clauses appear only when their value is non-empty, so an empty value is no filter on that column rather than a match against the empty string, and this is four statements sharing one name. Its LIMIT was interpolated from an unbounded caller integer and is a bounded field on the wire. Identifiers cross and the scope travels, as for the other scoped reads."
     },
     {
+      "symbol": "db2_memory_list_retryable_index_failures",
+      "signature_sha256": "4740271f35489731eac458c27cf61af69ddc7551e0eeb04c826ee6df182a86d0",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.retryable_index_failures operation lists the memories whose indexing failed and is still worth retrying. Oldest failure first, so a caller working through the list makes progress rather than retrying the same head. A limit of zero adds no LIMIT clause, leaving the row bound as the only stop. Distinct memory identifiers come back, so a memory that failed several times appears once and the reply says nothing about how many attempts it has left."
+    },
+    {
       "symbol": "db2_memory_list_session_scope_priority",
       "signature_sha256": "b0110278348371f632b08e96afb7a3771dd2eaaf39ee1786757de0c27c6ec0aa",
       "disposition": "wire-operation",
@@ -3106,6 +3130,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private second half of memory_refresh_units_graph: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
+    },
+    {
+      "symbol": "db2_memory_unit_list_ids",
+      "signature_sha256": "53f02e3058073001f1ec7363ce4142ca4a7735019c4ef30ad1ec1475b159286b",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.unit_ids_for_memory operation lists the units a memory was split into. The statement has no ORDER BY, so the order is whatever Postgres returns and is not stable between calls -- anything pairing this list with another by position is relying on something nobody promised. A memory that does not exist and one with no units both answer with nothing."
     },
     {
       "symbol": "db2_memory_units_delete_for_memory",

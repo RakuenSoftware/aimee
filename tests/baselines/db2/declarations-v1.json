@@ -9958,9 +9958,15 @@
           "line": 137
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.document_chunk_ids operation lists the chunks a file was split into. Only the project's current generation is listed, so a file indexed under an older one has no chunks as far as this operation is concerned. The list stops at the row bound and says nothing about having stopped, which matters because its caller, the curator invalidation, uses the list to decide what to stale -- a file with more chunks than the bound leaves the rest valid."
+      },
       "signature": "int db2_kb_documents_list_chunk_ids_for_file ( const char * project , const char * file_path , int64_t * out , int max )",
       "signature_sha256": "ff2c5761418e43ba5aaadbda19604c0c0a8f2357d22c9b3c245469f036b89e77",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_documents_list_chunk_ids_for_file"
     },
     {
@@ -11989,9 +11995,15 @@
           "line": 100
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.memory_ids_by_updated operation lists memories newest-updated first. A limit of zero does not mean no rows: the backend builds its statement without a LIMIT clause at all, so the whole table is read and the row bound is the only thing that stops it. Every tier is included, unlike the other memory listings beside it, and a caller cannot tell a list cut at the bound from one that ended."
+      },
       "signature": "int db2_kb_service_list_memory_ids_by_updated ( int limit , int64_t * ids , int max_ids )",
       "signature_sha256": "dce2ee59521ae70d54c2a950dc99c0091a4030fb002270ae9dd268d5b08860de",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_list_memory_ids_by_updated"
     },
     {
@@ -18032,9 +18044,15 @@
           "line": 53
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.retryable_index_failures operation lists the memories whose indexing failed and is still worth retrying. Oldest failure first, so a caller working through the list makes progress rather than retrying the same head. A limit of zero adds no LIMIT clause, leaving the row bound as the only stop. Distinct memory identifiers come back, so a memory that failed several times appears once and the reply says nothing about how many attempts it has left."
+      },
       "signature": "int db2_memory_list_retryable_index_failures ( int max_attempts , int limit , int64_t * out , int max )",
       "signature_sha256": "4740271f35489731eac458c27cf61af69ddc7551e0eeb04c826ee6df182a86d0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_retryable_index_failures"
     },
     {
@@ -19735,9 +19753,15 @@
           "line": 703
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.unit_ids_for_memory operation lists the units a memory was split into. The statement has no ORDER BY, so the order is whatever Postgres returns and is not stable between calls -- anything pairing this list with another by position is relying on something nobody promised. A memory that does not exist and one with no units both answer with nothing."
+      },
       "signature": "int db2_memory_unit_list_ids ( int64_t memory_id , int64_t * out , int max )",
       "signature_sha256": "53f02e3058073001f1ec7363ce4142ca4a7735019c4ef30ad1ec1475b159286b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_unit_list_ids"
     },
     {
@@ -27012,15 +27036,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b6a99acb81a9800417417f1b763c63f3e2fb9bae1d07128378b3499bb8ed8bf2",
+  "fingerprint": "4e135225d547cc6a3f64c8ca97ea8ef8fb24665fb7a7a2e1824fc8944ae9a9c1",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 460,
+    "audit_pending": 456,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 498
+    "reviewed": 502
   }
 }

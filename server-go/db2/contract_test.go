@@ -391,7 +391,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 198 ||
+	if len(baseline.Operations) != 202 ||
 		baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
@@ -470,126 +470,130 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[75].Name != "scene_member_exists" ||
 		baseline.Operations[76].Name != "unit_edge_exists" ||
 		baseline.Operations[77].Name != "match_error_keys" ||
-		baseline.Operations[78].Name != "entity_edge_prune_orphans" ||
-		baseline.Operations[79].Name != "entity_edge_normalize_weights" ||
-		baseline.Operations[80].Name != "project_count" ||
-		baseline.Operations[81].Name != "purge_hidden_pollution" ||
-		baseline.Operations[82].Name != "requeue_drifted" ||
-		baseline.Operations[83].Name != "cross_repo_rebuild_routes" ||
-		baseline.Operations[84].Name != "cross_repo_rebuild_identities" ||
-		baseline.Operations[85].Name != "cross_repo_rebuild_build_deps" ||
-		baseline.Operations[86].Name != "drift_candidates" ||
-		baseline.Operations[87].Name != "file_index_delete_project" ||
-		baseline.Operations[88].Name != "entity_observation_count" ||
-		baseline.Operations[89].Name != "entity_profile_fresh" ||
-		baseline.Operations[90].Name != "project_fingerprint" ||
-		baseline.Operations[91].Name != "visible_source_hash" ||
-		baseline.Operations[92].Name != "entity_profile_card" ||
-		baseline.Operations[93].Name != "generation_abort" ||
-		baseline.Operations[94].Name != "generation_set_source_hash" ||
-		baseline.Operations[95].Name != "generation_publish" ||
-		baseline.Operations[96].Name != "purge_files_matching" ||
-		baseline.Operations[97].Name != "file_index_delete_current_generation" ||
-		baseline.Operations[98].Name != "project_delete" ||
-		baseline.Operations[99].Name != "minhash_delete_current_generation" ||
-		baseline.Operations[100].Name != "minhash_delete_file" ||
-		baseline.Operations[101].Name != "project_current_generation" ||
-		baseline.Operations[102].Name != "projection_generation_create" ||
-		baseline.Operations[103].Name != "projection_visible_id" ||
-		baseline.Operations[104].Name != "unique_file_basename" ||
-		baseline.Operations[105].Name != "rules_decay" ||
-		baseline.Operations[106].Name != "curiosity_rescore_all" ||
-		baseline.Operations[107].Name != "mining_seed_job_defaults" ||
-		baseline.Operations[108].Name != "proposals_archive_expired" ||
-		baseline.Operations[109].Name != "trace_mining_last_id" ||
-		baseline.Operations[110].Name != "anti_pattern_bump" ||
-		baseline.Operations[111].Name != "anti_pattern_delete" ||
-		baseline.Operations[112].Name != "trace_mining_record" ||
-		baseline.Operations[113].Name != "anti_pattern_exists_exact" ||
-		baseline.Operations[114].Name != "anti_pattern_exists_by_source_ref" ||
-		baseline.Operations[115].Name != "artifact_citation_count" ||
-		baseline.Operations[116].Name != "commits_in_last_7_days" ||
-		baseline.Operations[117].Name != "fidelity_attribution_count" ||
-		baseline.Operations[118].Name != "artifact_stamp_reflected" ||
-		baseline.Operations[119].Name != "failed_query_bump" ||
-		baseline.Operations[120].Name != "artifact_set_state" ||
-		baseline.Operations[121].Name != "artifact_register_exemplar" ||
-		baseline.Operations[122].Name != "evidence_enqueue" ||
-		baseline.Operations[123].Name != "evidence_mark_failed" ||
-		baseline.Operations[124].Name != "bandit_arms_list" ||
-		baseline.Operations[125].Name != "bandit_promotion_get" ||
-		baseline.Operations[126].Name != "decision_log_set_outcome" ||
-		baseline.Operations[127].Name != "decision_log_set_status" ||
-		baseline.Operations[128].Name != "decision_log_set_revisit" ||
-		baseline.Operations[129].Name != "collab_rule_approve" ||
-		baseline.Operations[130].Name != "collab_rule_reject" ||
-		baseline.Operations[131].Name != "collab_rule_retire" ||
-		baseline.Operations[132].Name != "proposal_bump_corroboration" ||
-		baseline.Operations[133].Name != "proposal_mark_committed" ||
-		baseline.Operations[134].Name != "rules_delete_by_id" ||
-		baseline.Operations[135].Name != "calibration_surfaces_with_data" ||
-		baseline.Operations[136].Name != "artifact_cite" ||
-		baseline.Operations[137].Name != "artifact_link" ||
-		baseline.Operations[138].Name != "bandit_promotion_set" ||
-		baseline.Operations[139].Name != "collab_rule_propose" ||
-		baseline.Operations[140].Name != "rules_delete_by_directive_type" ||
-		baseline.Operations[141].Name != "artifact_flag_review" ||
-		baseline.Operations[142].Name != "verdict_suppressed" ||
-		baseline.Operations[143].Name != "curator_invalidate_doc" ||
-		baseline.Operations[144].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[145].Name != "doc_delete" ||
-		baseline.Operations[146].Name != "task_delete" ||
-		baseline.Operations[147].Name != "clear_project" ||
-		baseline.Operations[148].Name != "clear_current_project" ||
-		baseline.Operations[149].Name != "document_exists" ||
-		baseline.Operations[150].Name != "blob_referenced" ||
-		baseline.Operations[151].Name != "fence_active" ||
-		baseline.Operations[152].Name != "doc_exists_by_hash" ||
-		baseline.Operations[153].Name != "pdf_quarantine_confirm" ||
-		baseline.Operations[154].Name != "pdf_quarantine_reject" ||
-		baseline.Operations[155].Name != "ontology_eval_status" ||
-		baseline.Operations[156].Name != "task_update_state" ||
-		baseline.Operations[157].Name != "release_add_doc" ||
-		baseline.Operations[158].Name != "ontology_approve" ||
-		baseline.Operations[159].Name != "ontology_reject" ||
-		baseline.Operations[160].Name != "doc_assets_delete_for_doc" ||
-		baseline.Operations[161].Name != "ontology_map" ||
-		baseline.Operations[162].Name != "release_create" ||
-		baseline.Operations[163].Name != "purge_fence_heartbeat" ||
-		baseline.Operations[164].Name != "purge_fence_clear" ||
-		baseline.Operations[165].Name != "document_stored_hash" ||
-		baseline.Operations[166].Name != "document_hash_exists" ||
-		baseline.Operations[167].Name != "pdf_tsr_state" ||
-		baseline.Operations[168].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[169].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[170].Name != "release_get_active" ||
-		baseline.Operations[171].Name != "enrollment_active" ||
-		baseline.Operations[172].Name != "prospective_sweep_expired" ||
-		baseline.Operations[173].Name != "directive_sweep_expired" ||
-		baseline.Operations[174].Name != "mark_revisit_due" ||
-		baseline.Operations[175].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[176].Name != "evidence_reembed_all" ||
-		baseline.Operations[177].Name != "curator_reembed_all" ||
-		baseline.Operations[178].Name != "synth_reenqueue_all" ||
-		baseline.Operations[179].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[180].Name != "directive_suppress" ||
-		baseline.Operations[181].Name != "directive_record_surface" ||
-		baseline.Operations[182].Name != "async_pending_count" ||
-		baseline.Operations[183].Name != "runtime_state_touch" ||
-		baseline.Operations[184].Name != "synth_enqueue" ||
-		baseline.Operations[185].Name != "synth_mark_done" ||
-		baseline.Operations[186].Name != "reembed_mark_finished" ||
-		baseline.Operations[187].Name != "mining_job_try_lock" ||
-		baseline.Operations[188].Name != "synth_mark_failed" ||
-		baseline.Operations[189].Name != "runtime_state_set" ||
-		baseline.Operations[190].Name != "set_active_embedder_version" ||
-		baseline.Operations[191].Name != "runtime_state_get" ||
-		baseline.Operations[192].Name != "ingest_queue_fail" ||
-		baseline.Operations[193].Name != "reset_stuck_vector_ops" ||
-		baseline.Operations[194].Name != "directive_resolve" ||
-		baseline.Operations[195].Name != "css_migration_enumerate" ||
-		baseline.Operations[196].Name != "css_migration_assert_conventions" ||
-		baseline.Operations[197].Name != "css_migration_rules_doc" {
+		baseline.Operations[78].Name != "memory_ids_by_updated" ||
+		baseline.Operations[79].Name != "unit_ids_for_memory" ||
+		baseline.Operations[80].Name != "entity_edge_prune_orphans" ||
+		baseline.Operations[81].Name != "entity_edge_normalize_weights" ||
+		baseline.Operations[82].Name != "project_count" ||
+		baseline.Operations[83].Name != "purge_hidden_pollution" ||
+		baseline.Operations[84].Name != "requeue_drifted" ||
+		baseline.Operations[85].Name != "cross_repo_rebuild_routes" ||
+		baseline.Operations[86].Name != "cross_repo_rebuild_identities" ||
+		baseline.Operations[87].Name != "cross_repo_rebuild_build_deps" ||
+		baseline.Operations[88].Name != "drift_candidates" ||
+		baseline.Operations[89].Name != "file_index_delete_project" ||
+		baseline.Operations[90].Name != "entity_observation_count" ||
+		baseline.Operations[91].Name != "entity_profile_fresh" ||
+		baseline.Operations[92].Name != "project_fingerprint" ||
+		baseline.Operations[93].Name != "visible_source_hash" ||
+		baseline.Operations[94].Name != "entity_profile_card" ||
+		baseline.Operations[95].Name != "generation_abort" ||
+		baseline.Operations[96].Name != "generation_set_source_hash" ||
+		baseline.Operations[97].Name != "generation_publish" ||
+		baseline.Operations[98].Name != "purge_files_matching" ||
+		baseline.Operations[99].Name != "file_index_delete_current_generation" ||
+		baseline.Operations[100].Name != "project_delete" ||
+		baseline.Operations[101].Name != "minhash_delete_current_generation" ||
+		baseline.Operations[102].Name != "minhash_delete_file" ||
+		baseline.Operations[103].Name != "project_current_generation" ||
+		baseline.Operations[104].Name != "projection_generation_create" ||
+		baseline.Operations[105].Name != "projection_visible_id" ||
+		baseline.Operations[106].Name != "unique_file_basename" ||
+		baseline.Operations[107].Name != "rules_decay" ||
+		baseline.Operations[108].Name != "curiosity_rescore_all" ||
+		baseline.Operations[109].Name != "mining_seed_job_defaults" ||
+		baseline.Operations[110].Name != "proposals_archive_expired" ||
+		baseline.Operations[111].Name != "trace_mining_last_id" ||
+		baseline.Operations[112].Name != "anti_pattern_bump" ||
+		baseline.Operations[113].Name != "anti_pattern_delete" ||
+		baseline.Operations[114].Name != "trace_mining_record" ||
+		baseline.Operations[115].Name != "anti_pattern_exists_exact" ||
+		baseline.Operations[116].Name != "anti_pattern_exists_by_source_ref" ||
+		baseline.Operations[117].Name != "artifact_citation_count" ||
+		baseline.Operations[118].Name != "commits_in_last_7_days" ||
+		baseline.Operations[119].Name != "fidelity_attribution_count" ||
+		baseline.Operations[120].Name != "artifact_stamp_reflected" ||
+		baseline.Operations[121].Name != "failed_query_bump" ||
+		baseline.Operations[122].Name != "artifact_set_state" ||
+		baseline.Operations[123].Name != "artifact_register_exemplar" ||
+		baseline.Operations[124].Name != "evidence_enqueue" ||
+		baseline.Operations[125].Name != "evidence_mark_failed" ||
+		baseline.Operations[126].Name != "bandit_arms_list" ||
+		baseline.Operations[127].Name != "bandit_promotion_get" ||
+		baseline.Operations[128].Name != "decision_log_set_outcome" ||
+		baseline.Operations[129].Name != "decision_log_set_status" ||
+		baseline.Operations[130].Name != "decision_log_set_revisit" ||
+		baseline.Operations[131].Name != "collab_rule_approve" ||
+		baseline.Operations[132].Name != "collab_rule_reject" ||
+		baseline.Operations[133].Name != "collab_rule_retire" ||
+		baseline.Operations[134].Name != "proposal_bump_corroboration" ||
+		baseline.Operations[135].Name != "proposal_mark_committed" ||
+		baseline.Operations[136].Name != "rules_delete_by_id" ||
+		baseline.Operations[137].Name != "calibration_surfaces_with_data" ||
+		baseline.Operations[138].Name != "artifact_cite" ||
+		baseline.Operations[139].Name != "artifact_link" ||
+		baseline.Operations[140].Name != "bandit_promotion_set" ||
+		baseline.Operations[141].Name != "collab_rule_propose" ||
+		baseline.Operations[142].Name != "rules_delete_by_directive_type" ||
+		baseline.Operations[143].Name != "artifact_flag_review" ||
+		baseline.Operations[144].Name != "verdict_suppressed" ||
+		baseline.Operations[145].Name != "curator_invalidate_doc" ||
+		baseline.Operations[146].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[147].Name != "doc_delete" ||
+		baseline.Operations[148].Name != "task_delete" ||
+		baseline.Operations[149].Name != "clear_project" ||
+		baseline.Operations[150].Name != "clear_current_project" ||
+		baseline.Operations[151].Name != "document_exists" ||
+		baseline.Operations[152].Name != "blob_referenced" ||
+		baseline.Operations[153].Name != "fence_active" ||
+		baseline.Operations[154].Name != "doc_exists_by_hash" ||
+		baseline.Operations[155].Name != "pdf_quarantine_confirm" ||
+		baseline.Operations[156].Name != "pdf_quarantine_reject" ||
+		baseline.Operations[157].Name != "ontology_eval_status" ||
+		baseline.Operations[158].Name != "task_update_state" ||
+		baseline.Operations[159].Name != "release_add_doc" ||
+		baseline.Operations[160].Name != "ontology_approve" ||
+		baseline.Operations[161].Name != "ontology_reject" ||
+		baseline.Operations[162].Name != "doc_assets_delete_for_doc" ||
+		baseline.Operations[163].Name != "ontology_map" ||
+		baseline.Operations[164].Name != "release_create" ||
+		baseline.Operations[165].Name != "purge_fence_heartbeat" ||
+		baseline.Operations[166].Name != "purge_fence_clear" ||
+		baseline.Operations[167].Name != "document_stored_hash" ||
+		baseline.Operations[168].Name != "document_hash_exists" ||
+		baseline.Operations[169].Name != "pdf_tsr_state" ||
+		baseline.Operations[170].Name != "document_chunk_ids" ||
+		baseline.Operations[171].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[172].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[173].Name != "release_get_active" ||
+		baseline.Operations[174].Name != "enrollment_active" ||
+		baseline.Operations[175].Name != "prospective_sweep_expired" ||
+		baseline.Operations[176].Name != "directive_sweep_expired" ||
+		baseline.Operations[177].Name != "mark_revisit_due" ||
+		baseline.Operations[178].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[179].Name != "evidence_reembed_all" ||
+		baseline.Operations[180].Name != "curator_reembed_all" ||
+		baseline.Operations[181].Name != "synth_reenqueue_all" ||
+		baseline.Operations[182].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[183].Name != "directive_suppress" ||
+		baseline.Operations[184].Name != "directive_record_surface" ||
+		baseline.Operations[185].Name != "async_pending_count" ||
+		baseline.Operations[186].Name != "runtime_state_touch" ||
+		baseline.Operations[187].Name != "synth_enqueue" ||
+		baseline.Operations[188].Name != "synth_mark_done" ||
+		baseline.Operations[189].Name != "reembed_mark_finished" ||
+		baseline.Operations[190].Name != "mining_job_try_lock" ||
+		baseline.Operations[191].Name != "synth_mark_failed" ||
+		baseline.Operations[192].Name != "runtime_state_set" ||
+		baseline.Operations[193].Name != "set_active_embedder_version" ||
+		baseline.Operations[194].Name != "runtime_state_get" ||
+		baseline.Operations[195].Name != "ingest_queue_fail" ||
+		baseline.Operations[196].Name != "reset_stuck_vector_ops" ||
+		baseline.Operations[197].Name != "directive_resolve" ||
+		baseline.Operations[198].Name != "css_migration_enumerate" ||
+		baseline.Operations[199].Name != "css_migration_assert_conventions" ||
+		baseline.Operations[200].Name != "css_migration_rules_doc" ||
+		baseline.Operations[201].Name != "retryable_index_failures" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -3032,6 +3036,44 @@ func TestMatchErrorKeysMatchesEverySharedCVector(t *testing.T) {
 }
 
 // Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestMemoryIdsByUpdatedMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_ids_by_updated")]
+
+	request, err := EncodeMemoryIdsByUpdatedRequest(operation.Request.Limit)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	limit, err := DecodeMemoryIdsByUpdatedRequest(request)
+	if err != nil || limit != operation.Request.Limit {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeMemoryIdsByUpdatedRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestUnitIdsForMemoryMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "unit_ids_for_memory")]
+
+	request, err := EncodeUnitIdsForMemoryRequest(operation.Request.MemoryID)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	memoryID, err := DecodeUnitIdsForMemoryRequest(request)
+	if err != nil || memoryID != operation.Request.MemoryID {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeUnitIdsForMemoryRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestProjectFingerprintMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "project_fingerprint")]
 
@@ -3975,6 +4017,26 @@ func TestPdfTsrStateMatchesEverySharedCVector(t *testing.T) {
 }
 
 // Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestDocumentChunkIdsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "document_chunk_ids")]
+
+	request, err := EncodeDocumentChunkIdsRequest(operation.Request.Project, operation.Request.FilePath)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	project, filePath, err := DecodeDocumentChunkIdsRequest(request)
+	if err != nil || project != operation.Request.Project ||
+		filePath != operation.Request.FilePath {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeDocumentChunkIdsRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestRuntimeStateGetMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "runtime_state_get")]
 
@@ -4105,6 +4167,26 @@ func TestCssMigrationRulesDocMatchesEverySharedCVector(t *testing.T) {
 	}
 	for _, vector := range operation.Request.Negative {
 		if _, err := DecodeCssMigrationRulesDocRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestRetryableIndexFailuresMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "retryable_index_failures")]
+
+	request, err := EncodeRetryableIndexFailuresRequest(operation.Request.MaxAttempts, operation.Request.Limit)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	maxAttempts, limit, err := DecodeRetryableIndexFailuresRequest(request)
+	if err != nil || maxAttempts != operation.Request.MaxAttempts ||
+		limit != operation.Request.Limit {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeRetryableIndexFailuresRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}

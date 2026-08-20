@@ -4028,6 +4028,92 @@
       }
     },
     {
+      "family": "memory",
+      "id": 69,
+      "name": "memory_ids_by_updated",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and when they were last updated are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_service_list_memory_ids_by_updated"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a limit of zero means no SQL limit at all, so the wire's row bound becomes the only thing stopping the read"
+        },
+        "fields": [
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1024
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            }
+          ]
+        },
+        "maximum_rows": 1024
+      }
+    },
+    {
+      "family": "memory",
+      "id": 70,
+      "name": "unit_ids_for_memory",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and the units they were split into are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_unit_list_ids"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the units are listed in whatever order the database returns them, because the statement has no ORDER BY"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "unit_id",
+              "type": "u64",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            }
+          ]
+        },
+        "maximum_rows": 1024
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -7823,6 +7909,55 @@
       }
     },
     {
+      "family": "organization",
+      "id": 25,
+      "name": "document_chunk_ids",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Documents, their chunks and the generation they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_documents_list_chunk_ids_for_file"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only chunks in the project's current generation are listed, and the list is cut at the wire's row bound with no way to ask for the rest"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "document_id",
+              "type": "u64",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            }
+          ]
+        },
+        "maximum_rows": 1024
+      }
+    },
+    {
       "family": "custody",
       "id": 1,
       "name": "vector_rebuild_lock_try_acquire",
@@ -8990,6 +9125,55 @@
             "maximum_bytes": 4095
           }
         ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 28,
+      "name": "retryable_index_failures",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Vector index operations and their attempt counts are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_retryable_index_failures"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the oldest failures come first and a limit of zero means no SQL limit, so the wire's row bound is what stops the read"
+        },
+        "fields": [
+          {
+            "name": "max_attempts",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 1024
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1024
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            }
+          ]
+        },
+        "maximum_rows": 1024
       }
     }
   ]

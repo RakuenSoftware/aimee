@@ -1711,6 +1711,41 @@ int db2_memory_promotion_match_error_keys(const char *error_lowered, int64_t *id
    return 3;
 }
 
+int db2_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
+                                             int64_t *out, int max)
+{
+   (void)project;
+   (void)file_path;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_kb_service_list_memory_ids_by_updated(int limit, int64_t *ids, int max_ids)
+{
+   (void)limit;
+   (void)ids;
+   (void)max_ids;
+   return 0;
+}
+
+int db2_memory_unit_list_ids(int64_t memory_id, int64_t *out, int max)
+{
+   (void)memory_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_retryable_index_failures(int max_attempts, int limit, int64_t *out, int max)
+{
+   (void)max_attempts;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -268,6 +268,10 @@ typedef struct
    int (*document_hash_exists)(const char *project, const char *file_hash, char *sample, size_t capacity);
    int (*pdf_tsr_state)(const char *project, const char *document_key, char *out, size_t capacity);
    int (*match_error_keys)(const char *error_lowered, int64_t *ids_out, int max);
+   int (*document_chunk_ids)(const char *project, const char *file_path, int64_t *out, int max);
+   int (*memory_ids_by_updated)(int limit, int64_t *ids, int max_ids);
+   int (*unit_ids_for_memory)(int64_t memory_id, int64_t *out, int max);
+   int (*retryable_index_failures)(int max_attempts, int limit, int64_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
