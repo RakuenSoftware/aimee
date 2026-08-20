@@ -62,6 +62,10 @@ static int db2_kb_directive_cause_valid(const char *cause)
           strcmp(cause, "missing_config") == 0 || strcmp(cause, "user_follow_up") == 0;
 }
 
+/* Despite the name this resolves nothing: it copies the project name into a
+ * bounded buffer and truncates it if it does not fit. No alias is followed and
+ * no normalisation happens, so callers match the project exactly. Kept as a
+ * function because the truncation bound differs by call site. */
 static void db2_kb_resolve_project(const char *project, char *out, size_t out_len)
 {
    if (!out || out_len == 0)

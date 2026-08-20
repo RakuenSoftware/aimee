@@ -21,6 +21,10 @@ static const char *col_text_or_empty(aimee_pg_stmt_t *stmt, int col)
    return t ? t : "";
 }
 
+/* Despite the name this resolves nothing: it copies the project name into a
+ * bounded buffer and truncates it if it does not fit. No alias is followed and
+ * no normalisation happens, so callers match the project exactly. Kept as a
+ * function because the truncation bound differs by call site. */
 static void db2_kb_resolve_project(const char *project, char *out, size_t out_len)
 {
    if (!out || out_len == 0)

@@ -3533,7 +3533,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             field = _keys(request["field"],
                           {"name", "type", "minimum_bytes", "maximum_bytes"},
                           "clear_project.request.field")
-            if (request["policy"] != {"resolves_project_name": True, "deletes_index_ops_first": True, "index_ops_failure": "ignored", "atomic": False, "generation_scope": "all"} or
+            if (request["policy"] != {"resolves_project_name": False, "deletes_index_ops_first": True, "index_ops_failure": "ignored", "atomic": False, "generation_scope": "all"} or
                     field != {"name": "project", "type": "utf8", "minimum_bytes": 1,
                               "maximum_bytes": 127}):
                 fail("clear-project-request",
@@ -3563,7 +3563,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             field = _keys(request["field"],
                           {"name", "type", "minimum_bytes", "maximum_bytes"},
                           "clear_current_project.request.field")
-            if (request["policy"] != {"resolves_project_name": True, "deletes_index_ops_first": True, "index_ops_failure": "fatal", "atomic": False, "generation_scope": "current"} or
+            if (request["policy"] != {"resolves_project_name": False, "deletes_index_ops_first": True, "index_ops_failure": "fatal", "atomic": False, "generation_scope": "current"} or
                     field != {"name": "project", "type": "utf8", "minimum_bytes": 1,
                               "maximum_bytes": 127}):
                 fail("clear-current-project-request",
@@ -3596,7 +3596,7 @@ def validate_catalog(value: object) -> dict[str, object]:
             field = _keys(request["field"],
                           {"name", "type", "minimum_bytes", "maximum_bytes"},
                           "file_index_delete_project.request.field")
-            if (request["policy"] != {"resolves_project_name": True, "atomic": True} or
+            if (request["policy"] != {"resolves_project_name": False, "atomic": True} or
                     field != {"name": "project", "type": "utf8", "minimum_bytes": 1,
                               "maximum_bytes": 127}):
                 fail("file-index-delete-project-request",
