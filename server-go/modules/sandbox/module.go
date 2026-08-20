@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"log"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -52,6 +53,12 @@ func handleObserve(store *Store, invocation bus.ModuleInvocation, request []byte
 		// "there was nothing to learn".
 		added, err := store.Record(decoded.GitRoot, parsed)
 		if err != nil {
+			// The comment above asks for "it did not persist" to be
+			// distinguishable from "there was nothing to learn"; a bare Internal
+			// with the reason dropped cannot carry that distinction to anyone
+			// reading a log.
+			log.Printf("sandbox: recording learned packages for %q failed: %v",
+				decoded.GitRoot, err)
 			return nil, bus.ModuleStatusInternal
 		}
 		response.Recorded = added
