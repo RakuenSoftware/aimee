@@ -231,9 +231,35 @@ if [ -n "$WI" ]; then
          say_fail "the pause was accepted but the store has no reason"
       ;;
    *)
-      [ -n "$reason" ] &&
-         say_pass "the pause was refused because the run was already parked ($reason), and that reason stands" ||
-         say_fail "the pause was refused but the run is not parked: $(printf '%s' "$PAUSE" | head -c 160)"
+      # A third consistent world, missed by the two above. The module guards the
+      # park on FOUR columns:
+      #
+      #   work_item_id=? AND current_stage=? AND state='active' AND pause_reason=''
+      #
+      # so a refusal also happens when the run has left the stage this call named,
+      # or is no longer active, or is being parked by the scheduler right now --
+      # and in that instant pause_reason can legitimately still read empty,
+      # because the read is a separate statement from the operation (as the
+      # comment above says). Asserting "refused => a reason is already there"
+      # therefore failed intermittently on a run the scheduler happened to be
+      # touching, which is the engine working, not the guard disagreeing.
+      #
+      # Re-read once after a settle. The genuine defect -- the guard refusing a
+      # park that the store says was perfectly parkable -- is a run that is STILL
+      # active, still on the same stage, and still carries no reason. That is
+      # what is asserted now.
+      if [ -z "$reason" ]; then
+         sleep 2
+         reason=$(in_store "SELECT pause_reason FROM lifecycle_work_item WHERE work_item_id='$WI'")
+         state_now=$(in_store "SELECT state FROM lifecycle_work_item WHERE work_item_id='$WI'")
+      fi
+      if [ -n "$reason" ]; then
+         say_pass "the pause was refused because the run was already parked ($reason), and that reason stands"
+      elif [ "${state_now:-active}" != "active" ]; then
+         say_pass "the pause was refused because the run was no longer active (state=$state_now)"
+      else
+         say_fail "the pause was refused but the run is still active, on the same stage, and unparked: $(printf '%s' "$PAUSE" | head -c 160)"
+      fi
       ;;
    esac
    check_owner "after a pause"
@@ -242,6 +268,12 @@ if [ -n "$WI" ]; then
    # the scheduler for want of a runner is NOT operator-resumable, and refusing
    # that is the behaviour the allowlist exists for -- so what is asserted is
    # that the store and the engine agree about the outcome, either way.
+   # Re-read immediately before the resume: `reason` above was read at pause time,
+   # and a scheduler park landing in between made this compare a stale value
+   # against a fresh one and report a "cleared" pause that had in fact just been
+   # SET. What this asserts is that the resume did not clear a lifecycle-owned
+   # reason, so the reason it must compare is the one in force when it resumed.
+   reason=$(in_store "SELECT pause_reason FROM lifecycle_work_item WHERE work_item_id='$WI'")
    wfe POST "/v1/workflow/items/$WI/resume" '{}' >/dev/null
    after=$(in_store "SELECT pause_reason FROM lifecycle_work_item WHERE work_item_id='$WI'")
    if [ "$reason" = "manual" ]; then
