@@ -17,6 +17,10 @@
  * vocabulary general enough to ask for one is general enough to ask for a
  * credential. See the note below on the 26 methods this distinction cost.
  *
+ * The 21 unserved methods, what blocks each, and what would unblock them are
+ * in docs/proposals/pending/served-argspec-residual.md. This comment is the
+ * record of what was decided and why; that file is the forward-looking half.
+ *
  * WHY THE REST ARE NOT HERE YET. 160 of the 181 CLI-reachable methods are
  * served. The 21 that are not are listed BY NAME below with what each would
  * take.
