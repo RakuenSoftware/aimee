@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "8299cb9e99309f5e6a29765f13b8677f6331d420390f0daffbfdf7a1373867c1"
+const ContractSHA256 = "77a853fc5a5f69b1ce9499f35afec0dd3f10fde8a92b79fdb11fa25be981f73b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -576,6 +576,64 @@ func DecodeRecordExistsReply(reply []byte) (uint32, error) {
 	return value, nil
 }
 
+const EventProspectiveSetState = EventMemory
+const StageProspectiveSetState = FamilyMemory
+const OperationProspectiveSetState uint32 = 64
+const ProspectiveSetStateProspectiveIDMin uint64 = 1
+const ProspectiveSetStateProspectiveIDMax uint64 = 9223372036854775807
+const ProspectiveSetStateNewStateMin = 1
+const ProspectiveSetStateNewStateMax = 63
+
+// EncodeProspectiveSetStateRequest writes the schema prospective_set_state declares, in order.
+func EncodeProspectiveSetStateRequest(prospectiveID uint64, newState string) ([]byte, error) {
+	if prospectiveID < ProspectiveSetStateProspectiveIDMin || prospectiveID > ProspectiveSetStateProspectiveIDMax ||
+		len(newState) < ProspectiveSetStateNewStateMin || len(newState) > ProspectiveSetStateNewStateMax || hasNUL(newState) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var prospectiveIDBytes [8]byte
+	binary.LittleEndian.PutUint64(prospectiveIDBytes[:], prospectiveID)
+	payload = append(payload, prospectiveIDBytes[:]...)
+	if err := putRowText(&payload, newState, ProspectiveSetStateNewStateMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProspectiveSetState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveSetStateRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveSetStateRequest(request []byte) (uint64, string, error) {
+	var prospectiveID uint64
+	var newState string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveSetState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	prospectiveID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if prospectiveID < ProspectiveSetStateProspectiveIDMin || prospectiveID > ProspectiveSetStateProspectiveIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if newState, err = takeRowText(payload, &cursor, ProspectiveSetStateNewStateMax); err != nil ||
+		len(newState) < ProspectiveSetStateNewStateMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return prospectiveID, newState, nil
+}
+
 const EventEntityObservationCount = EventIndex
 const StageEntityObservationCount = FamilyIndex
 const OperationEntityObservationCount uint32 = 12
@@ -853,6 +911,238 @@ func DecodeEntityProfileCardRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return entityID, nil
+}
+
+const EventGenerationAbort = EventIndex
+const StageGenerationAbort = FamilyIndex
+const OperationGenerationAbort uint32 = 17
+const GenerationAbortGenerationIDMin uint64 = 1
+const GenerationAbortGenerationIDMax uint64 = 9223372036854775807
+const GenerationAbortErrorMessageMin = 0
+const GenerationAbortErrorMessageMax = 1023
+
+// EncodeGenerationAbortRequest writes the schema generation_abort declares, in order.
+func EncodeGenerationAbortRequest(generationID uint64, errorMessage string) ([]byte, error) {
+	if generationID < GenerationAbortGenerationIDMin || generationID > GenerationAbortGenerationIDMax ||
+		len(errorMessage) < GenerationAbortErrorMessageMin || len(errorMessage) > GenerationAbortErrorMessageMax || hasNUL(errorMessage) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var generationIDBytes [8]byte
+	binary.LittleEndian.PutUint64(generationIDBytes[:], generationID)
+	payload = append(payload, generationIDBytes[:]...)
+	if err := putRowText(&payload, errorMessage, GenerationAbortErrorMessageMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationGenerationAbort, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeGenerationAbortRequest reads it back, checking each field against its own bound.
+func DecodeGenerationAbortRequest(request []byte) (uint64, string, error) {
+	var generationID uint64
+	var errorMessage string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationGenerationAbort || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	generationID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if generationID < GenerationAbortGenerationIDMin || generationID > GenerationAbortGenerationIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if errorMessage, err = takeRowText(payload, &cursor, GenerationAbortErrorMessageMax); err != nil ||
+		len(errorMessage) < GenerationAbortErrorMessageMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return generationID, errorMessage, nil
+}
+
+const EventGenerationSetSourceHash = EventIndex
+const StageGenerationSetSourceHash = FamilyIndex
+const OperationGenerationSetSourceHash uint32 = 18
+const GenerationSetSourceHashGenerationIDMin uint64 = 1
+const GenerationSetSourceHashGenerationIDMax uint64 = 9223372036854775807
+const GenerationSetSourceHashSourceHashMin = 1
+const GenerationSetSourceHashSourceHashMax = 63
+
+// EncodeGenerationSetSourceHashRequest writes the schema generation_set_source_hash declares, in order.
+func EncodeGenerationSetSourceHashRequest(generationID uint64, sourceHash string) ([]byte, error) {
+	if generationID < GenerationSetSourceHashGenerationIDMin || generationID > GenerationSetSourceHashGenerationIDMax ||
+		len(sourceHash) < GenerationSetSourceHashSourceHashMin || len(sourceHash) > GenerationSetSourceHashSourceHashMax || hasNUL(sourceHash) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var generationIDBytes [8]byte
+	binary.LittleEndian.PutUint64(generationIDBytes[:], generationID)
+	payload = append(payload, generationIDBytes[:]...)
+	if err := putRowText(&payload, sourceHash, GenerationSetSourceHashSourceHashMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationGenerationSetSourceHash, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeGenerationSetSourceHashRequest reads it back, checking each field against its own bound.
+func DecodeGenerationSetSourceHashRequest(request []byte) (uint64, string, error) {
+	var generationID uint64
+	var sourceHash string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationGenerationSetSourceHash || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	generationID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if generationID < GenerationSetSourceHashGenerationIDMin || generationID > GenerationSetSourceHashGenerationIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if sourceHash, err = takeRowText(payload, &cursor, GenerationSetSourceHashSourceHashMax); err != nil ||
+		len(sourceHash) < GenerationSetSourceHashSourceHashMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return generationID, sourceHash, nil
+}
+
+const EventGenerationPublish = EventIndex
+const StageGenerationPublish = FamilyIndex
+const OperationGenerationPublish uint32 = 19
+const GenerationPublishGenerationIDMin uint64 = 1
+const GenerationPublishGenerationIDMax uint64 = 9223372036854775807
+const GenerationPublishProjectMin = 1
+const GenerationPublishProjectMax = 255
+
+// EncodeGenerationPublishRequest writes the schema generation_publish declares, in order.
+func EncodeGenerationPublishRequest(generationID uint64, project string) ([]byte, error) {
+	if generationID < GenerationPublishGenerationIDMin || generationID > GenerationPublishGenerationIDMax ||
+		len(project) < GenerationPublishProjectMin || len(project) > GenerationPublishProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var generationIDBytes [8]byte
+	binary.LittleEndian.PutUint64(generationIDBytes[:], generationID)
+	payload = append(payload, generationIDBytes[:]...)
+	if err := putRowText(&payload, project, GenerationPublishProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationGenerationPublish, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeGenerationPublishRequest reads it back, checking each field against its own bound.
+func DecodeGenerationPublishRequest(request []byte) (uint64, string, error) {
+	var generationID uint64
+	var project string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationGenerationPublish || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	generationID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if generationID < GenerationPublishGenerationIDMin || generationID > GenerationPublishGenerationIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, GenerationPublishProjectMax); err != nil ||
+		len(project) < GenerationPublishProjectMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return generationID, project, nil
+}
+
+const EventPurgeFilesMatching = EventIndex
+const StagePurgeFilesMatching = FamilyIndex
+const OperationPurgeFilesMatching uint32 = 20
+const PurgeFilesMatchingProjectIDMin uint64 = 1
+const PurgeFilesMatchingProjectIDMax uint64 = 9223372036854775807
+const PurgeFilesMatchingPathGlobMin = 1
+const PurgeFilesMatchingPathGlobMax = 511
+
+// EncodePurgeFilesMatchingRequest writes the schema purge_files_matching declares, in order.
+func EncodePurgeFilesMatchingRequest(projectID uint64, pathGlob string) ([]byte, error) {
+	if projectID < PurgeFilesMatchingProjectIDMin || projectID > PurgeFilesMatchingProjectIDMax ||
+		len(pathGlob) < PurgeFilesMatchingPathGlobMin || len(pathGlob) > PurgeFilesMatchingPathGlobMax || hasNUL(pathGlob) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var projectIDBytes [8]byte
+	binary.LittleEndian.PutUint64(projectIDBytes[:], projectID)
+	payload = append(payload, projectIDBytes[:]...)
+	if err := putRowText(&payload, pathGlob, PurgeFilesMatchingPathGlobMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationPurgeFilesMatching, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodePurgeFilesMatchingRequest reads it back, checking each field against its own bound.
+func DecodePurgeFilesMatchingRequest(request []byte) (uint64, string, error) {
+	var projectID uint64
+	var pathGlob string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPurgeFilesMatching || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	projectID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if projectID < PurgeFilesMatchingProjectIDMin || projectID > PurgeFilesMatchingProjectIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if pathGlob, err = takeRowText(payload, &cursor, PurgeFilesMatchingPathGlobMax); err != nil ||
+		len(pathGlob) < PurgeFilesMatchingPathGlobMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return projectID, pathGlob, nil
 }
 
 const EventTraceMiningRecord = EventLearning
@@ -1746,6 +2036,180 @@ func DecodeBanditPromotionGetRequest(request []byte) (string, error) {
 	return decisionPoint, nil
 }
 
+const EventDecisionLogSetOutcome = EventLearning
+const StageDecisionLogSetOutcome = FamilyLearning
+const OperationDecisionLogSetOutcome uint32 = 22
+const DecisionLogSetOutcomeDecisionIDMin uint64 = 1
+const DecisionLogSetOutcomeDecisionIDMax uint64 = 9223372036854775807
+const DecisionLogSetOutcomeOutcomeMin = 0
+const DecisionLogSetOutcomeOutcomeMax = 511
+
+// EncodeDecisionLogSetOutcomeRequest writes the schema decision_log_set_outcome declares, in order.
+func EncodeDecisionLogSetOutcomeRequest(decisionID uint64, outcome string) ([]byte, error) {
+	if decisionID < DecisionLogSetOutcomeDecisionIDMin || decisionID > DecisionLogSetOutcomeDecisionIDMax ||
+		len(outcome) < DecisionLogSetOutcomeOutcomeMin || len(outcome) > DecisionLogSetOutcomeOutcomeMax || hasNUL(outcome) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var decisionIDBytes [8]byte
+	binary.LittleEndian.PutUint64(decisionIDBytes[:], decisionID)
+	payload = append(payload, decisionIDBytes[:]...)
+	if err := putRowText(&payload, outcome, DecisionLogSetOutcomeOutcomeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDecisionLogSetOutcome, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogSetOutcomeRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogSetOutcomeRequest(request []byte) (uint64, string, error) {
+	var decisionID uint64
+	var outcome string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogSetOutcome || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	decisionID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if decisionID < DecisionLogSetOutcomeDecisionIDMin || decisionID > DecisionLogSetOutcomeDecisionIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if outcome, err = takeRowText(payload, &cursor, DecisionLogSetOutcomeOutcomeMax); err != nil ||
+		len(outcome) < DecisionLogSetOutcomeOutcomeMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return decisionID, outcome, nil
+}
+
+const EventDecisionLogSetStatus = EventLearning
+const StageDecisionLogSetStatus = FamilyLearning
+const OperationDecisionLogSetStatus uint32 = 23
+const DecisionLogSetStatusDecisionIDMin uint64 = 1
+const DecisionLogSetStatusDecisionIDMax uint64 = 9223372036854775807
+const DecisionLogSetStatusStatusMin = 1
+const DecisionLogSetStatusStatusMax = 63
+
+// EncodeDecisionLogSetStatusRequest writes the schema decision_log_set_status declares, in order.
+func EncodeDecisionLogSetStatusRequest(decisionID uint64, status string) ([]byte, error) {
+	if decisionID < DecisionLogSetStatusDecisionIDMin || decisionID > DecisionLogSetStatusDecisionIDMax ||
+		len(status) < DecisionLogSetStatusStatusMin || len(status) > DecisionLogSetStatusStatusMax || hasNUL(status) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var decisionIDBytes [8]byte
+	binary.LittleEndian.PutUint64(decisionIDBytes[:], decisionID)
+	payload = append(payload, decisionIDBytes[:]...)
+	if err := putRowText(&payload, status, DecisionLogSetStatusStatusMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDecisionLogSetStatus, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogSetStatusRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogSetStatusRequest(request []byte) (uint64, string, error) {
+	var decisionID uint64
+	var status string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogSetStatus || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	decisionID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if decisionID < DecisionLogSetStatusDecisionIDMin || decisionID > DecisionLogSetStatusDecisionIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if status, err = takeRowText(payload, &cursor, DecisionLogSetStatusStatusMax); err != nil ||
+		len(status) < DecisionLogSetStatusStatusMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return decisionID, status, nil
+}
+
+const EventDecisionLogSetRevisit = EventLearning
+const StageDecisionLogSetRevisit = FamilyLearning
+const OperationDecisionLogSetRevisit uint32 = 24
+const DecisionLogSetRevisitDecisionIDMin uint64 = 1
+const DecisionLogSetRevisitDecisionIDMax uint64 = 9223372036854775807
+const DecisionLogSetRevisitRevisitWhenMin = 0
+const DecisionLogSetRevisitRevisitWhenMax = 63
+
+// EncodeDecisionLogSetRevisitRequest writes the schema decision_log_set_revisit declares, in order.
+func EncodeDecisionLogSetRevisitRequest(decisionID uint64, revisitWhen string) ([]byte, error) {
+	if decisionID < DecisionLogSetRevisitDecisionIDMin || decisionID > DecisionLogSetRevisitDecisionIDMax ||
+		len(revisitWhen) < DecisionLogSetRevisitRevisitWhenMin || len(revisitWhen) > DecisionLogSetRevisitRevisitWhenMax || hasNUL(revisitWhen) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var decisionIDBytes [8]byte
+	binary.LittleEndian.PutUint64(decisionIDBytes[:], decisionID)
+	payload = append(payload, decisionIDBytes[:]...)
+	if err := putRowText(&payload, revisitWhen, DecisionLogSetRevisitRevisitWhenMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDecisionLogSetRevisit, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogSetRevisitRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogSetRevisitRequest(request []byte) (uint64, string, error) {
+	var decisionID uint64
+	var revisitWhen string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogSetRevisit || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	decisionID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if decisionID < DecisionLogSetRevisitDecisionIDMin || decisionID > DecisionLogSetRevisitDecisionIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if revisitWhen, err = takeRowText(payload, &cursor, DecisionLogSetRevisitRevisitWhenMax); err != nil ||
+		len(revisitWhen) < DecisionLogSetRevisitRevisitWhenMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return decisionID, revisitWhen, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -2230,6 +2694,64 @@ func DecodeOntologyEvalStatusRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return relType, nil
+}
+
+const EventTaskUpdateState = EventOrganization
+const StageTaskUpdateState = FamilyOrganization
+const OperationTaskUpdateState uint32 = 13
+const TaskUpdateStateTaskIDMin uint64 = 1
+const TaskUpdateStateTaskIDMax uint64 = 9223372036854775807
+const TaskUpdateStateStateMin = 1
+const TaskUpdateStateStateMax = 63
+
+// EncodeTaskUpdateStateRequest writes the schema task_update_state declares, in order.
+func EncodeTaskUpdateStateRequest(taskID uint64, state string) ([]byte, error) {
+	if taskID < TaskUpdateStateTaskIDMin || taskID > TaskUpdateStateTaskIDMax ||
+		len(state) < TaskUpdateStateStateMin || len(state) > TaskUpdateStateStateMax || hasNUL(state) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var taskIDBytes [8]byte
+	binary.LittleEndian.PutUint64(taskIDBytes[:], taskID)
+	payload = append(payload, taskIDBytes[:]...)
+	if err := putRowText(&payload, state, TaskUpdateStateStateMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationTaskUpdateState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTaskUpdateStateRequest reads it back, checking each field against its own bound.
+func DecodeTaskUpdateStateRequest(request []byte) (uint64, string, error) {
+	var taskID uint64
+	var state string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskUpdateState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	taskID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if taskID < TaskUpdateStateTaskIDMin || taskID > TaskUpdateStateTaskIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if state, err = takeRowText(payload, &cursor, TaskUpdateStateStateMax); err != nil ||
+		len(state) < TaskUpdateStateStateMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return taskID, state, nil
 }
 
 const EventEnrollmentActive = EventCustody
@@ -2938,6 +3460,64 @@ func DecodeRuntimeStateGetRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return stateKey, nil
+}
+
+const EventIngestQueueFail = EventMaintenance
+const StageIngestQueueFail = FamilyMaintenance
+const OperationIngestQueueFail uint32 = 21
+const IngestQueueFailIngestJobIDMin uint64 = 1
+const IngestQueueFailIngestJobIDMax uint64 = 9223372036854775807
+const IngestQueueFailErrorMessageMin = 0
+const IngestQueueFailErrorMessageMax = 1023
+
+// EncodeIngestQueueFailRequest writes the schema ingest_queue_fail declares, in order.
+func EncodeIngestQueueFailRequest(ingestJobID uint64, errorMessage string) ([]byte, error) {
+	if ingestJobID < IngestQueueFailIngestJobIDMin || ingestJobID > IngestQueueFailIngestJobIDMax ||
+		len(errorMessage) < IngestQueueFailErrorMessageMin || len(errorMessage) > IngestQueueFailErrorMessageMax || hasNUL(errorMessage) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var ingestJobIDBytes [8]byte
+	binary.LittleEndian.PutUint64(ingestJobIDBytes[:], ingestJobID)
+	payload = append(payload, ingestJobIDBytes[:]...)
+	if err := putRowText(&payload, errorMessage, IngestQueueFailErrorMessageMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationIngestQueueFail, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeIngestQueueFailRequest reads it back, checking each field against its own bound.
+func DecodeIngestQueueFailRequest(request []byte) (uint64, string, error) {
+	var ingestJobID uint64
+	var errorMessage string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationIngestQueueFail || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	ingestJobID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if ingestJobID < IngestQueueFailIngestJobIDMin || ingestJobID > IngestQueueFailIngestJobIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if errorMessage, err = takeRowText(payload, &cursor, IngestQueueFailErrorMessageMax); err != nil ||
+		len(errorMessage) < IngestQueueFailErrorMessageMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return ingestJobID, errorMessage, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

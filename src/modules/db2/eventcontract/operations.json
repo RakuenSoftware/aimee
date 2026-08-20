@@ -2191,6 +2191,52 @@
       }
     },
     {
+      "family": "memory",
+      "id": 64,
+      "name": "prospective_set_state",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories and their states are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_set_state"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the state is stored as given and the update stamp is DB2's own clock, so a caller records that a state changed but not when"
+        },
+        "fields": [
+          {
+            "name": "prospective_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "new_state",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -2618,6 +2664,190 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 4095
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 17,
+      "name": "generation_abort",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projection generations and their states are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_generation_abort"
+      ],
+      "request": {
+        "policy": {
+          "writes": "only a pending generation is aborted, so aborting one already visible or already aborted changes nothing and is acknowledged"
+        },
+        "fields": [
+          {
+            "name": "generation_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "error_message",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 18,
+      "name": "generation_set_source_hash",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projection generations and the source hashes recorded against them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_generation_set_source_hash"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the hash is stored as given against any generation whatever its state, including one already visible"
+        },
+        "fields": [
+          {
+            "name": "generation_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "source_hash",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 19,
+      "name": "generation_publish",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projection generations, their states and which one a project shows are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_generation_publish"
+      ],
+      "request": {
+        "policy": {
+          "writes": "supersedes the project's visible generation and makes this one visible inside one transaction, so no moment has two visible generations or none"
+        },
+        "fields": [
+          {
+            "name": "generation_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 20,
+      "name": "purge_files_matching",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed files and the generation they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_purge_files_matching"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the pattern is bound as a SQL LIKE pattern, so a wildcard the caller writes is significant, and only the project's current generation is purged"
+        },
+        "fields": [
+          {
+            "name": "project_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "path_glob",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
           }
         ]
       }
@@ -3203,6 +3433,144 @@
       }
     },
     {
+      "family": "learning",
+      "id": 22,
+      "name": "decision_log_set_outcome",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Decision log rows and their outcomes are relational DB2 state.",
+      "c_symbols": [
+        "db2_decision_log_set_outcome"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the outcome is stored as given and an identifier naming nothing updates no row, both of which are acknowledged the same way"
+        },
+        "fields": [
+          {
+            "name": "decision_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "outcome",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 23,
+      "name": "decision_log_set_status",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Decision log rows and their statuses are relational DB2 state.",
+      "c_symbols": [
+        "db2_decision_log_set_status"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the status is stored as given; which statuses a reader understands is not checked here"
+        },
+        "fields": [
+          {
+            "name": "decision_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "status",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 24,
+      "name": "decision_log_set_revisit",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Decision log rows and the stamps that schedule revisiting them are relational DB2 state.",
+      "c_symbols": [
+        "db2_decision_log_set_revisit"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the stamp is the caller's and is stored as text without being parsed, so an unparseable one is stored and only fails whatever later reads it"
+        },
+        "fields": [
+          {
+            "name": "decision_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "revisit_when",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -3530,6 +3898,52 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 13,
+      "name": "task_update_state",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Tasks and their states are relational DB2 rows.",
+      "c_symbols": [
+        "db2_task_update_state"
+      ],
+      "request": {
+        "policy": {
+          "writes": "unlike the other state writes this one reports whether a row changed, because its backend distinguishes an update that matched nothing from one that did"
+        },
+        "fields": [
+          {
+            "name": "task_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "state",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "changed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
           }
         ]
       }
@@ -4151,6 +4565,52 @@
       "reply": {
         "fields": [
           {"name": "state_value", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 21,
+      "name": "ingest_queue_fail",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The ingest queue and the failure text on its rows are relational DB2 state.",
+      "c_symbols": [
+        "db2_kb_ingest_queue_fail"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the completion stamp is DB2's own clock, and a job already in another state is moved to failed regardless of what it was"
+        },
+        "fields": [
+          {
+            "name": "ingest_job_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "error_message",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
         ]
       }
     }

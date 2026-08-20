@@ -224,6 +224,19 @@ type wireBaseline struct {
 			PromoteConfidenceBits      uint64   `json:"promote_confidence_bits"`
 			DecisionPoint              string   `json:"decision_point"`
 			RelType                    string   `json:"rel_type"`
+			ProspectiveID              uint64   `json:"prospective_id"`
+			NewState                   string   `json:"new_state"`
+			GenerationID               uint64   `json:"generation_id"`
+			ErrorMessage               string   `json:"error_message"`
+			SourceHash                 string   `json:"source_hash"`
+			ProjectID                  uint64   `json:"project_id"`
+			PathGlob                   string   `json:"path_glob"`
+			DecisionID                 uint64   `json:"decision_id"`
+			Outcome                    string   `json:"outcome"`
+			Status                     string   `json:"status"`
+			RevisitWhen                string   `json:"revisit_when"`
+			TaskID                     uint64   `json:"task_id"`
+			IngestJobID                uint64   `json:"ingest_job_id"`
 			Negative                   []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -339,7 +352,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 145 ||
+	if len(baseline.Operations) != 155 ||
 		baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
@@ -413,78 +426,88 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[70].Name != "aggregate" ||
 		baseline.Operations[71].Name != "load_eval_corpus" ||
 		baseline.Operations[72].Name != "record_exists" ||
-		baseline.Operations[73].Name != "entity_edge_prune_orphans" ||
-		baseline.Operations[74].Name != "entity_edge_normalize_weights" ||
-		baseline.Operations[75].Name != "project_count" ||
-		baseline.Operations[76].Name != "purge_hidden_pollution" ||
-		baseline.Operations[77].Name != "requeue_drifted" ||
-		baseline.Operations[78].Name != "cross_repo_rebuild_routes" ||
-		baseline.Operations[79].Name != "cross_repo_rebuild_identities" ||
-		baseline.Operations[80].Name != "cross_repo_rebuild_build_deps" ||
-		baseline.Operations[81].Name != "drift_candidates" ||
-		baseline.Operations[82].Name != "file_index_delete_project" ||
-		baseline.Operations[83].Name != "entity_observation_count" ||
-		baseline.Operations[84].Name != "entity_profile_fresh" ||
-		baseline.Operations[85].Name != "project_fingerprint" ||
-		baseline.Operations[86].Name != "visible_source_hash" ||
-		baseline.Operations[87].Name != "entity_profile_card" ||
-		baseline.Operations[88].Name != "rules_decay" ||
-		baseline.Operations[89].Name != "curiosity_rescore_all" ||
-		baseline.Operations[90].Name != "mining_seed_job_defaults" ||
-		baseline.Operations[91].Name != "proposals_archive_expired" ||
-		baseline.Operations[92].Name != "trace_mining_last_id" ||
-		baseline.Operations[93].Name != "anti_pattern_bump" ||
-		baseline.Operations[94].Name != "anti_pattern_delete" ||
-		baseline.Operations[95].Name != "trace_mining_record" ||
-		baseline.Operations[96].Name != "anti_pattern_exists_exact" ||
-		baseline.Operations[97].Name != "anti_pattern_exists_by_source_ref" ||
-		baseline.Operations[98].Name != "artifact_citation_count" ||
-		baseline.Operations[99].Name != "commits_in_last_7_days" ||
-		baseline.Operations[100].Name != "fidelity_attribution_count" ||
-		baseline.Operations[101].Name != "artifact_stamp_reflected" ||
-		baseline.Operations[102].Name != "failed_query_bump" ||
-		baseline.Operations[103].Name != "artifact_set_state" ||
-		baseline.Operations[104].Name != "artifact_register_exemplar" ||
-		baseline.Operations[105].Name != "evidence_enqueue" ||
-		baseline.Operations[106].Name != "evidence_mark_failed" ||
-		baseline.Operations[107].Name != "bandit_arms_list" ||
-		baseline.Operations[108].Name != "bandit_promotion_get" ||
-		baseline.Operations[109].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[110].Name != "doc_delete" ||
-		baseline.Operations[111].Name != "task_delete" ||
-		baseline.Operations[112].Name != "clear_project" ||
-		baseline.Operations[113].Name != "clear_current_project" ||
-		baseline.Operations[114].Name != "document_exists" ||
-		baseline.Operations[115].Name != "blob_referenced" ||
-		baseline.Operations[116].Name != "fence_active" ||
-		baseline.Operations[117].Name != "doc_exists_by_hash" ||
-		baseline.Operations[118].Name != "pdf_quarantine_confirm" ||
-		baseline.Operations[119].Name != "pdf_quarantine_reject" ||
-		baseline.Operations[120].Name != "ontology_eval_status" ||
-		baseline.Operations[121].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[122].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[123].Name != "release_get_active" ||
-		baseline.Operations[124].Name != "enrollment_active" ||
-		baseline.Operations[125].Name != "prospective_sweep_expired" ||
-		baseline.Operations[126].Name != "directive_sweep_expired" ||
-		baseline.Operations[127].Name != "mark_revisit_due" ||
-		baseline.Operations[128].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[129].Name != "evidence_reembed_all" ||
-		baseline.Operations[130].Name != "curator_reembed_all" ||
-		baseline.Operations[131].Name != "synth_reenqueue_all" ||
-		baseline.Operations[132].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[133].Name != "directive_suppress" ||
-		baseline.Operations[134].Name != "directive_record_surface" ||
-		baseline.Operations[135].Name != "async_pending_count" ||
-		baseline.Operations[136].Name != "runtime_state_touch" ||
-		baseline.Operations[137].Name != "synth_enqueue" ||
-		baseline.Operations[138].Name != "synth_mark_done" ||
-		baseline.Operations[139].Name != "reembed_mark_finished" ||
-		baseline.Operations[140].Name != "mining_job_try_lock" ||
-		baseline.Operations[141].Name != "synth_mark_failed" ||
-		baseline.Operations[142].Name != "runtime_state_set" ||
-		baseline.Operations[143].Name != "set_active_embedder_version" ||
-		baseline.Operations[144].Name != "runtime_state_get" {
+		baseline.Operations[73].Name != "prospective_set_state" ||
+		baseline.Operations[74].Name != "entity_edge_prune_orphans" ||
+		baseline.Operations[75].Name != "entity_edge_normalize_weights" ||
+		baseline.Operations[76].Name != "project_count" ||
+		baseline.Operations[77].Name != "purge_hidden_pollution" ||
+		baseline.Operations[78].Name != "requeue_drifted" ||
+		baseline.Operations[79].Name != "cross_repo_rebuild_routes" ||
+		baseline.Operations[80].Name != "cross_repo_rebuild_identities" ||
+		baseline.Operations[81].Name != "cross_repo_rebuild_build_deps" ||
+		baseline.Operations[82].Name != "drift_candidates" ||
+		baseline.Operations[83].Name != "file_index_delete_project" ||
+		baseline.Operations[84].Name != "entity_observation_count" ||
+		baseline.Operations[85].Name != "entity_profile_fresh" ||
+		baseline.Operations[86].Name != "project_fingerprint" ||
+		baseline.Operations[87].Name != "visible_source_hash" ||
+		baseline.Operations[88].Name != "entity_profile_card" ||
+		baseline.Operations[89].Name != "generation_abort" ||
+		baseline.Operations[90].Name != "generation_set_source_hash" ||
+		baseline.Operations[91].Name != "generation_publish" ||
+		baseline.Operations[92].Name != "purge_files_matching" ||
+		baseline.Operations[93].Name != "rules_decay" ||
+		baseline.Operations[94].Name != "curiosity_rescore_all" ||
+		baseline.Operations[95].Name != "mining_seed_job_defaults" ||
+		baseline.Operations[96].Name != "proposals_archive_expired" ||
+		baseline.Operations[97].Name != "trace_mining_last_id" ||
+		baseline.Operations[98].Name != "anti_pattern_bump" ||
+		baseline.Operations[99].Name != "anti_pattern_delete" ||
+		baseline.Operations[100].Name != "trace_mining_record" ||
+		baseline.Operations[101].Name != "anti_pattern_exists_exact" ||
+		baseline.Operations[102].Name != "anti_pattern_exists_by_source_ref" ||
+		baseline.Operations[103].Name != "artifact_citation_count" ||
+		baseline.Operations[104].Name != "commits_in_last_7_days" ||
+		baseline.Operations[105].Name != "fidelity_attribution_count" ||
+		baseline.Operations[106].Name != "artifact_stamp_reflected" ||
+		baseline.Operations[107].Name != "failed_query_bump" ||
+		baseline.Operations[108].Name != "artifact_set_state" ||
+		baseline.Operations[109].Name != "artifact_register_exemplar" ||
+		baseline.Operations[110].Name != "evidence_enqueue" ||
+		baseline.Operations[111].Name != "evidence_mark_failed" ||
+		baseline.Operations[112].Name != "bandit_arms_list" ||
+		baseline.Operations[113].Name != "bandit_promotion_get" ||
+		baseline.Operations[114].Name != "decision_log_set_outcome" ||
+		baseline.Operations[115].Name != "decision_log_set_status" ||
+		baseline.Operations[116].Name != "decision_log_set_revisit" ||
+		baseline.Operations[117].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[118].Name != "doc_delete" ||
+		baseline.Operations[119].Name != "task_delete" ||
+		baseline.Operations[120].Name != "clear_project" ||
+		baseline.Operations[121].Name != "clear_current_project" ||
+		baseline.Operations[122].Name != "document_exists" ||
+		baseline.Operations[123].Name != "blob_referenced" ||
+		baseline.Operations[124].Name != "fence_active" ||
+		baseline.Operations[125].Name != "doc_exists_by_hash" ||
+		baseline.Operations[126].Name != "pdf_quarantine_confirm" ||
+		baseline.Operations[127].Name != "pdf_quarantine_reject" ||
+		baseline.Operations[128].Name != "ontology_eval_status" ||
+		baseline.Operations[129].Name != "task_update_state" ||
+		baseline.Operations[130].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[131].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[132].Name != "release_get_active" ||
+		baseline.Operations[133].Name != "enrollment_active" ||
+		baseline.Operations[134].Name != "prospective_sweep_expired" ||
+		baseline.Operations[135].Name != "directive_sweep_expired" ||
+		baseline.Operations[136].Name != "mark_revisit_due" ||
+		baseline.Operations[137].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[138].Name != "evidence_reembed_all" ||
+		baseline.Operations[139].Name != "curator_reembed_all" ||
+		baseline.Operations[140].Name != "synth_reenqueue_all" ||
+		baseline.Operations[141].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[142].Name != "directive_suppress" ||
+		baseline.Operations[143].Name != "directive_record_surface" ||
+		baseline.Operations[144].Name != "async_pending_count" ||
+		baseline.Operations[145].Name != "runtime_state_touch" ||
+		baseline.Operations[146].Name != "synth_enqueue" ||
+		baseline.Operations[147].Name != "synth_mark_done" ||
+		baseline.Operations[148].Name != "reembed_mark_finished" ||
+		baseline.Operations[149].Name != "mining_job_try_lock" ||
+		baseline.Operations[150].Name != "synth_mark_failed" ||
+		baseline.Operations[151].Name != "runtime_state_set" ||
+		baseline.Operations[152].Name != "set_active_embedder_version" ||
+		baseline.Operations[153].Name != "runtime_state_get" ||
+		baseline.Operations[154].Name != "ingest_queue_fail" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -2828,29 +2851,27 @@ func stringPairCountVectors(t *testing.T, index int, wantFirst string, wantSecon
 	}
 }
 
-func TestRuntimeStateGetMatchesEverySharedCVector(t *testing.T) {
-	// The first operation whose codecs are generated from a schema rather than
-	// written, so this drives the generated request codec against the fixtures
-	// the same generator produced -- which is worth doing precisely because
-	// both sides came from one description and could be wrong together only if
-	// the description is.
-	operation := loadWireBaseline(t).Operations[operationIndex(t, "runtime_state_get")]
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestProspectiveSetStateMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "prospective_set_state")]
 
-	request, err := EncodeRuntimeStateGetRequest(operation.Request.StateKey)
+	request, err := EncodeProspectiveSetStateRequest(operation.Request.ProspectiveID, operation.Request.NewState)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	if got, err := DecodeRuntimeStateGetRequest(request); err != nil ||
-		got != operation.Request.StateKey {
-		t.Fatalf("request decode: %v %q", err, got)
+	prospectiveID, newState, err := DecodeProspectiveSetStateRequest(request)
+	if err != nil || prospectiveID != operation.Request.ProspectiveID ||
+		newState != operation.Request.NewState {
+		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, err := DecodeRuntimeStateGetRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, err := DecodeProspectiveSetStateRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
 }
 
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestProjectFingerprintMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "project_fingerprint")]
 
@@ -2869,6 +2890,7 @@ func TestProjectFingerprintMatchesEverySharedCVector(t *testing.T) {
 	}
 }
 
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestVisibleSourceHashMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "visible_source_hash")]
 
@@ -2887,6 +2909,7 @@ func TestVisibleSourceHashMatchesEverySharedCVector(t *testing.T) {
 	}
 }
 
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestEntityProfileCardMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "entity_profile_card")]
 
@@ -2905,6 +2928,87 @@ func TestEntityProfileCardMatchesEverySharedCVector(t *testing.T) {
 	}
 }
 
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestGenerationAbortMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "generation_abort")]
+
+	request, err := EncodeGenerationAbortRequest(operation.Request.GenerationID, operation.Request.ErrorMessage)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	generationID, errorMessage, err := DecodeGenerationAbortRequest(request)
+	if err != nil || generationID != operation.Request.GenerationID ||
+		errorMessage != operation.Request.ErrorMessage {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeGenerationAbortRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestGenerationSetSourceHashMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "generation_set_source_hash")]
+
+	request, err := EncodeGenerationSetSourceHashRequest(operation.Request.GenerationID, operation.Request.SourceHash)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	generationID, sourceHash, err := DecodeGenerationSetSourceHashRequest(request)
+	if err != nil || generationID != operation.Request.GenerationID ||
+		sourceHash != operation.Request.SourceHash {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeGenerationSetSourceHashRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestGenerationPublishMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "generation_publish")]
+
+	request, err := EncodeGenerationPublishRequest(operation.Request.GenerationID, operation.Request.Project)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	generationID, project, err := DecodeGenerationPublishRequest(request)
+	if err != nil || generationID != operation.Request.GenerationID ||
+		project != operation.Request.Project {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeGenerationPublishRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestPurgeFilesMatchingMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "purge_files_matching")]
+
+	request, err := EncodePurgeFilesMatchingRequest(operation.Request.ProjectID, operation.Request.PathGlob)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	projectID, pathGlob, err := DecodePurgeFilesMatchingRequest(request)
+	if err != nil || projectID != operation.Request.ProjectID ||
+		pathGlob != operation.Request.PathGlob {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodePurgeFilesMatchingRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestBanditArmsListMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "bandit_arms_list")]
 
@@ -2923,6 +3027,7 @@ func TestBanditArmsListMatchesEverySharedCVector(t *testing.T) {
 	}
 }
 
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestBanditPromotionGetMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "bandit_promotion_get")]
 
@@ -2941,6 +3046,67 @@ func TestBanditPromotionGetMatchesEverySharedCVector(t *testing.T) {
 	}
 }
 
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestDecisionLogSetOutcomeMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "decision_log_set_outcome")]
+
+	request, err := EncodeDecisionLogSetOutcomeRequest(operation.Request.DecisionID, operation.Request.Outcome)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	decisionID, outcome, err := DecodeDecisionLogSetOutcomeRequest(request)
+	if err != nil || decisionID != operation.Request.DecisionID ||
+		outcome != operation.Request.Outcome {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeDecisionLogSetOutcomeRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestDecisionLogSetStatusMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "decision_log_set_status")]
+
+	request, err := EncodeDecisionLogSetStatusRequest(operation.Request.DecisionID, operation.Request.Status)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	decisionID, status, err := DecodeDecisionLogSetStatusRequest(request)
+	if err != nil || decisionID != operation.Request.DecisionID ||
+		status != operation.Request.Status {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeDecisionLogSetStatusRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestDecisionLogSetRevisitMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "decision_log_set_revisit")]
+
+	request, err := EncodeDecisionLogSetRevisitRequest(operation.Request.DecisionID, operation.Request.RevisitWhen)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	decisionID, revisitWhen, err := DecodeDecisionLogSetRevisitRequest(request)
+	if err != nil || decisionID != operation.Request.DecisionID ||
+		revisitWhen != operation.Request.RevisitWhen {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeDecisionLogSetRevisitRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
 func TestOntologyEvalStatusMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "ontology_eval_status")]
 
@@ -2954,6 +3120,65 @@ func TestOntologyEvalStatusMatchesEverySharedCVector(t *testing.T) {
 	}
 	for _, vector := range operation.Request.Negative {
 		if _, err := DecodeOntologyEvalStatusRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestTaskUpdateStateMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "task_update_state")]
+
+	request, err := EncodeTaskUpdateStateRequest(operation.Request.TaskID, operation.Request.State)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	taskID, state, err := DecodeTaskUpdateStateRequest(request)
+	if err != nil || taskID != operation.Request.TaskID ||
+		state != operation.Request.State {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeTaskUpdateStateRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestRuntimeStateGetMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "runtime_state_get")]
+
+	request, err := EncodeRuntimeStateGetRequest(operation.Request.StateKey)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	stateKey, err := DecodeRuntimeStateGetRequest(request)
+	if err != nil || stateKey != operation.Request.StateKey {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeRuntimeStateGetRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestIngestQueueFailMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "ingest_queue_fail")]
+
+	request, err := EncodeIngestQueueFailRequest(operation.Request.IngestJobID, operation.Request.ErrorMessage)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	ingestJobID, errorMessage, err := DecodeIngestQueueFailRequest(request)
+	if err != nil || ingestJobID != operation.Request.IngestJobID ||
+		errorMessage != operation.Request.ErrorMessage {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeIngestQueueFailRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}

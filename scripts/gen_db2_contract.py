@@ -340,7 +340,24 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                "negation_fts_search",
                                                "search_facts_patterns_by_keyword",
                                                "list_rows") else "none"
-        if operation["scope"] != expected_scope or \
+        # A described operation states its own transaction and idempotency, and
+        # the review entry beside it says why. The lists below cover the
+        # operations that predate the described format; extending them to every
+        # operation would be transcribing the catalog into the generator, which
+        # agrees by construction and so checks nothing.
+        if name in DERIVED_OPERATIONS and \
+                DERIVED_OPERATIONS[name]["format"] == "db2-envelope-generic-v1":
+            if operation["transaction"] not in ("none", "single-statement", "single",
+                                                "multi-statement"):
+                fail("operation-semantics",
+                     f"{name} declares an unknown transaction {operation['transaction']!r}")
+            if operation["idempotency"] not in ("safe", "unsafe"):
+                fail("operation-semantics",
+                     f"{name} declares an unknown idempotency {operation['idempotency']!r}")
+            if operation["scope"] != "none":
+                fail("operation-semantics",
+                     f"{name} is scoped, which the described format does not carry")
+        elif operation["scope"] != expected_scope or \
                 operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
             fail("operation-semantics",
@@ -12332,6 +12349,66 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "format": "db2-envelope-generic-v1",
         "symbol": "db2_ontology_eval_status",
         "policy": {"reads": 200},
+    },
+    "decision_log_set_outcome": {
+        "key": ("learning", 22),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_set_outcome",
+        "policy": {"writes": 200},
+    },
+    "decision_log_set_status": {
+        "key": ("learning", 23),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_set_status",
+        "policy": {"writes": 200},
+    },
+    "decision_log_set_revisit": {
+        "key": ("learning", 24),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_set_revisit",
+        "policy": {"writes": 200},
+    },
+    "prospective_set_state": {
+        "key": ("memory", 64),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_set_state",
+        "policy": {"writes": 200},
+    },
+    "task_update_state": {
+        "key": ("organization", 13),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_task_update_state",
+        "policy": {"writes": 200},
+    },
+    "ingest_queue_fail": {
+        "key": ("maintenance", 21),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_ingest_queue_fail",
+        "policy": {"writes": 200},
+    },
+    "generation_abort": {
+        "key": ("index", 17),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_generation_abort",
+        "policy": {"writes": 200},
+    },
+    "generation_set_source_hash": {
+        "key": ("index", 18),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_generation_set_source_hash",
+        "policy": {"writes": 200},
+    },
+    "generation_publish": {
+        "key": ("index", 19),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_generation_publish",
+        "policy": {"writes": 200},
+    },
+    "purge_files_matching": {
+        "key": ("index", 20),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_purge_files_matching",
+        "policy": {"writes": 200},
     },
 }
 

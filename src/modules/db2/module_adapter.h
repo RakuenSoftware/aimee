@@ -215,6 +215,16 @@ typedef struct
    int (*visible_source_hash)(const char *project, char *source_hash, size_t capacity);
    int (*entity_profile_card)(const char *entity_id, char *card_json, size_t capacity);
    int (*ontology_eval_status)(const char *rel_type, char *status, size_t capacity);
+   int (*decision_log_set_outcome)(int64_t decision_id, const char *outcome);
+   int (*decision_log_set_status)(int64_t decision_id, const char *status);
+   int (*decision_log_set_revisit)(int64_t decision_id, const char *revisit_when);
+   int (*prospective_set_state)(int64_t prospective_id, const char *new_state);
+   int (*task_update_state)(int64_t task_id, const char *state);
+   int (*ingest_queue_fail)(int64_t job_id, const char *error_message);
+   int (*generation_abort)(int64_t generation_id, const char *error_message);
+   int (*generation_set_source_hash)(int64_t generation_id, const char *source_hash);
+   int (*generation_publish)(int64_t generation_id, const char *project);
+   int (*purge_files_matching)(int64_t project_id, const char *path_glob);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

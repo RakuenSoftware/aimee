@@ -4428,9 +4428,15 @@
           "line": 93
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.purge_files_matching operation replaces the file purge. The pattern is bound as a SQL LIKE pattern rather than a literal, so a caller sending a path containing a percent sign deletes more than it named -- and only the project's current generation is touched, so files from an older generation survive. Both are properties a deletion count cannot show."
+      },
       "signature": "int db2_code_index_purge_files_matching ( int64_t project_id , const char * path_glob )",
       "signature_sha256": "932fefe5fe2d1001a2fac79acd6f373ea35797754bc0876171dde6816eb413b1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_purge_files_matching"
     },
     {
@@ -4697,9 +4703,15 @@
           "line": 41
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.generation_abort operation replaces the abort. Only a pending generation is touched, so aborting one that is already visible does nothing -- which is the safety the condition exists for, and is invisible in an acknowledgement that looks the same either way."
+      },
       "signature": "int db2_code_projection_generation_abort ( int64_t gen_id , const char * error_msg )",
       "signature_sha256": "93e202271604998f81a554377c447c30915c4148395d993899c67b1238312156",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_generation_abort"
     },
     {
@@ -4747,9 +4759,15 @@
           "line": 37
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.generation_publish operation replaces the publish. It supersedes whatever the project had visible and makes this generation visible inside one transaction, which is the point: a reader never sees two visible generations, and never sees none. It is the only operation in this batch that holds a transaction, and that is why."
+      },
       "signature": "int db2_code_projection_generation_publish ( int64_t gen_id , const char * project )",
       "signature_sha256": "3eb7f11c2c8d51b7bd57683b17552dc4492ee001cb692afd3fc89c1c13f324e5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_generation_publish"
     },
     {
@@ -4763,9 +4781,15 @@
           "line": 54
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.generation_set_source_hash operation replaces the hash write. Unlike the abort beside it this statement has no condition on the generation's state, so the hash of a generation that is already visible can be changed after the fact -- which would make visible_source_hash report something the generation was not built from. That is the backend's behaviour and is recorded rather than fixed here."
+      },
       "signature": "int db2_code_projection_generation_set_source_hash ( int64_t gen_id , const char * source_hash )",
       "signature_sha256": "d7cbba18cdef3f21dfc70f35a924477ed9d44f075869ca4bb0464acc3e24ee4a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_generation_set_source_hash"
     },
     {
@@ -6586,9 +6610,15 @@
           "line": 79
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.decision_log_set_outcome operation replaces the outcome write. The text is stored as given -- nothing checks it against a vocabulary -- and an identifier naming no decision updates nothing and is acknowledged just the same, so the reply says the statement ran rather than that it changed anything. An empty outcome is allowed, which is how a decision whose outcome is not yet known is recorded."
+      },
       "signature": "int db2_decision_log_set_outcome ( int64_t id , const char * outcome )",
       "signature_sha256": "9a234e687e6f8783d8ffe60695a7ef41f2dbea0992c9d3ab493d4c7b988e2630",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_set_outcome"
     },
     {
@@ -6602,9 +6632,15 @@
           "line": 96
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.decision_log_set_revisit operation replaces the revisit write. The stamp is the caller's and is stored as text without being parsed, so an unparseable one is accepted here and fails at whatever compares it later -- which is worth recording because the sweep that acts on revisit stamps compares them as text. An empty stamp clears the revisit."
+      },
       "signature": "int db2_decision_log_set_revisit ( int64_t id , const char * revisit_when )",
       "signature_sha256": "1d03af1ad9d0cfa5a886236e7a43054bb824fdb73be7a699d8305d1bd7b08b6f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_set_revisit"
     },
     {
@@ -6618,9 +6654,15 @@
           "line": 95
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.decision_log_set_status operation replaces the status write. Like the outcome beside it the value is stored unchecked, so a caller can put a decision into a status no reader understands. Unlike the outcome an empty status is refused, because a decision always has one and the empty string is not it."
+      },
       "signature": "int db2_decision_log_set_status ( int64_t id , const char * status )",
       "signature_sha256": "7e146d3ee0e78ac59bef03529a5a049b8656b8bbabaeaafb85a4557fa17419d0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_set_status"
     },
     {
@@ -10019,9 +10061,15 @@
           "line": 344
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.ingest_queue_fail operation replaces the failure write. The completion stamp is DB2's clock, and the statement has no condition on the job's current state, so a job that already succeeded is moved to failed just the same. That is the backend's behaviour and matters to anyone reading the queue afterwards."
+      },
       "signature": "int db2_kb_ingest_queue_fail ( int64_t job_id , const char * error_message )",
       "signature_sha256": "0ba5c6148750354b3df62d63d72c58e53aceaeaea170b2857adc37b75b325ae3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_ingest_queue_fail"
     },
     {
@@ -20823,9 +20871,15 @@
           "line": 40
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_set_state operation replaces the state write. The state is stored unchecked and the update stamp is DB2's clock rather than the caller's, so a caller records that something changed but never claims when. An identifier naming no prospective memory updates nothing and is acknowledged."
+      },
       "signature": "int db2_prospective_set_state ( int64_t id , const char * new_state )",
       "signature_sha256": "68fd714f2410e671c7e859c54e1c79964dc6e0509d7a2581f323dd94187990df",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_set_state"
     },
     {
@@ -22322,9 +22376,15 @@
           "line": 43
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.task_update_state operation replaces the task state write. Unlike the other state writes in this batch its backend distinguishes an update that matched no row from one that did, so the reply carries that rather than a bare acknowledgement -- a caller can tell that the task it named does not exist, which the others cannot."
+      },
       "signature": "int db2_task_update_state ( int64_t id , const char * state )",
       "signature_sha256": "d342203f1fca006d6b4556f56fc0f77abc19a53e4b141001930a1ec2b080b6a9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_task_update_state"
     },
     {
@@ -26694,15 +26754,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "025f28396348c1c943cb179275e847564101a780b70da672d1d00a26bfdc6fc3",
+  "fingerprint": "342df830242ef0ff1369dda14b8f24db571fe8edb3f13e7267af70bc56c3e818",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 513,
+    "audit_pending": 503,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 445
+    "reviewed": 455
   }
 }

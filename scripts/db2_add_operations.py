@@ -79,6 +79,27 @@ def check(batch: list[dict[str, object]]) -> None:
             fail(f"{operation['name']} has a reason longer than the ledger allows")
 
 
+    # The Go contract test reads every fixture into one struct, so a field name
+    # is shared across operations and can carry only one type. A name reused at
+    # a different type produces a struct that cannot hold both, and it fails as
+    # a type error inside a generated test rather than as anything about the
+    # batch, so it is caught here instead.
+    typed: dict[str, str] = {}
+    for item in catalog["operations"]:
+        if item["wire_format"] != "db2-envelope-generic-v1":
+            continue
+        for field in item["request"]["fields"]:
+            typed[str(field["name"])] = str(field["type"])
+    for operation in batch:
+        for field in operation["request"]:
+            name, kind = str(field["name"]), str(field["type"])
+            if typed.get(name, kind) != kind:
+                fail(f"{operation['name']} names a field {name!r} of type {kind}, but another "
+                     f"operation already carries {name!r} as {typed[name]}; give it a name of "
+                     "its own")
+            typed[name] = kind
+
+
 def catalog_entry(operation: dict[str, object]) -> str:
     body = {
         "family": operation["family"],

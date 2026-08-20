@@ -1509,6 +1509,76 @@ int db2_ontology_eval_status(const char *rel_type, char *out, size_t out_len)
    return 0;
 }
 
+int db2_decision_log_set_outcome(int64_t id, const char *outcome)
+{
+   (void)id;
+   (void)outcome;
+   return 0;
+}
+
+int db2_decision_log_set_status(int64_t id, const char *status)
+{
+   (void)id;
+   (void)status;
+   return 0;
+}
+
+int db2_decision_log_set_revisit(int64_t id, const char *revisit_when)
+{
+   (void)id;
+   (void)revisit_when;
+   return 0;
+}
+
+int db2_prospective_set_state(int64_t id, const char *new_state)
+{
+   (void)id;
+   (void)new_state;
+   return 0;
+}
+
+int db2_task_update_state(int64_t id, const char *state)
+{
+   (void)id;
+   (void)state;
+   return 0;
+}
+
+int db2_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
+{
+   (void)job_id;
+   (void)error_message;
+   return 0;
+}
+
+int db2_code_projection_generation_abort(int64_t gen_id, const char *error_msg)
+{
+   (void)gen_id;
+   (void)error_msg;
+   return 0;
+}
+
+int db2_code_projection_generation_set_source_hash(int64_t gen_id, const char *source_hash)
+{
+   (void)gen_id;
+   (void)source_hash;
+   return 0;
+}
+
+int db2_code_projection_generation_publish(int64_t gen_id, const char *project)
+{
+   (void)gen_id;
+   (void)project;
+   return 0;
+}
+
+int db2_code_index_purge_files_matching(int64_t project_id, const char *path_glob)
+{
+   (void)project_id;
+   (void)path_glob;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

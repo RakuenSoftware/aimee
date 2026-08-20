@@ -236,6 +236,14 @@
       "reason": "The typed index.project_count operation replaces the current-project tally used by the doctor surface. Only projects in the current lifecycle state are counted and that state is fixed policy, so a caller cannot include detached projects in the number."
     },
     {
+      "symbol": "db2_code_index_purge_files_matching",
+      "signature_sha256": "932fefe5fe2d1001a2fac79acd6f373ea35797754bc0876171dde6816eb413b1",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.purge_files_matching operation replaces the file purge. The pattern is bound as a SQL LIKE pattern rather than a literal, so a caller sending a path containing a percent sign deletes more than it named -- and only the project's current generation is touched, so files from an older generation survive. Both are properties a deletion count cannot show."
+    },
+    {
       "symbol": "db2_code_index_purge_hidden_pollution",
       "signature_sha256": "49344b06a20e56406e73eeda8561a4281f8b4ace1715968b197a05f724508bc8",
       "disposition": "wire-operation",
@@ -250,6 +258,30 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.requeue_drifted operation replaces the maintenance enqueue that re-ingests projects whose files have drifted. The forced re-ingest, the status the new rows carry and the pending-or-running dedup are fixed policy: without the dedup a repeated sweep would pile duplicate work onto the ingest drain, and the operation could not claim safe idempotency."
+    },
+    {
+      "symbol": "db2_code_projection_generation_abort",
+      "signature_sha256": "93e202271604998f81a554377c447c30915c4148395d993899c67b1238312156",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.generation_abort operation replaces the abort. Only a pending generation is touched, so aborting one that is already visible does nothing -- which is the safety the condition exists for, and is invisible in an acknowledgement that looks the same either way."
+    },
+    {
+      "symbol": "db2_code_projection_generation_publish",
+      "signature_sha256": "3eb7f11c2c8d51b7bd57683b17552dc4492ee001cb692afd3fc89c1c13f324e5",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.generation_publish operation replaces the publish. It supersedes whatever the project had visible and makes this generation visible inside one transaction, which is the point: a reader never sees two visible generations, and never sees none. It is the only operation in this batch that holds a transaction, and that is why."
+    },
+    {
+      "symbol": "db2_code_projection_generation_set_source_hash",
+      "signature_sha256": "d7cbba18cdef3f21dfc70f35a924477ed9d44f075869ca4bb0464acc3e24ee4a",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.generation_set_source_hash operation replaces the hash write. Unlike the abort beside it this statement has no condition on the generation's state, so the hash of a generation that is already visible can be changed after the fact -- which would make visible_source_hash report something the generation was not built from. That is the backend's behaviour and is recorded rather than fixed here."
     },
     {
       "symbol": "db2_code_projection_project_fingerprint",
@@ -346,6 +378,30 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.mark_revisit_due operation replaces the sweep that flags active decisions whose review date has arrived. The two states, the requirement that a decision carry a review date at all, and the database clock are fixed policy, as they are for the two sweeps beside it. Unlike those, this backend separates a failed statement from an empty sweep, so the boundary can report the failure instead of an untouched log."
+    },
+    {
+      "symbol": "db2_decision_log_set_outcome",
+      "signature_sha256": "9a234e687e6f8783d8ffe60695a7ef41f2dbea0992c9d3ab493d4c7b988e2630",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.decision_log_set_outcome operation replaces the outcome write. The text is stored as given -- nothing checks it against a vocabulary -- and an identifier naming no decision updates nothing and is acknowledged just the same, so the reply says the statement ran rather than that it changed anything. An empty outcome is allowed, which is how a decision whose outcome is not yet known is recorded."
+    },
+    {
+      "symbol": "db2_decision_log_set_revisit",
+      "signature_sha256": "1d03af1ad9d0cfa5a886236e7a43054bb824fdb73be7a699d8305d1bd7b08b6f",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.decision_log_set_revisit operation replaces the revisit write. The stamp is the caller's and is stored as text without being parsed, so an unparseable one is accepted here and fails at whatever compares it later -- which is worth recording because the sweep that acts on revisit stamps compares them as text. An empty stamp clears the revisit."
+    },
+    {
+      "symbol": "db2_decision_log_set_status",
+      "signature_sha256": "7e146d3ee0e78ac59bef03529a5a049b8656b8bbabaeaafb85a4557fa17419d0",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.decision_log_set_status operation replaces the status write. Like the outcome beside it the value is stored unchecked, so a caller can put a decision into a status no reader understands. Unlike the outcome an empty status is refused, because a decision always has one and the empty string is not it."
     },
     {
       "symbol": "db2_dim_change_reset",
@@ -586,6 +642,14 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
+    },
+    {
+      "symbol": "db2_kb_ingest_queue_fail",
+      "signature_sha256": "0ba5c6148750354b3df62d63d72c58e53aceaeaea170b2857adc37b75b325ae3",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.ingest_queue_fail operation replaces the failure write. The completion stamp is DB2's clock, and the statement has no condition on the job's current state, so a job that already succeeded is moved to failed just the same. That is the backend's behaviour and matters to anyone reading the queue afterwards."
     },
     {
       "symbol": "db2_kb_ingest_queue_reset_running",
@@ -2844,6 +2908,14 @@
       "reason": "The injected embedder callback is a process-local compatibility seam and cannot cross the bus; callers resolve the running endpoint's dimension before submitting the typed reset operation, which always carries an explicit target."
     },
     {
+      "symbol": "db2_prospective_set_state",
+      "signature_sha256": "68fd714f2410e671c7e859c54e1c79964dc6e0509d7a2581f323dd94187990df",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.prospective_set_state operation replaces the state write. The state is stored unchecked and the update stamp is DB2's clock rather than the caller's, so a caller records that something changed but never claims when. An identifier naming no prospective memory updates nothing and is acknowledged."
+    },
+    {
       "symbol": "db2_prospective_sweep_expired",
       "signature_sha256": "8aff5c8b3bc10a515458c73f31e9c57aa4e1be83d12e572e8be28c58b4419373",
       "disposition": "wire-operation",
@@ -2986,6 +3058,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.task_delete operation removes a task and its edges. It runs two statements with no transaction and ignores whether the edge delete succeeded, so a caller can be told the task is gone while its edges remain. The schema's foreign key cascades the edges anyway, which is why the explicit delete looked safe to ignore; the catalog records that the pair is not atomic instead of leaving that reasoning in a comment."
+    },
+    {
+      "symbol": "db2_task_update_state",
+      "signature_sha256": "d342203f1fca006d6b4556f56fc0f77abc19a53e4b141001930a1ec2b080b6a9",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_update_state operation replaces the task state write. Unlike the other state writes in this batch its backend distinguishes an update that matched no row from one that did, so the reply carries that rather than a bare acknowledgement -- a caller can tell that the task it named does not exist, which the others cannot."
     },
     {
       "symbol": "db2_tenant_scope_begin",

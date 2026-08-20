@@ -1766,3 +1766,30 @@ aimee_module_call_result_t aimee_db2_record_exists_call(aimee_db2_call_fn call, 
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_prospective_set_state_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, uint64_t prospective_id,
+                                     const char *new_state, uint32_t *acknowledged,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROSPECTIVE_SET_STATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_PROSPECTIVE_SET_STATE_RESPONSE_MAX_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_prospective_set_state_request_encode(prospective_id, new_state, request,
+                                                      sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROSPECTIVE_SET_STATE,
+            AIMEE_DB2_STAGE_PROSPECTIVE_SET_STATE, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_prospective_set_state_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
