@@ -1320,6 +1320,252 @@ int main(int argc, char **argv)
                                         &project_deleted, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(project_deleted == 0);
 
+   /* Everything catalogued that this replay was not calling.
+    *
+    * Until the module binary started being rebuilt, an operation nothing
+    * replayed was an operation nothing had ever run: artifact_flag_review was
+    * broken from the day it was written and every gate stayed green. These
+    * cases exist so that stops being possible, and where a round trip can be
+    * arranged they do more than watch a fresh-schema zero come back.
+    *
+    * The collaboration rules are a real round trip. propose returns the
+    * identifier the other three take, so each decision is applied to a rule
+    * this run created, and a decision on an identifier no rule has is refused.
+    * Rule identifiers start at one, so zero back from propose would mean the
+    * insert did not happen. */
+   uint32_t proposed_rule = 0, decided_rule = 9;
+   assert(aimee_db2_collab_rule_propose_call(call_client, &client, 9204, 0, "replay rule one",
+                                             "replay reason", "replay", &proposed_rule, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(proposed_rule > 0);
+   assert(aimee_db2_collab_rule_approve_call(call_client, &client, 9205, 0, proposed_rule,
+                                             &decided_rule, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided_rule == 1);
+   uint32_t second_rule = 0;
+   assert(aimee_db2_collab_rule_propose_call(call_client, &client, 9206, 0, "replay rule two",
+                                             "replay reason", "replay", &second_rule, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(second_rule > proposed_rule);
+   decided_rule = 9;
+   assert(aimee_db2_collab_rule_reject_call(call_client, &client, 9207, 0, second_rule,
+                                            &decided_rule, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided_rule == 1);
+   /* Retire only touches an active rule, and approve is what makes one active,
+    * so the third rule has to go through both. Retiring it straight from
+    * proposed is refused, which is the assertion before the approve. */
+   uint32_t third_rule = 0;
+   assert(aimee_db2_collab_rule_propose_call(call_client, &client, 9208, 0, "replay rule three",
+                                             "replay reason", "replay", &third_rule, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   decided_rule = 9;
+   assert(aimee_db2_collab_rule_retire_call(call_client, &client, 9209, 0, third_rule,
+                                            &decided_rule, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided_rule == 0);
+   decided_rule = 9;
+   assert(aimee_db2_collab_rule_approve_call(call_client, &client, 9245, 0, third_rule,
+                                             &decided_rule, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided_rule == 1);
+   decided_rule = 9;
+   assert(aimee_db2_collab_rule_retire_call(call_client, &client, 9246, 0, third_rule,
+                                            &decided_rule, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided_rule == 1);
+   decided_rule = 9;
+   assert(aimee_db2_collab_rule_approve_call(call_client, &client, 9210, 0, 2000000000u,
+                                             &decided_rule, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decided_rule == 0);
+   uint32_t rule_removed = 9;
+   assert(aimee_db2_rules_delete_by_id_call(call_client, &client, 9211, 0, 2000000000u,
+                                            &rule_removed, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rule_removed == 0);
+
+   /* A promotion round trip: one promotion per decision point, so the second
+    * set replaces the first and the get proves which one survived. */
+   uint32_t promoted = 9;
+   char promoted_arm[AIMEE_DB2_BANDIT_PROMOTION_GET_ARM_ID_MAX + 1] = "unset";
+   assert(aimee_db2_bandit_promotion_set_call(call_client, &client, 9212, 0, "replay-dp", "arm-one",
+                                              "rollback-one", &promoted, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(promoted == 1);
+   assert(aimee_db2_bandit_promotion_get_call(call_client, &client, 9213, 0, "replay-dp",
+                                              promoted_arm, sizeof(promoted_arm), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(strcmp(promoted_arm, "arm-one") == 0);
+   promoted = 9;
+   assert(aimee_db2_bandit_promotion_set_call(call_client, &client, 9214, 0, "replay-dp", "arm-two",
+                                              "", &promoted, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(promoted == 1);
+   assert(aimee_db2_bandit_promotion_get_call(call_client, &client, 9215, 0, "replay-dp",
+                                              promoted_arm, sizeof(promoted_arm), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(strcmp(promoted_arm, "arm-two") == 0);
+
+   /* No arm has been pulled at this decision point. The reply is an empty JSON
+    * array rather than an empty string, which is also what a decision point
+    * nobody has heard of returns, and what a failed read returns: the buffer
+    * is filled in before the statement is prepared. */
+   char arms[AIMEE_DB2_BANDIT_ARMS_LIST_ARMS_MAX + 1] = "unset";
+   assert(aimee_db2_bandit_arms_list_call(call_client, &client, 9216, 0, "replay-dp", arms,
+                                          sizeof(arms), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(strcmp(arms, "[]") == 0);
+
+   /* Citing and linking both need the artifact to exist, which the replay
+    * environment seeds. A citation's source is not checked, so citing a source
+    * that was never created is accepted; a link's far end is checked, so
+    * linking to one that was not is refused. */
+   uint32_t cited = 9;
+   assert(aimee_db2_artifact_cite_call(call_client, &client, 9217, 0, "replay-flag-probe", "memory",
+                                       "replay-source-that-does-not-exist", &cited, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(cited == 1);
+   uint32_t linked = 9;
+   assert(aimee_db2_artifact_link_call(call_client, &client, 9218, 0, "replay-flag-probe",
+                                       "replay-link-target", "derives-from", &linked, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(linked == 1);
+   linked = 9;
+   assert(aimee_db2_artifact_link_call(call_client, &client, 9219, 0, "replay-flag-probe",
+                                       "replay-artifact-that-does-not-exist", "derives-from",
+                                       &linked, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(linked == 0);
+
+   /* The rest have nothing to act on against a fresh schema, so each answers
+    * its own kind of nothing. Replayed because an operation that is never
+    * called is an operation whose handler, decoder and backend have never run
+    * together against a real database -- which is how a statement that could
+    * not be planned survived being written. */
+   uint32_t surfaces = 9;
+   assert(aimee_db2_calibration_surfaces_with_data_call(call_client, &client, 9220, 0, 1, &surfaces,
+                                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(surfaces == 0);
+   uint32_t merged_memories = 9;
+   assert(aimee_db2_dedupe_by_key_call(call_client, &client, 9221, 0, 1, &merged_memories, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(merged_memories == 0);
+   uint32_t stuck_reset = 9;
+   assert(aimee_db2_reset_stuck_vector_ops_call(call_client, &client, 9222, 0, 3, &stuck_reset,
+                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(stuck_reset == 0);
+
+   uint32_t acknowledged = 9;
+   assert(aimee_db2_decision_log_set_outcome_call(call_client, &client, 9223, 0, 4242, "replayed",
+                                                  &acknowledged, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+   acknowledged = 9;
+   assert(aimee_db2_decision_log_set_revisit_call(call_client, &client, 9224, 0, 4242,
+                                                  "2026-01-01T00:00:00Z", &acknowledged, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+   acknowledged = 9;
+   assert(aimee_db2_decision_log_set_status_call(call_client, &client, 9225, 0, 4242, "active",
+                                                 &acknowledged, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+
+   acknowledged = 9;
+   assert(aimee_db2_directive_resolve_call(call_client, &client, 9226, 0, 4242, 4243, &acknowledged,
+                                           NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+   acknowledged = 9;
+   assert(aimee_db2_release_add_doc_call(call_client, &client, 9227, 0, 4242, 4243, &acknowledged,
+                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+   uint32_t member = 9;
+   assert(aimee_db2_scene_member_exists_call(call_client, &client, 9228, 0, 4242, 4243, &member,
+                                             NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(member == 0);
+   uint32_t connected = 9;
+   assert(aimee_db2_unit_edge_exists_call(call_client, &client, 9229, 0, 4242, 4243, &connected,
+                                          NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(connected == 0);
+
+   /* No proposal has this identifier, and both of these acknowledge anyway:
+    * each reports that its statement ran, not that a row matched. The one is
+    * the assertion -- a zero here would mean the statement failed. */
+   acknowledged = 9;
+   assert(aimee_db2_proposal_bump_corroboration_call(call_client, &client, 9230, 0, 4242,
+                                                     &acknowledged, NULL,
+                                                     NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+   acknowledged = 9;
+   assert(aimee_db2_proposal_mark_committed_call(call_client, &client, 9231, 0, 4242, &acknowledged,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+   acknowledged = 9;
+   assert(aimee_db2_prospective_set_state_call(call_client, &client, 9232, 0, 4242, "fired",
+                                               &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+   uint32_t task_changed = 9;
+   assert(aimee_db2_task_update_state_call(call_client, &client, 9233, 0, 4242, "done",
+                                           &task_changed, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(task_changed == 0);
+   /* No such job, and the acknowledgement comes back anyway: the backend
+    * discards the step result and returns success as long as the statement
+    * could be prepared. */
+   acknowledged = 9;
+   assert(aimee_db2_ingest_queue_fail_call(call_client, &client, 9234, 0, 4242, "replayed",
+                                           &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+
+   /* The three generation writes, against a generation that does not exist.
+    * Two of them acknowledge it: abort and set_source_hash report that their
+    * statement completed and never that it matched. publish is the one that
+    * checks -- it requires exactly one pending generation to become visible
+    * and rolls back otherwise -- so it is also the only one whose reply here
+    * distinguishes a missing generation from a present one. */
+   acknowledged = 9;
+   assert(aimee_db2_generation_abort_call(call_client, &client, 9235, 0, 4242, "replayed",
+                                          &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+   acknowledged = 9;
+   assert(aimee_db2_generation_set_source_hash_call(call_client, &client, 9236, 0, 4242,
+                                                    "replayhash", &acknowledged, NULL,
+                                                    NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+   acknowledged = 9;
+   assert(aimee_db2_generation_publish_call(call_client, &client, 9237, 0, 4242, "demo",
+                                            &acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 0);
+
+   /* The project-scoped index operations, against a project nothing indexed. */
+   uint32_t index_deleted = 9;
+   assert(aimee_db2_file_index_delete_current_generation_call(call_client, &client, 9238, 0, "demo",
+                                                              &index_deleted, NULL,
+                                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(index_deleted == 0);
+   uint32_t minhash_cleared = 9;
+   assert(aimee_db2_minhash_delete_current_generation_call(call_client, &client, 9239, 0, "demo",
+                                                           &minhash_cleared, NULL,
+                                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(minhash_cleared == 1);
+   uint32_t purged_files = 9;
+   assert(aimee_db2_purge_files_matching_call(call_client, &client, 9240, 0, 4242, "src/%",
+                                              &purged_files, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(purged_files == 0);
+
+   /* The four string-returning reads, each against something that is not
+    * there. All four answer with an empty string, which is also what a failed
+    * read answers -- the reason for replaying them is the handler and the
+    * decoder, not the value. */
+   char fingerprint[AIMEE_DB2_PROJECT_FINGERPRINT_FINGERPRINT_MAX + 1] = "unset";
+   assert(aimee_db2_project_fingerprint_call(call_client, &client, 9241, 0, "demo", fingerprint,
+                                             sizeof(fingerprint), NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   char source_hash[AIMEE_DB2_VISIBLE_SOURCE_HASH_SOURCE_HASH_MAX + 1] = "unset";
+   assert(aimee_db2_visible_source_hash_call(call_client, &client, 9242, 0, "demo", source_hash,
+                                             sizeof(source_hash), NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   static char profile_card[AIMEE_DB2_ENTITY_PROFILE_CARD_CARD_JSON_MAX + 1];
+   profile_card[0] = 'x';
+   assert(aimee_db2_entity_profile_card_call(call_client, &client, 9243, 0, "replay-entity",
+                                             profile_card, sizeof(profile_card), NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   char eval_status[AIMEE_DB2_ONTOLOGY_EVAL_STATUS_STATUS_MAX + 1] = "unset";
+   assert(aimee_db2_ontology_eval_status_call(call_client, &client, 9244, 0, "replay_rel",
+                                              eval_status, sizeof(eval_status), NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(eval_status[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

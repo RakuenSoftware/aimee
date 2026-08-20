@@ -127,12 +127,16 @@ say "applying the schema so the replay can be seeded"
 run_file "$DB" src/modules/db2/c/schema.sql >/dev/null ||
    { say "could not apply the schema to $DB"; exit 1; }
 
-# One artifact, committed, with a payload of its own, for the flag-review
-# replay to merge into and for the assertion afterwards to read back.
+# Two artifacts. The first is committed and carries a payload of its own, for
+# the flag-review replay to merge into and for the assertion afterwards to read
+# back. Both ends of a link are foreign keys and a citation's citing end is
+# one, so the cite and link replays need real rows or they can only ever show a
+# refusal.
 run_sql "$DB" "INSERT INTO artifacts (id, kind, state, payload)
-   VALUES ('replay-flag-probe', 'probe', 'committed', '{\"kept\": 1}'::jsonb)
-   ON CONFLICT (id) DO UPDATE SET state = 'committed', payload = '{\"kept\": 1}'::jsonb" \
-   >/dev/null || { say "could not seed the flag-review fixture"; exit 1; }
+   VALUES ('replay-flag-probe', 'probe', 'committed', '{\"kept\": 1}'::jsonb),
+          ('replay-link-target', 'probe', 'proposed', '{}'::jsonb)
+   ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, payload = EXCLUDED.payload" \
+   >/dev/null || { say "could not seed the artifact fixtures"; exit 1; }
 
 AIMEE_DB2_URL="postgres://aimee:aimee@$DBHOST:5432/$DB" \
    EMBEDDER_DIMS=$EMBED_DIM \

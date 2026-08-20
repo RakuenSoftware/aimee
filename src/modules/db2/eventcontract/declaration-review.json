@@ -217,7 +217,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.bandit_arms_list operation replaces the arm listing. The backend joins the distinct arm identifiers into one value with newlines between them, so what crosses is a document a caller has to parse -- and an arm identifier containing a newline would read back as two arms. That is the backend's format, not this boundary's, and it is recorded because the wire carries one string either way."
+      "reason": "The typed learning.bandit_arms_list operation replaces the arm listing. What crosses is a JSON array of quoted arm identifiers built by hand: nothing escapes them, so an arm whose name contains a quote or a backslash produces a document the caller cannot parse, and an empty one is dropped. When the buffer fills the array is closed early, so a truncated listing is indistinguishable from a complete one. A read that fails returns the empty array it wrote before preparing the statement."
     },
     {
       "symbol": "db2_bandit_promotion_get",
@@ -385,7 +385,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.collab_rule_retire operation replaces the retirement. It touches only an active rule, so a proposed one cannot be retired without being approved first -- the state machine is in the statement rather than anywhere a caller can see, and the acknowledgement is the same whether the rule moved or not."
+      "reason": "The typed learning.collab_rule_retire operation replaces the retirement. It touches only an active rule, so a proposed one cannot be retired without being approved first -- the state machine is in the statement rather than anywhere a caller can see. Unlike most of the writes beside it the reply does distinguish: retiring a rule that was not active is refused, not acknowledged."
     },
     {
       "symbol": "db2_conn",
@@ -785,7 +785,7 @@
       "disposition": "wire-operation",
       "family": "maintenance",
       "db3_placement": "retained-db2",
-      "reason": "The typed maintenance.ingest_queue_fail operation replaces the failure write. The completion stamp is DB2's clock, and the statement has no condition on the job's current state, so a job that already succeeded is moved to failed just the same. That is the backend's behaviour and matters to anyone reading the queue afterwards."
+      "reason": "The typed maintenance.ingest_queue_fail operation replaces the failure write. The completion stamp is DB2's clock, and the statement has no condition on the job's current state, so a job that already succeeded is moved to failed just the same. The backend discards the step result, so the acknowledgement means the statement was prepared and nothing more: a job identifier that matches nothing is acknowledged."
     },
     {
       "symbol": "db2_kb_ingest_queue_reset_running",
@@ -2041,7 +2041,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.proposal_bump_corroboration operation replaces the corroboration bump. The count is incremented by the statement rather than supplied, so a caller records that a proposal was corroborated again without being able to set or read the total. Only a pending proposal is bumped, so corroborating one already committed does nothing."
+      "reason": "The typed learning.proposal_bump_corroboration operation replaces the corroboration bump. The count is incremented by the statement rather than supplied, so a caller records that a proposal was corroborated again without being able to set or read the total. Only a pending proposal is bumped, but the acknowledgement reports that the statement ran and not that a row matched, so corroborating a committed proposal -- or one that does not exist -- does nothing and says it succeeded."
     },
     {
       "symbol": "db2_learning_proposal_mark_committed",
