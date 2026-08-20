@@ -1680,6 +1680,272 @@ aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uin
       rc = db1_wfe_finish(field[0], field[1], field[2], field[3], field[4], parsed5);
       break;
    }
+   case AIMEE_DB1_OP_WFE_STOP_TREE:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 512)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char (*found)[DB1_WFE_ID_LEN] = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_wfe_stop_tree(field[0], found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 1u * sizeof *cells);
+         if (!cells)
+         {
+            free(cells);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            cells[row * 1u + 0u] = found[row];
+         }
+         rows = cells;
+         row_count = produced * 1u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_RECONCILE_ORPHANS:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed0 <= 0 || parsed0 > 512)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char (*found)[DB1_WFE_ID_LEN] = calloc((size_t)parsed0, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_wfe_reconcile_orphans(found, parsed0);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed0)
+                                 ? (uint32_t)rc : (uint32_t)parsed0;
+         const char **cells = malloc((size_t)produced * 1u * sizeof *cells);
+         if (!cells)
+         {
+            free(cells);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            cells[row * 1u + 0u] = found[row];
+         }
+         rows = cells;
+         row_count = produced * 1u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_PARK_BUDGET_TREE:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      double parsed2;
+      if (parse_double(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_park_budget_tree(field[0], field[1], parsed2);
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_DELETE_TREE:
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_delete_tree(field[0]);
+      break;
+   case AIMEE_DB1_OP_WFE_RESOLVE_GATE:
+      if (count != 5u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_resolve_gate(field[0], field[1], field[2], field[3], field[4]);
+      break;
+   case AIMEE_DB1_OP_WFE_REJECT_GATE:
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_reject_gate(field[0], field[1], field[2]);
+      break;
+   case AIMEE_DB1_OP_WFE_PARK_RUNNER_FAILURE:
+   {
+      if (count != 8u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[5][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[6][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed5;
+      if (parse_int(field[5], &parsed5) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed6;
+      if (parse_int(field[6], &parsed6) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      double parsed7;
+      if (parse_double(field[7], &parsed7) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_wfe_park_runner_failure(field[0], field[1], field[2], field[3], field[4], parsed5, parsed6, parsed7);
+      break;
+   }
+   case AIMEE_DB1_OP_WFE_RECOVER_LOST_REPLAY:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int produced = db1_wfe_recover_lost_replay(field[0], field[1], field[2]);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

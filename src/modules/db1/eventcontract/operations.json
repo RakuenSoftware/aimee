@@ -338,18 +338,20 @@
    "active": true,
    "doc": "work-item state and its audit log. Split from workflow because wfe_engine.c wraps sixteen of these writes in two transactions it opens and commits across separate calls, which is a redesign of that engine's write path rather than a wire question.",
    "client_doc": "",
-   "covers": "wfe_budget_store, wfe_engine_store, wfe_store, wfe_transition_store",
+   "covers": "wfe_budget_store, wfe_engine_store, wfe_store, wfe_transition_store, wfe_tree_store",
    "sources": [
     "wfe_budget_store",
     "wfe_engine_store",
     "wfe_store",
-    "wfe_transition_store"
+    "wfe_transition_store",
+    "wfe_tree_store"
    ],
    "retired_sources": [
     "wfe_budget_store.c",
     "wfe_engine_store.c",
     "wfe_store.c",
-    "wfe_transition_store.c"
+    "wfe_transition_store.c",
+    "wfe_tree_store.c"
    ]
   },
   {
@@ -24868,6 +24870,398 @@
    "reply": {
     "fields": [],
     "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 57,
+   "name": "wfe_stop_tree",
+   "c_name": "db1_wfe_stop_tree",
+   "c_params": [
+    "work_item_id",
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 512,
+     "column": {
+      "kind": "text",
+      "width": "DB1_WFE_ID_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 58,
+   "name": "wfe_reconcile_orphans",
+   "c_name": "db1_wfe_reconcile_orphans",
+   "c_params": [
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 512,
+     "column": {
+      "kind": "text",
+      "width": "DB1_WFE_ID_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 59,
+   "name": "wfe_park_budget_tree",
+   "c_name": "db1_wfe_park_budget_tree",
+   "c_params": [
+    "root_id",
+    "completed_item_id",
+    "added_cost"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "root_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "completed_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "added_cost",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 60,
+   "name": "wfe_delete_tree",
+   "c_name": "db1_wfe_delete_tree",
+   "c_params": [
+    "work_item_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 61,
+   "name": "wfe_resolve_gate",
+   "c_name": "db1_wfe_resolve_gate",
+   "c_params": [
+    "work_item_id",
+    "from_stage",
+    "to_stage",
+    "decision",
+    "content_hash"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "from_stage",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "to_stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "decision",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "content_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 62,
+   "name": "wfe_reject_gate",
+   "c_name": "db1_wfe_reject_gate",
+   "c_params": [
+    "work_item_id",
+    "stage",
+    "content_hash"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "content_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 63,
+   "name": "wfe_park_runner_failure",
+   "c_name": "db1_wfe_park_runner_failure",
+   "c_params": [
+    "work_item_id",
+    "stage",
+    "owner",
+    "reason",
+    "detail",
+    "dispatched",
+    "cost_known",
+    "actual"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "detail",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "dispatched",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "cost_known",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "actual",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "lifecycle",
+   "id": 64,
+   "name": "wfe_recover_lost_replay",
+   "c_name": "db1_wfe_recover_lost_replay",
+   "c_params": [
+    "work_item_id",
+    "stage",
+    "owner"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "work_item_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "stage",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "owner",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "redispatch",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
    }
   },
   {

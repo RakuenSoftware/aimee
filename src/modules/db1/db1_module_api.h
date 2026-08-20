@@ -585,6 +585,14 @@
 #define AIMEE_DB1_OP_WFE_PARK_WITH_DETAIL                54u
 #define AIMEE_DB1_OP_WFE_RESUME                          55u
 #define AIMEE_DB1_OP_WFE_FINISH                          56u
+#define AIMEE_DB1_OP_WFE_STOP_TREE                       57u
+#define AIMEE_DB1_OP_WFE_RECONCILE_ORPHANS               58u
+#define AIMEE_DB1_OP_WFE_PARK_BUDGET_TREE                59u
+#define AIMEE_DB1_OP_WFE_DELETE_TREE                     60u
+#define AIMEE_DB1_OP_WFE_RESOLVE_GATE                    61u
+#define AIMEE_DB1_OP_WFE_REJECT_GATE                     62u
+#define AIMEE_DB1_OP_WFE_PARK_RUNNER_FAILURE             63u
+#define AIMEE_DB1_OP_WFE_RECOVER_LOST_REPLAY             64u
 
 /* Family 17: the management-JWKS cache row: the envelope the server verified,
  * when it is valid for, and the digests that pin it. Digests cross as hex

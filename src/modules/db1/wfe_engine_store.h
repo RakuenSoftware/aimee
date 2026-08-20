@@ -182,6 +182,50 @@ extern "C"
    int db1_wfe_finish(const char *work_item_id, const char *stage, const char *state,
                       const char *detail, const char *content_hash, double cost);
 
+   /* Whole-tree operations. A run fans out into child slices, and these four
+    * things must happen to the tree as a unit: a stop that reached half of it
+    * leaves agents running under a run the operator believes is stopped.
+    *
+    * stop_tree and reconcile_orphans return the ids they ended, because the
+    * caller cancels the delegate jobs those runs left behind. */
+   int db1_wfe_stop_tree(const char *work_item_id, char (*out_ids)[DB1_WFE_ID_LEN], int max);
+
+   /* Active runs whose ancestor has already finished. Nothing will advance them
+    * and nothing is waiting for them, so they are ended and reported. */
+   int db1_wfe_reconcile_orphans(char (*out_ids)[DB1_WFE_ID_LEN], int max);
+
+   /* Charge a finished invocation whose cost exhausted the tree's budget, and
+    * park every runnable member on 'budget_cap'. */
+   int db1_wfe_park_budget_tree(const char *root_id, const char *completed_item_id,
+                                double added_cost);
+
+   /* Delete a tree outright. Refuses while any member is still active: deleting
+    * the row does not stop the agent working under it. */
+   int db1_wfe_delete_tree(const char *work_item_id);
+
+   /* The engine's human gate, which parks on 'human_gate'. Distinct from
+    * db1_work_item_gate_apply, which serves the daemon's own gate flow, guards
+    * on 'pending_human' and compares a content hash -- two different gates that
+    * happen to share a word. */
+   int db1_wfe_resolve_gate(const char *work_item_id, const char *from_stage, const char *to_stage,
+                            const char *decision, const char *content_hash);
+   int db1_wfe_reject_gate(const char *work_item_id, const char *stage, const char *content_hash);
+
+   /* Park a runner failure with whatever is known about what it cost. When the
+    * invocation was dispatched but its cost is unknown, the known prefix is
+    * committed and the rest of the authorization is retained as 'unresolved' --
+    * releasing it would let the tree hand out money that may already be gone. */
+   int db1_wfe_park_runner_failure(const char *work_item_id, const char *stage, const char *owner,
+                                   const char *reason, const char *detail, int dispatched,
+                                   int cost_known, double actual);
+
+   /* A replay whose result never came back. Returns 1 when the run may be
+    * re-dispatched fresh (the estimate was never committed), 0 when the spend
+    * was measured but its result is unreproducible and the run has been parked
+    * for a human instead, -1 on error or a reservation this owner does not
+    * hold. */
+   int db1_wfe_recover_lost_replay(const char *work_item_id, const char *stage, const char *owner);
+
 #ifdef __cplusplus
 }
 #endif

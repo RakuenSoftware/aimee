@@ -502,3 +502,244 @@ int db1_wfe_budget_reconcile(const char *work_item_id, const char *owner, double
       return -1;
    return (changed == 1) ? 1 : 0;
 }
+
+/* A runner failure, parked with whatever is known about what it cost.
+ *
+ * Three cases, and the difference between them is money:
+ *
+ *   not dispatched          the invocation never left, so nothing was spent and
+ *                           the reservation is dropped outright.
+ *   dispatched, cost known  the measured cost is committed and the reservation
+ *                           is dropped: the story is complete.
+ *   dispatched, cost NOT    the invocation crossed the provider boundary and may
+ *   known                   have spent an unknown amount. The known prefix is
+ *                           committed and the REST of the authorization is
+ *                           retained as 'unresolved' -- releasing it would let
+ *                           the tree hand out money that may already be gone.
+ */
+int db1_wfe_park_runner_failure(const char *work_item_id, const char *stage, const char *owner,
+                                const char *reason, const char *detail, int dispatched,
+                                int cost_known, double actual)
+{
+   if (!work_item_id || !work_item_id[0] || !stage || !stage[0] || !owner || !owner[0] || !reason ||
+       !reason[0] || actual < 0 || isnan(actual) || isinf(actual))
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db || sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+      return -1;
+
+   const char *state = "";
+   double amount = 0;
+   double event_cost = 0;
+   if (dispatched && cost_known)
+   {
+      event_cost = actual;
+   }
+   else if (dispatched)
+   {
+      state = "unresolved";
+      static const char *held_sql = "SELECT reserved_cost_usd FROM lifecycle_work_item "
+                                    "WHERE work_item_id=? AND reservation_owner=? "
+                                    "AND reservation_state IN ('reserved','unresolved')";
+      sqlite3_stmt *st = NULL;
+      if (sqlite3_prepare_v2(db, held_sql, -1, &st, NULL) != SQLITE_OK)
+      {
+         rollback(db);
+         return -1;
+      }
+      sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, owner, -1, SQLITE_TRANSIENT);
+      int have = sqlite3_step(st) == SQLITE_ROW;
+      amount = have ? sqlite3_column_double(st, 0) : 0;
+      sqlite3_finalize(st);
+      if (!have)
+      {
+         rollback(db);
+         return -1;
+      }
+      /* Measured spend from completed reroute attempts is committed now; only
+       * what is left of the authorization stays unresolved. */
+      event_cost = actual;
+      if (amount > actual)
+         amount -= actual;
+      else if (amount > 0)
+         amount = 0;
+   }
+
+   static const char *park_sql =
+       "UPDATE lifecycle_work_item "
+       "SET pause_reason=?, paused_state=?, cum_cost_usd=cum_cost_usd+?, reserved_cost_usd=?, "
+       "reservation_state=?, reservation_owner=CASE WHEN ?='' THEN '' ELSE ? END, "
+       "reservation_lease_until='', updated_at=datetime('now') "
+       "WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason='' "
+       "AND reservation_owner=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, park_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, reason, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_double(st, 3, event_cost);
+   sqlite3_bind_double(st, 4, amount);
+   sqlite3_bind_text(st, 5, state, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 6, state, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 7, owner, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 8, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 9, stage, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 10, owner, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
+   sqlite3_finalize(st);
+   if (changed != 1)
+   {
+      rollback(db);
+      return -1;
+   }
+
+   static const char *event_sql =
+       "INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,cost_usd) "
+       "VALUES (?,?,'pause','go-wfe',?,?)";
+   if (sqlite3_prepare_v2(db, event_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 3, detail ? detail : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_double(st, 4, event_cost);
+   rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   if (rc != SQLITE_DONE)
+   {
+      rollback(db);
+      return -1;
+   }
+   return (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK) ? 0 : -1;
+}
+
+/* A replay whose result never came back. What happens next depends entirely on
+ * whether the money is known to have been spent:
+ *
+ *   'unresolved'  the estimate was never committed, so drop it and let the run
+ *                 be re-dispatched fresh. Returns 1: redispatch.
+ *   'actual'      the cost was measured but the RESULT is unreproducible.
+ *                 Commit the spend and park for a human rather than silently
+ *                 paying for the same work twice. Returns 0: do not redispatch.
+ *
+ * Any other state is not replayable and is an error rather than a guess.
+ */
+int db1_wfe_recover_lost_replay(const char *work_item_id, const char *stage, const char *owner)
+{
+   if (!work_item_id || !work_item_id[0] || !owner)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db || sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+      return -1;
+
+   static const char *load_sql = "SELECT reservation_state,reservation_owner,reserved_cost_usd "
+                                 "FROM lifecycle_work_item WHERE work_item_id=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, load_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   if (sqlite3_step(st) != SQLITE_ROW)
+   {
+      sqlite3_finalize(st);
+      rollback(db);
+      return -1;
+   }
+   char state[24];
+   char holder[128];
+   const unsigned char *state_text = sqlite3_column_text(st, 0);
+   const unsigned char *owner_text = sqlite3_column_text(st, 1);
+   snprintf(state, sizeof state, "%s", state_text ? (const char *)state_text : "");
+   snprintf(holder, sizeof holder, "%s", owner_text ? (const char *)owner_text : "");
+   double amount = sqlite3_column_double(st, 2);
+   sqlite3_finalize(st);
+
+   if (strcmp(holder, owner) != 0)
+   {
+      /* Someone else's invocation. Recovering it would decide the fate of money
+       * this caller did not authorize. */
+      rollback(db);
+      return -1;
+   }
+
+   const char *update_sql = NULL;
+   const char *event_kind = NULL;
+   const char *event_detail = NULL;
+   double event_cost = 0;
+   int redispatch = 0;
+   if (strcmp(state, "unresolved") == 0)
+   {
+      update_sql =
+          "UPDATE lifecycle_work_item "
+          "SET reserved_cost_usd=0, reservation_state='', reservation_owner='', "
+          "reservation_lease_until='', updated_at=datetime('now') "
+          "WHERE work_item_id=? AND reservation_owner=? AND reservation_state='unresolved'";
+      event_kind = "redispatch";
+      event_detail = "replay result lost; re-dispatching fresh";
+      redispatch = 1;
+   }
+   else if (strcmp(state, "actual") == 0)
+   {
+      update_sql = "UPDATE lifecycle_work_item "
+                   "SET cum_cost_usd=cum_cost_usd+reserved_cost_usd, reserved_cost_usd=0, "
+                   "reservation_state='', reservation_owner='', reservation_lease_until='', "
+                   "pause_reason='replay_unrecoverable', paused_state=current_stage, "
+                   "updated_at=datetime('now') "
+                   "WHERE work_item_id=? AND reservation_owner=? AND reservation_state='actual'";
+      event_kind = "pause";
+      event_detail = "replay_unrecoverable: reconciled result lost, parked for human";
+      event_cost = amount;
+   }
+   else
+   {
+      rollback(db);
+      return -1;
+   }
+
+   if (sqlite3_prepare_v2(db, update_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, owner, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
+   sqlite3_finalize(st);
+   if (changed != 1)
+   {
+      rollback(db);
+      return -1;
+   }
+
+   static const char *event_sql =
+       "INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,cost_usd) "
+       "VALUES (?,?,?,'go-wfe',?,?)";
+   if (sqlite3_prepare_v2(db, event_sql, -1, &st, NULL) != SQLITE_OK)
+   {
+      rollback(db);
+      return -1;
+   }
+   sqlite3_bind_text(st, 1, work_item_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage ? stage : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 3, event_kind, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 4, event_detail, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_double(st, 5, event_cost);
+   rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   if (rc != SQLITE_DONE)
+   {
+      rollback(db);
+      return -1;
+   }
+   return (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK) ? redispatch : -1;
+}

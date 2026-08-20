@@ -1737,6 +1737,174 @@ static void test_transitions_are_all_or_nothing(void)
    printf("  PASS: transitions are all or nothing\n");
 }
 
+/* Whole-tree operations. The danger here is not a wrong number but a partial
+   application: a stop that reached half a tree leaves agents running under a run
+   the operator believes is stopped. So these assert the whole set moved -- and,
+   for delete, that it refuses rather than half-deleting a tree that is still
+   running. */
+static void test_tree_operations_move_the_whole_tree(void)
+{
+   db1_work_item_t item;
+   char ids[32][DB1_WFE_ID_LEN];
+
+   must(db1_work_item_create("st-root", "repo/s", "p/r", "build", "1", "run", "autonomous") == 0,
+        "root");
+   must(db1_work_item_create("st-a", "repo/s", "p/a", "build", "1", "run", "autonomous") == 0, "a");
+   must(db1_work_item_create("st-b", "repo/s", "p/b", "build", "1", "run", "autonomous") == 0, "b");
+   must(db1_work_item_set_parent("st-a", "st-root") == 0, "a under root");
+   must(db1_work_item_set_parent("st-b", "st-a") == 0, "b under a");
+
+   /* A tree with anything active refuses to be deleted: deleting the row does
+      not stop the agent working under it. */
+   must(db1_wfe_delete_tree("st-root") == -1, "an active tree will not be deleted");
+   must(db1_work_item_get("st-root", &item) == 1, "and nothing was deleted");
+   must(db1_work_item_get("st-b", &item) == 1, "not even the leaf");
+
+   /* Stopping reaches every active member and reports them all. */
+   int n = db1_wfe_stop_tree("st-root", ids, 32);
+   must(n == 3, "all three were stopped and reported");
+   must(db1_work_item_get("st-b", &item) == 1 && strcmp(item.state, "stopped") == 0,
+        "the grandchild is stopped, not just the root");
+   must(db1_work_item_get("st-root", &item) == 1 && strcmp(item.state, "stopped") == 0,
+        "and so is the root");
+   must(db1_wfe_stop_tree("st-root", ids, 32) == 0, "a second stop finds nothing active");
+
+   /* Now that nothing is active, the tree can be deleted -- entirely. */
+   must(db1_wfe_delete_tree("st-root") == 0, "a stopped tree deletes");
+   must(db1_work_item_get("st-root", &item) == 0, "root gone");
+   must(db1_work_item_get("st-a", &item) == 0, "child gone");
+   must(db1_work_item_get("st-b", &item) == 0, "grandchild gone");
+
+   /* Orphan reconciliation: a child left active under a finished parent. */
+   must(db1_work_item_create("or-root", "repo/s", "p/or", "build", "1", "run", "autonomous") == 0,
+        "a root");
+   must(db1_work_item_create("or-kid", "repo/s", "p/ok", "build", "1", "run", "autonomous") == 0,
+        "a child");
+   must(db1_work_item_create("or-gkid", "repo/s", "p/og", "build", "1", "run", "autonomous") == 0,
+        "a grandchild");
+   must(db1_work_item_set_parent("or-kid", "or-root") == 0, "link");
+   must(db1_work_item_set_parent("or-gkid", "or-kid") == 0, "link");
+   must(db1_work_item_set_terminal("or-root", "accepted") == 0, "the root finishes");
+
+   n = db1_wfe_reconcile_orphans(ids, 32);
+   must(n == 2, "the child AND its own descendant are orphaned, not just the child");
+   must(db1_work_item_get("or-gkid", &item) == 1 && strcmp(item.state, "stopped") == 0,
+        "the grandchild was reached through the orphaned child");
+   must(db1_wfe_reconcile_orphans(ids, 32) == 0, "and a second sweep finds nothing");
+
+   /* Parking a tree on its budget: every runnable member parks, and one that is
+      already parked keeps the more specific reason it has. */
+   must(db1_work_item_create("bp-root", "repo/s", "p/bp", "build", "1", "run", "autonomous") == 0,
+        "root");
+   must(db1_work_item_create("bp-kid", "repo/s", "p/bk", "build", "1", "run", "autonomous") == 0,
+        "child");
+   must(db1_work_item_set_parent("bp-kid", "bp-root") == 0, "link");
+   must(db1_work_item_set_pause("bp-kid", "ci_pending", "run") == 0, "the child is already parked");
+   must(db1_wfe_park_budget_tree("bp-root", "bp-root", 3.5) == 0, "park the tree on its budget");
+   must(db1_work_item_get("bp-root", &item) == 1, "read the root");
+   must(strcmp(item.pause_reason, "budget_cap") == 0, "the runnable root parked on budget_cap");
+   must(item.cum_cost_usd == 3.5, "and was charged the cost that tipped it over");
+   must(db1_work_item_get("bp-kid", &item) == 1, "read the child");
+   must(strcmp(item.pause_reason, "ci_pending") == 0,
+        "the already-parked child kept its own more specific reason");
+
+   /* The engine's human gate, which is not the daemon's: it parks on
+      'human_gate' and does not compare hashes. */
+   must(db1_work_item_create("gt-1", "repo/s", "p/gt", "build", "1", "review", "interactive") == 0,
+        "a run at a gate");
+   must(db1_wfe_resolve_gate("gt-1", "review", "merge", "approved", "h") == -1,
+        "a run that is not parked at a human gate cannot be resolved");
+   must(db1_work_item_set_pause("gt-1", "human_gate", "review") == 0, "park it at the gate");
+   must(db1_wfe_resolve_gate("gt-1", "review", "merge", "approved", "h") == 0, "now it resolves");
+   must(db1_work_item_get("gt-1", &item) == 1, "read");
+   must(strcmp(item.current_stage, "merge") == 0, "it advanced");
+   must(strcmp(item.pause_reason, "") == 0, "and is no longer parked");
+
+   must(db1_work_item_create("gt-2", "repo/s", "p/g2", "build", "1", "review", "interactive") == 0,
+        "another");
+   must(db1_work_item_set_pause("gt-2", "human_gate", "review") == 0, "park at the gate");
+   must(db1_wfe_reject_gate("gt-2", "review", "h2") == 0, "reject it");
+   must(db1_work_item_get("gt-2", &item) == 1, "read");
+   must(strcmp(item.state, "rejected") == 0, "the run is rejected");
+
+   printf("  PASS: tree operations move the whole tree\n");
+}
+
+/* The two recovery paths, which are decisions about money rather than state.
+   A dispatched invocation whose cost is unknown must NOT have its authorization
+   released -- the provider may already have been paid -- and a replay whose
+   measured result is unreproducible must be parked for a human rather than
+   silently re-billed. */
+static void test_recovery_never_releases_money_it_cannot_account_for(void)
+{
+   db1_work_item_t item;
+   db1_wfe_budget_reservation_t r;
+
+   /* Dispatched, cost known: the story is complete, so the reservation goes and
+      the measured cost is committed. */
+   must(db1_work_item_create("rc-1", "repo/r", "p/1", "build", "1", "run", "autonomous") == 0, "1");
+   must(db1_work_item_set_cost_cap("rc-1", 20.0) == 0, "cap");
+   must(db1_wfe_budget_reserve("rc-1", "own-1", &r) == 0 && r.allowed == 1, "reserve");
+   must(db1_wfe_park_runner_failure("rc-1", "run", "own-1", "runner_failed", "boom", 1, 1, 2.0) ==
+            0,
+        "park with a known cost");
+   must(db1_work_item_get("rc-1", &item) == 1, "read");
+   must(item.cum_cost_usd == 2.0, "the measured cost was committed");
+   must(strcmp(item.pause_reason, "runner_failed") == 0, "and it parked with the reason");
+   /* The reservation is fully released, so another owner may take one. */
+   must(db1_wfe_resume("rc-1") == 0, "unpark it");
+   must(db1_wfe_budget_reserve("rc-1", "own-2", &r) == 0 && r.busy == 0,
+        "a released reservation is available to anyone");
+   must(db1_wfe_budget_release("rc-1", "own-2") == 0, "tidy up");
+
+   /* Dispatched, cost UNKNOWN: the authorization is retained as unresolved. */
+   must(db1_work_item_create("rc-2", "repo/r", "p/2", "build", "1", "run", "autonomous") == 0, "2");
+   must(db1_work_item_set_cost_cap("rc-2", 20.0) == 0, "cap");
+   must(db1_wfe_budget_reserve("rc-2", "own-1", &r) == 0 && r.allowed == 1, "reserve");
+   must(r.amount > 0, "with a real estimate");
+   must(db1_wfe_park_runner_failure("rc-2", "run", "own-1", "runner_lost", "gone", 1, 0, 0.5) == 0,
+        "park with the cost unknown");
+   must(db1_work_item_get("rc-2", &item) == 1, "read");
+   must(item.cum_cost_usd == 0.5, "the known prefix was committed");
+   /* A parked run cannot be reserved at all -- the load is guarded on
+      pause_reason='' -- so the retained authorization is only visible once the
+      run is runnable again. That guard is why this has to unpark first. */
+   must(db1_wfe_budget_reserve("rc-2", "own-2", &r) == -1, "a parked run takes no reservation");
+   must(db1_wfe_resume("rc-2") == 0, "unpark it");
+   must(db1_wfe_budget_reserve("rc-2", "own-2", &r) == 0, "now another owner asks");
+   must(r.replay_only == 1,
+        "and is told this is replay-only -- never handed a fresh estimate over money "
+        "that may already be spent");
+
+   /* An unresolved reservation recovers by being dropped and re-dispatched. */
+   must(db1_wfe_recover_lost_replay("rc-2", "run", "own-2") == 1,
+        "the owner that took it over may re-dispatch fresh");
+   must(db1_work_item_get("rc-2", &item) == 1, "read");
+   must(item.cum_cost_usd == 0.5, "and re-dispatching charged nothing extra");
+
+   /* A measured 'actual' whose result is lost is parked, not re-dispatched. */
+   must(db1_work_item_create("rc-3", "repo/r", "p/3", "build", "1", "run", "autonomous") == 0, "3");
+   must(db1_work_item_set_cost_cap("rc-3", 20.0) == 0, "cap");
+   must(db1_wfe_budget_reserve("rc-3", "own-1", &r) == 0 && r.allowed == 1, "reserve");
+   must(db1_wfe_budget_reconcile("rc-3", "own-1", 3.0) == 1, "measure the cost");
+   must(db1_wfe_recover_lost_replay("rc-3", "run", "own-1") == 0,
+        "a measured result that is lost must NOT be re-dispatched");
+   must(db1_work_item_get("rc-3", &item) == 1, "read");
+   must(item.cum_cost_usd == 3.0, "the measured spend was committed rather than forgotten");
+   must(strcmp(item.pause_reason, "replay_unrecoverable") == 0, "and it parked for a human");
+
+   /* Recovering someone else's reservation is refused outright: it decides the
+      fate of money this caller did not authorize. */
+   must(db1_work_item_create("rc-4", "repo/r", "p/4", "build", "1", "run", "autonomous") == 0, "4");
+   must(db1_wfe_budget_reserve("rc-4", "own-1", &r) == 0, "reserve");
+   must(db1_wfe_recover_lost_replay("rc-4", "run", "someone-else") == -1,
+        "another owner cannot recover it");
+   must(db1_wfe_recover_lost_replay("rc-4", "run", "own-1") == -1,
+        "and a plain 'reserved' state is not a lost replay at all");
+
+   printf("  PASS: recovery never releases money it cannot account for\n");
+}
+
 static void test_a_first_user_claim_says_how_it_went(void)
 {
    /* The claim validates its inputs: a webuser principal, and a bearer that is
@@ -2068,6 +2236,8 @@ int main(int argc, char **argv)
    test_the_engine_sweeps_report_what_they_moved();
    test_the_budget_protocol_holds_across_the_bus();
    test_transitions_are_all_or_nothing();
+   test_tree_operations_move_the_whole_tree();
+   test_recovery_never_releases_money_it_cannot_account_for();
    test_a_first_user_claim_says_how_it_went();
    test_a_replayed_token_is_not_a_broken_store();
    test_a_digest_with_a_zero_byte_survives_the_wire();
