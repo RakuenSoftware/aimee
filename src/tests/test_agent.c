@@ -569,6 +569,31 @@ static void test_route_authority_refuses_without_provider(void)
    agent_route_failure_message("review", why, sizeof(why));
    assert(strstr(why, "no agent available for role") != NULL);
    assert(strstr(why, "routing module unavailable") == NULL);
+
+   /* A seat that is produced WITHOUT consulting the provider still clears the
+    * latch. The single-candidate shortcut returns before the provider is asked,
+    * so clearing only on provider success left the fault latched after the
+    * module came back -- and the next genuinely empty roster then read as an
+    * outage. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(agent_route(&cfg, "review") == NULL);
+   assert(agent_route_last_was_module_fault());
+   agent_config_t one;
+   memset(&one, 0, sizeof(one));
+   one.agent_count = 1;
+   snprintf(one.agents[0].name, sizeof(one.agents[0].name), "solo");
+   strcpy(one.agents[0].roles[0], "review");
+   one.agents[0].role_count = 1;
+   one.agents[0].enabled = 1;
+   one.agents[0].cost_tier = 0;
+   /* Deliberately NO reset here: the latch has to still be set going in, or this
+    * asserts nothing. One candidate needs no selection, so the shortcut answers
+    * before the authority is consulted -- and that success must clear the latch. */
+   assert(agent_route_last_was_module_fault());
+   assert(agent_route(&one, "review") == &one.agents[0]);
+   assert(!agent_route_last_was_module_fault());
+   agent_reset_route_selection_authority();
 }
 
 static void test_agent_route_selection_provider(void)

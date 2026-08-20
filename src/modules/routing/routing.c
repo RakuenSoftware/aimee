@@ -354,6 +354,20 @@ int agent_route_last_was_module_fault(void)
    return atomic_load_explicit(&g_route_module_faults, memory_order_relaxed) != 0;
 }
 
+/* Every path that actually produces a seat clears the latch -- including the
+ * ones that never consult the provider, like the single-candidate shortcut.
+ * Clearing only on provider success left the latch set after the module came
+ * back, so the next genuinely empty roster was reported as an outage. */
+static void route_selection_succeeded(void)
+{
+   atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
+}
+
+static void route_selection_faulted(void)
+{
+   atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
+}
+
 void agent_route_failure_message(const char *role, char *buf, size_t len)
 {
    if (!buf || len == 0)
@@ -401,17 +415,20 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
    if (count <= 0)
       return NULL;
    if (count == 1)
+   {
+      route_selection_succeeded();
       return candidates[0];
+   }
    if (g_route_selection_provider)
    {
       uint32_t selected = 0;
       if (g_route_selection_provider(0, (uint32_t)count, &selected) != 0 ||
           selected >= (uint32_t)count)
       {
-         atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
+         route_selection_faulted();
          return NULL;
       }
-      atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
+      route_selection_succeeded();
       return candidates[selected];
    }
    if (g_route_selection_authority)
@@ -423,10 +440,11 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
                 "selection authority declared but no provider is installed; refusing to route "
                 "%d candidates rather than fall back to the built-in balancer",
                 count);
-      atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
+      route_selection_faulted();
       return NULL;
    }
    unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
+   route_selection_succeeded();
    return candidates[pick % (unsigned int)count];
 }
 
@@ -527,10 +545,10 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
       if (g_route_selection_provider(1, (uint32_t)pool_n, &selected) != 0 ||
           selected >= (uint32_t)pool_n)
       {
-         atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
+         route_selection_faulted();
          return -1;
       }
-      atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
+      route_selection_succeeded();
       return pool[selected];
    }
    if (g_route_selection_authority)
@@ -541,9 +559,10 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
                 "selection authority declared but no provider is installed; refusing to pick "
                 "among %d role candidates",
                 pool_n);
-      atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
+      route_selection_faulted();
       return -1;
    }
+   route_selection_succeeded();
    return pool[delegate_role_rand() % (unsigned)pool_n];
 }
 
