@@ -232,3 +232,8 @@ benchmarks/compaction-quality/.cache-ab/
 
 # transient build/test logs written by local verification runs
 .*.log
+
+# scratch a local verification run writes beside the tree; committing one of
+# these has happened twice, so they are named here rather than remembered
+.commitmsg
+.db2scratch/
