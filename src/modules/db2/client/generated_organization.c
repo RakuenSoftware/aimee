@@ -213,3 +213,90 @@ aimee_module_call_result_t aimee_db2_fence_active_call(aimee_db2_call_fn call, v
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_doc_exists_by_hash_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, const char *content_hash, const char *scope,
+                                  uint32_t *exists, aimee_module_cancelled_fn cancelled,
+                                  void *cancel_context)
+{
+   if (exists)
+      *exists = 0u;
+   if (!call || !exists || !content_hash || !scope)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DOC_EXISTS_BY_HASH_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DOC_EXISTS_BY_HASH_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_doc_exists_by_hash_request_encode(content_hash, scope, request, sizeof(request),
+                                                   &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DOC_EXISTS_BY_HASH, AIMEE_DB2_STAGE_DOC_EXISTS_BY_HASH,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_doc_exists_by_hash_reply_decode(response, response_len, exists) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_pdf_quarantine_confirm_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                      uint64_t deadline_ns, const char *project,
+                                      const char *file_path, uint32_t *confirmed,
+                                      aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (confirmed)
+      *confirmed = 0u;
+   if (!call || !confirmed || !project || !file_path)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PDF_QUARANTINE_CONFIRM_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_PDF_QUARANTINE_CONFIRM_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_pdf_quarantine_confirm_request_encode(project, file_path, request, sizeof(request),
+                                                       &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PDF_QUARANTINE_CONFIRM,
+            AIMEE_DB2_STAGE_PDF_QUARANTINE_CONFIRM, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_pdf_quarantine_confirm_reply_decode(response, response_len, confirmed) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_pdf_quarantine_reject_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, const char *project,
+                                     const char *file_path, uint32_t *rejected,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (rejected)
+      *rejected = 0u;
+   if (!call || !rejected || !project || !file_path)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PDF_QUARANTINE_REJECT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_PDF_QUARANTINE_REJECT_RESPONSE_LEN];
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_pdf_quarantine_reject_request_encode(project, file_path, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PDF_QUARANTINE_REJECT,
+            AIMEE_DB2_STAGE_PDF_QUARANTINE_REJECT, trace_id, deadline_ns, request, request_len,
+            response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_pdf_quarantine_reject_reply_decode(response, response_len, rejected) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}

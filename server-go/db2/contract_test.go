@@ -10,6 +10,108 @@ import (
 	"testing"
 )
 
+// replyVector is one positive reply fixture. It is named so that shared
+// helpers can take a selector for the field they care about.
+type replyVector struct {
+	Flags                 uint32            `json:"flags"`
+	Result                uint32            `json:"result"`
+	Dimension             uint32            `json:"dimension"`
+	Count                 uint64            `json:"count"`
+	DeletedCount          uint32            `json:"deleted_count"`
+	PrunedCount           uint32            `json:"pruned_count"`
+	NormalizedCount       uint32            `json:"normalized_count"`
+	ProjectCount          uint32            `json:"project_count"`
+	PurgedCount           uint32            `json:"purged_count"`
+	RequeuedCount         uint32            `json:"requeued_count"`
+	ExpiredCount          uint32            `json:"expired_count"`
+	DirectivesExpired     uint32            `json:"directives_expired"`
+	MarkedCount           uint32            `json:"marked_count"`
+	ResetCount            uint32            `json:"reset_count"`
+	RequeuedRows          uint32            `json:"requeued_rows"`
+	DemotedArtifacts      uint32            `json:"demoted_artifacts"`
+	ReenqueuedOps         uint32            `json:"reenqueued_ops"`
+	ExtractJobs           uint32            `json:"extract_jobs"`
+	RouteCount            uint32            `json:"route_count"`
+	IdentitiesWritten     uint32            `json:"identities_written"`
+	BuildDepsWritten      uint32            `json:"build_deps_written"`
+	RulesTouched          uint32            `json:"rules_touched"`
+	ItemsRescored         uint32            `json:"items_rescored"`
+	Acquired              uint32            `json:"acquired"`
+	DriftCandidates       uint64            `json:"drift_candidates"`
+	ReleaseID             uint64            `json:"release_id"`
+	LastTraceID           uint64            `json:"last_trace_id"`
+	ArchivedCount         uint32            `json:"archived_count"`
+	Tagged                uint32            `json:"tagged"`
+	InForce               uint32            `json:"in_force"`
+	Present               uint32            `json:"present"`
+	UpdatedRows           uint32            `json:"updated_rows"`
+	Content               string            `json:"content"`
+	SessionIDReply        string            `json:"session_id"`
+	RefKey                string            `json:"ref_key"`
+	MaxUpdatedAt          string            `json:"max_updated_at"`
+	RowKey                string            `json:"key"`
+	RowKind               string            `json:"kind"`
+	RowUseCount           uint32            `json:"use_count"`
+	Truncated             uint32            `json:"truncated"`
+	Label                 string            `json:"label"`
+	ConfidenceBits        uint64            `json:"confidence_binary64_bits"`
+	SalienceBits          uint64            `json:"salience_binary64_bits"`
+	Tier                  string            `json:"tier"`
+	UseCases              string            `json:"use_cases"`
+	LastUsedAt            string            `json:"last_used_at"`
+	CreatedAt             string            `json:"created_at"`
+	UpdatedAt             string            `json:"updated_at"`
+	RowSourceSession      string            `json:"source_session"`
+	ProvenanceCategory    string            `json:"provenance_category"`
+	DeletedRows           uint32            `json:"deleted_rows"`
+	DemotedCount          uint32            `json:"demoted_count"`
+	AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
+	LowEffectivenessCount uint32            `json:"low_effectiveness_count"`
+	HighImpactCount       uint32            `json:"high_impact_count"`
+	MemoryIDs             []uint64          `json:"memory_ids"`
+	SnapshotsDeleted      uint32            `json:"snapshots_deleted"`
+	ContradictionsDeleted uint32            `json:"contradictions_deleted"`
+	Counters              map[string]uint32 `json:"counters"`
+	TierCounts            []uint32          `json:"tier_counts"`
+	KindCounts            []uint32          `json:"kind_counts"`
+	Total                 uint32            `json:"total"`
+	Conflicts             uint32            `json:"conflicts"`
+	Level0Deleted         uint32            `json:"level0_deleted"`
+	StaleLevel1Deleted    uint32            `json:"stale_level1_deleted"`
+	CascadedCount         uint32            `json:"cascaded_count"`
+	PromotedCount         uint32            `json:"promoted_count"`
+	ReclassifiedCount     uint32            `json:"reclassified_count"`
+	Exists                uint32            `json:"exists"`
+	Referenced            uint32            `json:"referenced"`
+	Fresh                 uint32            `json:"fresh"`
+	Confirmed             uint32            `json:"confirmed"`
+	Rejected              uint32            `json:"rejected"`
+	FenceActive           uint32            `json:"active"`
+	Found                 uint32            `json:"found"`
+	ID                    uint64            `json:"id"`
+	Size                  uint32            `json:"size"`
+	InUse                 uint32            `json:"in_use"`
+	Waiters               uint32            `json:"waiters"`
+	LeaseGrants           uint64            `json:"lease_grants"`
+	LeaseTimeouts         uint64            `json:"lease_timeouts"`
+	Stuck                 uint64            `json:"stuck"`
+	Poisoned              uint64            `json:"poisoned"`
+	RefusedCount          uint64            `json:"refused_count"`
+	LastOffered           uint32            `json:"last_offered"`
+	Available             uint32            `json:"available"`
+	Active                uint32            `json:"active_connections"`
+	Maximum               uint32            `json:"max_connections"`
+	IsReplica             uint32            `json:"is_replica"`
+	ReplicaLag            uint64            `json:"replica_lag_bytes"`
+	TargetDim             uint32            `json:"target_dimension"`
+	StartedEpoch          uint64            `json:"started_epoch"`
+	WasInProgress         uint32            `json:"was_in_progress"`
+	RecordedDim           uint32            `json:"recorded_dimension"`
+	RunningDim            uint32            `json:"running_dimension"`
+	ServingID             string            `json:"serving_id"`
+	Hex                   string            `json:"hex"`
+}
+
 type wireBaseline struct {
 	CatalogSHA256 string `json:"catalog_sha256"`
 	WireVersion   uint32 `json:"wire_version"`
@@ -90,6 +192,12 @@ type wireBaseline struct {
 			StateValue                 string   `json:"state_value"`
 			Version                    string   `json:"version"`
 			UpdatedAt                  string   `json:"updated_at"`
+			Window                     string   `json:"window"`
+			ContentHash                string   `json:"content_hash"`
+			Scope                      string   `json:"scope"`
+			FilePath                   string   `json:"file_path"`
+			CertIssuer                 string   `json:"cert_issuer"`
+			CertSerialNorm             string   `json:"cert_serial_norm"`
 			Project                    string   `json:"project"`
 			StaleL1Tier                string   `json:"stale_l1_tier"`
 			MaximumKinds               uint32   `json:"maximum_kinds"`
@@ -120,102 +228,7 @@ type wireBaseline struct {
 			} `json:"negative"`
 		} `json:"request"`
 		Reply struct {
-			Positive []struct {
-				Flags                 uint32            `json:"flags"`
-				Result                uint32            `json:"result"`
-				Dimension             uint32            `json:"dimension"`
-				Count                 uint64            `json:"count"`
-				DeletedCount          uint32            `json:"deleted_count"`
-				PrunedCount           uint32            `json:"pruned_count"`
-				NormalizedCount       uint32            `json:"normalized_count"`
-				ProjectCount          uint32            `json:"project_count"`
-				PurgedCount           uint32            `json:"purged_count"`
-				RequeuedCount         uint32            `json:"requeued_count"`
-				ExpiredCount          uint32            `json:"expired_count"`
-				DirectivesExpired     uint32            `json:"directives_expired"`
-				MarkedCount           uint32            `json:"marked_count"`
-				ResetCount            uint32            `json:"reset_count"`
-				RequeuedRows          uint32            `json:"requeued_rows"`
-				DemotedArtifacts      uint32            `json:"demoted_artifacts"`
-				ReenqueuedOps         uint32            `json:"reenqueued_ops"`
-				ExtractJobs           uint32            `json:"extract_jobs"`
-				RouteCount            uint32            `json:"route_count"`
-				IdentitiesWritten     uint32            `json:"identities_written"`
-				BuildDepsWritten      uint32            `json:"build_deps_written"`
-				RulesTouched          uint32            `json:"rules_touched"`
-				ItemsRescored         uint32            `json:"items_rescored"`
-				Acquired              uint32            `json:"acquired"`
-				DriftCandidates       uint64            `json:"drift_candidates"`
-				ReleaseID             uint64            `json:"release_id"`
-				LastTraceID           uint64            `json:"last_trace_id"`
-				ArchivedCount         uint32            `json:"archived_count"`
-				Tagged                uint32            `json:"tagged"`
-				InForce               uint32            `json:"in_force"`
-				Present               uint32            `json:"present"`
-				UpdatedRows           uint32            `json:"updated_rows"`
-				Content               string            `json:"content"`
-				SessionIDReply        string            `json:"session_id"`
-				RefKey                string            `json:"ref_key"`
-				MaxUpdatedAt          string            `json:"max_updated_at"`
-				RowKey                string            `json:"key"`
-				RowKind               string            `json:"kind"`
-				RowUseCount           uint32            `json:"use_count"`
-				Truncated             uint32            `json:"truncated"`
-				Label                 string            `json:"label"`
-				ConfidenceBits        uint64            `json:"confidence_binary64_bits"`
-				SalienceBits          uint64            `json:"salience_binary64_bits"`
-				Tier                  string            `json:"tier"`
-				UseCases              string            `json:"use_cases"`
-				LastUsedAt            string            `json:"last_used_at"`
-				CreatedAt             string            `json:"created_at"`
-				UpdatedAt             string            `json:"updated_at"`
-				RowSourceSession      string            `json:"source_session"`
-				ProvenanceCategory    string            `json:"provenance_category"`
-				DeletedRows           uint32            `json:"deleted_rows"`
-				DemotedCount          uint32            `json:"demoted_count"`
-				AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
-				LowEffectivenessCount uint32            `json:"low_effectiveness_count"`
-				HighImpactCount       uint32            `json:"high_impact_count"`
-				MemoryIDs             []uint64          `json:"memory_ids"`
-				SnapshotsDeleted      uint32            `json:"snapshots_deleted"`
-				ContradictionsDeleted uint32            `json:"contradictions_deleted"`
-				Counters              map[string]uint32 `json:"counters"`
-				TierCounts            []uint32          `json:"tier_counts"`
-				KindCounts            []uint32          `json:"kind_counts"`
-				Total                 uint32            `json:"total"`
-				Conflicts             uint32            `json:"conflicts"`
-				Level0Deleted         uint32            `json:"level0_deleted"`
-				StaleLevel1Deleted    uint32            `json:"stale_level1_deleted"`
-				CascadedCount         uint32            `json:"cascaded_count"`
-				PromotedCount         uint32            `json:"promoted_count"`
-				ReclassifiedCount     uint32            `json:"reclassified_count"`
-				Exists                uint32            `json:"exists"`
-				Referenced            uint32            `json:"referenced"`
-				FenceActive           uint32            `json:"active"`
-				Found                 uint32            `json:"found"`
-				ID                    uint64            `json:"id"`
-				Size                  uint32            `json:"size"`
-				InUse                 uint32            `json:"in_use"`
-				Waiters               uint32            `json:"waiters"`
-				LeaseGrants           uint64            `json:"lease_grants"`
-				LeaseTimeouts         uint64            `json:"lease_timeouts"`
-				Stuck                 uint64            `json:"stuck"`
-				Poisoned              uint64            `json:"poisoned"`
-				RefusedCount          uint64            `json:"refused_count"`
-				LastOffered           uint32            `json:"last_offered"`
-				Available             uint32            `json:"available"`
-				Active                uint32            `json:"active_connections"`
-				Maximum               uint32            `json:"max_connections"`
-				IsReplica             uint32            `json:"is_replica"`
-				ReplicaLag            uint64            `json:"replica_lag_bytes"`
-				TargetDim             uint32            `json:"target_dimension"`
-				StartedEpoch          uint64            `json:"started_epoch"`
-				WasInProgress         uint32            `json:"was_in_progress"`
-				RecordedDim           uint32            `json:"recorded_dimension"`
-				RunningDim            uint32            `json:"running_dimension"`
-				ServingID             string            `json:"serving_id"`
-				Hex                   string            `json:"hex"`
-			} `json:"positive"`
+			Positive []replyVector `json:"positive"`
 			Negative []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -324,7 +337,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 133 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 138 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -408,55 +421,60 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[81].Name != "drift_candidates" ||
 		baseline.Operations[82].Name != "file_index_delete_project" ||
 		baseline.Operations[83].Name != "entity_observation_count" ||
-		baseline.Operations[84].Name != "rules_decay" ||
-		baseline.Operations[85].Name != "curiosity_rescore_all" ||
-		baseline.Operations[86].Name != "mining_seed_job_defaults" ||
-		baseline.Operations[87].Name != "proposals_archive_expired" ||
-		baseline.Operations[88].Name != "trace_mining_last_id" ||
-		baseline.Operations[89].Name != "anti_pattern_bump" ||
-		baseline.Operations[90].Name != "anti_pattern_delete" ||
-		baseline.Operations[91].Name != "trace_mining_record" ||
-		baseline.Operations[92].Name != "anti_pattern_exists_exact" ||
-		baseline.Operations[93].Name != "anti_pattern_exists_by_source_ref" ||
-		baseline.Operations[94].Name != "artifact_citation_count" ||
-		baseline.Operations[95].Name != "commits_in_last_7_days" ||
-		baseline.Operations[96].Name != "fidelity_attribution_count" ||
-		baseline.Operations[98].Name != "failed_query_bump" ||
-		baseline.Operations[102].Name != "evidence_mark_failed" ||
-		baseline.Operations[103].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[104].Name != "doc_delete" ||
-		baseline.Operations[105].Name != "task_delete" ||
-		baseline.Operations[106].Name != "clear_project" ||
-		baseline.Operations[107].Name != "clear_current_project" ||
-		baseline.Operations[108].Name != "document_exists" ||
-		baseline.Operations[109].Name != "blob_referenced" ||
-		baseline.Operations[110].Name != "fence_active" ||
-		baseline.Operations[111].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[112].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[113].Name != "release_get_active" ||
-		baseline.Operations[114].Name != "prospective_sweep_expired" ||
-		baseline.Operations[115].Name != "directive_sweep_expired" ||
-		baseline.Operations[116].Name != "mark_revisit_due" ||
-		baseline.Operations[117].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[118].Name != "evidence_reembed_all" ||
-		baseline.Operations[119].Name != "curator_reembed_all" ||
-		baseline.Operations[120].Name != "synth_reenqueue_all" ||
-		baseline.Operations[121].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[122].Name != "directive_suppress" ||
-		baseline.Operations[123].Name != "directive_record_surface" ||
-		baseline.Operations[124].Name != "async_pending_count" ||
-		baseline.Operations[97].Name != "artifact_stamp_reflected" ||
-		baseline.Operations[125].Name != "runtime_state_touch" ||
-		baseline.Operations[126].Name != "synth_enqueue" ||
-		baseline.Operations[127].Name != "synth_mark_done" ||
-		baseline.Operations[128].Name != "reembed_mark_finished" ||
-		baseline.Operations[129].Name != "mining_job_try_lock" ||
-		baseline.Operations[99].Name != "artifact_set_state" ||
-		baseline.Operations[100].Name != "artifact_register_exemplar" ||
-		baseline.Operations[101].Name != "evidence_enqueue" ||
-		baseline.Operations[130].Name != "synth_mark_failed" ||
-		baseline.Operations[131].Name != "runtime_state_set" ||
-		baseline.Operations[132].Name != "set_active_embedder_version" {
+		baseline.Operations[84].Name != "entity_profile_fresh" ||
+		baseline.Operations[85].Name != "rules_decay" ||
+		baseline.Operations[86].Name != "curiosity_rescore_all" ||
+		baseline.Operations[87].Name != "mining_seed_job_defaults" ||
+		baseline.Operations[88].Name != "proposals_archive_expired" ||
+		baseline.Operations[89].Name != "trace_mining_last_id" ||
+		baseline.Operations[90].Name != "anti_pattern_bump" ||
+		baseline.Operations[91].Name != "anti_pattern_delete" ||
+		baseline.Operations[92].Name != "trace_mining_record" ||
+		baseline.Operations[93].Name != "anti_pattern_exists_exact" ||
+		baseline.Operations[94].Name != "anti_pattern_exists_by_source_ref" ||
+		baseline.Operations[95].Name != "artifact_citation_count" ||
+		baseline.Operations[96].Name != "commits_in_last_7_days" ||
+		baseline.Operations[97].Name != "fidelity_attribution_count" ||
+		baseline.Operations[99].Name != "failed_query_bump" ||
+		baseline.Operations[103].Name != "evidence_mark_failed" ||
+		baseline.Operations[104].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[105].Name != "doc_delete" ||
+		baseline.Operations[106].Name != "task_delete" ||
+		baseline.Operations[107].Name != "clear_project" ||
+		baseline.Operations[108].Name != "clear_current_project" ||
+		baseline.Operations[109].Name != "document_exists" ||
+		baseline.Operations[110].Name != "blob_referenced" ||
+		baseline.Operations[111].Name != "fence_active" ||
+		baseline.Operations[114].Name != "pdf_quarantine_reject" ||
+		baseline.Operations[115].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[116].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[117].Name != "release_get_active" ||
+		baseline.Operations[118].Name != "enrollment_active" ||
+		baseline.Operations[119].Name != "prospective_sweep_expired" ||
+		baseline.Operations[120].Name != "directive_sweep_expired" ||
+		baseline.Operations[121].Name != "mark_revisit_due" ||
+		baseline.Operations[122].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[123].Name != "evidence_reembed_all" ||
+		baseline.Operations[124].Name != "curator_reembed_all" ||
+		baseline.Operations[125].Name != "synth_reenqueue_all" ||
+		baseline.Operations[126].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[127].Name != "directive_suppress" ||
+		baseline.Operations[128].Name != "directive_record_surface" ||
+		baseline.Operations[129].Name != "async_pending_count" ||
+		baseline.Operations[98].Name != "artifact_stamp_reflected" ||
+		baseline.Operations[130].Name != "runtime_state_touch" ||
+		baseline.Operations[131].Name != "synth_enqueue" ||
+		baseline.Operations[132].Name != "synth_mark_done" ||
+		baseline.Operations[133].Name != "reembed_mark_finished" ||
+		baseline.Operations[134].Name != "mining_job_try_lock" ||
+		baseline.Operations[100].Name != "artifact_set_state" ||
+		baseline.Operations[101].Name != "artifact_register_exemplar" ||
+		baseline.Operations[102].Name != "evidence_enqueue" ||
+		baseline.Operations[135].Name != "synth_mark_failed" ||
+		baseline.Operations[136].Name != "runtime_state_set" ||
+		baseline.Operations[137].Name != "set_active_embedder_version" ||
+		baseline.Operations[112].Name != "doc_exists_by_hash" ||
+		baseline.Operations[113].Name != "pdf_quarantine_confirm" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -699,7 +717,7 @@ func TestCuratorReenqueueExtractAllMatchesEverySharedCVector(t *testing.T) {
 
 func TestSynthReenqueueAllMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	operation := baseline.Operations[120]
+	operation := baseline.Operations[125]
 	if operation.Family != "maintenance" {
 		t.Fatalf("family = %q, want maintenance", operation.Family)
 	}
@@ -1009,13 +1027,13 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 		decode func([]byte) (uint64, error)
 		reply  func([]byte) error
 	}{
-		{89, "anti_pattern_bump", "learning", 41,
+		{90, "anti_pattern_bump", "learning", 41,
 			EncodeAntiPatternBumpRequest, DecodeAntiPatternBumpRequest, DecodeAntiPatternBumpReply},
-		{90, "anti_pattern_delete", "learning", 42,
+		{91, "anti_pattern_delete", "learning", 42,
 			EncodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteRequest, DecodeAntiPatternDeleteReply},
-		{104, "doc_delete", "organization", 43,
+		{105, "doc_delete", "organization", 43,
 			EncodeDocDeleteRequest, DecodeDocDeleteRequest, DecodeDocDeleteReply},
-		{105, "task_delete", "organization", 44,
+		{106, "task_delete", "organization", 44,
 			EncodeTaskDeleteRequest, DecodeTaskDeleteRequest, DecodeTaskDeleteReply},
 	} {
 		entry := baseline.Operations[operation.index]
@@ -1049,8 +1067,8 @@ func TestByIDOperationsMatchEverySharedCVector(t *testing.T) {
 
 func TestDirectiveIDOperationsMatchEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	suppress := baseline.Operations[122]
-	surface := baseline.Operations[123]
+	suppress := baseline.Operations[127]
+	surface := baseline.Operations[128]
 	if suppress.Family != "maintenance" || surface.Family != "maintenance" {
 		t.Fatalf("families = %q/%q, want maintenance", suppress.Family, surface.Family)
 	}
@@ -1222,8 +1240,8 @@ func TestReleaseGetActiveMatchesEverySharedCVector(t *testing.T) {
 
 func TestVectorRebuildLockMatchesEverySharedCVector(t *testing.T) {
 	baseline := loadWireBaseline(t)
-	acquire := baseline.Operations[111]
-	release := baseline.Operations[112]
+	acquire := baseline.Operations[115]
+	release := baseline.Operations[116]
 	if acquire.Family != "custody" || release.Family != "custody" {
 		t.Fatalf("families = %q/%q, want custody", acquire.Family, release.Family)
 	}
@@ -2704,6 +2722,97 @@ func stringPairAckVectors(t *testing.T, index int, wantFirst string, wantSecond 
 	}
 	for _, vector := range operation.Reply.Negative {
 		if err := decodeReply(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("reply %s decoded", vector.Mutation)
+		}
+	}
+}
+
+func TestEntityProfileFreshMatchesEverySharedCVector(t *testing.T) {
+	stringPairCountVectors(t, operationIndex(t, "entity_profile_fresh"),
+		loadWireBaseline(t).Operations[operationIndex(t, "entity_profile_fresh")].Request.EntityID,
+		loadWireBaseline(t).Operations[operationIndex(t, "entity_profile_fresh")].Request.Window,
+		func(v replyVector) uint32 { return v.Fresh },
+		EncodeEntityProfileFreshRequest, DecodeEntityProfileFreshRequest,
+		EncodeEntityProfileFreshReply, DecodeEntityProfileFreshReply)
+}
+
+func TestDocExistsByHashMatchesEverySharedCVector(t *testing.T) {
+	stringPairCountVectors(t, operationIndex(t, "doc_exists_by_hash"),
+		loadWireBaseline(t).Operations[operationIndex(t, "doc_exists_by_hash")].Request.ContentHash,
+		loadWireBaseline(t).Operations[operationIndex(t, "doc_exists_by_hash")].Request.Scope,
+		func(v replyVector) uint32 { return v.Exists },
+		EncodeDocExistsByHashRequest, DecodeDocExistsByHashRequest,
+		EncodeDocExistsByHashReply, DecodeDocExistsByHashReply)
+}
+
+func TestPdfQuarantineConfirmMatchesEverySharedCVector(t *testing.T) {
+	stringPairCountVectors(t, operationIndex(t, "pdf_quarantine_confirm"),
+		loadWireBaseline(t).Operations[operationIndex(t, "pdf_quarantine_confirm")].Request.Project,
+		loadWireBaseline(t).Operations[operationIndex(t, "pdf_quarantine_confirm")].Request.FilePath,
+		func(v replyVector) uint32 { return v.Confirmed },
+		EncodePdfQuarantineConfirmRequest, DecodePdfQuarantineConfirmRequest,
+		EncodePdfQuarantineConfirmReply, DecodePdfQuarantineConfirmReply)
+}
+
+func TestPdfQuarantineRejectMatchesEverySharedCVector(t *testing.T) {
+	stringPairCountVectors(t, operationIndex(t, "pdf_quarantine_reject"),
+		loadWireBaseline(t).Operations[operationIndex(t, "pdf_quarantine_reject")].Request.Project,
+		loadWireBaseline(t).Operations[operationIndex(t, "pdf_quarantine_reject")].Request.FilePath,
+		func(v replyVector) uint32 { return v.Rejected },
+		EncodePdfQuarantineRejectRequest, DecodePdfQuarantineRejectRequest,
+		EncodePdfQuarantineRejectReply, DecodePdfQuarantineRejectReply)
+}
+
+func TestEnrollmentActiveMatchesEverySharedCVector(t *testing.T) {
+	stringPairCountVectors(t, operationIndex(t, "enrollment_active"),
+		loadWireBaseline(t).Operations[operationIndex(t, "enrollment_active")].Request.CertIssuer,
+		loadWireBaseline(t).Operations[operationIndex(t, "enrollment_active")].Request.CertSerialNorm,
+		// `Active` is the pool's connection count; the field carrying an
+		// `active` reply is FenceActive, which this shares with the fence probe.
+		func(v replyVector) uint32 { return v.FenceActive },
+		EncodeEnrollmentActiveRequest, DecodeEnrollmentActiveRequest,
+		EncodeEnrollmentActiveReply, DecodeEnrollmentActiveReply)
+}
+
+// stringPairCountVectors drives one db2-envelope-string-pair-u32-v1 operation
+// through every vector. The answer is read through a selector rather than
+// guessed from whichever field is non-zero: these operations name their answer
+// differently, and a zero answer is a legitimate positive.
+func stringPairCountVectors(t *testing.T, index int, wantFirst string, wantSecond string,
+	answerOf func(replyVector) uint32,
+	encodeRequest func(string, string) ([]byte, error),
+	decodeRequest func([]byte) (string, string, error),
+	encodeReply func(uint32) ([]byte, error),
+	decodeReply func([]byte) (uint32, error)) {
+	t.Helper()
+	operation := loadWireBaseline(t).Operations[index]
+
+	request, err := encodeRequest(wantFirst, wantSecond)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	first, second, err := decodeRequest(request)
+	if err != nil || first != wantFirst || second != wantSecond {
+		t.Fatalf("request decode: %v %q %q", err, first, second)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := decodeRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+
+	for _, vector := range operation.Reply.Positive {
+		answer := answerOf(vector)
+		reply, err := encodeReply(answer)
+		if err != nil || hex.EncodeToString(reply) != vector.Hex {
+			t.Fatalf("reply encode: %v %x", err, reply)
+		}
+		if got, err := decodeReply(reply); err != nil || got != answer {
+			t.Fatalf("reply decode: %v %d", err, got)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		if _, err := decodeReply(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("reply %s decoded", vector.Mutation)
 		}
 	}

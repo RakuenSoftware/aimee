@@ -2474,6 +2474,35 @@
       }
     },
     {
+      "family": "index",
+      "id": 13,
+      "name": "entity_profile_fresh",
+      "wire_format": "db2-envelope-string-pair-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity profiles and their refresh stamps are relational DB2 rows, so freshness is measured against DB2's own clock.",
+      "c_symbols": ["db2_entity_profile_is_fresh"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 350,
+        "policy": {"reads": "the window is a Postgres interval the caller supplies, compared against DB2's clock; an unparseable one makes the statement fail rather than answer false"},
+        "fields": [
+          {"name": "entity_id", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 255},
+          {"name": "window", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 63}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "fresh", "type": "u32", "minimum": 0, "maximum": 1}
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -3179,6 +3208,93 @@
       }
     },
     {
+      "family": "organization",
+      "id": 9,
+      "name": "doc_exists_by_hash",
+      "wire_format": "db2-envelope-string-pair-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Documents and the scopes they belong to are relational DB2 rows, so whether one with this content exists is DB2 authority.",
+      "c_symbols": ["db2_kb_doc_exists_by_hash_scope"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 286,
+        "policy": {"reads": "the hash is matched exactly and within one scope, so the same content in another scope does not count"},
+        "fields": [
+          {"name": "content_hash", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127},
+          {"name": "scope", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+      }
+    },
+    {
+      "family": "organization",
+      "id": 10,
+      "name": "pdf_quarantine_confirm",
+      "wire_format": "db2-envelope-string-pair-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Quarantined documents and the generation they belong to are relational DB2 state.",
+      "c_symbols": ["db2_kb_pdf_quarantine_confirm"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 798,
+        "policy": {"reads": "only a pending PDF at the project's current generation is confirmed, so a stale or already-confirmed one counts zero rather than failing"},
+        "fields": [
+          {"name": "project", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 255},
+          {"name": "file_path", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "confirmed", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
+      "family": "organization",
+      "id": 11,
+      "name": "pdf_quarantine_reject",
+      "wire_format": "db2-envelope-string-pair-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Quarantined documents and the generation they belong to are relational DB2 state.",
+      "c_symbols": ["db2_kb_pdf_quarantine_reject"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 798,
+        "policy": {"reads": "the mirror of confirm: it deletes rather than clears, and the same generation and pending conditions apply"},
+        "fields": [
+          {"name": "project", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 255},
+          {"name": "file_path", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 511}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "rejected", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    {
       "family": "custody",
       "id": 1,
       "name": "vector_rebuild_lock_try_acquire",
@@ -3254,6 +3370,35 @@
         "encoded_size_error": 24,
         "field": {"name": "release_id", "type": "u64", "minimum": 0,
                   "maximum": 9223372036854775807}
+      }
+    },
+    {
+      "family": "custody",
+      "id": 4,
+      "name": "enrollment_active",
+      "wire_format": "db2-envelope-string-pair-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Enrollments and their revocation state are relational DB2 rows, so whether a certificate is enrolled is DB2 authority.",
+      "c_symbols": ["db2_enrollment_is_active_by_key"],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 670,
+        "policy": {"reads": "an enrollment that is revoked reads as inactive, so a caller cannot tell a revoked one from one that was never enrolled"},
+        "fields": [
+          {"name": "cert_issuer", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 511},
+          {"name": "cert_serial_norm", "type": "utf8", "minimum_bytes": 1,
+           "maximum_bytes": 127}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "active", "type": "u32", "minimum": 0, "maximum": 1}
       }
     },
     {

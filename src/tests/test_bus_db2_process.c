@@ -566,6 +566,39 @@ int main(int argc, char **argv)
                                                      "replay-version", "2026-01-01T00:00:00Z", NULL,
                                                      NULL) == AIMEE_MODULE_CALL_OK);
 
+   /* Five pair statements against real tables. entity_profile_fresh passes a
+    * real Postgres interval, because an unparseable one fails at the database
+    * rather than answering false -- which is the property its policy states. */
+   string_answer = 99;
+   assert(aimee_db2_entity_profile_fresh_call(call_client, &client, 9180, 0, "replay-first",
+                                              "-1 hour", &string_answer, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_doc_exists_by_hash_call(call_client, &client, 9181, 0, "replay-first",
+                                            "replay-scope", &string_answer, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_pdf_quarantine_confirm_call(call_client, &client, 9182, 0, "replay-first",
+                                                "replay/file.pdf", &string_answer, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_pdf_quarantine_reject_call(call_client, &client, 9183, 0, "replay-first",
+                                               "replay/file.pdf", &string_answer, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_enrollment_active_call(call_client, &client, 9184, 0, "replay-first",
+                                           "replay-serial", &string_answer, NULL,
+                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 0);
+
    assert(aimee_db2_health_record_call(call_client, &client, 9035, 0, 4u, 2u, 9u, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
 

@@ -17,6 +17,7 @@
 #include "c/decision_log.h"
 #include "c/entity_edges.h"
 #include "c/entity_profiles.h"
+#include "c/enrollments.h"
 #include "c/epistemic_directives.h"
 #include "c/evidence_vectors.h"
 #include "c/fidelity.h"
@@ -696,6 +697,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .synth_mark_failed = db2_synth_mark_failed,
        .runtime_state_set = db2_kb_runtime_state_set,
        .set_active_embedder_version = db2_kb_service_set_active_embedder_version,
+       .entity_profile_fresh = db2_entity_profile_is_fresh,
+       .doc_exists_by_hash = db2_kb_doc_exists_by_hash_scope,
+       .pdf_quarantine_confirm = db2_kb_pdf_quarantine_confirm,
+       .pdf_quarantine_reject = db2_kb_pdf_quarantine_reject,
+       .enrollment_active = db2_enrollment_is_active_by_key,
        .session_neighbors_before = production_session_neighbors_before,
        .session_neighbors_after = production_session_neighbors_after,
        .row_get = production_row_get,
@@ -923,6 +929,52 @@ static aimee_module_status_t db2_dispatch_string_pair_ack(
       if (written != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       if (binding->encode(response_body, response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+   return AIMEE_MODULE_STATUS_OK;
+}
+
+/* db2-envelope-string-pair-u32-v1: two bounded strings in, one bounded number
+ * out. Same arguments as the pair acknowledgement above; the difference is that
+ * these answer something. */
+typedef struct
+{
+   int (*decode)(const uint8_t *input, size_t input_len, char *first, size_t first_capacity,
+                 char *second, size_t second_capacity);
+   int (*encode)(uint32_t answer, uint8_t *output, size_t capacity, uint32_t *output_len);
+   int (*read)(const char *first, const char *second);
+   uint32_t bound;
+} db2_string_pair_count_binding_t;
+
+static aimee_module_status_t db2_dispatch_string_pair_count(
+    const db2_string_pair_count_binding_t *bindings, size_t count, const uint8_t *request_body,
+    uint32_t request_len, uint8_t *response_body, size_t response_capacity, uint32_t *response_len,
+    const aimee_module_invocation_t *invocation, int *handled)
+{
+   char first[DB2_STRING_PAIR_FIRST_MAX + 1];
+   char second[DB2_STRING_PAIR_SECOND_MAX + 1];
+   *handled = 0;
+   for (size_t index = 0; index < count; index++)
+   {
+      const db2_string_pair_count_binding_t *binding = &bindings[index];
+      if (binding->decode(request_body, request_len, first, sizeof(first), second,
+                          sizeof(second)) != 0)
+         continue;
+      *handled = 1;
+      if (response_capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!binding->read)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      int counted = binding->read(first, second);
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (counted < 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      uint32_t value = (uint32_t)counted;
+      if (value > binding->bound)
+         value = binding->bound;
+      if (binding->encode(value, response_body, response_capacity, response_len) != 0)
          return AIMEE_MODULE_STATUS_INTERNAL;
       return AIMEE_MODULE_STATUS_OK;
    }
@@ -2402,6 +2454,20 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (handled)
             return status;
       }
+      {
+         /* Every db2-envelope-string-pair-u32-v1 operation this family owns. */
+         const db2_string_pair_count_binding_t bindings[] = {
+             {aimee_db2_entity_profile_fresh_request_decode,
+              aimee_db2_entity_profile_fresh_reply_encode,
+              backend ? backend->entity_profile_fresh : NULL, AIMEE_DB2_ENTITY_PROFILE_FRESH_MAX},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_pair_count(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -2595,6 +2661,19 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE)
    {
+      {
+         /* Every db2-envelope-string-pair-u32-v1 operation this family owns. */
+         const db2_string_pair_count_binding_t bindings[] = {
+             {aimee_db2_enrollment_active_request_decode, aimee_db2_enrollment_active_reply_encode,
+              backend ? backend->enrollment_active : NULL, AIMEE_DB2_ENROLLMENT_ACTIVE_MAX},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_pair_count(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
       if (aimee_db2_vector_rebuild_lock_try_acquire_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_VECTOR_REBUILD_LOCK_TRY_ACQUIRE_RESPONSE_LEN)
@@ -2744,6 +2823,27 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          };
          int handled = 0;
          aimee_module_status_t status = db2_dispatch_u64_probe(
+             bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
+             response_body, response_capacity, response_len, invocation, &handled);
+         if (handled)
+            return status;
+      }
+      {
+         /* Every db2-envelope-string-pair-u32-v1 operation this family owns. */
+         const db2_string_pair_count_binding_t bindings[] = {
+             {aimee_db2_doc_exists_by_hash_request_decode,
+              aimee_db2_doc_exists_by_hash_reply_encode,
+              backend ? backend->doc_exists_by_hash : NULL, AIMEE_DB2_DOC_EXISTS_BY_HASH_MAX},
+             {aimee_db2_pdf_quarantine_confirm_request_decode,
+              aimee_db2_pdf_quarantine_confirm_reply_encode,
+              backend ? backend->pdf_quarantine_confirm : NULL,
+              AIMEE_DB2_PDF_QUARANTINE_CONFIRM_MAX},
+             {aimee_db2_pdf_quarantine_reject_request_decode,
+              aimee_db2_pdf_quarantine_reject_reply_encode,
+              backend ? backend->pdf_quarantine_reject : NULL, AIMEE_DB2_PDF_QUARANTINE_REJECT_MAX},
+         };
+         int handled = 0;
+         aimee_module_status_t status = db2_dispatch_string_pair_count(
              bindings, sizeof(bindings) / sizeof(bindings[0]), request_body, request_len,
              response_body, response_capacity, response_len, invocation, &handled);
          if (handled)

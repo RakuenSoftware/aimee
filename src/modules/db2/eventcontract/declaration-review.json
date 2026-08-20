@@ -380,6 +380,14 @@
       "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
     },
     {
+      "symbol": "db2_enrollment_is_active_by_key",
+      "signature_sha256": "313dfb279e65f3be168e4d333d47441c8dccb1c9daa8146dfbd61126229f3397",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.enrollment_active operation replaces the enrollment probe. A revoked enrollment reads as inactive, exactly like one that was never enrolled, so a caller cannot tell the two apart through this operation -- which matters because they mean different things to whoever is deciding what to do next."
+    },
+    {
       "symbol": "db2_entity_count_observations",
       "signature_sha256": "b1542fbbdf4772d744aaea46795c0360004baa6e503f3615fa946aa54e44d3e0",
       "disposition": "wire-operation",
@@ -418,6 +426,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The symbol counterpart of the file key builder, and private for the same reason. Both encode their components the same way and both must stay that way; a divergence produces keys that look valid and match nothing."
+    },
+    {
+      "symbol": "db2_entity_profile_is_fresh",
+      "signature_sha256": "9f07ca476f598ec073a07f42cb8e91d9d13c381823f0b424a4fc53aa8b53b26a",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_profile_fresh operation replaces the freshness probe. The window is a Postgres interval the caller supplies and DB2 evaluates against its own clock, so an unparseable interval makes the statement fail rather than answer false; the wire bounds its length but cannot check its syntax."
     },
     {
       "symbol": "db2_evidence_enqueue",
@@ -508,6 +524,14 @@
       "reason": "The typed organization.doc_delete operation removes a document row by identifier, reporting an error when nothing matched."
     },
     {
+      "symbol": "db2_kb_doc_exists_by_hash_scope",
+      "signature_sha256": "7f43d3cf217b1f13bdfbe738fd92b97ee87a69246fded9df1142a37a067ca6ce",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.doc_exists_by_hash operation replaces the content probe. The hash is matched exactly and within one scope, so the same content in another scope does not count -- which is what makes this usable as a per-scope duplicate check rather than a global one."
+    },
+    {
       "symbol": "db2_kb_file_index_delete_project",
       "signature_sha256": "b52dc0573377b86c812b5f4e07d93855dcd86409ab8b99c3e0b721bf2f7e170c",
       "disposition": "wire-operation",
@@ -530,6 +554,22 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.ingest_queue_reset_running operation replaces the startup recovery that returns queue rows abandoned by a dead worker to the pending pool. The two states and the clearing of started_at are fixed policy. Clearing the claim instant is the part that matters: a row left marked as claimed by a process that no longer exists is work that never runs again, and a caller able to skip the clear would hand back a row that still looks taken."
+    },
+    {
+      "symbol": "db2_kb_pdf_quarantine_confirm",
+      "signature_sha256": "74c6e4bd9dbff9c6c1aacef51c4fbe122805b39675c89a37fd90800c92cfbfbf",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.pdf_quarantine_confirm operation replaces the confirm. It only touches a pending PDF at the project's current generation, so a stale one, or one already confirmed, counts zero rather than failing -- a caller reading zero as an error would be wrong."
+    },
+    {
+      "symbol": "db2_kb_pdf_quarantine_reject",
+      "signature_sha256": "e9a42a8ab77e86dee6b568bc316dd952cf0461b14cb4ea090ccd1913810f345b",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.pdf_quarantine_reject operation replaces the reject. It is the mirror of confirm and deletes rather than clears, under the same generation and pending conditions; the count is rows removed."
     },
     {
       "symbol": "db2_kb_purge_fence_active",

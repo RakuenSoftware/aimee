@@ -1591,6 +1591,41 @@ int db2_kb_service_set_active_embedder_version(const char *version, const char *
    return 0;
 }
 
+int db2_entity_profile_is_fresh(const char *entity_id, const char *window)
+{
+   (void)entity_id;
+   (void)window;
+   return 0;
+}
+
+int db2_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
+{
+   (void)content_hash;
+   (void)scope;
+   return 0;
+}
+
+int db2_kb_pdf_quarantine_confirm(const char *project, const char *file_path)
+{
+   (void)project;
+   (void)file_path;
+   return 0;
+}
+
+int db2_kb_pdf_quarantine_reject(const char *project, const char *file_path)
+{
+   (void)project;
+   (void)file_path;
+   return 0;
+}
+
+int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
+{
+   (void)cert_issuer;
+   (void)cert_serial_norm;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

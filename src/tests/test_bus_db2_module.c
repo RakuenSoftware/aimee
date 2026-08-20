@@ -108,6 +108,11 @@ typedef struct
    int (*synth_mark_failed)(const char *artifact_id, const char *last_error);
    int (*runtime_state_set)(const char *state_key, const char *state_value);
    int (*set_active_embedder_version)(const char *version, const char *updated_at);
+   int (*entity_profile_fresh)(const char *entity_id, const char *window);
+   int (*doc_exists_by_hash)(const char *content_hash, const char *scope);
+   int (*pdf_quarantine_confirm)(const char *project, const char *file_path);
+   int (*pdf_quarantine_reject)(const char *project, const char *file_path);
+   int (*enrollment_active)(const char *cert_issuer, const char *cert_serial_norm);
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);
    int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
@@ -331,6 +336,7 @@ static int string_read_calls[4];
 static int cross_family_calls[4];
 static int batch8_calls[8];
 static int pair_calls[7];
+static int pair_read_calls[5];
 static char pair_first_seen[64];
 static char pair_second_seen[64];
 static char string_read_argument_seen[64];
@@ -793,6 +799,41 @@ static int pair_impl(int which, const char *first, const char *second)
    snprintf(pair_first_seen, sizeof(pair_first_seen), "%s", first ? first : "");
    snprintf(pair_second_seen, sizeof(pair_second_seen), "%s", second ? second : "");
    return 0;
+}
+
+/* The last two are bounded at a full count rather than a Boolean, so they
+ * answer past one to show the handler clamps only where the contract says. */
+static int pair_read_impl(int which, const char *first, const char *second)
+{
+   pair_read_calls[which]++;
+   snprintf(pair_first_seen, sizeof(pair_first_seen), "%s", first ? first : "");
+   snprintf(pair_second_seen, sizeof(pair_second_seen), "%s", second ? second : "");
+   return which + 1;
+}
+
+static int entity_profile_fresh(const char *entity_id, const char *window)
+{
+   return pair_read_impl(0, entity_id, window);
+}
+
+static int doc_exists_by_hash(const char *content_hash, const char *scope)
+{
+   return pair_read_impl(1, content_hash, scope);
+}
+
+static int pdf_quarantine_confirm(const char *project, const char *file_path)
+{
+   return pair_read_impl(2, project, file_path);
+}
+
+static int pdf_quarantine_reject(const char *project, const char *file_path)
+{
+   return pair_read_impl(3, project, file_path);
+}
+
+static int enrollment_active(const char *cert_issuer, const char *cert_serial_norm)
+{
+   return pair_read_impl(4, cert_issuer, cert_serial_norm);
 }
 
 static int artifact_set_state(const char *state, const char *artifact_id)
@@ -1362,6 +1403,41 @@ int db2_kb_service_set_active_embedder_version(const char *version, const char *
 {
    (void)version;
    (void)updated_at;
+   return 0;
+}
+
+int db2_entity_profile_is_fresh(const char *entity_id, const char *window)
+{
+   (void)entity_id;
+   (void)window;
+   return 0;
+}
+
+int db2_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
+{
+   (void)content_hash;
+   (void)scope;
+   return 0;
+}
+
+int db2_kb_pdf_quarantine_confirm(const char *project, const char *file_path)
+{
+   (void)project;
+   (void)file_path;
+   return 0;
+}
+
+int db2_kb_pdf_quarantine_reject(const char *project, const char *file_path)
+{
+   (void)project;
+   (void)file_path;
+   return 0;
+}
+
+int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
+{
+   (void)cert_issuer;
+   (void)cert_serial_norm;
    return 0;
 }
 
@@ -2711,6 +2787,11 @@ int main(void)
        .synth_mark_failed = synth_mark_failed,
        .runtime_state_set = runtime_state_set,
        .set_active_embedder_version = set_active_embedder_version,
+       .entity_profile_fresh = entity_profile_fresh,
+       .doc_exists_by_hash = doc_exists_by_hash,
+       .pdf_quarantine_confirm = pdf_quarantine_confirm,
+       .pdf_quarantine_reject = pdf_quarantine_reject,
+       .enrollment_active = enrollment_active,
        .session_neighbors_before = session_neighbors_before,
        .session_neighbors_after = session_neighbors_after,
        .row_get = row_get,
@@ -3351,6 +3432,43 @@ int main(void)
    assert(aimee_db2_evidence_mark_failed_call(call_client, &client, 7211, 0, "artifact", "", NULL,
                                               NULL) == AIMEE_MODULE_CALL_OK);
    assert(pair_calls[3] == 2 && pair_second_seen[0] == '\0');
+
+   /* Five reads on the pair format. The three Boolean-bounded ones clamp what
+    * their backend answers; the two counts pass it through. */
+   string_answer = 99;
+   assert(aimee_db2_entity_profile_fresh_call(call_client, &client, 7220, 0, "probe-first",
+                                              "probe-second", &string_answer, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && pair_read_calls[0] == 1 &&
+          strcmp(pair_first_seen, "probe-first") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_doc_exists_by_hash_call(call_client, &client, 7221, 0, "probe-first",
+                                            "probe-second", &string_answer, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && pair_read_calls[1] == 1 &&
+          strcmp(pair_first_seen, "probe-first") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_pdf_quarantine_confirm_call(call_client, &client, 7222, 0, "probe-first",
+                                                "probe-second", &string_answer, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 3 && pair_read_calls[2] == 1 &&
+          strcmp(pair_first_seen, "probe-first") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_pdf_quarantine_reject_call(call_client, &client, 7223, 0, "probe-first",
+                                               "probe-second", &string_answer, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 4 && pair_read_calls[3] == 1 &&
+          strcmp(pair_first_seen, "probe-first") == 0);
+
+   string_answer = 99;
+   assert(aimee_db2_enrollment_active_call(call_client, &client, 7224, 0, "probe-first",
+                                           "probe-second", &string_answer, NULL,
+                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(string_answer == 1 && pair_read_calls[4] == 1 &&
+          strcmp(pair_first_seen, "probe-first") == 0);
 
    /* An empty term is not a wildcard: every one of these statements would match
     * nothing, so the encoder refuses it rather than asking. */

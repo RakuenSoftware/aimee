@@ -7345,9 +7345,15 @@
           "line": 60
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.enrollment_active operation replaces the enrollment probe. A revoked enrollment reads as inactive, exactly like one that was never enrolled, so a caller cannot tell the two apart through this operation -- which matters because they mean different things to whoever is deciding what to do next."
+      },
       "signature": "int db2_enrollment_is_active_by_key ( const char * cert_issuer , const char * cert_serial_norm )",
       "signature_sha256": "313dfb279e65f3be168e4d333d47441c8dccb1c9daa8146dfbd61126229f3397",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_enrollment_is_active_by_key"
     },
     {
@@ -8244,9 +8250,15 @@
           "line": 22
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_profile_fresh operation replaces the freshness probe. The window is a Postgres interval the caller supplies and DB2 evaluates against its own clock, so an unparseable interval makes the statement fail rather than answer false; the wire bounds its length but cannot check its syntax."
+      },
       "signature": "int db2_entity_profile_is_fresh ( const char * entity_id , const char * cutoff_modifier )",
       "signature_sha256": "9f07ca476f598ec073a07f42cb8e91d9d13c381823f0b424a4fc53aa8b53b26a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_profile_is_fresh"
     },
     {
@@ -9459,9 +9471,15 @@
           "line": 40
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.doc_exists_by_hash operation replaces the content probe. The hash is matched exactly and within one scope, so the same content in another scope does not count -- which is what makes this usable as a per-scope duplicate check rather than a global one."
+      },
       "signature": "int db2_kb_doc_exists_by_hash_scope ( const char * content_hash , const char * scope )",
       "signature_sha256": "7f43d3cf217b1f13bdfbe738fd92b97ee87a69246fded9df1142a37a067ca6ce",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_exists_by_hash_scope"
     },
     {
@@ -10083,9 +10101,15 @@
           "line": 244
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.pdf_quarantine_confirm operation replaces the confirm. It only touches a pending PDF at the project's current generation, so a stale one, or one already confirmed, counts zero rather than failing -- a caller reading zero as an error would be wrong."
+      },
       "signature": "int db2_kb_pdf_quarantine_confirm ( const char * project , const char * document_key )",
       "signature_sha256": "74c6e4bd9dbff9c6c1aacef51c4fbe122805b39675c89a37fd90800c92cfbfbf",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_pdf_quarantine_confirm"
     },
     {
@@ -10098,9 +10122,15 @@
           "line": 245
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.pdf_quarantine_reject operation replaces the reject. It is the mirror of confirm and deletes rather than clears, under the same generation and pending conditions; the count is rows removed."
+      },
       "signature": "int db2_kb_pdf_quarantine_reject ( const char * project , const char * document_key )",
       "signature_sha256": "e9a42a8ab77e86dee6b568bc316dd952cf0461b14cb4ea090ccd1913810f345b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_pdf_quarantine_reject"
     },
     {
@@ -26622,15 +26652,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4fd8aec40468beca4e73e47d57d762f3842b7a8b302a282e16ef442659842af4",
+  "fingerprint": "c80fa0252f315c557222629033dc5565094d855a8da85c57e5e243fed51711e9",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 525,
+    "audit_pending": 520,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 433
+    "reviewed": 438
   }
 }

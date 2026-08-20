@@ -99,6 +99,11 @@ typedef struct
    int (*synth_mark_failed)(const char *artifact_id, const char *last_error);
    int (*runtime_state_set)(const char *state_key, const char *state_value);
    int (*set_active_embedder_version)(const char *version, const char *updated_at);
+   int (*entity_profile_fresh)(const char *entity_id, const char *window);
+   int (*doc_exists_by_hash)(const char *content_hash, const char *scope);
+   int (*pdf_quarantine_confirm)(const char *project, const char *file_path);
+   int (*pdf_quarantine_reject)(const char *project, const char *file_path);
+   int (*enrollment_active)(const char *cert_issuer, const char *cert_serial_norm);
    /* The session walks take no scope: the session identifier is the filter. */
    int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
                                    int64_t *out, int max);

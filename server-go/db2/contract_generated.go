@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "8e495b942cfd093c7e692ddb69c609d00b72b4fd315ef60bc49835f9d6f14d9f"
+const ContractSHA256 = "4760d5fc7bf53cb5ba128416be5c01256eab0a5843091231d5c24c355e7e660b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -640,6 +640,87 @@ func DecodeEntityObservationCountReply(reply []byte) (uint32, error) {
 	}
 	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
 	if value > EntityObservationCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventEntityProfileFresh = EventIndex
+const StageEntityProfileFresh = FamilyIndex
+const OperationEntityProfileFresh uint32 = 13
+const EntityProfileFreshFirstMin = 1
+const EntityProfileFreshFirstMax = 255
+const EntityProfileFreshSecondMin = 1
+const EntityProfileFreshSecondMax = 63
+
+// EncodeEntityProfileFreshRequest carries both bounded strings.
+func EncodeEntityProfileFreshRequest(entityID string, window string) ([]byte, error) {
+	if len(entityID) < EntityProfileFreshFirstMin || len(entityID) > EntityProfileFreshFirstMax ||
+		len(window) < EntityProfileFreshSecondMin || len(window) > EntityProfileFreshSecondMax ||
+		hasNUL(entityID) || hasNUL(window) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entityID, EntityProfileFreshFirstMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, window, EntityProfileFreshSecondMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityProfileFresh, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityProfileFreshRequest walks both length prefixes rather than trusting them.
+func DecodeEntityProfileFreshRequest(request []byte) (string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityProfileFresh || header.Flags != 0 ||
+		header.PayloadLen < 8 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	entityID, err := takeRowText(payload, &cursor, EntityProfileFreshFirstMax)
+	if err != nil {
+		return "", "", err
+	}
+	window, err := takeRowText(payload, &cursor, EntityProfileFreshSecondMax)
+	if err != nil || cursor != len(payload) || len(entityID) < EntityProfileFreshFirstMin ||
+		len(window) < EntityProfileFreshSecondMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	return entityID, window, nil
+}
+
+const EntityProfileFreshMax uint32 = 1
+
+// EncodeEntityProfileFreshReply emits the bounded answer.
+func EncodeEntityProfileFreshReply(fresh uint32) ([]byte, error) {
+	if fresh > EntityProfileFreshMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEntityProfileFresh, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], fresh)
+	return reply, nil
+}
+
+// DecodeEntityProfileFreshReply rejects any answer outside its bound.
+func DecodeEntityProfileFreshReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEntityProfileFresh || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > EntityProfileFreshMax {
 		return 0, ErrMalformedEnvelope
 	}
 	return value, nil
@@ -1645,6 +1726,330 @@ func DecodeFenceActiveReply(reply []byte) (uint32, error) {
 	}
 	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
 	if value > FenceActiveMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventDocExistsByHash = EventOrganization
+const StageDocExistsByHash = FamilyOrganization
+const OperationDocExistsByHash uint32 = 9
+const DocExistsByHashFirstMin = 1
+const DocExistsByHashFirstMax = 127
+const DocExistsByHashSecondMin = 1
+const DocExistsByHashSecondMax = 127
+
+// EncodeDocExistsByHashRequest carries both bounded strings.
+func EncodeDocExistsByHashRequest(contentHash string, scope string) ([]byte, error) {
+	if len(contentHash) < DocExistsByHashFirstMin || len(contentHash) > DocExistsByHashFirstMax ||
+		len(scope) < DocExistsByHashSecondMin || len(scope) > DocExistsByHashSecondMax ||
+		hasNUL(contentHash) || hasNUL(scope) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, contentHash, DocExistsByHashFirstMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scope, DocExistsByHashSecondMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDocExistsByHash, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDocExistsByHashRequest walks both length prefixes rather than trusting them.
+func DecodeDocExistsByHashRequest(request []byte) (string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDocExistsByHash || header.Flags != 0 ||
+		header.PayloadLen < 8 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	contentHash, err := takeRowText(payload, &cursor, DocExistsByHashFirstMax)
+	if err != nil {
+		return "", "", err
+	}
+	scope, err := takeRowText(payload, &cursor, DocExistsByHashSecondMax)
+	if err != nil || cursor != len(payload) || len(contentHash) < DocExistsByHashFirstMin ||
+		len(scope) < DocExistsByHashSecondMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	return contentHash, scope, nil
+}
+
+const DocExistsByHashMax uint32 = 1
+
+// EncodeDocExistsByHashReply emits the bounded answer.
+func EncodeDocExistsByHashReply(exists uint32) ([]byte, error) {
+	if exists > DocExistsByHashMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDocExistsByHash, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], exists)
+	return reply, nil
+}
+
+// DecodeDocExistsByHashReply rejects any answer outside its bound.
+func DecodeDocExistsByHashReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDocExistsByHash || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > DocExistsByHashMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventPdfQuarantineConfirm = EventOrganization
+const StagePdfQuarantineConfirm = FamilyOrganization
+const OperationPdfQuarantineConfirm uint32 = 10
+const PdfQuarantineConfirmFirstMin = 1
+const PdfQuarantineConfirmFirstMax = 255
+const PdfQuarantineConfirmSecondMin = 1
+const PdfQuarantineConfirmSecondMax = 511
+
+// EncodePdfQuarantineConfirmRequest carries both bounded strings.
+func EncodePdfQuarantineConfirmRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < PdfQuarantineConfirmFirstMin || len(project) > PdfQuarantineConfirmFirstMax ||
+		len(filePath) < PdfQuarantineConfirmSecondMin || len(filePath) > PdfQuarantineConfirmSecondMax ||
+		hasNUL(project) || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, PdfQuarantineConfirmFirstMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, PdfQuarantineConfirmSecondMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationPdfQuarantineConfirm, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodePdfQuarantineConfirmRequest walks both length prefixes rather than trusting them.
+func DecodePdfQuarantineConfirmRequest(request []byte) (string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPdfQuarantineConfirm || header.Flags != 0 ||
+		header.PayloadLen < 8 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	project, err := takeRowText(payload, &cursor, PdfQuarantineConfirmFirstMax)
+	if err != nil {
+		return "", "", err
+	}
+	filePath, err := takeRowText(payload, &cursor, PdfQuarantineConfirmSecondMax)
+	if err != nil || cursor != len(payload) || len(project) < PdfQuarantineConfirmFirstMin ||
+		len(filePath) < PdfQuarantineConfirmSecondMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
+}
+
+const PdfQuarantineConfirmMax uint32 = 2147483647
+
+// EncodePdfQuarantineConfirmReply emits the bounded answer.
+func EncodePdfQuarantineConfirmReply(confirmed uint32) ([]byte, error) {
+	if confirmed > PdfQuarantineConfirmMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationPdfQuarantineConfirm, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], confirmed)
+	return reply, nil
+}
+
+// DecodePdfQuarantineConfirmReply rejects any answer outside its bound.
+func DecodePdfQuarantineConfirmReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPdfQuarantineConfirm || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > PdfQuarantineConfirmMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventPdfQuarantineReject = EventOrganization
+const StagePdfQuarantineReject = FamilyOrganization
+const OperationPdfQuarantineReject uint32 = 11
+const PdfQuarantineRejectFirstMin = 1
+const PdfQuarantineRejectFirstMax = 255
+const PdfQuarantineRejectSecondMin = 1
+const PdfQuarantineRejectSecondMax = 511
+
+// EncodePdfQuarantineRejectRequest carries both bounded strings.
+func EncodePdfQuarantineRejectRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < PdfQuarantineRejectFirstMin || len(project) > PdfQuarantineRejectFirstMax ||
+		len(filePath) < PdfQuarantineRejectSecondMin || len(filePath) > PdfQuarantineRejectSecondMax ||
+		hasNUL(project) || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, PdfQuarantineRejectFirstMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, PdfQuarantineRejectSecondMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationPdfQuarantineReject, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodePdfQuarantineRejectRequest walks both length prefixes rather than trusting them.
+func DecodePdfQuarantineRejectRequest(request []byte) (string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPdfQuarantineReject || header.Flags != 0 ||
+		header.PayloadLen < 8 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	project, err := takeRowText(payload, &cursor, PdfQuarantineRejectFirstMax)
+	if err != nil {
+		return "", "", err
+	}
+	filePath, err := takeRowText(payload, &cursor, PdfQuarantineRejectSecondMax)
+	if err != nil || cursor != len(payload) || len(project) < PdfQuarantineRejectFirstMin ||
+		len(filePath) < PdfQuarantineRejectSecondMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
+}
+
+const PdfQuarantineRejectMax uint32 = 2147483647
+
+// EncodePdfQuarantineRejectReply emits the bounded answer.
+func EncodePdfQuarantineRejectReply(rejected uint32) ([]byte, error) {
+	if rejected > PdfQuarantineRejectMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationPdfQuarantineReject, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], rejected)
+	return reply, nil
+}
+
+// DecodePdfQuarantineRejectReply rejects any answer outside its bound.
+func DecodePdfQuarantineRejectReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPdfQuarantineReject || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > PdfQuarantineRejectMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return value, nil
+}
+
+const EventEnrollmentActive = EventCustody
+const StageEnrollmentActive = FamilyCustody
+const OperationEnrollmentActive uint32 = 4
+const EnrollmentActiveFirstMin = 1
+const EnrollmentActiveFirstMax = 511
+const EnrollmentActiveSecondMin = 1
+const EnrollmentActiveSecondMax = 127
+
+// EncodeEnrollmentActiveRequest carries both bounded strings.
+func EncodeEnrollmentActiveRequest(certIssuer string, certSerialNorm string) ([]byte, error) {
+	if len(certIssuer) < EnrollmentActiveFirstMin || len(certIssuer) > EnrollmentActiveFirstMax ||
+		len(certSerialNorm) < EnrollmentActiveSecondMin || len(certSerialNorm) > EnrollmentActiveSecondMax ||
+		hasNUL(certIssuer) || hasNUL(certSerialNorm) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, certIssuer, EnrollmentActiveFirstMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, certSerialNorm, EnrollmentActiveSecondMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEnrollmentActive, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEnrollmentActiveRequest walks both length prefixes rather than trusting them.
+func DecodeEnrollmentActiveRequest(request []byte) (string, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEnrollmentActive || header.Flags != 0 ||
+		header.PayloadLen < 8 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	certIssuer, err := takeRowText(payload, &cursor, EnrollmentActiveFirstMax)
+	if err != nil {
+		return "", "", err
+	}
+	certSerialNorm, err := takeRowText(payload, &cursor, EnrollmentActiveSecondMax)
+	if err != nil || cursor != len(payload) || len(certIssuer) < EnrollmentActiveFirstMin ||
+		len(certSerialNorm) < EnrollmentActiveSecondMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	return certIssuer, certSerialNorm, nil
+}
+
+const EnrollmentActiveMax uint32 = 1
+
+// EncodeEnrollmentActiveReply emits the bounded answer.
+func EncodeEnrollmentActiveReply(active uint32) ([]byte, error) {
+	if active > EnrollmentActiveMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEnrollmentActive, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], active)
+	return reply, nil
+}
+
+// DecodeEnrollmentActiveReply rejects any answer outside its bound.
+func DecodeEnrollmentActiveReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEnrollmentActive || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	value := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if value > EnrollmentActiveMax {
 		return 0, ErrMalformedEnvelope
 	}
 	return value, nil
