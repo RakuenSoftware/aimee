@@ -370,7 +370,10 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
-   cJSON_AddStringToObject(resp, "state", db1_store_ready() ? "ok" : "unavailable");
+   /* Probed, not inferred: module availability is registry state that survives
+    * the module's death for ~37s, and this endpoint exists to be believed at
+    * the start of an outage. See db1_store_probe.c. */
+   cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
    server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);

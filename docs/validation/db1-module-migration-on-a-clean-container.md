@@ -172,13 +172,20 @@ it tested is not evidence.
 
 ## What it turned up
 
-**One finding in the product**, written up as
-`docs/proposals/pending/db1-health-is-a-heartbeat-not-a-probe.md`: after the
-module dies, `/v1/server/health` keeps reporting `"state":"ok"` for ~37s (30s
-heartbeat staleness plus up to 7.5s of reap interval) while every store call
-fails. Bounded, not a latch, and not introduced by the migration -- but it is
-the health endpoint disagreeing with the daemon's own behaviour during the part
-of an outage when someone is looking.
+**One finding in the product, found here and fixed here.** After the module
+died, `/v1/server/health` kept reporting `"state":"ok"` for ~37s -- 30s of bus
+heartbeat staleness plus up to 7.5s of reap interval -- while every store call
+was already failing. Health was reading module availability, which is registry
+state, and the registry is only corrected by the reaper.
+
+It is now probed rather than inferred: `db1_store_probe()` asks the store a real
+question and caches the verdict for a second, and only the health handler uses
+it -- `db1_store_ready()` stays the cheap predicate in front of every
+store-backed command. **Measured on the same container by the same script: 1s.**
+`test_integration.sh` kills the module and asserts health stops saying "ok"
+within five seconds, so a regression to inferring fails by twenty seconds rather
+than by a hair. Written up in
+`docs/proposals/pending/db1-health-is-a-heartbeat-not-a-probe.md`, now RESOLVED.
 
 **Two in the integration harness**, both fixed in `src/tests/test_integration.sh`:
 

@@ -1,9 +1,9 @@
 # Proposal: `/v1/server/health` reports the store from a heartbeat, so it is
 # wrong for about half a minute after the module dies
 
-- **State:** OPEN. Found by running the migrated build on a clean container;
-  reproduced deliberately and timed. Not a regression from the migration, but
-  the migration is what put this window on the health endpoint.
+- **State:** RESOLVED, by the second option below. Found by running the migrated
+  build on a clean container, reproduced deliberately and timed at 36.5s and
+  37s; measured at **1s** after the fix, on the same container, same method.
 
 ## What happens
 
@@ -74,14 +74,36 @@ every module's liveness sharper and makes false reaps of a briefly-stalled
 module more likely. This is a bus-wide policy change and should not be made to
 fix one endpoint.
 
-## Recommendation
+## What was done
 
-The second, scoped to the health endpoint only. It is the one that makes health
-agree with behaviour, and it does not touch liveness semantics that eighteen
-other kinds depend on. It is written up rather than done because "what does
-health mean" is a question about the daemon's contract with whatever supervises
-it, and that belongs to whoever owns the deployment story, not to the migration
-that happened to measure it.
+The second, scoped to the health endpoint only, in `src/db1_store_probe.c`.
+
+`db1_store_ready()` is unchanged and still means "is a module serving the
+store". It has to stay cheap: it guards every store-backed command, on the way
+to a call that reports its own failure anyway. Making *that* probe would put a
+round trip in front of every command to fix one endpoint.
+
+`db1_store_probe()` is the new one, and only `handle_server_health` calls it. It
+asks the store a real question -- `server_session_count` over a window nothing
+can fall into, so it reads an index and returns zero rather than counting rows
+on a busy store -- and caches the verdict for one second. The cache is what
+stops a polled endpoint from becoming load on the module; a second is short
+enough that no operator or orchestrator could act on the difference. If nothing
+is registered at all it answers from the registry without a call, so a daemon
+that never had a store does not pay a timeout to be told so.
+
+The round trip happens outside the lock. Two concurrent probes cost one extra
+call, which is cheaper than serialising every health request behind the
+module's latency.
+
+The third option -- shortening the bus's stale window -- was not taken, and that
+reasoning stands: it is one constant shared by nineteen kinds, and changing
+liveness semantics for every module to fix one endpoint trades a known bounded
+staleness for unknown false reaps.
+
+`test_integration.sh` now kills the module and asserts health stops saying "ok"
+within five seconds. A regression to inferring availability fails it by twenty
+seconds rather than by a hair, which is the margin worth having.
 
 ## How to reproduce
 

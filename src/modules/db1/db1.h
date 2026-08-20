@@ -25,6 +25,17 @@ extern "C"
     * the store will answer. */
    int db1_store_ready(void);
 
+   /* Whether the store can be USED right now, asked by calling it. Costs a
+    * round trip (cached for a second), so this is for the health endpoint, not
+    * for the guard in front of every store-backed command -- that is
+    * db1_store_ready above.
+    *
+    * The two disagree for as long as the bus takes to notice a module that
+    * died: availability is registry state, corrected by a 30s heartbeat and a
+    * reap that runs every 7.5s, so db1_store_ready keeps saying yes for about
+    * 37 seconds after the store stops answering. */
+   int db1_store_probe(void);
+
    /* Close DB1. Safe to call if not initialized, or more than once. */
    void db1_shutdown(void);
 

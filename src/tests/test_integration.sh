@@ -552,6 +552,47 @@ check_output "server.health uptime" '"uptime"' echo "$RESP"
 # and "status":"ok" above stays ok either way.
 check_output "server.health reports the DB1 store reachable" '"state":"ok"' echo "$RESP"
 
+# ... and stops reporting it once the store is gone, promptly.
+#
+# "Promptly" is the whole point. This used to be read from module availability,
+# which is registry state the bus corrects on a 30s heartbeat with a reap every
+# 7.5s -- so health kept answering "ok" for ~37s after the module died while
+# every store call was already failing. Measured twice on a clean container at
+# 36.5s and 37s before the fix, 1s after it.
+#
+# Five seconds is the budget here: the probe caches for one, and the rest is
+# slack for a loaded CI box. A regression to inferring availability rather than
+# probing it fails this by twenty seconds, not by a hair.
+if [ -x "$DB1_MODULE" ]; then
+    stop_db1_module
+    HEALTH_GONE=""
+    for _i in $(seq 1 25); do
+        HEALTH_GONE=$(http_rpc '{"method":"server.health"}') || true
+        case "$HEALTH_GONE" in
+        *'"state":"ok"'*) sleep 0.2 ;;
+        *) break ;;
+        esac
+    done
+    case "$HEALTH_GONE" in
+    *'"state":"ok"'*)
+        echo "FAIL: server.health still reported the store ok 5s after the module was killed"
+        echo "  health: $HEALTH_GONE"
+        FAIL=$((FAIL + 1))
+        ;;
+    *)
+        PASS=$((PASS + 1)) # server.health notices the store is gone
+        ;;
+    esac
+    # Put it back: every check after this one needs a store.
+    start_db1_module
+    for _i in $(seq 1 50); do
+        case "$(http_rpc '{"method":"server.health"}' || true)" in
+        *'"state":"ok"'*) break ;;
+        *) sleep 0.2 ;;
+        esac
+    done
+fi
+
 # The /v1 HTTP surface is the only transport now (the NDJSON RPC socket was
 # removed). Confirm the local /v1 UDS is bound and an allowlisted read returns a
 # well-formed dispatch response over its first-class /v1 route.
