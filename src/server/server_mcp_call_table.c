@@ -580,6 +580,27 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(jargs, "force");
    if (cJSON_IsBool(jf))
       force = cJSON_IsTrue(jf) ? 1 : 0;
+
+   /* Capability gate, for the same reason `mutate` has one. The prune mode is
+    * the bulk twin of memory.delete: memory_expire() wipes every L0 row and its
+    * provenance and deletes stale L1 rows, and memory_enforce_retention() hard-
+    * deletes restricted/sensitive memories past their retention window. There is
+    * no RPC method twin to inherit a grade from — memory.maintenance_run is a
+    * KB-service method the server never dispatches — so this tool was the ONLY
+    * door to bulk memory destruction, and it was ungated.
+    *
+    * `modes` of 0 means MEMORY_MAINTENANCE_MODES_DEFAULT, which INCLUDES prune,
+    * so a bare `memory_maintain {}` destroys; it must grade as destructive too.
+    * The grade follows the modes requested and not `dry_run`: dry_run is a flag
+    * the same caller controls, so letting it lower the gate would just move the
+    * bypass rather than close it. */
+   unsigned int effective_modes = modes ? modes : (unsigned int)MEMORY_MAINTENANCE_MODES_DEFAULT;
+   uint32_t required =
+       (effective_modes & MEMORY_MAINTENANCE_MODE_PRUNE) ? CAP_MEMORY_ADMIN : CAP_MEMORY_WRITE;
+   if (!c->conn || (c->conn->capabilities & required) == 0)
+      return text_content("error: forbidden: insufficient capabilities for memory maintenance "
+                          "(the prune mode permanently deletes memories)");
+
    char *envelope = kb_client_memory_maintenance_run_json(modes, force, dry_run);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);

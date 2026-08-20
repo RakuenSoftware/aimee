@@ -436,6 +436,21 @@ static void test_update_user_authority_overwrites(void)
    teardown();
 }
 
+/* The MCP `memory_maintain` gate grades a request as destructive when it asks
+ * for prune — including the bare `{}` call, because modes of 0 means
+ * MEMORY_MAINTENANCE_MODES_DEFAULT. That defaulting is the subtle half of the
+ * gate: if prune ever leaves the default set, mcph_memory_maintain's
+ * effective_modes logic must be revisited, or a bare call silently drops from
+ * memory:admin to memory:write. Pin the relationship the gate depends on.
+ *
+ * Prune is destructive, not merely a sweep: memory_expire() wipes every L0 row
+ * and its provenance and deletes stale L1 rows, and memory_enforce_retention()
+ * hard-deletes restricted/sensitive memories past their retention window. */
+static void test_maintenance_default_modes_include_prune(void)
+{
+   assert((MEMORY_MAINTENANCE_MODES_DEFAULT & MEMORY_MAINTENANCE_MODE_PRUNE) != 0);
+}
+
 /* --- Deeper coverage --- */
 
 static void test_list_by_tier_and_kind(void)
@@ -2550,6 +2565,7 @@ int main(void)
    test_delete_user_authority_destroys();
    test_update_model_authority_supersedes();
    test_update_user_authority_overwrites();
+   test_maintenance_default_modes_include_prune();
    test_list_by_tier_and_kind();
    test_get_nonexistent();
    test_delete_nonexistent();
