@@ -1656,6 +1656,18 @@ int main(int argc, char **argv)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(tsr_state[0] == '\0');
 
+   /* No memory is stored, so no key can appear in an error message. Seeding one
+    * here would be visible to the fresh-schema counts above, so the populated
+    * row path is proved in the hosted bus test instead, where the backend is a
+    * stub that can return rows on demand. */
+   aimee_db2_match_error_keys_row_t matched[AIMEE_DB2_MATCH_ERROR_KEYS_MAX_ROWS];
+   uint32_t matched_count = 99;
+   assert(aimee_db2_match_error_keys_call(call_client, &client, 9260, 0,
+                                          "boom: replay-error-key was not found", matched,
+                                          AIMEE_DB2_MATCH_ERROR_KEYS_MAX_ROWS, &matched_count, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   assert(matched_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

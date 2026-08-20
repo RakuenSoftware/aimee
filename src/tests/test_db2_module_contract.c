@@ -2047,6 +2047,14 @@ int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *ou
    return 0;
 }
 
+int db2_memory_promotion_match_error_keys(const char *error_lowered, int64_t *ids_out, int max)
+{
+   (void)error_lowered;
+   (void)ids_out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

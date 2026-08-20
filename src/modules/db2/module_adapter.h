@@ -267,6 +267,7 @@ typedef struct
    int (*document_stored_hash)(const char *project, const char *file_path, char *out, size_t capacity);
    int (*document_hash_exists)(const char *project, const char *file_hash, char *sample, size_t capacity);
    int (*pdf_tsr_state)(const char *project, const char *document_key, char *out, size_t capacity);
+   int (*match_error_keys)(const char *error_lowered, int64_t *ids_out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

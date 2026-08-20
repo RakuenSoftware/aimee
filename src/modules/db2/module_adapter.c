@@ -861,6 +861,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .document_stored_hash = db2_kb_documents_get_stored_hash,
        .document_hash_exists = db2_kb_documents_hash_exists,
        .pdf_tsr_state = db2_kb_pdf_tsr_state,
+       .match_error_keys = db2_memory_promotion_match_error_keys,
    };
    return &backend;
 }
@@ -1914,6 +1915,33 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_unit_edge_exists_reply_encode(connected, response_body, response_capacity,
                                                         response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char error_lowered[AIMEE_DB2_MATCH_ERROR_KEYS_ERROR_LOWERED_MAX + 1] = "";
+         if (aimee_db2_match_error_keys_request_decode(request_body, request_len, error_lowered,
+                                                       sizeof(error_lowered)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MATCH_ERROR_KEYS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->match_error_keys)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_match_error_keys_row_t rows[AIMEE_DB2_MATCH_ERROR_KEYS_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               int64_t ids[AIMEE_DB2_MATCH_ERROR_KEYS_MAX_ROWS];
+               int found = backend->match_error_keys(error_lowered, ids,
+                                                     AIMEE_DB2_MATCH_ERROR_KEYS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+                  rows[index].memory_id = (uint64_t)ids[index];
+               count = found < 0 ? 0u : (uint32_t)found;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_match_error_keys_reply_encode(rows, count, response_body,
+                                                        response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

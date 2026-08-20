@@ -18534,9 +18534,15 @@
           "line": 60
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.match_error_keys operation finds the memories whose key appears in an error message. The comparison puts the key on the pattern side of a LIKE, so a key containing a percent or an underscore is a wildcard: one such key matches text it has nothing to do with, and nothing escapes it. The scan reads every L1 and L2 memory above the confidence floor, so cost grows with the corpus, and the caller sees a truncated list and a full one the same way."
+      },
       "signature": "int db2_memory_promotion_match_error_keys ( const char * error_lowered , int64_t * ids_out , int max )",
       "signature_sha256": "aa7e33b0982d91f02e43a26ef2616cf1fa70adad2ba4f155623c6c5c3a0879ee",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_match_error_keys"
     },
     {
@@ -27006,15 +27012,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a7078ef99c3d908dc301e56a90dffe0cf7f260f9a98f4a17b1bcb475c37523bf",
+  "fingerprint": "b6a99acb81a9800417417f1b763c63f3e2fb9bae1d07128378b3499bb8ed8bf2",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 461,
+    "audit_pending": 460,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 497
+    "reviewed": 498
   }
 }

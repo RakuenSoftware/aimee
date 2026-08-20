@@ -2828,6 +2828,14 @@
       "reason": "Enumerating the kinds present in a tier is a private pre-step of the tier-cycle operations; each one iterates the kinds it finds inside a single DB2 action rather than exposing a snapshot that can go stale between calls."
     },
     {
+      "symbol": "db2_memory_promotion_match_error_keys",
+      "signature_sha256": "aa7e33b0982d91f02e43a26ef2616cf1fa70adad2ba4f155623c6c5c3a0879ee",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.match_error_keys operation finds the memories whose key appears in an error message. The comparison puts the key on the pattern side of a LIKE, so a key containing a percent or an underscore is a wildcard: one such key matches text it has nothing to do with, and nothing escapes it. The scan reads every L1 and L2 memory above the confidence floor, so cost grows with the corpus, and the caller sees a truncated list and a full one the same way."
+    },
+    {
       "symbol": "db2_memory_promotion_promote_stable_l2_to_l3",
       "signature_sha256": "7774ad32c2c5d27c72f22ce7ebdcf2608add0a25daddc4b23f5bdec5d52f5e4f",
       "disposition": "wire-operation",

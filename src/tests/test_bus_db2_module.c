@@ -9,6 +9,8 @@
 #include <aimee/db2/client.h>
 #include <aimee/db2/module_api.h>
 
+#include "module_adapter.h"
+
 #include "platform_test_util.h"
 
 #include <assert.h>
@@ -23,190 +25,6 @@
 
 #define MODULE_REF 29u
 #define CALLER_REF 90u
-
-typedef struct
-{
-   int (*is_initialized)(void);
-   int (*health_probe)(int *schema_ok, int *have_pg_trgm);
-   int (*kb_health_probe)(int *kb_tables_ok);
-   int (*embedding_dimension)(void);
-   int (*level3_count)(void);
-   int (*level2_count)(void);
-   int (*orphaned_l0_count)(void);
-   int64_t (*total_count)(void);
-   int (*session_l2_count)(const char *source_session);
-   int (*key_exists)(const char *key);
-   int64_t (*find_id_by_key_kind)(const char *key, const char *kind);
-   int (*key_exists_in_tier_pair)(const char *key, const char *tier_a, const char *tier_b);
-   int (*clear_effectiveness)(int64_t memory_id);
-   int (*set_effectiveness)(int64_t memory_id, double value);
-   int (*retention_delete)(const char *sensitivity, int days);
-   int (*demote_effectiveness)(double threshold);
-   int (*effectiveness_stats)(double low_threshold, double *avg_effectiveness,
-                              int *low_effectiveness, int *high_impact);
-   int (*list_l2_memory_ids)(int64_t *out, int max);
-   int (*top_l2_facts)(int scope_active, int include_all, const char *workspace,
-                       const char *project, int64_t *out, int max);
-   int (*list_session_scope_priority)(int scope_active, int include_all, const char *workspace,
-                                      const char *project, int64_t *out, int max);
-   int (*collect_alias_matches)(const char *term, int limit, int scope_active, int include_all,
-                                const char *workspace, const char *project, int64_t *out, int max);
-   int (*collect_entity_matches)(const char *term, int limit, int scope_active, int include_all,
-                                 const char *workspace, const char *project, int64_t *out, int max);
-   int (*collect_event_frame_matches)(const char *term, int limit, int scope_active,
-                                      int include_all, const char *workspace, const char *project,
-                                      int64_t *out, int max);
-   int (*collect_relation_token_matches)(const char *term, int limit, int scope_active,
-                                         int include_all, const char *workspace,
-                                         const char *project, int64_t *out, int max);
-   int (*collect_summary_matches)(const char *term, int limit, int scope_active, int include_all,
-                                  const char *workspace, const char *project, int64_t *out,
-                                  int max);
-   int (*collect_temporal_matches)(const char *term, int limit, int scope_active, int include_all,
-                                   const char *workspace, const char *project, int64_t *out,
-                                   int max);
-   int (*find_facts_like)(const char *term, int limit, int scope_active, int include_all,
-                          const char *workspace, const char *project, int64_t *out, int max);
-   int (*list_session_scope_priority_like)(const char *term, int limit, int scope_active,
-                                           int include_all, const char *workspace,
-                                           const char *project, int64_t *out, int max);
-   int (*negation_fts_search)(const char *term, int limit, int scope_active, int include_all,
-                              const char *workspace, const char *project, int64_t *out, int max);
-   int (*search_facts_patterns_by_keyword)(const char *term, int limit, int scope_active,
-                                           int include_all, const char *workspace,
-                                           const char *project, int64_t *out, int max);
-   int (*fact_history)(const char *normalized_key, int limit, int64_t *out, int max);
-   int (*list_rows)(const char *tier, const char *kind, int hide_archived, int limit,
-                    int scope_active, int include_all, const char *workspace, const char *project,
-                    int64_t *out, int max);
-   int (*aggregate)(const char *entity_seed, const char *keyword, int limit, int *truncated_out,
-                    int64_t *out, int max);
-   int (*load_eval_corpus)(int limit, char *label_out, size_t label_len, int64_t *out, int max);
-   int (*record_exists)(int64_t record_id);
-   int (*document_exists)(int64_t document_id);
-   int (*trace_mining_record)(int64_t last_trace_id);
-   int (*anti_pattern_exists_exact)(const char *pattern);
-   int (*anti_pattern_exists_by_source_ref)(const char *source_ref);
-   int (*artifact_citation_count)(const char *artifact_id);
-   int (*commits_in_last_7_days)(const char *sink);
-   int (*entity_observation_count)(const char *entity_id);
-   int (*fidelity_attribution_count)(const char *turn_id);
-   int (*blob_referenced)(const char *blob_ref);
-   int (*async_pending_count)(const char *kind);
-   int (*artifact_stamp_reflected)(const char *artifact_id);
-   int (*failed_query_bump)(const char *query_norm);
-   int (*fence_active)(const char *project);
-   int (*runtime_state_touch)(const char *state_key);
-   int (*synth_enqueue)(const char *artifact_id);
-   int (*synth_mark_done)(const char *artifact_id);
-   int (*reembed_mark_finished)(const char *finished_at);
-   int (*mining_job_try_lock)(const char *job_id);
-   int (*artifact_set_state)(const char *state, const char *artifact_id);
-   int (*artifact_register_exemplar)(const char *artifact_id, const char *collection);
-   int (*evidence_enqueue)(const char *artifact_id, const char *collection);
-   int (*evidence_mark_failed)(const char *artifact_id, const char *last_error);
-   int (*synth_mark_failed)(const char *artifact_id, const char *last_error);
-   int (*runtime_state_set)(const char *state_key, const char *state_value);
-   int (*set_active_embedder_version)(const char *version, const char *updated_at);
-   int (*entity_profile_fresh)(const char *entity_id, const char *window);
-   int (*doc_exists_by_hash)(const char *content_hash, const char *scope);
-   int (*pdf_quarantine_confirm)(const char *project, const char *file_path);
-   int (*pdf_quarantine_reject)(const char *project, const char *file_path);
-   int (*enrollment_active)(const char *cert_issuer, const char *cert_serial_norm);
-   int (*runtime_state_get)(const char *state_key, char *state_value, size_t capacity);
-   int (*session_neighbors_before)(const char *session_id, int64_t anchor_id, int limit,
-                                   int64_t *out, int max);
-   int (*session_neighbors_after)(const char *session_id, int64_t anchor_id, int limit,
-                                  int64_t *out, int max);
-   int (*row_get)(int64_t memory_id, aimee_db2_memory_row_t *row);
-   int (*row_get_by_unit_id)(int64_t unit_id, aimee_db2_memory_row_t *row);
-   int (*count_memories)(void);
-   int (*count_recent_conflicts)(int days);
-   void (*health_record)(int total_memories, int contradictions_detected, int promotions,
-                         int demotions, int expirations);
-   int (*prune_health)(int days);
-   int (*prune_contradictions)(int days);
-   int (*health_counters)(int promote_use_count, double promote_confidence,
-                          aimee_db2_health_counters_t *counters);
-   int (*stats_counts)(aimee_db2_memory_stats_t *stats);
-   int (*delete_l0_provenance)(void);
-   int (*delete_l0)(void);
-   int (*list_kinds_in_tier)(const char *tier, char (*kinds)[16], int max);
-   int (*kind_expire_days)(const char *kind);
-   int (*delete_stale_l1_provenance)(const char *kind, const char *days_neg);
-   int (*delete_stale_l1)(const char *kind, const char *days_neg);
-   void (*now_utc)(char *buf, size_t len);
-   int (*kind_demote_policy)(const char *kind, double *confidence, int *days);
-   int (*demote_kind)(const char *ts, const char *kind, double confidence, const char *days_neg);
-   int (*demote_cascade)(const char *ts);
-   int (*promote_stable)(const char *ts);
-   int (*reclassify_directives)(int require_approval);
-   int (*record_l4_approval)(int64_t memory_id, const char *approver, const char *note);
-   int (*prune_orphaned_l0)(void);
-   int (*lifecycle_sweep_expired)(void);
-   int (*demote_id)(int64_t memory_id);
-   int (*has_workspace_tag)(int64_t memory_id);
-   int (*delete_row)(int64_t memory_id);
-   int (*touch)(int64_t memory_id);
-   int (*link_delete)(int64_t link_id);
-   int (*valid_at)(int64_t memory_id, const char *as_of);
-   int (*has_scope_type)(int64_t memory_id, const char *scope_type);
-   int (*reject)(int64_t memory_id);
-   int (*update_content)(int64_t memory_id, const char *content);
-   void (*decay_confidence)(int64_t memory_id);
-   void (*workspace_tag_insert)(int64_t memory_id, const char *workspace);
-   void (*set_cognified_kind)(int64_t memory_id, const char *kind);
-   void (*set_source_session)(int64_t memory_id, const char *session_id);
-   void (*negation_tokens_update)(int64_t memory_id, const char *tokens);
-   int (*get_content)(int64_t memory_id, char *out, int out_len);
-   int (*get_source_session)(int64_t memory_id, char *out, int out_len);
-   int (*pick_first_temporal_ref)(int64_t memory_id, char *out, int out_len);
-   int (*count_and_max_updated)(int *out_count, char *out_ts, int out_ts_len);
-   int (*entity_edge_prune_orphans)(void);
-   int (*entity_edge_normalize_weights)(void);
-   int (*project_count)(void);
-   int (*purge_hidden_pollution)(void);
-   int (*requeue_drifted)(void);
-   int (*cross_repo_rebuild_routes)(void);
-   int (*cross_repo_rebuild_identities)(void);
-   int (*cross_repo_rebuild_build_deps)(void);
-   int64_t (*drift_candidates)(void);
-   int (*rules_decay)(void);
-   int (*curiosity_rescore_all)(void);
-   int (*mining_seed_job_defaults)(void);
-   void (*proposals_archive_expired)(void);
-   int64_t (*trace_mining_last_id)(void);
-   int (*rel_types_ensure_seed)(void);
-   int (*vector_rebuild_lock_try_acquire)(void);
-   void (*vector_rebuild_lock_release)(void);
-   int64_t (*release_get_active)(void);
-   int (*prospective_sweep_expired)(void);
-   int (*directive_sweep_expired)(void);
-   int (*directive_suppress)(int64_t directive_id);
-   int (*directive_record_surface)(int64_t directive_id);
-   int (*anti_pattern_bump)(int64_t anti_pattern_id);
-   int (*anti_pattern_delete)(int64_t anti_pattern_id);
-   int (*doc_delete)(int64_t doc_id);
-   int (*task_delete)(int64_t task_id);
-   int (*file_index_delete_project)(const char *project);
-   int (*clear_project)(const char *project);
-   int (*clear_current_project)(const char *project);
-   int (*mark_revisit_due)(void);
-   int (*ingest_queue_reset_running)(void);
-   int (*evidence_reembed_all)(void);
-   int (*curator_reembed_all)(void);
-   int (*synth_reenqueue_all)(void);
-   int (*curator_reenqueue_extract_all)(void);
-   int (*pool_status)(aimee_db2_pool_status_t *status);
-   int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
-   int (*postgres_status)(aimee_db2_postgres_status_t *status);
-   int (*reembed_status)(aimee_db2_reembed_status_t *status);
-   int (*reembed_clear)(void);
-   int (*reembed_clear_maintenance)(int force, int *was_in_progress, int *recorded, int *running);
-   const char *(*embedder_serving_id)(void);
-   int (*dimension_reset)(uint32_t target_dimension, uint32_t force, uint32_t dry_run,
-                          aimee_db2_dimension_reset_t *status);
-} aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
                                                   const uint8_t *request_body, uint32_t request_len,
@@ -1874,6 +1692,25 @@ int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *ou
    return 0;
 }
 
+/* Returns rows so the generic row-list reply is exercised with something in
+ * it. The replay can only ever see the empty case: seeding a memory there
+ * would be visible to the fresh-schema counts it also asserts. */
+static char match_error_keys_seen[256] = "";
+static int match_error_keys_calls;
+
+int db2_memory_promotion_match_error_keys(const char *error_lowered, int64_t *ids_out, int max)
+{
+   match_error_keys_calls++;
+   snprintf(match_error_keys_seen, sizeof(match_error_keys_seen), "%s",
+            error_lowered ? error_lowered : "");
+   if (!ids_out || max < 3)
+      return 0;
+   ids_out[0] = 11;
+   ids_out[1] = 22;
+   ids_out[2] = 9007199254740993;
+   return 3;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
@@ -3313,6 +3150,7 @@ int main(void)
        .reembed_clear_maintenance = db2_reembed_clear_maintenance,
        .embedder_serving_id = db2_embedder_serving_id,
        .dimension_reset = dimension_reset,
+       .match_error_keys = db2_memory_promotion_match_error_keys,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -3424,6 +3262,18 @@ int main(void)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(l2_count == 3 && l2_ids[0] == 7 && l2_ids[1] == 19 && l2_ids[2] == 4242 &&
           list_l2_memory_ids_calls == 1);
+
+   /* The row-list reply, carrying rows. The third identifier is past what a
+    * double can hold exactly, so a codec that ever routed one through a
+    * floating-point value would return a different number here. */
+   aimee_db2_match_error_keys_row_t matched[AIMEE_DB2_MATCH_ERROR_KEYS_MAX_ROWS];
+   uint32_t matched_count = 99;
+   assert(aimee_db2_match_error_keys_call(call_client, &client, 7043, 0, "boom: alpha not found",
+                                          matched, AIMEE_DB2_MATCH_ERROR_KEYS_MAX_ROWS,
+                                          &matched_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(matched_count == 3 && matched[0].memory_id == 11 && matched[1].memory_id == 22 &&
+          matched[2].memory_id == 9007199254740993 && match_error_keys_calls == 1 &&
+          strcmp(match_error_keys_seen, "boom: alpha not found") == 0);
 
    uint64_t scoped_ids[AIMEE_DB2_TOP_L2_FACTS_MAX];
    uint32_t scoped_count = 99;

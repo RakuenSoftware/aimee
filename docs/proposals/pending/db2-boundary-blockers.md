@@ -45,31 +45,42 @@ time.
 
 Until that exists, the guard stays where it is and stays unreviewed.
 
-## `db2_kb_service_count_embeddings_for_version` ignores the version it is given
+## Three declarations ask about embeddings and none of them can
 
     int db2_kb_service_count_embeddings_for_version(const char *version);
+    int db2_kb_service_list_unembedded_memory_ids(const char *version, int64_t *ids, int max);
+    int db2_memory_promotion_list_unembedded_l2(const char *version, int64_t *ids, int max);
 
-The statement it runs has no version in it:
+All three take a version. None of them uses it, and two of them do not look at
+whether anything is embedded either:
 
     SELECT COUNT(*) FROM vector_index_ops
     WHERE collection = 'memory_units' AND status = 'ok' AND memory_id IS NOT NULL
 
-`vector_index_ops` has no column recording which embedding version produced a
-row, so the argument has nowhere to go. Its only caller,
-`kb_handle_memory_reembed_rollback`, uses the count as a safety gate: it refuses
-to roll back to a version that has no embeddings. Because the count ignores the
-version, that gate passes for any version string, including one that was never
-embedded.
+    SELECT m.id FROM memories m WHERE m.tier IN ('L1', 'L2')
 
-Publishing it as a wire operation would write the defect into the contract: a
-`version` field that every reader would reasonably assume filters the count.
-Publishing it without the field would be honest about the SQL and dishonest
-about the name, and would silently turn the caller's gate into a check that the
-table is non-empty.
+    SELECT m.id FROM memories m WHERE m.tier = 'L2' LIMIT ?1
 
-The fix is a schema change — a version column on `vector_index_ops`, populated
-where the rows are written — after which the operation is unremarkable. That
-belongs to whoever owns the re-embedding pipeline.
+The first counts every successful index operation whatever version produced it,
+because `vector_index_ops` has no column saying. Its only caller,
+`kb_handle_memory_reembed_rollback`, uses the count as a safety gate and
+refuses to roll back to a version with no embeddings, so the gate passes for
+any version string including one that was never embedded.
+
+The two listers are named for memories that have not been embedded and select
+memories by tier alone. Every L1 and L2 memory is "unembedded" to the first,
+every L2 memory to the second, so a re-embedding pass driven by either does the
+whole corpus every time and reports it as the backlog.
+
+This is one gap, not three: nothing in the schema records which embedding
+version produced a row, so no query can ask the question these three names
+claim to answer. Publishing any of them writes a `version` field into the
+contract that every reader would take to filter, and publishing them without it
+would be honest about the SQL and dishonest about the names.
+
+The fix is a version column on `vector_index_ops`, populated where the rows are
+written, after which all three become unremarkable queries. That belongs to
+whoever owns the re-embedding pipeline.
 
 ## The two JSONL exports write to a path the caller names
 

@@ -12662,6 +12662,12 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_kb_pdf_tsr_state",
         "policy": {"reads": 200},
     },
+    "match_error_keys": {
+        "key": ("memory", 68),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_promotion_match_error_keys",
+        "policy": {"reads": 200},
+    },
 }
 
 

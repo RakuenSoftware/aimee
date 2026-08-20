@@ -3985,6 +3985,49 @@
       }
     },
     {
+      "family": "memory",
+      "id": 68,
+      "name": "match_error_keys",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_promotion_match_error_keys"
+      ],
+      "request": {
+        "policy": {
+          "reads": "each memory's key is used as a SQL LIKE pattern against the text, so a key containing a wildcard matches far more than its own words"
+        },
+        "fields": [
+          {
+            "name": "error_lowered",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

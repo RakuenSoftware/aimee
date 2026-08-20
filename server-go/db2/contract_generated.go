@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "d620ff3f4e1be1104eb906856b5cd28dc9d0df3c5dca555dd131f93cd75ced85"
+const ContractSHA256 = "78735171cef28ccc8d8ccfcee25a3bed0a1c9eb82b4d2829d4513674a3de30a1"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -803,6 +803,49 @@ func DecodeUnitEdgeExistsRequest(request []byte) (uint64, uint64, error) {
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return unitIDA, unitIDB, nil
+}
+
+const EventMatchErrorKeys = EventMemory
+const StageMatchErrorKeys = FamilyMemory
+const OperationMatchErrorKeys uint32 = 68
+const MatchErrorKeysErrorLoweredMin = 1
+const MatchErrorKeysErrorLoweredMax = 1023
+
+// EncodeMatchErrorKeysRequest writes the schema match_error_keys declares, in order.
+func EncodeMatchErrorKeysRequest(errorLowered string) ([]byte, error) {
+	if len(errorLowered) < MatchErrorKeysErrorLoweredMin || len(errorLowered) > MatchErrorKeysErrorLoweredMax || hasNUL(errorLowered) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, errorLowered, MatchErrorKeysErrorLoweredMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMatchErrorKeys, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMatchErrorKeysRequest reads it back, checking each field against its own bound.
+func DecodeMatchErrorKeysRequest(request []byte) (string, error) {
+	var errorLowered string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMatchErrorKeys || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if errorLowered, err = takeRowText(payload, &cursor, MatchErrorKeysErrorLoweredMax); err != nil ||
+		len(errorLowered) < MatchErrorKeysErrorLoweredMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return errorLowered, nil
 }
 
 const EventEntityObservationCount = EventIndex
