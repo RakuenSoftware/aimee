@@ -301,6 +301,9 @@ typedef struct
    int (*briefing_active_entities)(db2_memory_briefing_entity_t *out, int max);
    int (*entity_walk_step_typed)(const char *node, db2_entity_edge_typed_t *out, int max);
    int (*projection_generations_list)(const char *project, code_projection_generation_row_t *out, int max);
+   int (*entity_edge_bump_utility)(const char *entity, double utility_delta);
+   int (*bandit_decision_close)(const char *decision_id, double reward);
+   int (*entity_neighbors_weighted)(const char *entity, db2_entity_edge_weighted_neighbor_t *out, int max, int limit_sql, int utility_scoring_enabled);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

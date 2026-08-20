@@ -3867,9 +3867,15 @@
           "line": 30
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_decision_close operation records the reward for a decision and closes it. The reward is stored as given -- nothing normalizes it, so what a bandit compares later is on whatever scale the caller chose -- and the closing stamp is DB2's clock. The statement is not checked to have matched a row, so closing a decision that does not exist, or one already closed, is acknowledged and overwrites the earlier reward."
+      },
       "signature": "int db2_bandit_decision_close ( const char * id , double reward )",
       "signature_sha256": "16d52cdd57b619f0527e9af0a6ad70bd42f688dc7cafb286a284d642d6008f81",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_decision_close"
     },
     {
@@ -7845,9 +7851,15 @@
           "line": 118
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_edge_bump_utility operation adjusts the utility of every edge touching an entity -- at either end, by the same amount, in one statement, with no bound on how many rows that is. Each result is clamped into the range the column keeps, so a delta past it moves an edge to the limit rather than being refused, and repeating the call stops changing anything once every edge is pinned. The reply says the statement ran and never how many edges moved."
+      },
       "signature": "int db2_entity_edge_bump_utility ( const char * key , double delta )",
       "signature_sha256": "f34e5681a747d87c7fc027f135c7edc5d96c5ca3417241465d5148061092b912",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_bump_utility"
     },
     {
@@ -7985,9 +7997,15 @@
           "line": 199
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_neighbors_weighted operation lists an entity's neighbours with both the utility stored on each edge and the utility after decay. The two differ by how long ago the edge was last touched, so a caller comparing them is comparing a value to its own age. Both are signed and clamped to the range the column keeps. As with the plain neighbour listing, edges are followed in both directions and nothing orders the result, so which neighbours survive the limit is arbitrary."
+      },
       "signature": "int db2_entity_edge_neighbors_weighted ( const char * entity , db2_entity_edge_weighted_neighbor_t * out , int max , int limit_sql , int utility_scoring_enabled )",
       "signature_sha256": "ba927bb80f578444a0f8e7afbb845835eb86bb7fd5f373ea6eed28136ef7c4b4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_neighbors_weighted"
     },
     {
@@ -27144,15 +27162,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "10b4d503084466072716dad38274b31c2877b38eaa620a424d715e910388e0da",
+  "fingerprint": "2d5742a827b9e1546a32b10f8ca9271a4235f35fa396672b17bc7208b7fb4786",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 439,
+    "audit_pending": 436,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 520
+    "reviewed": 523
   }
 }

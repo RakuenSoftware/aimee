@@ -79,12 +79,18 @@ def main() -> int:
         if marker in text:
             text = _drop_case(text, marker)
         fields = operation["request"]["fields"]
-        arguments = ", ".join(
-            f"operation.Request.{go_name(str(field['name']))}" for field in fields)
+
+        def fixture(field: dict) -> str:
+            """What the fixture calls this field, read back as its own type."""
+            name = str(field["name"])
+            if field["type"] == "f64":
+                return f"math.Float64frombits(operation.Request.{go_name(name)}Binary64Bits)"
+            return f"operation.Request.{go_name(name)}"
+
+        arguments = ", ".join(fixture(field) for field in fields)
         results = ", ".join(go_local(str(field["name"])) for field in fields)
         comparisons = " ||\n\t\t".join(
-            f"{go_local(str(field['name']))} != operation.Request.{go_name(str(field['name']))}"
-            for field in fields)
+            f"{go_local(str(field['name']))} != {fixture(field)}" for field in fields)
         blanks = ", ".join("_" for _ in fields)
         # An operation with no request fields decodes for the error alone:
         # there is nothing to bind on the left of the assignment and nothing to
@@ -130,8 +136,12 @@ func Test{go_name(name)}MatchesEverySharedCVector(t *testing.T) {{
     for operation in described:
         for field in operation["request"]["fields"]:
             tag = str(field["name"])
-            kind = {"utf8": "string", "u32": "uint32", "u64": "uint64",
-                    "f64": "float64"}[field["type"]]
+            if field["type"] == "f64":
+                # The fixture records a float as its bit pattern, under its own
+                # key, because a JSON float literal cannot carry one exactly.
+                wanted[f"{tag}_binary64_bits"] = "uint64"
+                continue
+            kind = {"utf8": "string", "u32": "uint32", "u64": "uint64"}[field["type"]]
             wanted[tag] = kind
     # The wide request struct, not the envelope fixture's narrow one: both are
     # spelled `Operations []struct {`, and the first is the wrong one.

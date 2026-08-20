@@ -1871,6 +1871,41 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(generation_rows_count == 0);
 
+   /* The first signed floats to cross. A magnitude bound admits both signs, so
+    * a negative delta is a legitimate request and is replayed as one; the
+    * statement matches no edge on this schema and is acknowledged anyway,
+    * because it reports that it ran rather than what it moved. */
+   acknowledged = 9;
+   assert(aimee_db2_entity_edge_bump_utility_call(call_client, &client, 9285, 0, "replay-entity",
+                                                  -1.5, &acknowledged, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+   acknowledged = 9;
+   assert(aimee_db2_entity_edge_bump_utility_call(call_client, &client, 9286, 0, "replay-entity",
+                                                  5.0, &acknowledged, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+   /* Past the bound in either direction is refused before the request is sent,
+    * which is the bound doing its job rather than the database. */
+   assert(aimee_db2_entity_edge_bump_utility_call(call_client, &client, 9287, 0, "replay-entity",
+                                                  -5.5, &acknowledged, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
+   acknowledged = 9;
+   assert(aimee_db2_bandit_decision_close_call(call_client, &client, 9288, 0, "replay-decision",
+                                               -0.25, &acknowledged, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   assert(acknowledged == 1);
+
+   static aimee_db2_entity_neighbors_weighted_row_t
+       weighted_rows[AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS];
+   uint32_t weighted_count = 99;
+   assert(aimee_db2_entity_neighbors_weighted_call(
+              call_client, &client, 9289, 0, "replay-entity", 8u, 1u, weighted_rows,
+              AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS, &weighted_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(weighted_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

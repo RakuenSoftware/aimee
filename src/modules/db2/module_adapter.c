@@ -883,6 +883,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .briefing_active_entities = db2_memory_briefing_list_active_entities,
        .entity_walk_step_typed = db2_entity_edge_walk_step_typed,
        .projection_generations_list = db2_code_projection_generations_list,
+       .entity_edge_bump_utility = db2_entity_edge_bump_utility,
+       .bandit_decision_close = db2_bandit_decision_close,
+       .entity_neighbors_weighted = db2_entity_edge_neighbors_weighted,
    };
    return &backend;
 }
@@ -3456,6 +3459,64 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char entity[AIMEE_DB2_ENTITY_EDGE_BUMP_UTILITY_ENTITY_MAX + 1] = "";
+         double utility_delta = 0.0;
+         if (aimee_db2_entity_edge_bump_utility_request_decode(request_body, request_len, entity,
+                                                               sizeof(entity), &utility_delta) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_EDGE_BUMP_UTILITY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_edge_bump_utility)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->entity_edge_bump_utility(entity, utility_delta) == 0 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_entity_edge_bump_utility_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char entity[AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_ENTITY_MAX + 1] = "";
+         uint32_t limit = 0u;
+         uint32_t utility_scoring_enabled = 0u;
+         if (aimee_db2_entity_neighbors_weighted_request_decode(request_body, request_len, entity,
+                                                                sizeof(entity), &limit,
+                                                                &utility_scoring_enabled) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_neighbors_weighted)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_neighbors_weighted_row_t
+                rows[AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_entity_edge_weighted_neighbor_t
+                   found[AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS];
+               int written = backend->entity_neighbors_weighted(
+                   entity, found, AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS, (int)limit,
+                   (int)utility_scoring_enabled);
+               for (int index = 0; index < written; index++)
+               {
+                  snprintf(rows[index].node, sizeof(rows[index].node), "%s", found[index].node);
+                  rows[index].weight = found[index].weight < 0 ? 0u : (uint32_t)found[index].weight;
+                  rows[index].utility_score = found[index].utility_score;
+                  rows[index].effective_utility = found[index].effective_utility;
+               }
+               count = written < 0 ? 0u : (uint32_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_entity_neighbors_weighted_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -4824,6 +4885,28 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             if (aimee_db2_bandit_decision_points_reply_encode(decision_points, response_body,
                                                               response_capacity, response_len) != 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char bandit_decision_id[AIMEE_DB2_BANDIT_DECISION_CLOSE_BANDIT_DECISION_ID_MAX + 1] = "";
+         double reward = 0.0;
+         if (aimee_db2_bandit_decision_close_request_decode(
+                 request_body, request_len, bandit_decision_id, sizeof(bandit_decision_id),
+                 &reward) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_BANDIT_DECISION_CLOSE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->bandit_decision_close)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->bandit_decision_close(bandit_decision_id, reward) == 0 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            if (aimee_db2_bandit_decision_close_reply_encode(acknowledged, response_body,
+                                                             response_capacity, response_len) != 0)
                return AIMEE_MODULE_STATUS_INTERNAL;
             return AIMEE_MODULE_STATUS_OK;
          }

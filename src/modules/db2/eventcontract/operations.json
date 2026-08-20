@@ -5988,6 +5988,125 @@
       }
     },
     {
+      "family": "index",
+      "id": 41,
+      "name": "entity_edge_bump_utility",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges and the utility recorded on them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_bump_utility"
+      ],
+      "request": {
+        "policy": {
+          "writes": "every edge touching the entity at either end is bumped by the same amount, and each result is clamped to the range the column keeps"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "utility_delta",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4617315517961601024
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 42,
+      "name": "entity_neighbors_weighted",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their weights and the utility recorded on them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_neighbors_weighted"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the stored utility and the utility after decay both cross, and they differ by how long ago the edge was last touched"
+        },
+        "fields": [
+          {
+            "name": "entity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1024
+          },
+          {
+            "name": "utility_scoring_enabled",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "node",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "weight",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "utility_score",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4617315517961601024
+            },
+            {
+              "name": "effective_utility",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4617315517961601024
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -7648,6 +7767,52 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 2047
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 42,
+      "name": "bandit_decision_close",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Bandit decisions and the rewards recorded on them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_bandit_decision_close"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the reward is stored as given, the closing stamp is DB2's clock, and a decision that does not exist is acknowledged"
+        },
+        "fields": [
+          {
+            "name": "bandit_decision_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "reward",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
           }
         ]
       }

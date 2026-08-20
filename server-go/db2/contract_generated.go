@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "2b33a7ec2815871c2ba03e7ef27f9282e9e9b7f6871a7b45a54eff4a6106de74"
+const ContractSHA256 = "7f65494a02382fa22dab251132efce9316508c44ad4b936dbfec759f6eef2a7e"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2494,6 +2494,139 @@ func DecodeProjectionGenerationsListRequest(request []byte) (string, error) {
 	return project, nil
 }
 
+const EventEntityEdgeBumpUtility = EventIndex
+const StageEntityEdgeBumpUtility = FamilyIndex
+const OperationEntityEdgeBumpUtility uint32 = 41
+const EntityEdgeBumpUtilityEntityMin = 1
+const EntityEdgeBumpUtilityEntityMax = 511
+const EntityEdgeBumpUtilityUtilityDeltaMaxMagnitudeBits uint64 = 4617315517961601024
+
+// EncodeEntityEdgeBumpUtilityRequest writes the schema entity_edge_bump_utility declares, in order.
+func EncodeEntityEdgeBumpUtilityRequest(entity string, utilityDelta float64) ([]byte, error) {
+	if len(entity) < EntityEdgeBumpUtilityEntityMin || len(entity) > EntityEdgeBumpUtilityEntityMax || hasNUL(entity) ||
+		math.Float64bits(utilityDelta)&0x7fffffffffffffff > EntityEdgeBumpUtilityUtilityDeltaMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityEdgeBumpUtilityEntityMax); err != nil {
+		return nil, err
+	}
+	var utilityDeltaBytes [8]byte
+	binary.LittleEndian.PutUint64(utilityDeltaBytes[:], math.Float64bits(utilityDelta))
+	payload = append(payload, utilityDeltaBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityEdgeBumpUtility, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityEdgeBumpUtilityRequest reads it back, checking each field against its own bound.
+func DecodeEntityEdgeBumpUtilityRequest(request []byte) (string, float64, error) {
+	var entity string
+	var utilityDelta float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityEdgeBumpUtility || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityEdgeBumpUtilityEntityMax); err != nil ||
+		len(entity) < EntityEdgeBumpUtilityEntityMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > EntityEdgeBumpUtilityUtilityDeltaMaxMagnitudeBits {
+			return "", 0, ErrMalformedEnvelope
+		}
+		utilityDelta = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return entity, utilityDelta, nil
+}
+
+const EventEntityNeighborsWeighted = EventIndex
+const StageEntityNeighborsWeighted = FamilyIndex
+const OperationEntityNeighborsWeighted uint32 = 42
+const EntityNeighborsWeightedEntityMin = 1
+const EntityNeighborsWeightedEntityMax = 511
+const EntityNeighborsWeightedLimitMin uint32 = 0
+const EntityNeighborsWeightedLimitMax uint32 = 1024
+const EntityNeighborsWeightedUtilityScoringEnabledMin uint32 = 0
+const EntityNeighborsWeightedUtilityScoringEnabledMax uint32 = 1
+
+// EncodeEntityNeighborsWeightedRequest writes the schema entity_neighbors_weighted declares, in order.
+func EncodeEntityNeighborsWeightedRequest(entity string, limit uint32, utilityScoringEnabled uint32) ([]byte, error) {
+	if len(entity) < EntityNeighborsWeightedEntityMin || len(entity) > EntityNeighborsWeightedEntityMax || hasNUL(entity) ||
+		limit < EntityNeighborsWeightedLimitMin || limit > EntityNeighborsWeightedLimitMax ||
+		utilityScoringEnabled < EntityNeighborsWeightedUtilityScoringEnabledMin || utilityScoringEnabled > EntityNeighborsWeightedUtilityScoringEnabledMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entity, EntityNeighborsWeightedEntityMax); err != nil {
+		return nil, err
+	}
+	var limitBytes [4]byte
+	binary.LittleEndian.PutUint32(limitBytes[:], limit)
+	payload = append(payload, limitBytes[:]...)
+	var utilityScoringEnabledBytes [4]byte
+	binary.LittleEndian.PutUint32(utilityScoringEnabledBytes[:], utilityScoringEnabled)
+	payload = append(payload, utilityScoringEnabledBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityNeighborsWeighted, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityNeighborsWeightedRequest reads it back, checking each field against its own bound.
+func DecodeEntityNeighborsWeightedRequest(request []byte) (string, uint32, uint32, error) {
+	var entity string
+	var limit uint32
+	var utilityScoringEnabled uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityNeighborsWeighted || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entity, err = takeRowText(payload, &cursor, EntityNeighborsWeightedEntityMax); err != nil ||
+		len(entity) < EntityNeighborsWeightedEntityMin {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	limit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if limit < EntityNeighborsWeightedLimitMin || limit > EntityNeighborsWeightedLimitMax {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	utilityScoringEnabled = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if utilityScoringEnabled < EntityNeighborsWeightedUtilityScoringEnabledMin || utilityScoringEnabled > EntityNeighborsWeightedUtilityScoringEnabledMax {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	return entity, limit, utilityScoringEnabled, nil
+}
+
 const EventTraceMiningRecord = EventLearning
 const StageTraceMiningRecord = FamilyLearning
 const OperationTraceMiningRecord uint32 = 8
@@ -4382,6 +4515,66 @@ func DecodeBanditDecisionPointsRequest(request []byte) (error) {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+const EventBanditDecisionClose = EventLearning
+const StageBanditDecisionClose = FamilyLearning
+const OperationBanditDecisionClose uint32 = 42
+const BanditDecisionCloseBanditDecisionIDMin = 1
+const BanditDecisionCloseBanditDecisionIDMax = 127
+const BanditDecisionCloseRewardMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeBanditDecisionCloseRequest writes the schema bandit_decision_close declares, in order.
+func EncodeBanditDecisionCloseRequest(banditDecisionID string, reward float64) ([]byte, error) {
+	if len(banditDecisionID) < BanditDecisionCloseBanditDecisionIDMin || len(banditDecisionID) > BanditDecisionCloseBanditDecisionIDMax || hasNUL(banditDecisionID) ||
+		math.Float64bits(reward)&0x7fffffffffffffff > BanditDecisionCloseRewardMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, banditDecisionID, BanditDecisionCloseBanditDecisionIDMax); err != nil {
+		return nil, err
+	}
+	var rewardBytes [8]byte
+	binary.LittleEndian.PutUint64(rewardBytes[:], math.Float64bits(reward))
+	payload = append(payload, rewardBytes[:]...)
+	header, err := EncodeRequestHeader(OperationBanditDecisionClose, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditDecisionCloseRequest reads it back, checking each field against its own bound.
+func DecodeBanditDecisionCloseRequest(request []byte) (string, float64, error) {
+	var banditDecisionID string
+	var reward float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditDecisionClose || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if banditDecisionID, err = takeRowText(payload, &cursor, BanditDecisionCloseBanditDecisionIDMax); err != nil ||
+		len(banditDecisionID) < BanditDecisionCloseBanditDecisionIDMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > BanditDecisionCloseRewardMaxMagnitudeBits {
+			return "", 0, ErrMalformedEnvelope
+		}
+		reward = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return banditDecisionID, reward, nil
 }
 
 const EventDocumentExists = EventOrganization

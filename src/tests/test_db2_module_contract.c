@@ -2250,6 +2250,31 @@ int db2_code_projection_generations_list(const char *project, code_projection_ge
    return 0;
 }
 
+int db2_entity_edge_bump_utility(const char *key, double delta)
+{
+   (void)key;
+   (void)delta;
+   return 0;
+}
+
+int db2_bandit_decision_close(const char *id, double reward)
+{
+   (void)id;
+   (void)reward;
+   return 0;
+}
+
+int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weighted_neighbor_t *out,
+                                       int max, int limit_sql, int utility_scoring_enabled)
+{
+   (void)entity;
+   (void)out;
+   (void)max;
+   (void)limit_sql;
+   (void)utility_scoring_enabled;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

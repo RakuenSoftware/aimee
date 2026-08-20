@@ -12785,6 +12785,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_code_projection_generations_list",
         "policy": {"reads": 200},
     },
+    "entity_edge_bump_utility": {
+        "key": ("index", 41),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_bump_utility",
+        "policy": {"writes": 200},
+    },
+    "bandit_decision_close": {
+        "key": ("learning", 42),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_decision_close",
+        "policy": {"writes": 200},
+    },
+    "entity_neighbors_weighted": {
+        "key": ("index", 42),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_neighbors_weighted",
+        "policy": {"reads": 200},
+    },
 }
 
 
@@ -13915,8 +13933,16 @@ def _generic_fields(section: dict[str, object], where: str,
             if not (0 <= checked["minimum"] <= checked["maximum"] <= ceiling):
                 fail("generic-fields", f"{where}[{index}] has impossible bounds")
         elif kind == "f64":
-            checked = _keys(field, {"name", "type", "encoding", "minimum_binary64_bits",
-                                    "maximum_binary64_bits"}, f"{where}[{index}]")
+            if "maximum_magnitude_binary64_bits" in field:
+                checked = _keys(field, {"name", "type", "encoding",
+                                        "maximum_magnitude_binary64_bits"}, f"{where}[{index}]")
+                magnitude = checked["maximum_magnitude_binary64_bits"]
+                if not isinstance(magnitude, int) or not 0 <= magnitude < 0x7ff0000000000000:
+                    fail("generic-fields",
+                         f"{where}[{index}] magnitude must be a finite binary64 pattern")
+            else:
+                checked = _keys(field, {"name", "type", "encoding", "minimum_binary64_bits",
+                                        "maximum_binary64_bits"}, f"{where}[{index}]")
             if checked["encoding"] != "ieee754-binary64-le":
                 fail("generic-fields", f"{where}[{index}] must be little-endian binary64")
         else:
@@ -13990,6 +14016,9 @@ def _generic_field_constants(operation: dict[str, object], fields: list[dict[str
         elif kind == "u64":
             rows.append((f"AIMEE_DB2_{upper}_{name}_MIN", f"{field['minimum']}ull"))
             rows.append((f"AIMEE_DB2_{upper}_{name}_MAX", f"{field['maximum']}ull"))
+        elif "maximum_magnitude_binary64_bits" in field:
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MAX_MAGNITUDE_BITS",
+                         f"{field['maximum_magnitude_binary64_bits']}ull"))
         else:
             rows.append((f"AIMEE_DB2_{upper}_{name}_MIN_BITS",
                          f"{field['minimum_binary64_bits']}ull"))
@@ -14096,6 +14125,11 @@ def _generic_c_encode_body(operation: dict[str, object], fields: list[dict[str, 
                           if int(field["minimum"]) else f"{value} > {bound}_MAX")
             writes.append(f"""   aimee_db2_put_u64(payload + cursor, {value});
    cursor += 8u;""")
+        elif "maximum_magnitude_binary64_bits" in field:
+            checks.append(f"(aimee_db2_binary64_bits({value}) & 0x7fffffffffffffffull) > "
+                          f"{bound}_MAX_MAGNITUDE_BITS")
+            writes.append(f"""   aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits({value}));
+   cursor += 8u;""")
         else:
             floor_bits = int(field["minimum_binary64_bits"])
             checks.append(
@@ -14149,9 +14183,12 @@ def _generic_c_decode_body(operation: dict[str, object], fields: list[dict[str, 
    if ({floor}{value} > {bound}_MAX)
       return -1;""")
         else:
-            floor_bits = int(field["minimum_binary64_bits"])
-            guard = (f"bits < {bound}_MIN_BITS || bits > {bound}_MAX_BITS" if floor_bits
-                     else f"bits > {bound}_MAX_BITS")
+            if "maximum_magnitude_binary64_bits" in field:
+                guard = f"(bits & 0x7fffffffffffffffull) > {bound}_MAX_MAGNITUDE_BITS"
+            else:
+                floor_bits = int(field["minimum_binary64_bits"])
+                guard = (f"bits < {bound}_MIN_BITS || bits > {bound}_MAX_BITS" if floor_bits
+                         else f"bits > {bound}_MAX_BITS")
             steps.append(f"""   if (cursor + 8u > payload_len)
       return -1;
    {{
@@ -14400,6 +14437,10 @@ def _generic_sample(field: dict[str, object], index: int) -> object:
         text = f"value-{index}"[:ceiling]
         return text if len(text) >= floor else "v" * floor
     if kind == "f64":
+        if "maximum_magnitude_binary64_bits" in field:
+            # Negative, at the bound: a fixture that only ever carried positive
+            # values would pass against a codec that lost the sign.
+            return int(field["maximum_magnitude_binary64_bits"]) | 0x8000000000000000
         return int(field["maximum_binary64_bits"])
     floor, ceiling = int(field["minimum"]), int(field["maximum"])
     return min(ceiling, max(floor, index + 1))
@@ -14469,6 +14510,14 @@ def _generic_vectors(catalog: dict[str, object],
                     "mutation": f"{name}_above_maximum",
                     "hex": _mutate_u32(request, offset, int(field["maximum"]) + 1).hex()})
             offset += 4
+        elif kind == "f64" and "maximum_magnitude_binary64_bits" in field:
+            # One past the bound, sign kept: the mutation has to be too large
+            # rather than the wrong sign, or it would pass for the wrong reason.
+            over = (int(field["maximum_magnitude_binary64_bits"]) + 1) | 0x8000000000000000
+            negative.append({
+                "mutation": f"{name}_above_magnitude",
+                "hex": (request[:offset] + _put_u64(over) + request[offset + 8:]).hex()})
+            offset += 8
         else:
             ceiling = (int(field["maximum"]) if kind == "u64"
                        else int(field["maximum_binary64_bits"]))
@@ -14555,6 +14604,9 @@ def _generic_go(operation: dict[str, object]) -> str:
         if field["type"] == "utf8":
             bounds.append(f"const {name}{upper}Min = {field['minimum_bytes']}")
             bounds.append(f"const {name}{upper}Max = {field['maximum_bytes']}")
+        elif field["type"] == "f64" and "maximum_magnitude_binary64_bits" in field:
+            bounds.append(f"const {name}{upper}MaxMagnitudeBits uint64 = "
+                          f"{field['maximum_magnitude_binary64_bits']}")
         elif field["type"] == "f64":
             bounds.append(f"const {name}{upper}MinBits uint64 = {field['minimum_binary64_bits']}")
             bounds.append(f"const {name}{upper}MaxBits uint64 = {field['maximum_binary64_bits']}")
@@ -14609,9 +14661,9 @@ def _generic_go(operation: dict[str, object]) -> str:
 	if {local} < {name}{upper}Min || {local} > {name}{upper}Max {{
 		return {zeros}, ErrMalformedEnvelope
 	}}""")
-        else:
-            checks.append(f"math.Float64bits({local}) < {name}{upper}MinBits || "
-                          f"math.Float64bits({local}) > {name}{upper}MaxBits")
+        elif "maximum_magnitude_binary64_bits" in field:
+            checks.append(f"math.Float64bits({local})&0x7fffffffffffffff > "
+                          f"{name}{upper}MaxMagnitudeBits")
             writes.append(f"""	var {local}Bytes [8]byte
 	binary.LittleEndian.PutUint64({local}Bytes[:], math.Float64bits({local}))
 	payload = append(payload, {local}Bytes[:]...)""")
@@ -14621,7 +14673,28 @@ def _generic_go(operation: dict[str, object]) -> str:
 	{{
 		bits := binary.LittleEndian.Uint64(payload[cursor:])
 		cursor += 8
-		if bits < {name}{upper}MinBits || bits > {name}{upper}MaxBits {{
+		if bits&0x7fffffffffffffff > {name}{upper}MaxMagnitudeBits {{
+			return {zeros}, ErrMalformedEnvelope
+		}}
+		{local} = math.Float64frombits(bits)
+	}}""")
+        else:
+            checks.append(f"math.Float64bits({local}) < {name}{upper}MinBits || "
+                          f"math.Float64bits({local}) > {name}{upper}MaxBits")
+            writes.append(f"""	var {local}Bytes [8]byte
+	binary.LittleEndian.PutUint64({local}Bytes[:], math.Float64bits({local}))
+	payload = append(payload, {local}Bytes[:]...)""")
+            go_float_guard = (
+                f"bits&0x7fffffffffffffff > {name}{upper}MaxMagnitudeBits"
+                if "maximum_magnitude_binary64_bits" in field
+                else f"bits < {name}{upper}MinBits || bits > {name}{upper}MaxBits")
+            reads.append(f"""	if cursor+8 > len(payload) {{
+		return {zeros}, ErrMalformedEnvelope
+	}}
+	{{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if {go_float_guard} {{
 			return {zeros}, ErrMalformedEnvelope
 		}}
 		{local} = math.Float64frombits(bits)
