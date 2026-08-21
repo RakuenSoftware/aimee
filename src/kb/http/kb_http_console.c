@@ -12,6 +12,8 @@
 #include "kb_service_kb.h"          /* kb_service_health_json */
 #include "db2/kb_service_backend.h" /* async queue status */
 #include "db2/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
+#include "db2/fact_mutation.h"      /* assertion review/rollback/removal */
+#include "db2/entity_registry.h"    /* entity merge/unmerge review */
 #include "rel_types.h"              /* REL_TYPE_NAME_MAX */
 #include <openssl/crypto.h>         /* wipe transient credential request copies */
 
@@ -204,6 +206,67 @@ static int console_typed_facts(char *out_buf, int out_cap)
    }
    cJSON_AddNumberToObject(root, "candidate_count", nc < 0 ? 0 : nc);
 
+   /* Assertion candidates are quarantined from recall until this queue approves
+    * them.  Evidence count is independent of the graph weight. */
+   cJSON *assertions = cJSON_AddArrayToObject(root, "assertion_candidates");
+   fact_candidate_t fc[64];
+   int nfc = db2_fact_candidates(fc, 64);
+   for (int i = 0; i < nfc && assertions; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      if (!o)
+         continue;
+      cJSON_AddNumberToObject(o, "id", (double)fc[i].id);
+      cJSON_AddStringToObject(o, "subject", fc[i].source);
+      cJSON_AddStringToObject(o, "relation", fc[i].relation);
+      cJSON_AddStringToObject(o, "object", fc[i].target);
+      cJSON_AddStringToObject(o, "assertion_kind", fc[i].assertion_kind);
+      cJSON_AddStringToObject(o, "lifecycle", fc[i].lifecycle);
+      cJSON_AddNumberToObject(o, "authority_rank", fc[i].authority_rank);
+      cJSON_AddNumberToObject(o, "evidence_count", fc[i].evidence_count);
+      cJSON_AddStringToObject(o, "commit_id", fc[i].commit_id);
+      cJSON_AddItemToArray(assertions, o);
+   }
+   cJSON_AddNumberToObject(root, "assertion_candidate_count", nfc < 0 ? 0 : nfc);
+
+   /* Canonical entities and merge history share the typed-fact operator surface:
+    * merge is a graph mutation with the same commit/rollback/audit contract. */
+   cJSON *entities = cJSON_AddArrayToObject(root, "entities");
+   entity_summary_t es[128];
+   int nes = db2_entity_summaries(es, 128);
+   for (int i = 0; i < nes && entities; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      if (!o)
+         continue;
+      cJSON_AddNumberToObject(o, "canonical_id", (double)es[i].canonical_id);
+      cJSON_AddNumberToObject(o, "kind", es[i].kind);
+      cJSON_AddStringToObject(o, "status", es[i].status);
+      cJSON_AddNumberToObject(o, "merged_into", (double)es[i].merged_into);
+      cJSON_AddStringToObject(o, "name", es[i].name);
+      cJSON_AddItemToArray(entities, o);
+   }
+   cJSON_AddNumberToObject(root, "entity_count", nes < 0 ? 0 : nes);
+
+   cJSON *merges = cJSON_AddArrayToObject(root, "entity_merges");
+   entity_merge_summary_t ms[64];
+   int nms = db2_entity_merge_summaries(ms, 64);
+   for (int i = 0; i < nms && merges; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      if (!o)
+         continue;
+      cJSON_AddNumberToObject(o, "merge_id", (double)ms[i].merge_id);
+      cJSON_AddNumberToObject(o, "from_id", (double)ms[i].from_id);
+      cJSON_AddNumberToObject(o, "into_id", (double)ms[i].into_id);
+      cJSON_AddBoolToObject(o, "undone", ms[i].undone ? 1 : 0);
+      cJSON_AddStringToObject(o, "from_name", ms[i].from_name);
+      cJSON_AddStringToObject(o, "into_name", ms[i].into_name);
+      cJSON_AddStringToObject(o, "commit_id", ms[i].commit_id);
+      cJSON_AddItemToArray(merges, o);
+   }
+   cJSON_AddNumberToObject(root, "entity_merge_count", nms < 0 ? 0 : nms);
+
    char *s = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);
    if (!s)
@@ -357,6 +420,289 @@ static int console_typed_facts_relation(const char *body, char *out_buf, int out
    snprintf(out_buf, (size_t)out_cap, "%s", s);
    free(s);
    return status;
+}
+
+/* POST /v1/console/typed_facts/assertion
+ * {action:"approve"|"reject"|"undo", assertion_id:N}.  Authority is resolved
+ * exclusively from the verified request context by the mutation seam. */
+static int console_typed_facts_assertion(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "assertion_id") : NULL;
+   int64_t id = cJSON_IsNumber(idj) && idj->valuedouble > 0 ? (int64_t)idj->valuedouble : 0;
+   fact_review_action_t review;
+   if (action && strcmp(action, "approve") == 0)
+      review = FACT_REVIEW_APPROVE;
+   else if (action && strcmp(action, "reject") == 0)
+      review = FACT_REVIEW_REJECT;
+   else if (action && strcmp(action, "undo") == 0)
+      review = FACT_REVIEW_UNDO;
+   else
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be approve, reject, or undo\"}");
+      return 400;
+   }
+   if (!id)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive assertion_id required\"}");
+      return 400;
+   }
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   fact_mutation_result_t result;
+   int rc = db2_fact_mutation_review(&actor, id, review, &result);
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fact review transition failed\"}");
+      return 409;
+   }
+   snprintf(out_buf, (size_t)out_cap,
+            "{\"ok\":true,\"assertion_id\":%lld,\"lifecycle\":\"%s\","
+            "\"commit_id\":\"%s\"}",
+            (long long)result.assertion_id, result.lifecycle, result.commit_id);
+   return 200;
+}
+
+/* POST /v1/console/typed_facts/entity
+ * {action:"merge",from_id:N,into_id:N} or {action:"unmerge",merge_id:N}.
+ * IDs select existing canonical rows only; actor identity and authority come
+ * exclusively from the verified console request context. */
+static int console_typed_facts_entity(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   fact_actor_t actor;
+   if (!action || (strcmp(action, "merge") != 0 && strcmp(action, "unmerge") != 0))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be merge or unmerge\"}");
+      return 400;
+   }
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   char cid[FACT_COMMIT_ID_MAX];
+   if (strcmp(action, "merge") == 0)
+   {
+      cJSON *fj = cJSON_GetObjectItemCaseSensitive(req, "from_id");
+      cJSON *tj = cJSON_GetObjectItemCaseSensitive(req, "into_id");
+      int64_t from = cJSON_IsNumber(fj) && fj->valuedouble > 0 ? (int64_t)fj->valuedouble : 0;
+      int64_t into = cJSON_IsNumber(tj) && tj->valuedouble > 0 ? (int64_t)tj->valuedouble : 0;
+      if (!from || !into || from == into || fj->valuedouble != (double)from ||
+          tj->valuedouble != (double)into)
+      {
+         cJSON_Delete(req);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"distinct positive integer from_id and into_id required\"}");
+         return 400;
+      }
+      int64_t mid = db2_entity_merge_as(&actor, from, into, cid);
+      cJSON_Delete(req);
+      if (mid <= 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"entities are not both active or merge would be invalid\"}");
+         return 409;
+      }
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+               (long long)mid, cid);
+      return 200;
+   }
+   cJSON *mj = cJSON_GetObjectItemCaseSensitive(req, "merge_id");
+   int64_t mid = cJSON_IsNumber(mj) && mj->valuedouble > 0 ? (int64_t)mj->valuedouble : 0;
+   if (!mid || mj->valuedouble != (double)mid)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive integer merge_id required\"}");
+      return 400;
+   }
+   int rc = db2_entity_unmerge_as(&actor, mid, cid);
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"merge is unknown, already undone, or no longer current\"}");
+      return 409;
+   }
+   snprintf(out_buf, (size_t)out_cap,
+            "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+            (long long)mid, cid);
+   return 200;
+}
+
+/* POST /v1/console/typed_facts/commit
+ * preview/rollback accepts either one commit_id or one atomic ingest_run_id. */
+static int console_typed_facts_commit(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   const char *cid =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "commit_id")) : NULL;
+   const char *run =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "ingest_run_id")) : NULL;
+   int by_run = run && run[0];
+   if (!action || ((!cid || !cid[0]) && !by_run) || (cid && cid[0] && by_run))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"action and exactly one of commit_id or ingest_run_id required\"}");
+      return 400;
+   }
+   char selector[128];
+   const char *selected = by_run ? run : cid;
+   if (strlen(selected) >= sizeof(selector))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid commit_id\"}");
+      return 400;
+   }
+   snprintf(selector, sizeof(selector), "%s", selected);
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   if (strcmp(action, "rollback") == 0)
+   {
+      char rollback_id[FACT_COMMIT_ID_MAX];
+      int n = by_run ? db2_fact_ingest_run_rollback(&actor, selector, rollback_id)
+                     : db2_fact_commit_rollback(&actor, selector, rollback_id);
+      cJSON_Delete(req);
+      if (n < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"commit or ingest run is not reversible\"}");
+         return 409;
+      }
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"ok\":true,\"changes\":%d,\"rollback_commit_id\":\"%s\"}", n, rollback_id);
+      return 200;
+   }
+   if (strcmp(action, "preview") != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be preview or rollback\"}");
+      return 400;
+   }
+   fact_commit_change_t changes[64];
+   int n = by_run ? db2_fact_ingest_run_preview(selector, changes, 64)
+                  : db2_fact_commit_preview(selector, changes, 64);
+   cJSON_Delete(req);
+   if (n < 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"commit preview failed\"}");
+      return 404;
+   }
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddStringToObject(root, by_run ? "ingest_run_id" : "commit_id", selector);
+   cJSON *arr = cJSON_AddArrayToObject(root, "changes");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddNumberToObject(o, "assertion_id", (double)changes[i].assertion_id);
+      cJSON_AddStringToObject(o, "object_kind", changes[i].object_kind);
+      cJSON_AddStringToObject(o, "object_key", changes[i].object_key);
+      cJSON_AddStringToObject(o, "action", changes[i].action);
+      cJSON_AddStringToObject(o, "before", changes[i].before_lifecycle);
+      cJSON_AddStringToObject(o, "after", changes[i].after_lifecycle);
+      cJSON_AddNumberToObject(o, "before_authority", changes[i].before_authority_rank);
+      cJSON_AddNumberToObject(o, "after_authority", changes[i].after_authority_rank);
+      cJSON_AddBoolToObject(o, "existed_before", changes[i].existed_before);
+      cJSON_AddBoolToObject(o, "existed_after", changes[i].existed_after);
+      cJSON_AddStringToObject(o, "detail", changes[i].detail);
+      cJSON_AddItemToArray(arr, o);
+   }
+   char *rendered = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!rendered || strlen(rendered) >= (size_t)out_cap)
+   {
+      free(rendered);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"commit preview too large\"}");
+      return 500;
+   }
+   snprintf(out_buf, (size_t)out_cap, "%s", rendered);
+   free(rendered);
+   return 200;
+}
+
+/* POST /v1/console/typed_facts/erasure
+ * {action:"preview"|"erase",subject,relation?,object?}. */
+static int console_typed_facts_erasure(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   const char *source =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "subject")) : NULL;
+   const char *relation =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "relation")) : NULL;
+   const char *target =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "object")) : NULL;
+   if (!action || !source || !source[0] ||
+       (strcmp(action, "preview") != 0 && strcmp(action, "erase") != 0))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"action preview|erase and subject required\"}");
+      return 400;
+   }
+   char action_copy[16];
+   snprintf(action_copy, sizeof(action_copy), "%s", action);
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   fact_erasure_impact_t impact;
+   char cid[FACT_COMMIT_ID_MAX] = "";
+   int rc = strcmp(action_copy, "preview") == 0
+                ? db2_fact_erasure_preview(source, relation, target, &impact)
+                : db2_fact_erasure_execute(&actor, source, relation, target, &impact, cid);
+   cJSON_Delete(req);
+   if (rc < 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"erasure operation failed\"}");
+      return 409;
+   }
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddBoolToObject(root, "ok", 1);
+   cJSON_AddStringToObject(root, "action", action_copy);
+   cJSON_AddNumberToObject(root, "assertions", impact.assertion_count);
+   cJSON_AddNumberToObject(root, "evidence_mentions", impact.evidence_count);
+   cJSON_AddStringToObject(root, "residual_data", impact.residual_data);
+   if (cid[0])
+      cJSON_AddStringToObject(root, "commit_id", cid);
+   char *rendered = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!rendered || strlen(rendered) >= (size_t)out_cap)
+   {
+      free(rendered);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"erasure report too large\"}");
+      return 500;
+   }
+   snprintf(out_buf, (size_t)out_cap, "%s", rendered);
+   free(rendered);
+   return 200;
 }
 
 /* The curator-pipeline config keys the console may write, beyond the per-stage
@@ -771,6 +1117,18 @@ int kb_http_console_route(const char *method, const char *path, const char *body
                                          : console_method_not_allowed(out_buf, out_cap);
    if (route_is(path, "/v1/console/typed_facts/relation"))
       return strcmp(method, "POST") == 0 ? console_typed_facts_relation(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/assertion"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_assertion(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/entity"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_entity(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/commit"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_commit(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/erasure"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_erasure(body, out_buf, out_cap)
                                          : console_method_not_allowed(out_buf, out_cap);
    return -1; /* not a console route — caller continues dispatch */
 }

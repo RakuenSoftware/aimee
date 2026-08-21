@@ -4,6 +4,7 @@
 #include "entity_registry.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "fact_mutation.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -239,9 +240,18 @@ int db2_entity_aliases_for(int64_t canonical_id, char (*out)[128], int max)
    return n;
 }
 
-int64_t db2_entity_merge(int64_t from_id, int64_t into_id)
+static int er_actor_ok(const fact_actor_t *actor)
 {
-   if (from_id <= 0 || into_id <= 0 || from_id == into_id)
+   return actor && actor->principal[0] && actor->role[0] &&
+          actor->rank >= FACT_ACTOR_MODEL && actor->rank <= FACT_ACTOR_OPERATOR;
+}
+
+int64_t db2_entity_merge_as(const fact_actor_t *actor, int64_t from_id, int64_t into_id,
+                            char commit_id[FACT_COMMIT_ID_MAX])
+{
+   if (commit_id)
+      commit_id[0] = '\0';
+   if (!er_actor_ok(actor) || from_id <= 0 || into_id <= 0 || from_id == into_id)
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -321,17 +331,39 @@ int64_t db2_entity_merge(int64_t from_id, int64_t into_id)
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
+   char merge_key[64];
+   snprintf(merge_key, sizeof(merge_key), "%lld", (long long)mid);
+   char cid[FACT_COMMIT_ID_MAX];
+   if (db2_fact_graph_record_external_in_txn(actor, "entity.merge", "entity_merge", merge_key,
+                                             "merge", "active", "merged", 1, cid) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
+   if (commit_id)
+      snprintf(commit_id, FACT_COMMIT_ID_MAX, "%s", cid);
    return mid;
 }
 
-int db2_entity_unmerge(int64_t merge_id)
+int64_t db2_entity_merge(int64_t from_id, int64_t into_id)
 {
-   if (merge_id <= 0)
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &actor) != 0)
+      return -1;
+   return db2_entity_merge_as(&actor, from_id, into_id, NULL);
+}
+
+int db2_entity_unmerge_as(const fact_actor_t *actor, int64_t merge_id,
+                          char commit_id[FACT_COMMIT_ID_MAX])
+{
+   if (commit_id)
+      commit_id[0] = '\0';
+   if (!er_actor_ok(actor) || merge_id <= 0)
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -399,12 +431,104 @@ int db2_entity_unmerge(int64_t merge_id)
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
+   char merge_key[64];
+   snprintf(merge_key, sizeof(merge_key), "%lld", (long long)merge_id);
+   char cid[FACT_COMMIT_ID_MAX];
+   if (db2_fact_graph_record_external_in_txn(actor, "entity.unmerge", "entity_merge", merge_key,
+                                             "unmerge", "merged", "active", 1, cid) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
+   if (commit_id)
+      snprintf(commit_id, FACT_COMMIT_ID_MAX, "%s", cid);
    return 0;
+}
+
+int db2_entity_unmerge(int64_t merge_id)
+{
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &actor) != 0)
+      return -1;
+   return db2_entity_unmerge_as(&actor, merge_id, NULL);
+}
+
+int db2_entity_summaries(entity_summary_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[ER_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT r.canonical_id,r.kind,r.status,r.merged_into,COALESCE((SELECT a.name"
+       " FROM entity_aliases a WHERE a.canonical_id=r.canonical_id AND a.suppressed=0"
+       " ORDER BY a.is_preferred DESC,a.id ASC LIMIT 1),'') FROM entity_registry r"
+       " ORDER BY r.status='active' DESC,r.canonical_id DESC LIMIT ?1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", max);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[n], 0, sizeof(out[n]));
+      out[n].canonical_id = aimee_pg_column_int64(st, 0);
+      out[n].kind = aimee_pg_column_int(st, 1);
+      snprintf(out[n].status, sizeof(out[n].status), "%s", aimee_pg_column_text(st, 2));
+      out[n].merged_into = aimee_pg_column_int64(st, 3);
+      snprintf(out[n].name, sizeof(out[n].name), "%s", aimee_pg_column_text(st, 4));
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
+int db2_entity_merge_summaries(entity_merge_summary_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[ER_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT m.id,m.from_id,m.into_id,m.undone,"
+       " COALESCE((SELECT a.name FROM entity_aliases a WHERE a.canonical_id=m.from_id"
+       " AND a.suppressed=0 ORDER BY a.is_preferred DESC,a.id ASC LIMIT 1),''),"
+       " COALESCE((SELECT a.name FROM entity_aliases a WHERE a.canonical_id=m.into_id"
+       " AND a.suppressed=0 ORDER BY a.is_preferred DESC,a.id ASC LIMIT 1),''),"
+       " COALESCE((SELECT ch.commit_id FROM fact_graph_changes ch"
+       " WHERE ch.object_kind='entity_merge' AND ch.object_key=CAST(m.id AS TEXT)"
+       " AND ch.action='merge' ORDER BY ch.id DESC LIMIT 1),'')"
+       " FROM entity_merges m ORDER BY m.id DESC LIMIT ?1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", max);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[n], 0, sizeof(out[n]));
+      out[n].merge_id = aimee_pg_column_int64(st, 0);
+      out[n].from_id = aimee_pg_column_int64(st, 1);
+      out[n].into_id = aimee_pg_column_int64(st, 2);
+      out[n].undone = aimee_pg_column_int(st, 3);
+      snprintf(out[n].from_name, sizeof(out[n].from_name), "%s", aimee_pg_column_text(st, 4));
+      snprintf(out[n].into_name, sizeof(out[n].into_name), "%s", aimee_pg_column_text(st, 5));
+      snprintf(out[n].commit_id, sizeof(out[n].commit_id), "%s", aimee_pg_column_text(st, 6));
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
 }
 
 int64_t db2_entity_conflict_record(const char *name)

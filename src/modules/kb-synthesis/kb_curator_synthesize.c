@@ -252,9 +252,9 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    db2_lease_release_idle();
 
    char serr[256];
-   char *response = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT,
-                                       request, NULL, config_kb_curator_synthesize_command(),
-                                       CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
+   char *response = kb_curator_llm_run(
+       NULL, KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT, request, NULL,
+       config_kb_curator_synthesize_command(), CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
    free(request);
    if (!response)
    {

@@ -25,7 +25,66 @@ interface TypedFacts {
   config: { typed_facts_enabled: boolean; auto_promote: boolean; promote_threshold: number };
   promotion_candidates: Candidate[];
   candidate_count: number;
+  assertion_candidates: AssertionCandidate[];
+  assertion_candidate_count: number;
+  entities: EntitySummary[];
+  entity_count: number;
+  entity_merges: EntityMerge[];
+  entity_merge_count: number;
   generated_at: string;
+}
+
+interface EntitySummary {
+  canonical_id: number;
+  kind: number;
+  status: string;
+  merged_into: number;
+  name: string;
+}
+
+interface EntityMerge {
+  merge_id: number;
+  from_id: number;
+  into_id: number;
+  undone: boolean;
+  from_name: string;
+  into_name: string;
+  commit_id: string;
+}
+
+interface AssertionCandidate {
+  id: number;
+  subject: string;
+  relation: string;
+  object: string;
+  assertion_kind: string;
+  lifecycle: string;
+  authority_rank: number;
+  evidence_count: number;
+  commit_id: string;
+}
+
+interface CommitChange {
+  assertion_id: number;
+  object_kind: string;
+  object_key: string;
+  action: string;
+  before: string;
+  after: string;
+  detail: string;
+}
+
+interface CommitPreview {
+  commit_id?: string;
+  ingest_run_id?: string;
+  changes: CommitChange[];
+}
+
+interface ErasureImpact {
+  assertions: number;
+  evidence_mentions: number;
+  residual_data: string;
+  commit_id?: string;
 }
 
 export default function TypedFacts() {
@@ -35,6 +94,17 @@ export default function TypedFacts() {
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState("");
   const [threshold, setThreshold] = useState(0);
+  const [lastReview, setLastReview] = useState<{ id: number; action: string } | null>(null);
+  const [commitId, setCommitId] = useState("");
+  const [ingestRunId, setIngestRunId] = useState("");
+  const [commitPreview, setCommitPreview] = useState<CommitPreview | null>(null);
+  const [eraseSubject, setEraseSubject] = useState("");
+  const [eraseRelation, setEraseRelation] = useState("");
+  const [eraseObject, setEraseObject] = useState("");
+  const [erasurePreview, setErasurePreview] = useState<ErasureImpact | null>(null);
+  const [previewedSelector, setPreviewedSelector] = useState("");
+  const [mergeFrom, setMergeFrom] = useState("");
+  const [mergeInto, setMergeInto] = useState("");
 
   const refresh = useCallback(() => {
     apiGet<TypedFacts>("/v1/console/typed_facts")
@@ -95,6 +165,130 @@ export default function TypedFacts() {
     }
   };
 
+  const reviewAssertion = async (action: "approve" | "reject" | "undo", assertionId: number) => {
+    setBusy(`assertion:${assertionId}`);
+    setNotice("");
+    try {
+      await apiSend("POST", "/v1/console/typed_facts/assertion", {
+        action,
+        assertion_id: assertionId,
+      });
+      setLastReview(action === "undo" ? null : { id: assertionId, action });
+      setNotice(`Assertion ${assertionId} ${action === "reject" ? "declined" : `${action}d`}.`);
+      setErr("");
+      refresh();
+    } catch (e) {
+      setErr(`Review failed: ${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const commitSelector = () =>
+    ingestRunId.trim() ? { ingest_run_id: ingestRunId.trim() } : { commit_id: commitId.trim() };
+
+  const previewCommit = async () => {
+    if (!commitId.trim() && !ingestRunId.trim()) return;
+    setBusy("commit:preview");
+    try {
+      const result = await apiSend<CommitPreview>("POST", "/v1/console/typed_facts/commit", {
+        action: "preview",
+        ...commitSelector(),
+      });
+      setCommitPreview(result);
+      setErr("");
+    } catch (e) {
+      setErr(`Commit preview failed: ${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const rollbackCommit = async () => {
+    if (!commitPreview || !window.confirm(`Roll back all ${commitPreview.changes.length} previewed changes?`)) return;
+    setBusy("commit:rollback");
+    try {
+      const result = await apiSend<{ rollback_commit_id: string }>("POST", "/v1/console/typed_facts/commit", {
+        action: "rollback",
+        ...commitSelector(),
+      });
+      setNotice(`Rollback committed as ${result.rollback_commit_id}.`);
+      setCommitPreview(null);
+      setErr("");
+      refresh();
+    } catch (e) {
+      setErr(`Rollback failed: ${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const erasureSelector = () =>
+    JSON.stringify({ subject: eraseSubject.trim(), relation: eraseRelation.trim(), object: eraseObject.trim() });
+
+  const runErasure = async (action: "preview" | "erase") => {
+    if (!eraseSubject.trim()) return;
+    if (action === "erase" &&
+        (previewedSelector !== erasureSelector() ||
+         !window.confirm("Permanently erase the previewed assertions and evidence? This cannot be undone."))) return;
+    setBusy(`erasure:${action}`);
+    try {
+      const result = await apiSend<ErasureImpact>("POST", "/v1/console/typed_facts/erasure", {
+        action,
+        subject: eraseSubject.trim(),
+        relation: eraseRelation.trim(),
+        object: eraseObject.trim(),
+      });
+      setErasurePreview(result);
+      setPreviewedSelector(action === "preview" ? erasureSelector() : "");
+      setNotice(action === "erase" ? `Permanent erasure completed as ${result.commit_id}.` : "Erasure impact previewed.");
+      setErr("");
+      if (action === "erase") refresh();
+    } catch (e) {
+      setErr(`Erasure ${action} failed: ${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const mergeEntities = async () => {
+    if (!mergeFrom || !mergeInto || mergeFrom === mergeInto ||
+        !window.confirm("Merge the duplicate entity into the canonical entity? This changes name resolution.")) return;
+    setBusy("entity:merge");
+    try {
+      const result = await apiSend<{ merge_id: number; commit_id: string }>(
+        "POST", "/v1/console/typed_facts/entity",
+        { action: "merge", from_id: Number(mergeFrom), into_id: Number(mergeInto) },
+      );
+      setNotice(`Entity merge ${result.merge_id} committed as ${result.commit_id}.`);
+      setMergeFrom("");
+      setMergeInto("");
+      setErr("");
+      refresh();
+    } catch (e) {
+      setErr(`Entity merge failed: ${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const unmergeEntity = async (mergeId: number) => {
+    if (!window.confirm(`Undo entity merge ${mergeId}?`)) return;
+    setBusy(`entity:unmerge:${mergeId}`);
+    try {
+      const result = await apiSend<{ commit_id: string }>(
+        "POST", "/v1/console/typed_facts/entity", { action: "unmerge", merge_id: mergeId },
+      );
+      setNotice(`Entity merge ${mergeId} undone as ${result.commit_id}.`);
+      setErr("");
+      refresh();
+    } catch (e) {
+      setErr(`Entity unmerge failed: ${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
   if (!loaded) return <div style={{ padding: 24, color: "#888" }}>Loading typed facts…</div>;
 
   const cfg = data?.config;
@@ -111,6 +305,17 @@ export default function TypedFacts() {
       </p>
       {err && <p style={{ color: "#b00", fontSize: 13 }}>{err}</p>}
       {notice && <p style={{ color: "#1f7a3d", fontSize: 13 }}>{notice}</p>}
+      {lastReview && (
+        <p style={{ fontSize: 12, marginTop: -8 }}>
+          <button
+            disabled={!!busy}
+            onClick={() => reviewAssertion("undo", lastReview.id)}
+            style={plainBtn}
+          >
+            undo {lastReview.action}
+          </button>
+        </p>
+      )}
 
       {cfg && (
         <div style={{ marginBottom: 22, border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden" }}>
@@ -241,6 +446,153 @@ export default function TypedFacts() {
           ))
         )}
       </div>
+
+      <div style={{ border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden", marginTop: 18 }}>
+        <div style={panelHead}>
+          Assertion review{" "}
+          <span style={{ fontWeight: 400, color: "#999", fontSize: 12 }}>
+            {(data?.assertion_candidates ?? []).length} quarantined candidate
+            {(data?.assertion_candidates ?? []).length === 1 ? "" : "s"}
+          </span>
+        </div>
+        {(data?.assertion_candidates ?? []).length === 0 ? (
+          <div style={{ padding: "10px 12px", fontSize: 12, color: "#999" }}>
+            Nothing waiting. Candidate assertions stay out of default recall until approved here.
+          </div>
+        ) : (
+          (data?.assertion_candidates ?? []).map((candidate) => (
+            <div
+              key={candidate.id}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderBottom: "1px solid #eee", flexWrap: "wrap" }}
+            >
+              <div style={{ flex: "1 1 360px", minWidth: 240 }}>
+                <div style={{ fontSize: 14 }}>
+                  <code>{candidate.subject}</code> · <code>{candidate.relation}</code> · <code>{candidate.object}</code>
+                </div>
+                <div style={{ fontSize: 12, color: "#777", marginTop: 3 }}>
+                  {candidate.assertion_kind} · {candidate.evidence_count} evidence mention
+                  {candidate.evidence_count === 1 ? "" : "s"} · authority {candidate.authority_rank}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  disabled={busy === `assertion:${candidate.id}`}
+                  onClick={() => reviewAssertion("approve", candidate.id)}
+                  style={primaryBtn}
+                >
+                  approve
+                </button>
+                <button
+                  disabled={busy === `assertion:${candidate.id}`}
+                  onClick={() => reviewAssertion("reject", candidate.id)}
+                  style={{ ...plainBtn, color: "#b00", borderColor: "#e0b4b4" }}
+                >
+                  decline
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div style={{ border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden", marginTop: 18 }}>
+        <div style={panelHead}>Canonical entity merge</div>
+        <div style={{ padding: 12, display: "grid", gap: 8 }}>
+          <div style={helpStyle}>
+            Merge a duplicate entity into the canonical entity. The authenticated operator, diff,
+            commit ID, and reversal are recorded atomically.
+          </div>
+          <label style={{ fontSize: 12 }}>
+            Duplicate entity
+            <select aria-label="Duplicate entity" value={mergeFrom}
+              onChange={(e) => setMergeFrom(e.target.value)} style={{ ...textStyle, width: "100%", marginTop: 3 }}>
+              <option value="">select duplicate…</option>
+              {(data?.entities ?? []).filter((entity) => entity.status === "active").map((entity) => (
+                <option key={entity.canonical_id} value={entity.canonical_id} disabled={String(entity.canonical_id) === mergeInto}>
+                  {entity.name || `(unnamed ${entity.canonical_id})`} · #{entity.canonical_id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ fontSize: 12 }}>
+            Canonical entity
+            <select aria-label="Canonical entity" value={mergeInto}
+              onChange={(e) => setMergeInto(e.target.value)} style={{ ...textStyle, width: "100%", marginTop: 3 }}>
+              <option value="">select canonical…</option>
+              {(data?.entities ?? []).filter((entity) => entity.status === "active").map((entity) => (
+                <option key={entity.canonical_id} value={entity.canonical_id} disabled={String(entity.canonical_id) === mergeFrom}>
+                  {entity.name || `(unnamed ${entity.canonical_id})`} · #{entity.canonical_id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button disabled={!!busy || !mergeFrom || !mergeInto || mergeFrom === mergeInto}
+            onClick={mergeEntities} style={{ ...primaryBtn, justifySelf: "start" }}>merge entities</button>
+          {(data?.entity_merges ?? []).length > 0 && (
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              {(data?.entity_merges ?? []).map((merge) => (
+                <div key={merge.merge_id} style={{ padding: "6px 0", borderTop: "1px solid #eee", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ flex: 1 }}>
+                    #{merge.merge_id}: <code>{merge.from_name || merge.from_id}</code> → <code>{merge.into_name || merge.into_id}</code>
+                    {merge.undone ? " · undone" : ""}
+                  </span>
+                  {!merge.undone && (
+                    <button disabled={!!busy} onClick={() => unmergeEntity(merge.merge_id)} style={plainBtn}>undo merge</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden", marginTop: 18 }}>
+        <div style={panelHead}>Commit rollback</div>
+        <div style={{ padding: 12, display: "grid", gap: 8 }}>
+          <div style={helpStyle}>Preview one graph commit, or an entire ingest run, before atomically rolling it back.</div>
+          <input aria-label="Commit ID" placeholder="commit ID" value={commitId}
+            disabled={!!ingestRunId} onChange={(e) => { setCommitId(e.target.value); setCommitPreview(null); }} style={textStyle} />
+          <input aria-label="Ingest run ID" placeholder="ingest run ID (for example memory-facts:42)" value={ingestRunId}
+            disabled={!!commitId} onChange={(e) => { setIngestRunId(e.target.value); setCommitPreview(null); }} style={textStyle} />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button disabled={!!busy || (!commitId.trim() && !ingestRunId.trim())} onClick={previewCommit} style={plainBtn}>preview diff</button>
+            <button disabled={!!busy || !commitPreview} onClick={rollbackCommit} style={{ ...plainBtn, color: "#b00", borderColor: "#e0b4b4" }}>rollback previewed changes</button>
+          </div>
+          {commitPreview && (
+            <div style={{ fontSize: 12 }}>
+              {commitPreview.changes.length} change{commitPreview.changes.length === 1 ? "" : "s"}
+              {commitPreview.changes.map((change, i) => (
+                <div key={`${change.object_kind}:${change.object_key}:${i}`} style={{ padding: "5px 0", borderTop: "1px solid #eee" }}>
+                  <code>{change.object_kind}:{change.object_key}</code> · {change.action} · {change.before || "∅"} → {change.after || "∅"}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden", marginTop: 18 }}>
+        <div style={panelHead}>Permanent erasure</div>
+        <div style={{ padding: 12, display: "grid", gap: 8 }}>
+          <div style={helpStyle}>Use reversible invalidation for corrections. This operator-only workflow permanently removes matching assertions and evidence.</div>
+          <input aria-label="Erasure subject" placeholder="subject (required)" value={eraseSubject}
+            onChange={(e) => { setEraseSubject(e.target.value); setErasurePreview(null); }} style={textStyle} />
+          <input aria-label="Erasure relation" placeholder="relation (optional)" value={eraseRelation}
+            onChange={(e) => { setEraseRelation(e.target.value); setErasurePreview(null); }} style={textStyle} />
+          <input aria-label="Erasure object" placeholder="object (optional)" value={eraseObject}
+            onChange={(e) => { setEraseObject(e.target.value); setErasurePreview(null); }} style={textStyle} />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button disabled={!!busy || !eraseSubject.trim()} onClick={() => runErasure("preview")} style={plainBtn}>preview impact</button>
+            <button disabled={!!busy || !erasurePreview || previewedSelector !== erasureSelector()}
+              onClick={() => runErasure("erase")} style={{ ...plainBtn, color: "#b00", borderColor: "#e0b4b4" }}>erase permanently</button>
+          </div>
+          {erasurePreview && (
+            <div style={{ fontSize: 12, color: "#555" }}>
+              {erasurePreview.assertions} assertion{erasurePreview.assertions === 1 ? "" : "s"}, {erasurePreview.evidence_mentions} evidence mention{erasurePreview.evidence_mentions === 1 ? "" : "s"}. {erasurePreview.residual_data}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -259,6 +611,13 @@ const numStyle: React.CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   fontSize: 12,
   padding: "3px 6px",
+  borderRadius: 6,
+  border: "1px solid #ccc",
+};
+const textStyle: React.CSSProperties = {
+  fontFamily: "ui-monospace, monospace",
+  fontSize: 12,
+  padding: "6px 8px",
   borderRadius: 6,
   border: "1px solid #ccc",
 };

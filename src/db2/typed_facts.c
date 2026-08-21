@@ -1,9 +1,11 @@
-/* db2/typed_facts.c: typed-fact store + write gate. See typed_facts.h. */
+/* db2/typed_facts.c: compatibility write gate over canonical assertions. */
 #include "typed_facts.h"
 
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "fact_mutation.h"
+#include "memory_ontology.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -82,6 +84,35 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
       confidence = 0;
    if (confidence > 100)
       confidence = 100;
+
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &actor) != 0)
+      return TYPED_FACT_ERROR;
+   fact_evidence_input_t evidence = {.source_kind = "typed_fact_source",
+                                     .source_id = source && source[0] ? source : NULL,
+                                     .observed_at = now_iso,
+                                     .stance = "supports"};
+   fact_assertion_input_t input = {
+       .source = subject,
+       .relation = relation,
+       .target = object,
+       .relation_id = 0,
+       .subject_kind = NODE_OTHER,
+       .object_kind =
+           object_kind && (strcmp(object_kind, "scalar") == 0 || strcmp(object_kind, "value") == 0)
+               ? NODE_SCALAR
+               : NODE_OTHER,
+       .confidence_class = "B",
+       .confidence = (double)confidence / 100.0,
+       .assertion_kind = FACT_KIND_WORLD_FACT,
+       .valid_from = now_iso,
+       .evidence = &evidence,
+       .functional = 1};
+   fact_mutation_result_t result;
+   if (db2_fact_mutation_assert(&actor, &input, &result) != 0)
+      return TYPED_FACT_ERROR;
+   return result.changed || result.evidence_added ? TYPED_FACT_OK : TYPED_FACT_UNCHANGED;
+#if 0 /* legacy parallel fact table retired; semantic assertions are canonical */
 
    void *conn = db2_conn();
    if (!conn)
@@ -172,6 +203,7 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
    else
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
    return rc;
+#endif
 }
 
 static void tf_row(aimee_pg_stmt_t *st, typed_fact_t *f)
@@ -196,7 +228,10 @@ static void tf_row(aimee_pg_stmt_t *st, typed_fact_t *f)
 }
 
 #define TF_COLS                                                                                    \
-   "id, subject, subject_kind, relation, object, object_kind, confidence, source, asserted_at"
+   "e.id, e.source, CAST(e.subject_kind AS TEXT), e.relation, e.target,"                           \
+   " CAST(e.object_kind AS TEXT), CAST(e.confidence * 100 AS INTEGER),"                            \
+   " COALESCE((SELECT fe.source_id FROM fact_evidence fe WHERE fe.assertion_id=e.id"               \
+   " AND fe.invalidated_at='' ORDER BY fe.id DESC LIMIT 1),''), e.asserted_at"
 
 int db2_typed_fact_recall(const char *subject, const char *relation_filter, typed_fact_t *out,
                           int max)
@@ -207,11 +242,16 @@ int db2_typed_fact_recall(const char *subject, const char *relation_filter, type
    if (!conn)
       return -1;
    int filt = (relation_filter && relation_filter[0]) ? 1 : 0;
-   static const char *q_all = "SELECT " TF_COLS " FROM typed_facts"
-                              " WHERE subject = ?1 AND active = 1 ORDER BY relation, id LIMIT ?2";
-   static const char *q_rel = "SELECT " TF_COLS " FROM typed_facts"
-                              " WHERE subject = ?1 AND relation = ?3 AND active = 1"
-                              " ORDER BY id LIMIT ?2";
+   static const char *q_all = "SELECT " TF_COLS " FROM entity_edges e"
+                              " WHERE e.source = ?1 AND e.edge_class='semantic'"
+                              " AND e.lifecycle_state IN ('persistent','promoted')"
+                              " AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0"
+                              " ORDER BY e.relation, e.id LIMIT ?2";
+   static const char *q_rel = "SELECT " TF_COLS " FROM entity_edges e"
+                              " WHERE e.source = ?1 AND e.relation = ?3 AND e.edge_class='semantic'"
+                              " AND e.lifecycle_state IN ('persistent','promoted')"
+                              " AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0"
+                              " ORDER BY e.id LIMIT ?2";
    char err[TF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? q_rel : q_all, err, sizeof(err));
    if (!st)
@@ -234,8 +274,11 @@ int db2_typed_fact_by_relation(const char *relation, typed_fact_t *out, int max)
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *q = "SELECT " TF_COLS " FROM typed_facts"
-                          " WHERE relation = ?1 AND active = 1 ORDER BY subject, id LIMIT ?2";
+   static const char *q = "SELECT " TF_COLS " FROM entity_edges e"
+                          " WHERE e.relation = ?1 AND e.edge_class='semantic'"
+                          " AND e.lifecycle_state IN ('persistent','promoted')"
+                          " AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0"
+                          " ORDER BY e.source, e.id LIMIT ?2";
    char err[TF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, q, err, sizeof(err));
    if (!st)

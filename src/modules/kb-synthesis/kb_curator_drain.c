@@ -732,6 +732,8 @@ static size_t kb_curator_ordered_stages(kb_curator_stage_desc_t *out, size_t max
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
+   config_t cfg;
+   config_load(&cfg);
 
    /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
     * built>0 event, so the incremental rebuild below would never fire and
@@ -786,7 +788,7 @@ static void *drain_thread_main(void *arg)
        * typed_facts_enabled (a no-op when off). */
       if (config_typed_facts_enabled())
       {
-         int n = kb_memory_facts_drain(8);
+         int n = kb_memory_facts_drain(&cfg, 8);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
 

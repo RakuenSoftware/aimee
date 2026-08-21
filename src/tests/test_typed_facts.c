@@ -68,17 +68,19 @@ int main(void)
 
    /* db2_fact_commit path (entity_edges) — the one the memory-fact extractor and
     * auto-inject use. Unlike the strict CSS assert above, this gate ACCEPTs a
-    * free-form (NOVEL) relation as a provisional semantic edge, and recall must
-    * surface it. This is the assumption the LLM extractor relies on (it emits
-    * arbitrary snake_case relations). */
+    * free-form (NOVEL) relation as a provisional semantic edge. Model-derived
+    * assertions remain candidates and therefore stay out of default recall. */
    assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
-   /* A free-form (unknown) relation now defaults OPEN, so a benign LLM fact like
-    * works_as surfaces on an ORDINARY turn (turn_requests_sensitive=0). */
+   /* Candidate quarantine: inference is reviewable, but not recallable. */
    char facts[1024] = "";
    int fn = db2_fact_recall_block("user", 0, facts, sizeof(facts));
-   assert(fn >= 1);
-   assert(strstr(facts, "works_as") != NULL && strstr(facts, "engineer") != NULL);
+   assert(fn == 0 && strstr(facts, "works_as") == NULL);
+   /* Authenticated-user evidence promotes the exact candidate to persistent. */
+   assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
+                          FACT_AUTHORITY_USER, 1) == FACT_GATE_NOVEL);
+   fn = db2_fact_recall_block("user", 0, facts, sizeof(facts));
+   assert(fn >= 1 && strstr(facts, "works_as") != NULL && strstr(facts, "engineer") != NULL);
 
    /* But an unknown relation whose NAME plainly denotes PII is still gated:
     * withheld on an ordinary turn, surfaced only when the turn asks. (PII facts
@@ -91,7 +93,11 @@ int main(void)
    assert(strstr(ord, "home_address") == NULL); /* PII-looking: withheld by default */
    char sens[1024] = "";
    (void)db2_fact_recall_block("user", 1, sens, sizeof(sens));
-   assert(strstr(sens, "home_address") != NULL); /* surfaced when asked */
+   assert(strstr(sens, "home_address") == NULL); /* candidate stays quarantined */
+   assert(db2_fact_commit("user", NODE_PERSON, "home_address", "12 Oak St", NODE_OTHER,
+                          FACT_AUTHORITY_USER, 1) == FACT_GATE_NOVEL);
+   (void)db2_fact_recall_block("user", 1, sens, sizeof(sens));
+   assert(strstr(sens, "home_address") != NULL); /* persistent and explicitly requested */
 
    /* Personal-data boundary (Track A): a CREDENTIAL relation is withheld from the
     * shared KB entirely — never committed to DB2, so it never surfaces there. */

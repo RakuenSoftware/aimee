@@ -1,18 +1,13 @@
-/* db2/typed_facts.h: typed-fact knowledge layer (first slice).
+/* db2/typed_facts.h: compatibility surface for the typed-fact knowledge layer.
  *
- * A write-validated store of typed (subject, relation, object) propositions with
- * entity kinds, provenance, confidence (0-100), and correctable history. This is
- * the buildable core of docs/proposals/pending/typed-fact-knowledge-layer.md
- * (§1 ontology + write gate, §4 correction-by-supersede), scoped to unblock the
- * CSS migration assistant's #2 convention-model upgrade. The broader proposal
- * integrates typed facts with entity_edges + a self-extending ontology; this
- * slice uses a dedicated table and a fixed seed ontology for a clean base.
+ * CSS migration callers retain this API, but assertions now use the canonical
+ * entity_edges/fact_evidence store and the authority-aware fact mutation seam.
+ * The former typed_facts table remains migration history only.
  *
  * The write gate validates each relation against a seed ontology (unknown
  * relation -> reject) and the subject/object kinds against the relation's
  * allowed kinds. A contradicting assert (same subject+relation, different
- * object) SUPERSEDES the prior active row (active=0, superseded_by=new id)
- * rather than deleting it (always-retain-origin).
+ * object) supersedes the prior assertion through an auditable graph commit.
  */
 #ifndef DEC_DB2_TYPED_FACTS_H
 #define DEC_DB2_TYPED_FACTS_H 1

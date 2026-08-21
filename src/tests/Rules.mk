@@ -110,7 +110,13 @@ TEST_MCP_CLIENT_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
                        $(OBJDIR)/cJSON.o \
                        $(PLATFORM_BASIC_OBJS)
 
-TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
+TEST_FACT_MUTATION_MIN_OBJS = $(OBJDIR)/db2/fact_mutation.o \
+                              $(OBJDIR)/db2/kb_audit_worm.o \
+                              $(OBJDIR)/modules/audit/audit_worm_chain.o \
+                              $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                              $(OBJDIR)/rel_types.o
+
+TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_mutation.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
                  $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/posix/memory.o \
                  $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_effective.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
                  $(OBJDIR)/workflow_learn.o \
@@ -979,6 +985,7 @@ $(TESTPREFIX)/unit-test-css-insights: \
 $(TESTPREFIX)/unit-test-typed-facts: \
                                        $(OBJDIR)/tests/test_typed_facts.o \
                                        $(OBJDIR)/db2/typed_facts.o \
+                                       $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/db2/rel_types_store.o \
                                        $(OBJDIR)/db2/fact_recall.o \
                                        $(OBJDIR)/db2/entity_edges.o \
@@ -1000,6 +1007,7 @@ $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
+                                       $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/modules/css/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
@@ -1018,6 +1026,7 @@ $(TESTPREFIX)/unit-test-css-render: \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
+                                       $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/modules/css/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
@@ -1073,6 +1082,7 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/db2/typed_facts.o \
+                                       $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/db2/rel_types_store.o \
                                        $(OBJDIR)/db2/fact_recall.o \
                                        $(OBJDIR)/db2/fact_ingest.o \
