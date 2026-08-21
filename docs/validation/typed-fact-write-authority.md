@@ -216,6 +216,19 @@ provenance, not from the hardcoded constant it used before.
   the LLM call, so the stub's own responses never influenced a result; jobs that
   end `failed` failed on the LLM call after their facts were already committed.
 
-- **The module's other three stages.** `RETRIEVE`, `RERANK` and
-  `DECLARE_COMMANDS` are served by the module but not called by kb, so placing it
-  there exercised only the three stages kb uses.
+- **The module's server-only stages.** aimee-server calls four memory stages --
+  EXTRACT_INDEX, WRITE, RETRIEVE (the PII recall gate) and RERANK (the ingress
+  confidence tier). The module is installed and ATTACHED on the server's own bus
+  with its own grant, verified running, and the first two are the same code paths
+  proven on the kb side. RETRIEVE and RERANK are still unexercised: both are
+  reached only from a chat turn with a live provider, which this container has
+  none of.
+
+  An attempt to call them directly over the bus was abandoned. It needs a second
+  principal granted `request=` for those events, and the grant written for it was
+  refused -- which does not merely skip that module: the whole module endpoint
+  fails and the daemon exits ("obs_bus: module endpoint failed", then "server:
+  shut down"). One malformed file in `modules.d` takes the daemon with it, which
+  is worth knowing independently of this work. The grants were removed and both
+  daemons restored, with the full e2e suite re-run afterwards to confirm the
+  restore rather than assume it.
