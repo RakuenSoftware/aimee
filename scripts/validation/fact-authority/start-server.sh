@@ -21,6 +21,22 @@ export AIMEE_API_BEARER_TOKEN="$(cat /root/server-bearer.txt)"
 # native route builds no envelope and never reaches RERANK.
 grep -q '^ingress_preinject_anthropic_enabled:' /root/aimee.yaml 2>/dev/null || \
   printf '\ningress_preinject_anthropic_enabled: true\n' >> /root/aimee.yaml
+
+# code_context_mode defaults to "on", which is STRICT: an `on` packet may carry
+# only validated current-project code evidence, so ingress_preinject_build sets
+# facts_on = 0 AND legacy_preview_on = 0. Nothing is gathered, the envelope comes
+# back NULL, and the memory module's RERANK tier is never requested -- with no
+# error anywhere, because refusing to inject is the intended behaviour of strict
+# mode. `observe` admits memory previews and typed facts.
+grep -q '^code_context_mode:' /root/aimee.yaml 2>/dev/null || \
+  printf '\ncode_context_mode: observe\n' >> /root/aimee.yaml
+
+# Set the memory module toggle EXPLICITLY rather than relying on the -1
+# "unspecified" tristate surviving a config round-trip: ir_memory_enabled()
+# reads config_module_memory(), and a 0 there is an explicit DISABLE that
+# silently skips the whole ir_stage_memory transform.
+grep -q '^modules:' /root/aimee.yaml 2>/dev/null || \
+  printf '\nmodules:\n  memory: true\n' >> /root/aimee.yaml
 ulimit -S -s 65536 || true
 
 # Ingress pre-injection is fail-closed without an ACTIVE REPOSITORY:

@@ -260,9 +260,32 @@ same note is inference.
      `ingress_preinject_build()` returns NULL before assembling anything, so that
      agent ingress cannot "silently broaden to global recall"
      (`make-scope-repo.sh` gives it a git repo);
-  5. that project REGISTERED with the kb. This is where the run stopped: the
-     container reports `watching 0 project root(s)`, and the retrieval envelope
-     is still NULL.
+  5. the memory SCOPED to that project -- `ingress_preinject_build` calls
+     `kb_client_memory_scope_context_set(workspace, project, 0)` before
+     recalling, so an untagged memory is invisible however well it scores
+     unscoped (`memory.tag_workspace` + `memory.tag_scope`);
+  6. `code_context_mode` NOT `on`. It defaults to `on`, which is strict: an `on`
+     packet may carry only validated current-project code evidence, so
+     `facts_on = 0` AND `legacy_preview_on = 0` and nothing is gathered at all.
+     `observe` admits memory previews and typed facts.
+
+  With all six satisfied the run gets as far as pre-injection actually querying
+  the kb -- a turn-scoped trace of the kb log shows `memory.diagnose_scoped` and
+  `memory.facts` called during the turn, and both return the seeded row. But the
+  assembled block still comes out empty, so `ingress_preinject_build` returns
+  NULL before it ever reaches the confidence call, and RERANK is still not
+  exercised. Measured, not inferred: a session-start turn is 1696 input tokens
+  against 185 for a mid-session turn (the ~1500-token guidance block, which
+  proves `ir_stage_memory` is live), and a matching query scores 1695 against
+  1689 for a nonsense one -- a six-token delta that is just the query text.
+
+  Two things are worth keeping from that. `ingress_preinject_confidence()`
+  failing does not degrade the envelope, it DELETES it
+  ("rerank confidence unavailable; omitting pre-injection envelope"), so a
+  missing memory module silently costs the whole injection rather than just its
+  confidence line. And the module-up/module-down control used earlier is invalid
+  for this: stopping the module cannot change whether the envelope is BUILT,
+  only whether it survives that check.
 
   There is real signal short of the goal. The guidance block DOES inject -- the
   model's replies start citing `aimee index` -- which proves `ir_stage_memory`
