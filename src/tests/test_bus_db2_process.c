@@ -3734,6 +3734,88 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_depends_on_keys_count == 0);
 
+   /* A graph explain, the pending evidence queue, and a directive that does not exist. */
+   static aimee_db2_entity_edge_explain_row_t
+       entity_edge_explain_rows[AIMEE_DB2_ENTITY_EDGE_EXPLAIN_MAX_ROWS];
+   uint32_t entity_edge_explain_count = 99;
+   assert(aimee_db2_entity_edge_explain_call(
+              call_client, &client, 9499, 0, "symbol:replay-project:nothing",
+              entity_edge_explain_rows, AIMEE_DB2_ENTITY_EDGE_EXPLAIN_MAX_ROWS,
+              &entity_edge_explain_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(entity_edge_explain_count == 0);
+
+   static aimee_db2_evidence_pending_list_row_t
+       evidence_pending_list_rows[AIMEE_DB2_EVIDENCE_PENDING_LIST_MAX_ROWS];
+   uint32_t evidence_pending_list_count = 99;
+   assert(aimee_db2_evidence_pending_list_call(
+              call_client, &client, 9500, 0, evidence_pending_list_rows,
+              AIMEE_DB2_EVIDENCE_PENDING_LIST_MAX_ROWS, &evidence_pending_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(evidence_pending_list_count == 0);
+
+   uint32_t directive_get_directive_found = 99;
+   static char directive_get_directive_question[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_QUESTION_MAX + 1];
+   directive_get_directive_question[0] = 'x';
+   static char directive_get_directive_topic[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_TOPIC_MAX + 1];
+   directive_get_directive_topic[0] = 'x';
+   static char directive_get_anchor_entity[AIMEE_DB2_DIRECTIVE_GET_ANCHOR_ENTITY_MAX + 1];
+   directive_get_anchor_entity[0] = 'x';
+   static char directive_get_anchor_file[AIMEE_DB2_DIRECTIVE_GET_ANCHOR_FILE_MAX + 1];
+   directive_get_anchor_file[0] = 'x';
+   static char directive_get_directive_cause[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_CAUSE_MAX + 1];
+   directive_get_directive_cause[0] = 'x';
+   uint32_t directive_get_directive_priority = 99;
+   static char directive_get_directive_state[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_STATE_MAX + 1];
+   directive_get_directive_state[0] = 'x';
+   uint64_t directive_get_memory_a_id = 99;
+   uint64_t directive_get_memory_b_id = 99;
+   uint64_t directive_get_resolution_memory_id = 99;
+   static char directive_get_directive_evidence[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_EVIDENCE_MAX + 1];
+   directive_get_directive_evidence[0] = 'x';
+   static char directive_get_source_session[AIMEE_DB2_DIRECTIVE_GET_SOURCE_SESSION_MAX + 1];
+   directive_get_source_session[0] = 'x';
+   uint32_t directive_get_surfaced_count = 99;
+   static char directive_get_last_surfaced_at[AIMEE_DB2_DIRECTIVE_GET_LAST_SURFACED_AT_MAX + 1];
+   directive_get_last_surfaced_at[0] = 'x';
+   static char directive_get_resolved_at[AIMEE_DB2_DIRECTIVE_GET_RESOLVED_AT_MAX + 1];
+   directive_get_resolved_at[0] = 'x';
+   static char directive_get_valid_until[AIMEE_DB2_DIRECTIVE_GET_VALID_UNTIL_MAX + 1];
+   directive_get_valid_until[0] = 'x';
+   static char
+       directive_get_directive_created_at[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_CREATED_AT_MAX + 1];
+   directive_get_directive_created_at[0] = 'x';
+   static char
+       directive_get_directive_updated_at[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_UPDATED_AT_MAX + 1];
+   directive_get_directive_updated_at[0] = 'x';
+   assert(aimee_db2_directive_get_call(
+              call_client, &client, 9501, 0, 4242, &directive_get_directive_found,
+              directive_get_directive_question, sizeof(directive_get_directive_question),
+              directive_get_directive_topic, sizeof(directive_get_directive_topic),
+              directive_get_anchor_entity, sizeof(directive_get_anchor_entity),
+              directive_get_anchor_file, sizeof(directive_get_anchor_file),
+              directive_get_directive_cause, sizeof(directive_get_directive_cause),
+              &directive_get_directive_priority, directive_get_directive_state,
+              sizeof(directive_get_directive_state), &directive_get_memory_a_id,
+              &directive_get_memory_b_id, &directive_get_resolution_memory_id,
+              directive_get_directive_evidence, sizeof(directive_get_directive_evidence),
+              directive_get_source_session, sizeof(directive_get_source_session),
+              &directive_get_surfaced_count, directive_get_last_surfaced_at,
+              sizeof(directive_get_last_surfaced_at), directive_get_resolved_at,
+              sizeof(directive_get_resolved_at), directive_get_valid_until,
+              sizeof(directive_get_valid_until), directive_get_directive_created_at,
+              sizeof(directive_get_directive_created_at), directive_get_directive_updated_at,
+              sizeof(directive_get_directive_updated_at), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(directive_get_directive_found == 0 && directive_get_directive_question[0] == '\0' &&
+          directive_get_directive_topic[0] == '\0' && directive_get_anchor_entity[0] == '\0' &&
+          directive_get_anchor_file[0] == '\0' && directive_get_directive_cause[0] == '\0' &&
+          directive_get_directive_priority == 0 && directive_get_directive_state[0] == '\0' &&
+          directive_get_memory_a_id == 0 && directive_get_memory_b_id == 0 &&
+          directive_get_resolution_memory_id == 0 && directive_get_directive_evidence[0] == '\0' &&
+          directive_get_source_session[0] == '\0' && directive_get_surfaced_count == 0 &&
+          directive_get_last_surfaced_at[0] == '\0' && directive_get_resolved_at[0] == '\0' &&
+          directive_get_valid_until[0] == '\0' && directive_get_directive_created_at[0] == '\0' &&
+          directive_get_directive_updated_at[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

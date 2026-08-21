@@ -3366,6 +3366,29 @@ int db2_memory_list_depends_on_keys(int64_t memory_id, db2_memory_key_row_t *row
    return 0;
 }
 
+int db2_entity_edge_explain_by_entity(const char *entity, db2_entity_edge_explain_t *out, int max)
+{
+   (void)entity;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_evidence_list_pending(db2_evidence_pending_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_directive_get(int64_t id, memory_directive_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

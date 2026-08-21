@@ -7436,9 +7436,15 @@
           "line": 36
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.directive_get operation reads one epistemic directive. It carries three memory identifiers -- the two it was raised about and the one that resolved it -- and each is zero when absent, which is also what a caller would read if the memory it named were deleted. The state is the same free column memory.directive_counts_by_state groups by, so a directive in a state that grouping does not name is readable here and counted nowhere."
+      },
       "signature": "int db2_directive_get ( int64_t id , memory_directive_t * out )",
       "signature_sha256": "3fcde884044ee6a24903c612a2fe09780d591c25418bfd9a0b20637551fa51f1",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_get"
     },
     {
@@ -8295,9 +8301,15 @@
           "line": 168
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.entity_edge_explain operation lists the edges touching an entity, heaviest first, where heaviest is the structural weight plus the observed one. Those two are returned separately as well, so a caller can see which of them earned the rank. The entity matches as either endpoint, so an edge appears whichever way it points and the direction is only recoverable by comparing the endpoints to what was asked."
+      },
       "signature": "int db2_entity_edge_explain_by_entity ( const char * entity , db2_entity_edge_explain_t * out , int max )",
       "signature_sha256": "124ed9dfb900533126961ae914840a8cfb7373a7e4752d0b646fd7952f57485a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_explain_by_entity"
     },
     {
@@ -9130,9 +9142,15 @@
           "line": 29
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.evidence_pending_list operation lists evidence waiting to be indexed. Only rows whose status is pending are listed, and the ordering is by artifact identifier -- which is generated rather than sequential, so the order is neither insertion nor priority but an arbitrary total order that happens to be stable. Its caller asks for one at a time, so what that ordering decides is which item is worked next."
+      },
       "signature": "int db2_evidence_list_pending ( db2_evidence_pending_t * out , int max )",
       "signature_sha256": "7026af1b4daf26b25b2de99d749d03bce7b5203b93f95070ed1250918efddcf0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_evidence_list_pending"
     },
     {
@@ -28087,15 +28105,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "67fc281ac13d360ad854364eb2cdcaca3c2ed2546a1b4b08b1826ac77c7f91cd",
+  "fingerprint": "e47236b92f1fe3ac31f4be40a3863e807e6d138fb61261ffe861069f5cd5bee3",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 285,
+    "audit_pending": 282,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 674
+    "reviewed": 677
   }
 }

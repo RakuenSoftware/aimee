@@ -1076,6 +1076,14 @@
       "reason": "The typed memory.directive_counts_by_state operation counts epistemic directives by state. It names four states and drops every other group on the floor, so the four counts need not add up to the table and a state the writer adds later is counted nowhere. There is no scope and no filter: this is every directive the installation holds, which is the only thing the backend can answer."
     },
     {
+      "symbol": "db2_directive_get",
+      "signature_sha256": "3fcde884044ee6a24903c612a2fe09780d591c25418bfd9a0b20637551fa51f1",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.directive_get operation reads one epistemic directive. It carries three memory identifiers -- the two it was raised about and the one that resolved it -- and each is zero when absent, which is also what a caller would read if the memory it named were deleted. The state is the same free column memory.directive_counts_by_state groups by, so a directive in a state that grouping does not name is readable here and counted nowhere."
+    },
+    {
       "symbol": "db2_directive_list",
       "signature_sha256": "3791fe548397ab907e377149fc10b284a7024f37099edbc2c82d92ebeec66028",
       "disposition": "wire-operation",
@@ -1218,6 +1226,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_edge_bump_utility operation adjusts the utility of every edge touching an entity -- at either end, by the same amount, in one statement, with no bound on how many rows that is. Each result is clamped into the range the column keeps, so a delta past it moves an edge to the limit rather than being refused, and repeating the call stops changing anything once every edge is pinned. The reply says the statement ran and never how many edges moved."
+    },
+    {
+      "symbol": "db2_entity_edge_explain_by_entity",
+      "signature_sha256": "124ed9dfb900533126961ae914840a8cfb7373a7e4752d0b646fd7952f57485a",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.entity_edge_explain operation lists the edges touching an entity, heaviest first, where heaviest is the structural weight plus the observed one. Those two are returned separately as well, so a caller can see which of them earned the rank. The entity matches as either endpoint, so an edge appears whichever way it points and the direction is only recoverable by comparing the endpoints to what was asked."
     },
     {
       "symbol": "db2_entity_edge_list_by_entity",
@@ -1394,6 +1410,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.evidence_enqueue operation replaces the evidence queue insert. Enqueuing something already queued does nothing and is acknowledged, so a caller cannot tell a new job from a repeat. The collection defaults to evidence only for a null argument, which the wire cannot send."
+    },
+    {
+      "symbol": "db2_evidence_list_pending",
+      "signature_sha256": "7026af1b4daf26b25b2de99d749d03bce7b5203b93f95070ed1250918efddcf0",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.evidence_pending_list operation lists evidence waiting to be indexed. Only rows whose status is pending are listed, and the ordering is by artifact identifier -- which is generated rather than sequential, so the order is neither insertion nor priority but an arbitrary total order that happens to be stable. Its caller asks for one at a time, so what that ordering decides is which item is worked next."
     },
     {
       "symbol": "db2_evidence_mark_failed",

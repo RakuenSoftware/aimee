@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "evidence_vectors.h"
 #include "memory_conflicts.h"
 #include "memory_scenes.h"
 #include "anti_patterns.h"
@@ -587,6 +588,9 @@ typedef struct
    int (*memory_conflict_list)(conflict_t *out, int max);
    int (*memory_artifact_hashed_list)(db2_memory_artifact_row_t *rows, int max);
    int (*memory_depends_on_keys)(int64_t memory_id, db2_memory_key_row_t *rows, int max);
+   int (*entity_edge_explain)(const char *entity, db2_entity_edge_explain_t *out, int max);
+   int (*evidence_pending_list)(db2_evidence_pending_t *out, int max);
+   int (*directive_get)(int64_t id, memory_directive_t *out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

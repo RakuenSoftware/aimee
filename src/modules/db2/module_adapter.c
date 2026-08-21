@@ -1050,6 +1050,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .memory_conflict_list = db2_memory_conflict_list,
        .memory_artifact_hashed_list = db2_memory_list_artifact_hashed,
        .memory_depends_on_keys = db2_memory_list_depends_on_keys,
+       .entity_edge_explain = db2_entity_edge_explain_by_entity,
+       .evidence_pending_list = db2_evidence_list_pending,
+       .directive_get = db2_directive_get,
    };
    return &backend;
 }
@@ -4502,6 +4505,145 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
             free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char graph_entity[AIMEE_DB2_ENTITY_EDGE_EXPLAIN_GRAPH_ENTITY_MAX + 1] = "";
+         if (aimee_db2_entity_edge_explain_request_decode(request_body, request_len, graph_entity,
+                                                          sizeof(graph_entity)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_EDGE_EXPLAIN_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_edge_explain)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_edge_explain_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENTITY_EDGE_EXPLAIN_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_entity_edge_explain_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_ENTITY_EDGE_EXPLAIN_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->entity_edge_explain(graph_entity, listed,
+                                                       (int)AIMEE_DB2_ENTITY_EDGE_EXPLAIN_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].edge_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].edge_source, sizeof(rows[index].edge_source), "%s",
+                           listed[index].source);
+                  snprintf(rows[index].edge_relation, sizeof(rows[index].edge_relation), "%s",
+                           listed[index].relation);
+                  snprintf(rows[index].edge_target, sizeof(rows[index].edge_target), "%s",
+                           listed[index].target);
+                  rows[index].edge_weight =
+                      listed[index].weight > 0 ? (uint32_t)listed[index].weight : 0u;
+                  rows[index].structural_weight = listed[index].structural_weight > 0
+                                                      ? (uint32_t)listed[index].structural_weight
+                                                      : 0u;
+                  rows[index].utility_score = listed[index].utility_score;
+                  snprintf(rows[index].edge_origin, sizeof(rows[index].edge_origin), "%s",
+                           listed[index].edge_origin);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_edge_explain_reply_encode(rows, count, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t directive_id = 0u;
+         if (aimee_db2_directive_get_request_decode(request_body, request_len, &directive_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DIRECTIVE_GET_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->directive_get)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t directive_found = 0u;
+            char directive_question[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_QUESTION_MAX + 1] = "";
+            char directive_topic[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_TOPIC_MAX + 1] = "";
+            char anchor_entity[AIMEE_DB2_DIRECTIVE_GET_ANCHOR_ENTITY_MAX + 1] = "";
+            char anchor_file[AIMEE_DB2_DIRECTIVE_GET_ANCHOR_FILE_MAX + 1] = "";
+            char directive_cause[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_CAUSE_MAX + 1] = "";
+            uint32_t directive_priority = 0u;
+            char directive_state[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_STATE_MAX + 1] = "";
+            uint64_t memory_a_id = 0u;
+            uint64_t memory_b_id = 0u;
+            uint64_t resolution_memory_id = 0u;
+            char directive_evidence[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_EVIDENCE_MAX + 1] = "";
+            char source_session[AIMEE_DB2_DIRECTIVE_GET_SOURCE_SESSION_MAX + 1] = "";
+            uint32_t surfaced_count = 0u;
+            char last_surfaced_at[AIMEE_DB2_DIRECTIVE_GET_LAST_SURFACED_AT_MAX + 1] = "";
+            char resolved_at[AIMEE_DB2_DIRECTIVE_GET_RESOLVED_AT_MAX + 1] = "";
+            char valid_until[AIMEE_DB2_DIRECTIVE_GET_VALID_UNTIL_MAX + 1] = "";
+            char directive_created_at[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_CREATED_AT_MAX + 1] = "";
+            char directive_updated_at[AIMEE_DB2_DIRECTIVE_GET_DIRECTIVE_UPDATED_AT_MAX + 1] = "";
+            {
+               memory_directive_t directive;
+               memset(&directive, 0, sizeof(directive));
+               if (backend->directive_get((int64_t)directive_id, &directive) == 0)
+               {
+                  directive_found = 1u;
+                  snprintf(directive_question, sizeof(directive_question), "%s",
+                           directive.question);
+                  snprintf(directive_topic, sizeof(directive_topic), "%s", directive.topic);
+                  snprintf(anchor_entity, sizeof(anchor_entity), "%s", directive.anchor_entity);
+                  snprintf(anchor_file, sizeof(anchor_file), "%s", directive.anchor_file);
+                  snprintf(directive_cause, sizeof(directive_cause), "%s", directive.cause);
+                  directive_priority = directive.priority > 0 ? (uint32_t)directive.priority : 0u;
+                  snprintf(directive_state, sizeof(directive_state), "%s", directive.state);
+                  memory_a_id = directive.memory_a_id > 0 ? (uint64_t)directive.memory_a_id : 0u;
+                  memory_b_id = directive.memory_b_id > 0 ? (uint64_t)directive.memory_b_id : 0u;
+                  resolution_memory_id = directive.resolution_memory_id > 0
+                                             ? (uint64_t)directive.resolution_memory_id
+                                             : 0u;
+                  snprintf(directive_evidence, sizeof(directive_evidence), "%s",
+                           directive.evidence);
+                  snprintf(source_session, sizeof(source_session), "%s", directive.source_session);
+                  surfaced_count =
+                      directive.surfaced_count > 0 ? (uint32_t)directive.surfaced_count : 0u;
+                  snprintf(last_surfaced_at, sizeof(last_surfaced_at), "%s",
+                           directive.last_surfaced_at);
+                  snprintf(resolved_at, sizeof(resolved_at), "%s", directive.resolved_at);
+                  snprintf(valid_until, sizeof(valid_until), "%s", directive.valid_until);
+                  snprintf(directive_created_at, sizeof(directive_created_at), "%s",
+                           directive.created_at);
+                  snprintf(directive_updated_at, sizeof(directive_updated_at), "%s",
+                           directive.updated_at);
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_directive_get_reply_encode(
+                    directive_found, directive_question, directive_topic, anchor_entity,
+                    anchor_file, directive_cause, directive_priority, directive_state, memory_a_id,
+                    memory_b_id, resolution_memory_id, directive_evidence, source_session,
+                    surfaced_count, last_surfaced_at, resolved_at, valid_until,
+                    directive_created_at, directive_updated_at, response_body, response_capacity,
+                    response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
             return AIMEE_MODULE_STATUS_OK;
          }
       }
@@ -10627,6 +10769,54 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_calibration_surface_list_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_evidence_pending_list_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_EVIDENCE_PENDING_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->evidence_pending_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_evidence_pending_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_EVIDENCE_PENDING_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_evidence_pending_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_EVIDENCE_PENDING_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->evidence_pending_list(
+                      listed, (int)AIMEE_DB2_EVIDENCE_PENDING_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].artifact_id, sizeof(rows[index].artifact_id), "%s",
+                           listed[index].artifact_id);
+                  snprintf(rows[index].collection, sizeof(rows[index].collection), "%s",
+                           listed[index].collection);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_evidence_pending_list_reply_encode(rows, count, response_body,
+                                                             response_capacity, response_len) != 0)
             {
                free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;

@@ -13721,6 +13721,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_list_depends_on_keys",
         "policy": {"reads": 200},
     },
+    "entity_edge_explain": {
+        "key": ("memory", 120),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_explain_by_entity",
+        "policy": {"reads": 200},
+    },
+    "evidence_pending_list": {
+        "key": ("learning", 82),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_evidence_list_pending",
+        "policy": {"reads": 200},
+    },
+    "directive_get": {
+        "key": ("memory", 121),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_get",
+        "policy": {"reads": 200},
+    },
 }
 
 

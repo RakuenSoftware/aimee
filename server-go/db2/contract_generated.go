@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "61c7b5fc4332f94ec552fc09c1f17434e3ac75f0bb078e43801765448d2c91ab"
+const ContractSHA256 = "75ebf007911af7b58367f23f64da40d000a5939ebfea59404bfe99d2947ba3a6"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -3387,6 +3387,96 @@ func DecodeMemoryDependsOnKeysRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return memoryID, nil
+}
+
+const EventEntityEdgeExplain = EventMemory
+const StageEntityEdgeExplain = FamilyMemory
+const OperationEntityEdgeExplain uint32 = 120
+const EntityEdgeExplainGraphEntityMin = 1
+const EntityEdgeExplainGraphEntityMax = 511
+
+// EncodeEntityEdgeExplainRequest writes the schema entity_edge_explain declares, in order.
+func EncodeEntityEdgeExplainRequest(graphEntity string) ([]byte, error) {
+	if len(graphEntity) < EntityEdgeExplainGraphEntityMin || len(graphEntity) > EntityEdgeExplainGraphEntityMax || hasNUL(graphEntity) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, graphEntity, EntityEdgeExplainGraphEntityMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityEdgeExplain, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityEdgeExplainRequest reads it back, checking each field against its own bound.
+func DecodeEntityEdgeExplainRequest(request []byte) (string, error) {
+	var graphEntity string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityEdgeExplain || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if graphEntity, err = takeRowText(payload, &cursor, EntityEdgeExplainGraphEntityMax); err != nil ||
+		len(graphEntity) < EntityEdgeExplainGraphEntityMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return graphEntity, nil
+}
+
+const EventDirectiveGet = EventMemory
+const StageDirectiveGet = FamilyMemory
+const OperationDirectiveGet uint32 = 121
+const DirectiveGetDirectiveIDMin uint64 = 1
+const DirectiveGetDirectiveIDMax uint64 = 9223372036854775807
+
+// EncodeDirectiveGetRequest writes the schema directive_get declares, in order.
+func EncodeDirectiveGetRequest(directiveID uint64) ([]byte, error) {
+	if directiveID < DirectiveGetDirectiveIDMin || directiveID > DirectiveGetDirectiveIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var directiveIDBytes [8]byte
+	binary.LittleEndian.PutUint64(directiveIDBytes[:], directiveID)
+	payload = append(payload, directiveIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDirectiveGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveGetRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveGetRequest(request []byte) (uint64, error) {
+	var directiveID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	directiveID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if directiveID < DirectiveGetDirectiveIDMin || directiveID > DirectiveGetDirectiveIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return directiveID, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -11392,6 +11482,37 @@ func DecodeCalibrationSurfaceListRequest(request []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return minRows, nil
+}
+
+const EventEvidencePendingList = EventLearning
+const StageEvidencePendingList = FamilyLearning
+const OperationEvidencePendingList uint32 = 82
+
+
+// EncodeEvidencePendingListRequest writes the schema evidence_pending_list declares, in order.
+func EncodeEvidencePendingListRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationEvidencePendingList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEvidencePendingListRequest reads it back, checking each field against its own bound.
+func DecodeEvidencePendingListRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEvidencePendingList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 const EventDocumentExists = EventOrganization
