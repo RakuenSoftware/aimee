@@ -13769,6 +13769,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_list_low_effectiveness",
         "policy": {"reads": 200},
     },
+    "memory_superseded_keys": {
+        "key": ("memory", 127),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_superseded_keys",
+        "policy": {"reads": 200},
+    },
+    "memory_id_key_content": {
+        "key": ("memory", 128),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_id_key_content",
+        "policy": {"reads": 200},
+    },
+    "memory_summarise_clusters": {
+        "key": ("memory", 129),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_summarise_clusters",
+        "policy": {"reads": 200},
+    },
+    "memory_l1_session_clusters": {
+        "key": ("memory", 130),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_l1_session_clusters",
+        "policy": {"reads": 200},
+    },
+    "memory_dedupe_candidates": {
+        "key": ("memory", 131),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_active_kind_dedupe_candidates",
+        "policy": {"reads": 200},
+    },
 }
 
 

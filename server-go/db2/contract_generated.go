@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "53bcc25fc60d14576074f1e6d42f135fde458de915667257f92be8071f51e9b0"
+const ContractSHA256 = "deecc0fd68f90feeacdce141a5ace6d8ba959c673a2b2cf3c3367ed99d3c5095"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -3665,6 +3665,280 @@ func DecodeMemoryLowEffectivenessRequest(request []byte) (float64, uint32, error
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return effectivenessThreshold, rowLimit, nil
+}
+
+const EventMemorySupersededKeys = EventMemory
+const StageMemorySupersededKeys = FamilyMemory
+const OperationMemorySupersededKeys uint32 = 127
+const MemorySupersededKeysMinVersionsMin uint32 = 0
+const MemorySupersededKeysMinVersionsMax uint32 = 65535
+const MemorySupersededKeysRowLimitMin uint32 = 0
+const MemorySupersededKeysRowLimitMax uint32 = 65535
+
+// EncodeMemorySupersededKeysRequest writes the schema memory_superseded_keys declares, in order.
+func EncodeMemorySupersededKeysRequest(minVersions uint32, rowLimit uint32) ([]byte, error) {
+	if minVersions < MemorySupersededKeysMinVersionsMin || minVersions > MemorySupersededKeysMinVersionsMax ||
+		rowLimit < MemorySupersededKeysRowLimitMin || rowLimit > MemorySupersededKeysRowLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var minVersionsBytes [4]byte
+	binary.LittleEndian.PutUint32(minVersionsBytes[:], minVersions)
+	payload = append(payload, minVersionsBytes[:]...)
+	var rowLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
+	payload = append(payload, rowLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemorySupersededKeys, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemorySupersededKeysRequest reads it back, checking each field against its own bound.
+func DecodeMemorySupersededKeysRequest(request []byte) (uint32, uint32, error) {
+	var minVersions uint32
+	var rowLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemorySupersededKeys || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	minVersions = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if minVersions < MemorySupersededKeysMinVersionsMin || minVersions > MemorySupersededKeysMinVersionsMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if rowLimit < MemorySupersededKeysRowLimitMin || rowLimit > MemorySupersededKeysRowLimitMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return minVersions, rowLimit, nil
+}
+
+const EventMemoryIDKeyContent = EventMemory
+const StageMemoryIDKeyContent = FamilyMemory
+const OperationMemoryIDKeyContent uint32 = 128
+const MemoryIDKeyContentRowLimitMin uint32 = 0
+const MemoryIDKeyContentRowLimitMax uint32 = 65535
+
+// EncodeMemoryIDKeyContentRequest writes the schema memory_id_key_content declares, in order.
+func EncodeMemoryIDKeyContentRequest(rowLimit uint32) ([]byte, error) {
+	if rowLimit < MemoryIDKeyContentRowLimitMin || rowLimit > MemoryIDKeyContentRowLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var rowLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
+	payload = append(payload, rowLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryIDKeyContent, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryIDKeyContentRequest reads it back, checking each field against its own bound.
+func DecodeMemoryIDKeyContentRequest(request []byte) (uint32, error) {
+	var rowLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryIDKeyContent || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if rowLimit < MemoryIDKeyContentRowLimitMin || rowLimit > MemoryIDKeyContentRowLimitMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return rowLimit, nil
+}
+
+const EventMemorySummariseClusters = EventMemory
+const StageMemorySummariseClusters = FamilyMemory
+const OperationMemorySummariseClusters uint32 = 129
+const MemorySummariseClustersMaxConfidenceMaxMagnitudeBits uint64 = 4741671816366391296
+const MemorySummariseClustersMinCountMin uint32 = 0
+const MemorySummariseClustersMinCountMax uint32 = 65535
+
+// EncodeMemorySummariseClustersRequest writes the schema memory_summarise_clusters declares, in order.
+func EncodeMemorySummariseClustersRequest(maxConfidence float64, minCount uint32) ([]byte, error) {
+	if math.Float64bits(maxConfidence)&0x7fffffffffffffff > MemorySummariseClustersMaxConfidenceMaxMagnitudeBits ||
+		minCount < MemorySummariseClustersMinCountMin || minCount > MemorySummariseClustersMinCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var maxConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(maxConfidenceBytes[:], math.Float64bits(maxConfidence))
+	payload = append(payload, maxConfidenceBytes[:]...)
+	var minCountBytes [4]byte
+	binary.LittleEndian.PutUint32(minCountBytes[:], minCount)
+	payload = append(payload, minCountBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemorySummariseClusters, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemorySummariseClustersRequest reads it back, checking each field against its own bound.
+func DecodeMemorySummariseClustersRequest(request []byte) (float64, uint32, error) {
+	var maxConfidence float64
+	var minCount uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemorySummariseClusters || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemorySummariseClustersMaxConfidenceMaxMagnitudeBits {
+			return 0, 0, ErrMalformedEnvelope
+		}
+		maxConfidence = math.Float64frombits(bits)
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	minCount = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if minCount < MemorySummariseClustersMinCountMin || minCount > MemorySummariseClustersMinCountMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return maxConfidence, minCount, nil
+}
+
+const EventMemoryL1SessionClusters = EventMemory
+const StageMemoryL1SessionClusters = FamilyMemory
+const OperationMemoryL1SessionClusters uint32 = 130
+const MemoryL1SessionClustersExcludedSourceMin = 0
+const MemoryL1SessionClustersExcludedSourceMax = 127
+const MemoryL1SessionClustersMinCountMin uint32 = 0
+const MemoryL1SessionClustersMinCountMax uint32 = 65535
+
+// EncodeMemoryL1SessionClustersRequest writes the schema memory_l1_session_clusters declares, in order.
+func EncodeMemoryL1SessionClustersRequest(excludedSource string, minCount uint32) ([]byte, error) {
+	if len(excludedSource) < MemoryL1SessionClustersExcludedSourceMin || len(excludedSource) > MemoryL1SessionClustersExcludedSourceMax || hasNUL(excludedSource) ||
+		minCount < MemoryL1SessionClustersMinCountMin || minCount > MemoryL1SessionClustersMinCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, excludedSource, MemoryL1SessionClustersExcludedSourceMax); err != nil {
+		return nil, err
+	}
+	var minCountBytes [4]byte
+	binary.LittleEndian.PutUint32(minCountBytes[:], minCount)
+	payload = append(payload, minCountBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryL1SessionClusters, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryL1SessionClustersRequest reads it back, checking each field against its own bound.
+func DecodeMemoryL1SessionClustersRequest(request []byte) (string, uint32, error) {
+	var excludedSource string
+	var minCount uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryL1SessionClusters || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if excludedSource, err = takeRowText(payload, &cursor, MemoryL1SessionClustersExcludedSourceMax); err != nil ||
+		len(excludedSource) < MemoryL1SessionClustersExcludedSourceMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	minCount = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if minCount < MemoryL1SessionClustersMinCountMin || minCount > MemoryL1SessionClustersMinCountMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return excludedSource, minCount, nil
+}
+
+const EventMemoryDedupeCandidates = EventMemory
+const StageMemoryDedupeCandidates = FamilyMemory
+const OperationMemoryDedupeCandidates uint32 = 131
+const MemoryDedupeCandidatesMemoryKindMin = 1
+const MemoryDedupeCandidatesMemoryKindMax = 63
+
+// EncodeMemoryDedupeCandidatesRequest writes the schema memory_dedupe_candidates declares, in order.
+func EncodeMemoryDedupeCandidatesRequest(memoryKind string) ([]byte, error) {
+	if len(memoryKind) < MemoryDedupeCandidatesMemoryKindMin || len(memoryKind) > MemoryDedupeCandidatesMemoryKindMax || hasNUL(memoryKind) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, memoryKind, MemoryDedupeCandidatesMemoryKindMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryDedupeCandidates, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryDedupeCandidatesRequest reads it back, checking each field against its own bound.
+func DecodeMemoryDedupeCandidatesRequest(request []byte) (string, error) {
+	var memoryKind string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryDedupeCandidates || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if memoryKind, err = takeRowText(payload, &cursor, MemoryDedupeCandidatesMemoryKindMax); err != nil ||
+		len(memoryKind) < MemoryDedupeCandidatesMemoryKindMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return memoryKind, nil
 }
 
 const EventEntityObservationCount = EventIndex

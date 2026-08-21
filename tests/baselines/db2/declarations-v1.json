@@ -16544,9 +16544,15 @@
           "line": 237
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.dedupe_candidates operation lists the active memories of one kind so a caller can find duplicates among them. It returns the fields a caller would use to choose which duplicate to keep -- confidence, uses, observations, evidence -- and no content, so the comparison this feeds is over keys and scores rather than over what the memories say. The kind is matched exactly, so a caller must know the vocabulary the writers used."
+      },
       "signature": "int db2_memory_active_kind_dedupe_candidates ( const char * kind , db2_memory_dedupe_candidate_t * out , int max )",
       "signature_sha256": "74fffa0821274a5be355558251a5b6d669ccbcbfe49fa2a7c01095d037379726",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_active_kind_dedupe_candidates"
     },
     {
@@ -18253,9 +18259,15 @@
           "line": 511
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.l1_session_clusters operation counts session-tier memories per session, leaving out one session the caller names -- which is how a caller excludes its own. An empty exclusion excludes nothing, so the natural way to ask for all of them is to send nothing, and memories whose session is empty are excluded by the statement regardless. A session that recorded nothing is absent rather than zero."
+      },
       "signature": "int db2_memory_l1_session_clusters ( const char * excluded_source , int min_count , db2_memory_l1_cluster_row_t * rows , int max )",
       "signature_sha256": "c850a034b2e74d879efc0610697cd92648996b8d366ae6c0ba0cbf93022da7c8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_l1_session_clusters"
     },
     {
@@ -18765,9 +18777,15 @@
           "line": 1048
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.id_key_content operation lists memories newest-updated first. The limit is not a bound but a switch: the statement text carries a LIMIT clause only when the limit is positive, so asking for zero asks for every memory the installation holds. That is the opposite of what zero means everywhere else here, and it is the difference between a bounded read and an unbounded one."
+      },
       "signature": "int db2_memory_list_id_key_content ( int limit , db2_memory_id_key_content_row_t * out , int max )",
       "signature_sha256": "b05b8e61f2d1dcc63daf74f0f5f1cdbe51e514fb39f1d6da593f36720f52e415",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_id_key_content"
     },
     {
@@ -18961,9 +18979,15 @@
           "line": 316
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.superseded_keys operation counts how many versions each key has. A version is not a column: it is a '#v' marker inside the key text, and this splits on the FIRST one -- so a key whose own text contains that marker before its version suffix is grouped under a base key that is not its own. Keys without the marker are absent entirely, so a key with exactly one version is indistinguishable here from one that was never versioned."
+      },
       "signature": "int db2_memory_list_superseded_keys ( int min_versions , db2_memory_superseded_row_t * rows , int max )",
       "signature_sha256": "1cddee581ed39678e5485e8781fd37a2701a2e403debdeff1d9f9b9369dd1a80",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_superseded_keys"
     },
     {
@@ -20401,9 +20425,15 @@
           "line": 343
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.summarise_clusters operation finds sessions holding enough low-confidence facts to be worth summarising. Four conditions are written into the statement rather than the request -- the tier, the kind, that the memory is not already merged, and that the confidence is at or below what was asked -- so a caller can move only the last of them. The average returned is over the same rows the count counted, which makes it an average of the low-confidence facts rather than of the session."
+      },
       "signature": "int db2_memory_summarise_clusters ( double max_confidence , int min_count , db2_memory_summary_cluster_t * rows , int max )",
       "signature_sha256": "523bd2558837832de5f37ae561efc258bcfe013fef51efed62e650541794570a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_summarise_clusters"
     },
     {
@@ -28135,15 +28165,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9a0cb7c089d6585ac55b8a78d7a7afe608490e0fc950cc163a5dfb758039ccd6",
+  "fingerprint": "f2e4f6a14dbf0b6828ec44dee0b98d0a16db42792ee5f1c78aa304ee7ce3d767",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 277,
+    "audit_pending": 272,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 682
+    "reviewed": 687
   }
 }

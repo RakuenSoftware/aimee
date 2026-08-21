@@ -597,6 +597,13 @@ typedef struct
    int (*memory_key_facts_provenance)(db2_memory_key_fact_row_t *rows, int max);
    int (*memory_low_effectiveness)(double threshold, int limit, db2_memory_low_eff_row_t *rows,
                                    int max);
+   int (*memory_superseded_keys)(int min_versions, db2_memory_superseded_row_t *rows, int max);
+   int (*memory_id_key_content)(int limit, db2_memory_id_key_content_row_t *out, int max);
+   int (*memory_summarise_clusters)(double max_confidence, int min_count,
+                                    db2_memory_summary_cluster_t *rows, int max);
+   int (*memory_l1_session_clusters)(const char *excluded_source, int min_count,
+                                     db2_memory_l1_cluster_row_t *rows, int max);
+   int (*memory_dedupe_candidates)(const char *kind, db2_memory_dedupe_candidate_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

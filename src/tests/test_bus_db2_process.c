@@ -3862,6 +3862,52 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_low_effectiveness_count == 0);
 
+   /* Five clustering and inventory reads over an empty corpus. */
+   static aimee_db2_memory_superseded_keys_row_t
+       memory_superseded_keys_rows[AIMEE_DB2_MEMORY_SUPERSEDED_KEYS_MAX_ROWS];
+   uint32_t memory_superseded_keys_count = 99;
+   assert(aimee_db2_memory_superseded_keys_call(
+              call_client, &client, 9507, 0, 2, 16, memory_superseded_keys_rows,
+              AIMEE_DB2_MEMORY_SUPERSEDED_KEYS_MAX_ROWS, &memory_superseded_keys_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_superseded_keys_count == 0);
+
+   static aimee_db2_memory_id_key_content_row_t
+       memory_id_key_content_rows[AIMEE_DB2_MEMORY_ID_KEY_CONTENT_MAX_ROWS];
+   uint32_t memory_id_key_content_count = 99;
+   assert(aimee_db2_memory_id_key_content_call(
+              call_client, &client, 9508, 0, 16, memory_id_key_content_rows,
+              AIMEE_DB2_MEMORY_ID_KEY_CONTENT_MAX_ROWS, &memory_id_key_content_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_id_key_content_count == 0);
+
+   static aimee_db2_memory_summarise_clusters_row_t
+       memory_summarise_clusters_rows[AIMEE_DB2_MEMORY_SUMMARISE_CLUSTERS_MAX_ROWS];
+   uint32_t memory_summarise_clusters_count = 99;
+   assert(aimee_db2_memory_summarise_clusters_call(
+              call_client, &client, 9509, 0, 0.5, 2, memory_summarise_clusters_rows,
+              AIMEE_DB2_MEMORY_SUMMARISE_CLUSTERS_MAX_ROWS, &memory_summarise_clusters_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_summarise_clusters_count == 0);
+
+   static aimee_db2_memory_l1_session_clusters_row_t
+       memory_l1_session_clusters_rows[AIMEE_DB2_MEMORY_L1_SESSION_CLUSTERS_MAX_ROWS];
+   uint32_t memory_l1_session_clusters_count = 99;
+   assert(aimee_db2_memory_l1_session_clusters_call(
+              call_client, &client, 9510, 0, "replay-session", 2, memory_l1_session_clusters_rows,
+              AIMEE_DB2_MEMORY_L1_SESSION_CLUSTERS_MAX_ROWS, &memory_l1_session_clusters_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_l1_session_clusters_count == 0);
+
+   static aimee_db2_memory_dedupe_candidates_row_t
+       memory_dedupe_candidates_rows[AIMEE_DB2_MEMORY_DEDUPE_CANDIDATES_MAX_ROWS];
+   uint32_t memory_dedupe_candidates_count = 99;
+   assert(aimee_db2_memory_dedupe_candidates_call(
+              call_client, &client, 9511, 0, "fact", memory_dedupe_candidates_rows,
+              AIMEE_DB2_MEMORY_DEDUPE_CANDIDATES_MAX_ROWS, &memory_dedupe_candidates_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_dedupe_candidates_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

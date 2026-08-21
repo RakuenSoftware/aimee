@@ -3742,6 +3742,51 @@ int db2_memory_list_low_effectiveness(double threshold, int limit, db2_memory_lo
    return 0;
 }
 
+int db2_memory_list_superseded_keys(int min_versions, db2_memory_superseded_row_t *rows, int max)
+{
+   (void)min_versions;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_id_key_content(int limit, db2_memory_id_key_content_row_t *out, int max)
+{
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_summarise_clusters(double max_confidence, int min_count,
+                                  db2_memory_summary_cluster_t *rows, int max)
+{
+   (void)max_confidence;
+   (void)min_count;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_l1_session_clusters(const char *excluded_source, int min_count,
+                                   db2_memory_l1_cluster_row_t *rows, int max)
+{
+   (void)excluded_source;
+   (void)min_count;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe_candidate_t *out,
+                                             int max)
+{
+   (void)kind;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
