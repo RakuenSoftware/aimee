@@ -13141,6 +13141,52 @@
       }
     },
     {
+      "family": "learning",
+      "id": 72,
+      "name": "proposals_settled_counts",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposals are relational DB2 rows.",
+      "c_symbols": [
+        "db2_learning_proposals_settled_counts"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the two counts overlap: every committed proposal is also counted as terminal"
+        },
+        "fields": [
+          {
+            "name": "window_days",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 36500
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "committed_count",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "terminal_count",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -17784,6 +17830,162 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 47,
+      "name": "kb_file_index_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The file index and its generations are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_file_index_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only the current generation of a project the index calls current is visible, so a project mid-reindex answers as though nothing were ingested"
+        },
+        "fields": [
+          {
+            "name": "project_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "file_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "file_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "ingested_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 48,
+      "name": "kb_ingest_queue_complete",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The ingest queue is a relational DB2 table.",
+      "c_symbols": [
+        "db2_kb_ingest_queue_complete"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the update names no current status, so a job in any state is marked done"
+        },
+        "fields": [
+          {
+            "name": "ingest_job_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "files_indexed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "chunks_added",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "embeddings_added",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 49,
+      "name": "count_embeddings_for_version",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Vector index operations are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_service_count_embeddings_for_version"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the version is required and then not used, so every version is answered with the same count"
+        },
+        "fields": [
+          {
+            "name": "embedding_version",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "embedding_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
           }
         ]
       }

@@ -159,3 +159,93 @@ aimee_module_call_result_t aimee_db2_kb_doc_set_state_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_kb_file_index_get_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *project_name, const char *file_path, uint32_t *file_found, char *file_hash,
+    size_t file_hash_capacity, char *ingested_at, size_t ingested_at_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KB_FILE_INDEX_GET_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KB_FILE_INDEX_GET_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_kb_file_index_get_request_encode(project_name, file_path, request, sizeof(request),
+                                                  &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KB_FILE_INDEX_GET, AIMEE_DB2_STAGE_KB_FILE_INDEX_GET,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_kb_file_index_get_reply_decode(response, response_len, file_found, file_hash,
+                                                file_hash_capacity, ingested_at,
+                                                ingested_at_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_kb_ingest_queue_complete_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t ingest_job_id, uint32_t files_indexed, uint32_t chunks_added,
+    uint32_t embeddings_added, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KB_INGEST_QUEUE_COMPLETE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KB_INGEST_QUEUE_COMPLETE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_kb_ingest_queue_complete_request_encode(ingest_job_id, files_indexed, chunks_added,
+                                                         embeddings_added, request, sizeof(request),
+                                                         &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KB_INGEST_QUEUE_COMPLETE,
+            AIMEE_DB2_STAGE_KB_INGEST_QUEUE_COMPLETE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_kb_ingest_queue_complete_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_count_embeddings_for_version_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *embedding_version, uint32_t *embedding_count, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_COUNT_EMBEDDINGS_FOR_VERSION_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_COUNT_EMBEDDINGS_FOR_VERSION_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_count_embeddings_for_version_request_encode(embedding_version, request,
+                                                             sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_COUNT_EMBEDDINGS_FOR_VERSION,
+            AIMEE_DB2_STAGE_COUNT_EMBEDDINGS_FOR_VERSION, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_count_embeddings_for_version_reply_decode(response, response_len,
+                                                           embedding_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

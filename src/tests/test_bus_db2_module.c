@@ -2933,6 +2933,44 @@ int db2_feedback_record(const char *polarity, const char *title, const char *des
    return -1;
 }
 
+int db2_kb_file_index_get(const char *project, const char *file_path, char *hash_out,
+                          size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap)
+{
+   (void)project;
+   (void)file_path;
+   if (hash_out && hash_cap)
+      hash_out[0] = '\0';
+   if (ingested_at_out && ingested_at_cap)
+      ingested_at_out[0] = '\0';
+   return 0;
+}
+
+int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
+                                 int embeddings_added)
+{
+   (void)job_id;
+   (void)files_indexed;
+   (void)chunks_added;
+   (void)embeddings_added;
+   return -1;
+}
+
+int db2_kb_service_count_embeddings_for_version(const char *version)
+{
+   (void)version;
+   return -1;
+}
+
+int db2_learning_proposals_settled_counts(int window_days, int64_t *committed, int64_t *terminal)
+{
+   (void)window_days;
+   if (committed)
+      *committed = 0;
+   if (terminal)
+      *terminal = 0;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

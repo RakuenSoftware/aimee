@@ -50,6 +50,27 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def _derived_operations() -> dict[str, dict[str, object]]:
+    """The operations the generator describes by hand, read from its own table.
+
+    They are not in the catalog, but their fields share the one Go fixture
+    struct with everything that is, so a name reused at another type there is
+    still a collision.
+    """
+    namespace: dict[str, object] = {}
+    source = GENERATOR.read_text(encoding="utf-8")
+    match = re.search(r"^DERIVED_OPERATIONS[^=]*= \{$", source, re.M)
+    if not match:
+        fail("the generator's DERIVED_OPERATIONS table is not where this expects it")
+    end = source.index("\n}\n", match.start())
+    exec(source[match.start():end + 3].replace("DERIVED_OPERATIONS: dict[str, dict[str, object]]",
+                                               "DERIVED_OPERATIONS"), namespace)
+    derived = namespace.get("DERIVED_OPERATIONS")
+    if not isinstance(derived, dict) or not derived:
+        fail("the generator's DERIVED_OPERATIONS table read back empty")
+    return derived
+
+
 def check(batch: list[dict[str, object]]) -> None:
     """Reject a batch before anything is written."""
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -105,6 +126,20 @@ def check(batch: list[dict[str, object]]) -> None:
             continue
         for field in item["request"]["fields"]:
             typed[str(field["name"])] = str(field["type"])
+    # The struct also holds the fields of the operations the generator describes
+    # by hand, which are not in the catalog at all. db2_mining_job_try_lock's
+    # job_id is one of those, and a u64 job_id here collides with it -- as a Go
+    # build error inside a generated test, which says nothing about the batch.
+    # Their types are in the format name: everything before -ack-v1 or -u32-v1
+    # describes the argument (and the second, for a pair), and the reply is a
+    # u32 either way.
+    for item in _derived_operations().values():
+        fmt = str(item.get("format", ""))
+        argument_type = "u64" if fmt.startswith("db2-envelope-u64") else "utf8"
+        for key, kind in (("argument", argument_type), ("second", "utf8"), ("reply", "u32")):
+            name = item.get(key)
+            if isinstance(name, str):
+                typed.setdefault(name, kind)
     for operation in batch:
         for field in operation["request"]:
             name, kind = str(field["name"]), str(field["type"])

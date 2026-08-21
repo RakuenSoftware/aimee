@@ -3065,6 +3065,53 @@ int main(int argc, char **argv)
     * weight entirely. */
    assert(feedback_record_rule_id > 0 && feedback_record_rule_reinforced == 0);
 
+   /* The file index, an ingest job completion that matches nothing, the embedding count and the
+    * settled-proposal counts. */
+   uint32_t kb_file_index_get_file_found = 99;
+   static char kb_file_index_get_file_hash[AIMEE_DB2_KB_FILE_INDEX_GET_FILE_HASH_MAX + 1];
+   kb_file_index_get_file_hash[0] = 'x';
+   static char kb_file_index_get_ingested_at[AIMEE_DB2_KB_FILE_INDEX_GET_INGESTED_AT_MAX + 1];
+   kb_file_index_get_ingested_at[0] = 'x';
+   assert(aimee_db2_kb_file_index_get_call(
+              call_client, &client, 9442, 0, "replay-project", "replay/root/one.md",
+              &kb_file_index_get_file_found, kb_file_index_get_file_hash,
+              sizeof(kb_file_index_get_file_hash), kb_file_index_get_ingested_at,
+              sizeof(kb_file_index_get_ingested_at), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_file_index_get_file_found == 0 && kb_file_index_get_file_hash[0] == '\0' &&
+          kb_file_index_get_ingested_at[0] == '\0');
+
+   uint32_t kb_ingest_queue_complete_acknowledged = 99;
+   assert(aimee_db2_kb_ingest_queue_complete_call(call_client, &client, 9443, 0, 4242, 3, 7, 11,
+                                                  &kb_ingest_queue_complete_acknowledged, NULL,
+                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   /* No job carries this identifier. The update names no current status and
+    * nothing checks that a row matched, so completing a job that does not exist
+    * is acknowledged. */
+   assert(kb_ingest_queue_complete_acknowledged == 1);
+
+   uint32_t count_embeddings_for_version_embedding_count = 99;
+   assert(aimee_db2_count_embeddings_for_version_call(call_client, &client, 9444, 0, "v1",
+                                                      &count_embeddings_for_version_embedding_count,
+                                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Asking again under a different version. The two answers agree because the
+    * backend never binds the version -- there is no version column on
+    * vector_index_ops to bind it to. On this schema both are zero, so the
+    * equality is what carries the point rather than the value. */
+   uint32_t count_embeddings_other_version = 99;
+   assert(aimee_db2_count_embeddings_for_version_call(
+              call_client, &client, 9446, 0, "a-version-nothing-was-embedded-under",
+              &count_embeddings_other_version, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(count_embeddings_for_version_embedding_count == 0);
+   assert(count_embeddings_other_version == count_embeddings_for_version_embedding_count);
+
+   uint64_t proposals_settled_counts_committed_count = 99;
+   uint64_t proposals_settled_counts_terminal_count = 99;
+   assert(aimee_db2_proposals_settled_counts_call(
+              call_client, &client, 9445, 0, 30, &proposals_settled_counts_committed_count,
+              &proposals_settled_counts_terminal_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(proposals_settled_counts_committed_count == 0 &&
+          proposals_settled_counts_terminal_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

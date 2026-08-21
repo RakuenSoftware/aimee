@@ -13414,6 +13414,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_feedback_record",
         "policy": {"writes": 200},
     },
+    "kb_file_index_get": {
+        "key": ("maintenance", 47),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_file_index_get",
+        "policy": {"reads": 200},
+    },
+    "kb_ingest_queue_complete": {
+        "key": ("maintenance", 48),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_ingest_queue_complete",
+        "policy": {"writes": 200},
+    },
+    "count_embeddings_for_version": {
+        "key": ("maintenance", 49),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_count_embeddings_for_version",
+        "policy": {"reads": 200},
+    },
+    "proposals_settled_counts": {
+        "key": ("learning", 72),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_learning_proposals_settled_counts",
+        "policy": {"reads": 200},
+    },
 }
 
 

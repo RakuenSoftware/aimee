@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "db2_learning.h"
 #include "feedback.h"
 #include "kb_docs.h"
 #include "fidelity.h"
@@ -509,6 +510,12 @@ typedef struct
                                        const char *cert_serial_norm, char out_authority[33]);
    int (*feedback_record)(const char *polarity, const char *title, const char *description,
                           int weight_override, int *reinforced);
+   int (*kb_file_index_get)(const char *project, const char *file_path, char *hash_out,
+                            size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap);
+   int (*kb_ingest_queue_complete)(int64_t job_id, int files_indexed, int chunks_added,
+                                   int embeddings_added);
+   int (*count_embeddings_for_version)(const char *version);
+   int (*proposals_settled_counts)(int window_days, int64_t *committed, int64_t *terminal);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

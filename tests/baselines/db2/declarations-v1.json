@@ -10623,9 +10623,15 @@
           "line": 350
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_file_index_get operation reads what the index knows about one ingested file. The project name is resolved through an alias before the lookup, so the name that comes back to a caller is not necessarily the name it sent. Only the current generation of a project whose lifecycle is current matches, so a project being re-indexed answers as though the file were never ingested. A read that fails and a file that is absent are both a zero flag."
+      },
       "signature": "int db2_kb_file_index_get ( const char * project , const char * file_path , char * hash_out , size_t hash_cap , char * ingested_at_out , size_t ingested_at_cap )",
       "signature_sha256": "1d29fae2a6f60fd81599dd647d4d0028776c61a23fa242872fc67f153a39c461",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_file_index_get"
     },
     {
@@ -10728,9 +10734,15 @@
           "line": 342
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_ingest_queue_complete operation marks an ingest job done and records what it did. The update names no current status, so a job that was never claimed, or one already failed, is marked done just the same and its earlier outcome is overwritten. Nothing checks that a row matched, so a job identifier that names nothing is acknowledged. The three counts are the caller's and nothing verifies them; the completion stamp is DB2's clock."
+      },
       "signature": "int db2_kb_ingest_queue_complete ( int64_t job_id , int files_indexed , int chunks_added , int embeddings_added )",
       "signature_sha256": "7f00d3baa5d985580a811ac258209ee492fdc194b2f3a94716331195a158f869",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_ingest_queue_complete"
     },
     {
@@ -11971,9 +11983,15 @@
           "line": 99
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.count_embeddings_for_version operation counts indexed memory embeddings. It does not count them for a version. The backend requires the version to be non-empty and then never binds it: the statement counts every memory_units row whose status is ok, and vector_index_ops has no version column to filter on. The argument is on the wire because it is in the declaration, and the replay asks twice with different versions to show the answer does not move."
+      },
       "signature": "int db2_kb_service_count_embeddings_for_version ( const char * version )",
       "signature_sha256": "064a22916968be788da2b59f1b0cec1e9b8994742039a162591a15799264d885",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_count_embeddings_for_version"
     },
     {
@@ -15014,9 +15032,15 @@
           "line": 84
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposals_settled_counts operation counts learning proposals that settled inside a window. The two counts are not disjoint: terminal counts committed and archived together, so every committed proposal is in both and a caller subtracting one from the other gets the archived count rather than a remainder. A proposal falls in the window by whichever of its committed, updated or created stamps exists, so an old proposal touched recently counts as settled recently."
+      },
       "signature": "int db2_learning_proposals_settled_counts ( int window_days , int64_t * committed , int64_t * terminal )",
       "signature_sha256": "9b9c740eb55febcd5c20ef69325b48921dc1c81ccb5eb5df7dfed51a7684a66e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposals_settled_counts"
     },
     {
@@ -27768,15 +27792,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "474864f9231c231cf911dd7249c068cc2d03bcef4909c216335811bb8b499e4c",
+  "fingerprint": "ac598a0b22d878cbebcf71466b3a317982084ffa98cc9ef11af8c61e48b08f48",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 335,
+    "audit_pending": 331,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 624
+    "reviewed": 628
   }
 }

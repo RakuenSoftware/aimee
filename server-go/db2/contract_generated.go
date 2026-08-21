@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "831b4fe2d1c047fd68394fcb2cd89864b0e24f549e90435e573ad52f4259c277"
+const ContractSHA256 = "267522571723b92b8abaf3fbbc5c5a2b98eeb8d7fdbee7036f5f702ea4c79417"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -9390,6 +9390,53 @@ func DecodeFeedbackRecordRequest(request []byte) (string, string, string, uint32
 	return rulePolarity, ruleTitle, ruleDescription, weightOverride, nil
 }
 
+const EventProposalsSettledCounts = EventLearning
+const StageProposalsSettledCounts = FamilyLearning
+const OperationProposalsSettledCounts uint32 = 72
+const ProposalsSettledCountsWindowDaysMin uint32 = 1
+const ProposalsSettledCountsWindowDaysMax uint32 = 36500
+
+// EncodeProposalsSettledCountsRequest writes the schema proposals_settled_counts declares, in order.
+func EncodeProposalsSettledCountsRequest(windowDays uint32) ([]byte, error) {
+	if windowDays < ProposalsSettledCountsWindowDaysMin || windowDays > ProposalsSettledCountsWindowDaysMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var windowDaysBytes [4]byte
+	binary.LittleEndian.PutUint32(windowDaysBytes[:], windowDays)
+	payload = append(payload, windowDaysBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProposalsSettledCounts, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProposalsSettledCountsRequest reads it back, checking each field against its own bound.
+func DecodeProposalsSettledCountsRequest(request []byte) (uint32, error) {
+	var windowDays uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProposalsSettledCounts || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	windowDays = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if windowDays < ProposalsSettledCountsWindowDaysMin || windowDays > ProposalsSettledCountsWindowDaysMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return windowDays, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -13429,6 +13476,195 @@ func DecodeKBDocSetStateRequest(request []byte) (uint64, string, uint32, string,
 		return 0, "", 0, "", ErrMalformedEnvelope
 	}
 	return docID, docState, clearReviewNeeded, reviewReason, nil
+}
+
+const EventKBFileIndexGet = EventMaintenance
+const StageKBFileIndexGet = FamilyMaintenance
+const OperationKBFileIndexGet uint32 = 47
+const KBFileIndexGetProjectNameMin = 1
+const KBFileIndexGetProjectNameMax = 255
+const KBFileIndexGetFilePathMin = 0
+const KBFileIndexGetFilePathMax = 1023
+
+// EncodeKBFileIndexGetRequest writes the schema kb_file_index_get declares, in order.
+func EncodeKBFileIndexGetRequest(projectName string, filePath string) ([]byte, error) {
+	if len(projectName) < KBFileIndexGetProjectNameMin || len(projectName) > KBFileIndexGetProjectNameMax || hasNUL(projectName) ||
+		len(filePath) < KBFileIndexGetFilePathMin || len(filePath) > KBFileIndexGetFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, KBFileIndexGetProjectNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, KBFileIndexGetFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBFileIndexGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBFileIndexGetRequest reads it back, checking each field against its own bound.
+func DecodeKBFileIndexGetRequest(request []byte) (string, string, error) {
+	var projectName string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBFileIndexGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, KBFileIndexGetProjectNameMax); err != nil ||
+		len(projectName) < KBFileIndexGetProjectNameMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, KBFileIndexGetFilePathMax); err != nil ||
+		len(filePath) < KBFileIndexGetFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return projectName, filePath, nil
+}
+
+const EventKBIngestQueueComplete = EventMaintenance
+const StageKBIngestQueueComplete = FamilyMaintenance
+const OperationKBIngestQueueComplete uint32 = 48
+const KBIngestQueueCompleteIngestJobIDMin uint64 = 1
+const KBIngestQueueCompleteIngestJobIDMax uint64 = 9223372036854775807
+const KBIngestQueueCompleteFilesIndexedMin uint32 = 0
+const KBIngestQueueCompleteFilesIndexedMax uint32 = 2147483647
+const KBIngestQueueCompleteChunksAddedMin uint32 = 0
+const KBIngestQueueCompleteChunksAddedMax uint32 = 2147483647
+const KBIngestQueueCompleteEmbeddingsAddedMin uint32 = 0
+const KBIngestQueueCompleteEmbeddingsAddedMax uint32 = 2147483647
+
+// EncodeKBIngestQueueCompleteRequest writes the schema kb_ingest_queue_complete declares, in order.
+func EncodeKBIngestQueueCompleteRequest(ingestJobID uint64, filesIndexed uint32, chunksAdded uint32, embeddingsAdded uint32) ([]byte, error) {
+	if ingestJobID < KBIngestQueueCompleteIngestJobIDMin || ingestJobID > KBIngestQueueCompleteIngestJobIDMax ||
+		filesIndexed < KBIngestQueueCompleteFilesIndexedMin || filesIndexed > KBIngestQueueCompleteFilesIndexedMax ||
+		chunksAdded < KBIngestQueueCompleteChunksAddedMin || chunksAdded > KBIngestQueueCompleteChunksAddedMax ||
+		embeddingsAdded < KBIngestQueueCompleteEmbeddingsAddedMin || embeddingsAdded > KBIngestQueueCompleteEmbeddingsAddedMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var ingestJobIDBytes [8]byte
+	binary.LittleEndian.PutUint64(ingestJobIDBytes[:], ingestJobID)
+	payload = append(payload, ingestJobIDBytes[:]...)
+	var filesIndexedBytes [4]byte
+	binary.LittleEndian.PutUint32(filesIndexedBytes[:], filesIndexed)
+	payload = append(payload, filesIndexedBytes[:]...)
+	var chunksAddedBytes [4]byte
+	binary.LittleEndian.PutUint32(chunksAddedBytes[:], chunksAdded)
+	payload = append(payload, chunksAddedBytes[:]...)
+	var embeddingsAddedBytes [4]byte
+	binary.LittleEndian.PutUint32(embeddingsAddedBytes[:], embeddingsAdded)
+	payload = append(payload, embeddingsAddedBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBIngestQueueComplete, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBIngestQueueCompleteRequest reads it back, checking each field against its own bound.
+func DecodeKBIngestQueueCompleteRequest(request []byte) (uint64, uint32, uint32, uint32, error) {
+	var ingestJobID uint64
+	var filesIndexed uint32
+	var chunksAdded uint32
+	var embeddingsAdded uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBIngestQueueComplete || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	ingestJobID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if ingestJobID < KBIngestQueueCompleteIngestJobIDMin || ingestJobID > KBIngestQueueCompleteIngestJobIDMax {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	filesIndexed = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if filesIndexed < KBIngestQueueCompleteFilesIndexedMin || filesIndexed > KBIngestQueueCompleteFilesIndexedMax {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	chunksAdded = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if chunksAdded < KBIngestQueueCompleteChunksAddedMin || chunksAdded > KBIngestQueueCompleteChunksAddedMax {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	embeddingsAdded = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if embeddingsAdded < KBIngestQueueCompleteEmbeddingsAddedMin || embeddingsAdded > KBIngestQueueCompleteEmbeddingsAddedMax {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	return ingestJobID, filesIndexed, chunksAdded, embeddingsAdded, nil
+}
+
+const EventCountEmbeddingsForVersion = EventMaintenance
+const StageCountEmbeddingsForVersion = FamilyMaintenance
+const OperationCountEmbeddingsForVersion uint32 = 49
+const CountEmbeddingsForVersionEmbeddingVersionMin = 1
+const CountEmbeddingsForVersionEmbeddingVersionMax = 127
+
+// EncodeCountEmbeddingsForVersionRequest writes the schema count_embeddings_for_version declares, in order.
+func EncodeCountEmbeddingsForVersionRequest(embeddingVersion string) ([]byte, error) {
+	if len(embeddingVersion) < CountEmbeddingsForVersionEmbeddingVersionMin || len(embeddingVersion) > CountEmbeddingsForVersionEmbeddingVersionMax || hasNUL(embeddingVersion) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, embeddingVersion, CountEmbeddingsForVersionEmbeddingVersionMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCountEmbeddingsForVersion, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCountEmbeddingsForVersionRequest reads it back, checking each field against its own bound.
+func DecodeCountEmbeddingsForVersionRequest(request []byte) (string, error) {
+	var embeddingVersion string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCountEmbeddingsForVersion || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if embeddingVersion, err = takeRowText(payload, &cursor, CountEmbeddingsForVersionEmbeddingVersionMax); err != nil ||
+		len(embeddingVersion) < CountEmbeddingsForVersionEmbeddingVersionMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return embeddingVersion, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

@@ -1572,12 +1572,28 @@
       "reason": "The typed index.file_index_delete_project operation removes a project's file index entries across every generation. The name goes through db2_kb_resolve_project, which despite the name copies the string and does nothing else, so the project is matched exactly and an alias matches nothing. Unlike the document clears it is a single statement with nothing to leave half-done, and it does not check whether that statement finished, so a failure reports zero deleted rather than an error."
     },
     {
+      "symbol": "db2_kb_file_index_get",
+      "signature_sha256": "1d29fae2a6f60fd81599dd647d4d0028776c61a23fa242872fc67f153a39c461",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_file_index_get operation reads what the index knows about one ingested file. The project name is resolved through an alias before the lookup, so the name that comes back to a caller is not necessarily the name it sent. Only the current generation of a project whose lifecycle is current matches, so a project being re-indexed answers as though the file were never ingested. A read that fails and a file that is absent are both a zero flag."
+    },
+    {
       "symbol": "db2_kb_health_probe",
       "signature_sha256": "c0cc00bd5827a435e096d3c14146348e2b71393d97cb0760c9dd8d6603f74dcf",
       "disposition": "wire-operation",
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
+    },
+    {
+      "symbol": "db2_kb_ingest_queue_complete",
+      "signature_sha256": "7f00d3baa5d985580a811ac258209ee492fdc194b2f3a94716331195a158f869",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_ingest_queue_complete operation marks an ingest job done and records what it did. The update names no current status, so a job that was never claimed, or one already failed, is marked done just the same and its earlier outcome is overwritten. Nothing checks that a row matched, so a job identifier that names nothing is acknowledged. The three counts are the caller's and nothing verifies them; the completion stamp is DB2's clock."
     },
     {
       "symbol": "db2_kb_ingest_queue_fail",
@@ -1874,6 +1890,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The cJSON retirement facade is caller-specific serialization; a typed learning mutation performs the rule transition atomically."
+    },
+    {
+      "symbol": "db2_kb_service_count_embeddings_for_version",
+      "signature_sha256": "064a22916968be788da2b59f1b0cec1e9b8994742039a162591a15799264d885",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.count_embeddings_for_version operation counts indexed memory embeddings. It does not count them for a version. The backend requires the version to be non-empty and then never binds it: the statement counts every memory_units row whose status is ok, and vector_index_ops has no version column to filter on. The argument is on the wire because it is in the declaration, and the replay asks twice with different versions to show the answer does not move."
     },
     {
       "symbol": "db2_kb_service_curiosity_create_json",
@@ -2914,6 +2938,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.proposals_archive_expired operation replaces the sweep that archives learning proposals past their expiry. The states, the archive reason and the database clock are fixed policy. This backend returns void and logs its failures, so the boundary cannot report one either; the catalog records reports_failure as false rather than letting an always-ok acknowledgement imply a guarantee that is not there."
+    },
+    {
+      "symbol": "db2_learning_proposals_settled_counts",
+      "signature_sha256": "9b9c740eb55febcd5c20ef69325b48921dc1c81ccb5eb5df7dfed51a7684a66e",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposals_settled_counts operation counts learning proposals that settled inside a window. The two counts are not disjoint: terminal counts committed and archived together, so every committed proposal is in both and a caller subtracting one from the other gets the archived count rather than a remainder. A proposal falls in the window by whichever of its committed, updated or created stamps exists, so an old proposal touched recently counts as settled recently."
     },
     {
       "symbol": "db2_lease_end",
