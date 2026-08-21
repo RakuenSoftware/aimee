@@ -295,6 +295,38 @@ hooks the Anthropic-native ingress); `ingress_preinject_anthropic_enabled` ON
 to that project; and `code_context_mode` not `on`, whose strict mode zeroes both
 the preview and facts layers.
 
+### RETRIEVE: the kb was deciding PII locally
+
+The mirror of the placement gap, found by asking who actually calls each stage.
+
+`RETRIEVE` is the §7 PII recall gate, and its only callers -- `fact_recall`,
+`fact_ingest`, `rel_types_store` -- are db2 code that runs in the **kb**. But the
+kb registered no provider for it, so `memory_pii_turn_requests_sensitive()` and
+the sensitivity batch silently fell back to the hardcoded cue list in
+`pii_classifier_primitives.c`. Meanwhile aimee-**server** registered the
+module-backed providers and calls `RETRIEVE` -- but nothing in the server invokes
+the gate. The capability was wired on one side and consumed on the other, so the
+module never decided anything.
+
+`docs/modules/memory.md` names this exactly: "a registered provider that is
+authoritative and never falls back to the local implementation, because a silent
+fallback lets a broken module look healthy."
+
+The kb now registers both providers. Failure stays fail-closed by construction: a
+turn classifier that errors reads as "did not ask for sensitive data" (withhold),
+and a sensitivity batch that errors makes `fact_recall` abandon its candidates
+rather than inject them.
+
+Verified live by cycling the kb-side module around a recall of a PII-classed
+relation:
+
+    module RUNNING    facts: - age: 52 / - has_email: ctl@example.com
+    module STOPPED    facts: (none)
+    module RESTARTED  facts: - age: 52 / - has_email: ctl@example.com
+
+Identical output in all three would have meant the kb was still deciding
+locally. It is not.
+
 - **The module's other stages.** aimee-server calls four memory stages --
   EXTRACT_INDEX, WRITE, RETRIEVE (the PII recall gate) and RERANK (the ingress
   confidence tier). The module is installed and ATTACHED on the server's own bus
