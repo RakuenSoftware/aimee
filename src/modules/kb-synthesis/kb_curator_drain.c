@@ -783,6 +783,8 @@ static size_t kb_curator_ordered_stages(kb_curator_stage_desc_t *out, size_t max
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
+   config_t cfg;
+   config_load(&cfg);
 
    /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
     * built>0 event, so the incremental rebuild below would never fire and
@@ -837,38 +839,14 @@ static void *drain_thread_main(void *arg)
        * typed_facts_enabled (a no-op when off). */
       if (config_typed_facts_enabled())
       {
-         int n = kb_memory_facts_drain(8);
+         int n = kb_memory_facts_drain(&cfg, 8);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
 
-         /* §7.2 autonomous ontology reconciliation: promote provisional relations
-          * (novel predicates the extractor's "other" fallback staged) to active
-          * once they have recurred >= threshold times across sources, so facts
-          * using them become durable/recallable WITHOUT a human approving each.
-          * Default-on with typed facts; the threshold is operator-tunable via
-          * kb.typed_facts.promote_threshold (§8), falling back to the built-in. */
-         if (config_kb_typed_facts_auto_promote_enabled())
-         {
-            int thr = config_kb_typed_facts_promote_threshold() > 0
-                          ? config_kb_typed_facts_promote_threshold()
-                          : KB_ONTO_PROMOTE_DEFAULT_THRESHOLD;
-            char cands[KB_ONTO_PROMOTE_BATCH][REL_TYPE_NAME_MAX];
-            int nc = db2_ontology_eval_candidates(thr, cands, KB_ONTO_PROMOTE_BATCH);
-            for (int i = 0; i < nc; i++)
-            {
-               /* Never promote a generic catch-all bucket to active: it would make
-                * low-quality "misc" facts durable and can't be reconciled to a
-                * real predicate. The extractor is instructed not to emit these,
-                * but exclude them defensively. */
-               if (strcmp(cands[i], "other") == 0 || strcmp(cands[i], "unknown") == 0 ||
-                   strcmp(cands[i], "misc") == 0 || strcmp(cands[i], "unspecified") == 0)
-                  continue;
-               if (db2_ontology_approve(cands[i]) == 0)
-                  aimee_log(LOG_INFO, "kb.ontology.promote",
-                            "auto-promoted relation '%s' to active (>= %d observations)", cands[i],
-                            thr);
-            }
-         }
+         /* Observation counts only affect the operator queue's priority. P7
+          * deliberately removes the former count-based ontology promotion:
+          * activating a provisional relation is an authenticated governance
+          * decision, regardless of how often extraction observed it. */
       }
 
       /* Backfill: queue extract_doc curation for docs that entered kb_documents

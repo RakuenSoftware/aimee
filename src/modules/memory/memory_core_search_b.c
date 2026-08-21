@@ -43,6 +43,54 @@
 #include <unistd.h>
 #include <pthread.h>
 
+static _Thread_local int s_recall_trace_capture;
+static _Thread_local memory_recall_rejection_t
+    s_recall_rejections[MEMORY_RECALL_TRACE_MAX_REJECTIONS];
+static _Thread_local int s_recall_rejection_count;
+
+void memory_recall_trace_capture_begin(void)
+{
+   s_recall_trace_capture = 1;
+   s_recall_rejection_count = 0;
+}
+
+void memory_recall_trace_capture_reset(void)
+{
+   if (s_recall_trace_capture)
+      s_recall_rejection_count = 0;
+}
+
+void memory_recall_trace_capture_end(void)
+{
+   s_recall_trace_capture = 0;
+   s_recall_rejection_count = 0;
+}
+
+void memory_recall_trace_reject(int64_t memory_id, const char *lane, const char *gate)
+{
+   if (!s_recall_trace_capture || memory_id <= 0 || !gate || !gate[0])
+      return;
+   for (int i = 0; i < s_recall_rejection_count; i++)
+      if (s_recall_rejections[i].memory_id == memory_id &&
+          strcmp(s_recall_rejections[i].gate, gate) == 0)
+         return;
+   if (s_recall_rejection_count >= MEMORY_RECALL_TRACE_MAX_REJECTIONS)
+      return;
+   memory_recall_rejection_t *r = &s_recall_rejections[s_recall_rejection_count++];
+   r->memory_id = memory_id;
+   snprintf(r->lane, sizeof(r->lane), "%s", lane && lane[0] ? lane : "candidate");
+   snprintf(r->gate, sizeof(r->gate), "%s", gate);
+}
+
+int memory_recall_trace_rejections(memory_recall_rejection_t *out, int max)
+{
+   if (!out || max <= 0 || !s_recall_trace_capture)
+      return 0;
+   int n = s_recall_rejection_count < max ? s_recall_rejection_count : max;
+   memcpy(out, s_recall_rejections, (size_t)n * sizeof(*out));
+   return n;
+}
+
 static double memory_temporal_bonus(int64_t memory_id, memory_query_intent_t intent,
                                     char qtokens[][64], int nq)
 {
@@ -330,10 +378,12 @@ void memory_compute_score_parts(const char *raw_query, const char *norm_query,
     * fusion is off the hook is a no-op, graph_score stays 0, the term below adds
     * 0, and the score is byte-identical to the pre-fusion behaviour. */
    memory_fusion_expansions_apply(parts, m->id);
+   parts->outcome = db2_memory_outcome_adjustment(m->id);
+   parts->graph_weight = memory_env_weight("AIMEE_MEMORY_GRAPH_WEIGHT", 0.30);
    parts->total = parts->lexical + parts->coverage + parts->entity + parts->temporal +
                   parts->evidence + parts->semantic + parts->state + parts->intent +
                   parts->salience + parts->surprise + parts->pagerank +
-                  memory_env_weight("AIMEE_MEMORY_GRAPH_WEIGHT", 0.30) * parts->graph_score;
+                  parts->graph_weight * parts->graph_score + parts->outcome;
 }
 
 int memory_token_in_norm(const char *norm, const char *token)
@@ -994,7 +1044,10 @@ int memory_filter_scope(memory_t *matches, int count, const char *scope_type,
    for (int i = 0; i < count; i++)
    {
       if (!memory_scope_matches(matches[i].id, scope_type, scope_value))
+      {
+         memory_recall_trace_reject(matches[i].id, "candidate", "scope_boundary");
          continue;
+      }
       if (kept != i)
          matches[kept] = matches[i];
       kept++;

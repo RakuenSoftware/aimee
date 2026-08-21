@@ -1720,17 +1720,31 @@ static int config_set_section(const char *key, void (*emit)(const config_t *, cJ
  * leave the layer half-configured if one failed. */
 int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
 {
-   int rc = 0;
+   ensure_config_dir();
+   cJSON *root = config_load_doc();
+   if (!root)
+      return -1;
+
+   /* These settings are owned by the nested KB surface, not by the flat field
+    * registry used by config_set(). Patch all requested values in memory and do
+    * one rename so a multi-option console request is genuinely atomic. */
    if (enabled >= 0)
-      rc = config_set("typed_facts_enabled", enabled ? "true" : "false");
-   if (rc == 0 && auto_promote >= 0)
-      rc = config_set("kb_typed_facts_auto_promote_enabled", auto_promote ? "true" : "false");
-   if (rc == 0 && promote_threshold > 0)
    {
-      char buf[32];
-      snprintf(buf, sizeof(buf), "%d", promote_threshold);
-      rc = config_set("kb_typed_facts_promote_threshold", buf);
+      config_doc_set(root, "kb.typed_facts.enabled", cJSON_CreateBool(enabled ? 1 : 0));
+      /* Retire the legacy alias when the console takes ownership, otherwise its
+       * parse order can make the persisted document needlessly ambiguous. */
+      cJSON_DeleteItemFromObjectCaseSensitive(root, "typed_facts_enabled");
    }
+   if (auto_promote >= 0)
+      config_doc_set(root, "kb.typed_facts.auto_promote", cJSON_CreateBool(auto_promote ? 1 : 0));
+   if (promote_threshold > 0)
+      config_doc_set(root, "kb.typed_facts.promote_threshold",
+                     cJSON_CreateNumber(promote_threshold));
+
+   int rc = config_write_doc(root);
+   cJSON_Delete(root);
+   if (rc == 0)
+      (void)config_reload();
    return rc;
 }
 

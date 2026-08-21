@@ -122,10 +122,12 @@ static int run_synthesis_pass(const db2_artifact_proposed_t *row)
        * (provider_client) if present, else the legacy kb_synthesize_command
        * sidecar. A NULL return is a fail — skip this attempt (fail-closed: no
        * durable write happens on a failed/empty response). */
+      config_t cfg;
+      config_load(&cfg);
       char serr[256];
       char *out = kb_curator_llm_run(
-          KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, REFLECTION_SYNTH_SYSTEM_PROMPT, req_str, NULL,
-          config_kb_synthesize_command(), REFLECTION_SYNTH_OUTBUF, serr, sizeof(serr));
+          &cfg, KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, REFLECTION_SYNTH_SYSTEM_PROMPT, req_str,
+          NULL, config_kb_synthesize_command(), REFLECTION_SYNTH_OUTBUF, serr, sizeof(serr));
       free(req_str);
 
       if (!out)

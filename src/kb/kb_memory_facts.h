@@ -15,6 +15,6 @@
 
 /* Drain up to `batch` pending "memory_facts" jobs. Returns the number processed
  * (0 when none, when typed_facts_enabled is off, or when DB2 is unavailable). */
-int kb_memory_facts_drain(int batch);
+int kb_memory_facts_drain(const config_t *cfg, int batch);
 
 #endif /* DEC_KB_MEMORY_FACTS_H */

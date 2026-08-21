@@ -258,7 +258,7 @@ static void test_reclaim_stale_running_memory_facts(sqlite3 *db)
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.typed_facts_enabled = 1;
-   (void)kb_memory_facts_drain(8);
+   (void)kb_memory_facts_drain(&cfg, 8);
 
    assert(strcmp(job_status(db, 9003), "failed") == 0);  /* orphan reclaimed */
    assert(strcmp(job_status(db, 9002), "running") == 0); /* extract_doc untouched */

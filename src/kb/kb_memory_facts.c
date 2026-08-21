@@ -27,6 +27,7 @@
 #include <string.h>
 #include <strings.h> /* strcasecmp */
 #include <time.h>    /* time() — reclaim throttle */
+#include <openssl/sha.h>
 
 #define MF_ERRBUF       256
 #define MF_LLM_OUT_CAP  8192
@@ -157,8 +158,10 @@ static void mf_mark_done(int64_t job_id)
       return;
    char err[MF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "UPDATE kb_async_jobs SET status='done', updated_at=pg_now_text() WHERE id=?1", err,
-       sizeof(err));
+       conn,
+       "UPDATE kb_async_jobs SET status='done', last_error='', next_attempt_at='',"
+       " claimed_by='', claimed_at='', updated_at=pg_now_text() WHERE id=?1",
+       err, sizeof(err));
    if (!st)
       return;
    aimee_pg_bind_int64(st, "?1", job_id);
@@ -263,7 +266,8 @@ static memory_node_kind_t mf_subject_kind(const char *subject)
 
 /* Parse {"facts":[...]} and commit each triple above the confidence floor.
  * Returns the number committed (ACCEPT or NOVEL). */
-static int mf_commit_facts(const char *llm_json, const char *note)
+static int mf_commit_facts(const char *llm_json, const char *note,
+                           const fact_evidence_input_t *evidence)
 {
    if (!llm_json)
       return 0;
@@ -372,8 +376,12 @@ static int mf_commit_facts(const char *llm_json, const char *note)
          if (!rel_type_kind_allowed(sdef, 0, obj_kind) && sdef->tail_kind_count > 0)
             obj_kind = sdef->tail_kinds[0];
       }
-      fact_gate_verdict_t v =
-          db2_fact_commit(subject, subj_kind, relation, object, obj_kind, FACT_AUTHORITY_MODEL, 1);
+      fact_actor_t model_actor;
+      if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &model_actor) != 0)
+         continue;
+      fact_gate_verdict_t v = db2_fact_commit_with_actor(
+          subject, subj_kind, relation, object, obj_kind, &model_actor, 1, evidence,
+          FACT_KIND_OBSERVATION, evidence ? evidence->observed_at : NULL, NULL);
       if (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL)
          committed++;
    }
@@ -388,7 +396,7 @@ static int mf_commit_facts(const char *llm_json, const char *note)
    return committed;
 }
 
-static int mf_process_one(const mf_job_t *job)
+static int mf_process_one(const config_t *cfg, const mf_job_t *job)
 {
    memory_t mem;
    memset(&mem, 0, sizeof(mem));
@@ -398,6 +406,35 @@ static int mf_process_one(const mf_job_t *job)
       mf_mark_done(job->job_id);
       return 0;
    }
+   fact_actor_t source_actor;
+   if (db2_fact_actor_for_memory(job->memory_id, &source_actor) != 0)
+   {
+      /* Upgrade compatibility for jobs queued before memory_fact_actors existed:
+       * never invent user authority when the original identity is unknowable. */
+      if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &source_actor) != 0)
+         return -1;
+   }
+
+   /* Every extracted assertion cites the source memory independently.  The hash
+    * covers the exact note, the span identifies the extraction region, and the
+    * async job id is the ingest-run identity shared by pattern + LLM passes. */
+   unsigned char digest[SHA256_DIGEST_LENGTH];
+   char evidence_hash[SHA256_DIGEST_LENGTH * 2 + 1];
+   SHA256((const unsigned char *)mem.content, strlen(mem.content), digest);
+   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+      snprintf(evidence_hash + (size_t)i * 2, 3, "%02x", digest[i]);
+   char source_id[64], source_span[64], ingest_run_id[64];
+   snprintf(source_id, sizeof(source_id), "memory:%lld", (long long)job->memory_id);
+   snprintf(source_span, sizeof(source_span), "bytes:0-%zu", strlen(mem.content));
+   snprintf(ingest_run_id, sizeof(ingest_run_id), "memory-facts:%lld", (long long)job->job_id);
+   fact_evidence_input_t evidence = {.source_kind = "memory",
+                                     .source_id = source_id,
+                                     .source_span = source_span,
+                                     .evidence_hash = evidence_hash,
+                                     .actor_principal = source_actor.principal,
+                                     .observed_at = mem.created_at,
+                                     .ingest_run_id = ingest_run_id,
+                                     .stance = "supports"};
 
    /* Deterministic pattern-first extraction, moved off the synchronous store/turn
     * path to the drain: high-precision regex triples committed idempotently. Runs
@@ -417,8 +454,8 @@ static int mf_process_one(const mf_job_t *job)
     * a model-sourced triple never enters at Class A). This used to be a flat
     * FACT_AUTHORITY_USER, which made every note the model chose to remember a
     * source of permanent facts outranking the user's own. */
-   if (db2_fact_ingest_text(mem.content, fact_authority_from_provenance(mem.provenance_category),
-                            1) < 0)
+   if (db2_fact_ingest_text_as_actor(mem.content, &source_actor, 1, &evidence,
+                                     FACT_KIND_WORLD_FACT, mem.created_at, NULL) < 0)
       aimee_log(LOG_WARN, "kb.memory.facts", "pattern extraction gave no answer for memory %lld",
                 (long long)job->memory_id);
 
@@ -440,8 +477,8 @@ static int mf_process_one(const mf_job_t *job)
    db2_lease_release_idle();
 
    char err[MF_ERRBUF] = "";
-   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json, NULL,
-                                   "", MF_LLM_OUT_CAP, err, sizeof(err));
+   char *resp = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json,
+                                   NULL, "", MF_LLM_OUT_CAP, err, sizeof(err));
    free(request_json);
    if (!resp)
    {
@@ -449,7 +486,7 @@ static int mf_process_one(const mf_job_t *job)
       return -1;
    }
 
-   int n = mf_commit_facts(resp, mem.content);
+   int n = mf_commit_facts(resp, mem.content, &evidence);
    free(resp);
    mf_mark_done(job->job_id);
    if (n > 0)
@@ -458,9 +495,9 @@ static int mf_process_one(const mf_job_t *job)
    return n;
 }
 
-int kb_memory_facts_drain(int batch)
+int kb_memory_facts_drain(const config_t *cfg, int batch)
 {
-   if (!config_typed_facts_enabled() || batch <= 0)
+   if (!cfg || !config_typed_facts_enabled() || batch <= 0)
       return 0;
    if (!db2_conn())
       return 0;
@@ -476,7 +513,7 @@ int kb_memory_facts_drain(int batch)
       memset(&job, 0, sizeof(job));
       if (!mf_claim_job(&job))
          break;
-      (void)mf_process_one(&job);
+      (void)mf_process_one(cfg, &job);
       processed++;
    }
    return processed;

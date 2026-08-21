@@ -94,8 +94,10 @@ typedef struct
    double hybrid_total;   /* lexical+dense hybrid score, for the explain surface */
    double blended_total;  /* final score after the post-hybrid passes */
    double graph_score;    /* utility-weighted graph boost contribution */
+   double graph_weight;   /* weight actually applied to graph_score */
    double code_proximity; /* code-projection edge proximity score */
    double utility;        /* decayed utility signal from feedback */
+   double outcome;        /* P5 work-outcome overlay; default weight is zero */
    double source_fusion;  /* fused graph-vector-code ranking delta */
    double total;
 } memory_score_parts_t;
@@ -105,6 +107,22 @@ typedef struct
    memory_t memory;
    memory_score_parts_t parts;
 } memory_diagnostic_t;
+
+#define MEMORY_RECALL_TRACE_MAX_REJECTIONS 64
+typedef struct
+{
+   int64_t memory_id;
+   char lane[24];
+   char gate[64];
+} memory_recall_rejection_t;
+
+/* Per-thread, opt-in capture of candidates rejected by the real recall gates.
+ * Capture observes the live path and never participates in scoring. */
+void memory_recall_trace_capture_begin(void);
+void memory_recall_trace_capture_reset(void);
+void memory_recall_trace_capture_end(void);
+void memory_recall_trace_reject(int64_t memory_id, const char *lane, const char *gate);
+int memory_recall_trace_rejections(memory_recall_rejection_t *out, int max);
 
 #define MEMORY_ANSWER_MAX_CITATIONS 4
 #define MEMORY_ANSWER_TRACE_MAX_IDS 16
@@ -366,6 +384,10 @@ int memory_insert(const char *tier, const char *kind, const char *key, const cha
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
                      const char *use_cases, double confidence, const char *session_id,
                      memory_authority_t authority, memory_t *out);
+int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
+                               const char *key, const char *content, const char *use_cases,
+                               double confidence, const char *session_id,
+                               memory_authority_t authority, memory_t *out);
 int memory_get(int64_t id, memory_t *out);
 int memory_touch(int64_t id);
 /* Batch memory_touch, for the recall path: one statement per chunk of ids
@@ -385,6 +407,8 @@ int memory_stats(memory_stats_t *out);
  *
  * memory_update_content() is the USER-authority spelling, kept for the CLI /
  * operator callers that predate the split. */
+/* Returns -2 for immutable episode/experience content (annotate instead) and
+ * -3 for instruction/policy content (revoke and replace instead). */
 int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
                              int64_t *new_id_out);
 int memory_update_content(int64_t id, const char *content);
@@ -941,6 +965,8 @@ int anti_pattern_extract_from_failures(void);
 int anti_pattern_escalate(int hit_threshold);
 
 /* --- Temporal Facts --- */
+/* Returns -2 when an episode/experience must be annotated and -3 when an
+ * instruction/policy must be revoked instead of corrected. */
 int memory_supersede(int64_t old_id, const char *new_content, double confidence,
                      const char *session_id, memory_t *out);
 int memory_fact_history(const char *key, memory_t *out, int max);

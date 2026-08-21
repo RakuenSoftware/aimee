@@ -1,6 +1,10 @@
 # Proposal: P6 — epistemic kind as a dimension separate from authority and tier
 
-- **State:** proposed (pending — not started)
+> **Archived proposal.** This records the implemented design; current behaviour
+> is defined by the code and acceptance validation.
+
+- **State:** done (2026-08-21) — implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 6 of 9.
 - **Author:** JBailes
 - **Date:** 2026-08-21
@@ -160,5 +164,5 @@ Ranking is untouched. `epistemic_kind` is not a score input in this proposal.
 
 Supersedes nothing. Refines the claim taxonomy assumed by
 [typed-fact knowledge layer](../done/typed-fact-knowledge-layer.md) and by the
-pending [evidence provenance tiers](proposal-evidence-provenance-tiers.md), which
+pending [evidence provenance tiers](../pending/proposal-evidence-provenance-tiers.md), which
 governs the orthogonal question of how much *human* evidence stands behind a row.

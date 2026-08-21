@@ -1,6 +1,10 @@
 # Proposal: P8 — versioned, dry-runnable, rollback-able ontology packages
 
-- **State:** proposed (pending — not started)
+> **Archived proposal.** This records the implemented design; current behaviour
+> is defined by the code and acceptance validation.
+
+- **State:** done (2026-08-21) — implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 8 of 9.
 - **Author:** JBailes
 - **Date:** 2026-08-21

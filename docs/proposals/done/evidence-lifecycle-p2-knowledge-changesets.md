@@ -1,6 +1,10 @@
 # Proposal: P2 — knowledge changesets with diff and compensating revert
 
-- **State:** proposed (pending — not started)
+> **Archived proposal.** This records the implemented design; current behaviour
+> is defined by the code and acceptance validation.
+
+- **State:** done (2026-08-21) — implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 2 of 9. Foundational.
 - **Author:** JBailes
 - **Date:** 2026-08-21

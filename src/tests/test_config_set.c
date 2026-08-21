@@ -95,6 +95,21 @@ int main(void)
    assert(config_max_iterations() == 12);
    assert(strcmp(config_provider(), "openai") == 0 && "earlier write still present");
 
+   /* The console's typed-facts group is one nested-document write. It must not
+    * route KB-only keys through the flat registry (where they are unknown), and
+    * a partial follow-up must preserve the other two values. */
+   assert(config_set_typed_facts(0, 0, 7) == 0);
+   y = read_yaml();
+   assert(strstr(y, "typed_facts:") && strstr(y, "promote_threshold: 7"));
+   assert(strstr(y, "typed_facts_enabled:") == NULL && strstr(y, "keep-me"));
+   assert(config_typed_facts_enabled() == 0);
+   assert(config_kb_typed_facts_auto_promote_enabled() == 0);
+   assert(config_kb_typed_facts_promote_threshold() == 7);
+   assert(config_set_typed_facts(-1, 1, -1) == 0);
+   assert(config_typed_facts_enabled() == 0);
+   assert(config_kb_typed_facts_auto_promote_enabled() == 1);
+   assert(config_kb_typed_facts_promote_threshold() == 7);
+
    /* Credential-shaped fields bypass the YAML document entirely. */
    config_secret_writer_set(test_secret_writer);
    assert(config_set("db2_url", "postgres://user:never-write-me@example/db") == 0);

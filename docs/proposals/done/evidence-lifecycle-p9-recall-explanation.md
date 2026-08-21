@@ -1,6 +1,10 @@
 # Proposal: P9 — a complete, persisted recall explanation
 
-- **State:** proposed (pending — not started)
+> **Archived proposal.** This records the implemented design; current behaviour
+> is defined by the code and acceptance validation.
+
+- **State:** done (2026-08-21) — implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 9 of 9.
 - **Author:** JBailes
 - **Date:** 2026-08-21
@@ -110,7 +114,7 @@ operator expects is worse than one that says it does not know.
 - No new ranking features. P9 exposes what exists.
 - No replacement of `feature_rows` or the fitter's training view; the trace
   complements them and feeds the pending
-  [per-query feature persistence residual](per-query-feature-persistence-residual.md)
+  [per-query feature persistence residual](../pending/per-query-feature-persistence-residual.md)
   rather than forking it.
 - No end-user explanation UI. This is an operator and evaluation surface; a
   user-facing "why did you say that" view is a separate proposal.
@@ -165,5 +169,5 @@ operator expects is worse than one that says it does not know.
 Supersedes nothing. Extends the audit-trace surface delivered by
 [auditable correctness for the KB](../done/auditable-correctness-for-the-kb.md)
 from "what was surfaced" to "why", and supplies the per-query decomposition the
-pending [per-query feature persistence residual](per-query-feature-persistence-residual.md)
-and [kb_hybrid outcome residual](kb-hybrid-outcome-wiring-residual.md) both need.
+pending [per-query feature persistence residual](../pending/per-query-feature-persistence-residual.md)
+and [kb_hybrid outcome residual](../pending/kb-hybrid-outcome-wiring-residual.md) both need.

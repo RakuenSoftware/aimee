@@ -1,6 +1,10 @@
 # Proposal: P7 — one operator review surface over every pending knowledge decision
 
-- **State:** proposed (pending — not started)
+> **Archived proposal.** This records the implemented design; current behaviour
+> is defined by the code and acceptance validation.
+
+- **State:** done (2026-08-21) — implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 7 of 9.
 - **Author:** JBailes
 - **Date:** 2026-08-21
@@ -193,7 +197,7 @@ independent state to go stale.
 
 Supersedes nothing. Consolidates the review surfaces assumed by
 [graph feedback, self-audit and learning](../done/graph-feedback-self-audit-and-learning.md),
-[memory auto-population phase 4](memory-auto-population-phase4.md) and
+[memory auto-population phase 4](../pending/memory-auto-population-phase4.md) and
 [governance decision records and action audit](../done/governance-decision-records-and-action-audit.md)
 into one operator decision path, and provides the surface the pending
-[operator audit activity residual](operator-audit-activity-residual.md) reads from.
+[operator audit activity residual](../pending/operator-audit-activity-residual.md) reads from.

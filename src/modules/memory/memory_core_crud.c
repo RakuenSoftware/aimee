@@ -235,11 +235,19 @@ static int memory_keys_have_different_numeric_tokens(const char *a, const char *
    return (n_a != n_b) || (n_a > 0 && strcmp(sig_a, sig_b) != 0);
 }
 
-int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
-                     const char *use_cases, double confidence, const char *session_id,
-                     memory_authority_t authority, memory_t *out)
+int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
+                               const char *key, const char *content, const char *use_cases,
+                               double confidence, const char *session_id,
+                               memory_authority_t authority, memory_t *out)
 {
-   if (!tier || !kind || !key)
+   static const char *const epistemic_kinds[] = {
+       "world_fact", "episode", "experience", "mental_model", "preference",
+       "instruction", "policy", "hypothesis", NULL};
+   int epistemic_ok = 0;
+   for (int i = 0; epistemic_kinds[i]; i++)
+      if (epistemic_kind && strcmp(epistemic_kind, epistemic_kinds[i]) == 0)
+         epistemic_ok = 1;
+   if (!tier || !kind || !key || !epistemic_ok)
       return -1;
 
    /* Eval scratch stores are throwaway. Skip cross-cutting write-side work
@@ -477,8 +485,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
 
    /* Truly new: INSERT */
    {
-      int64_t new_id = db2_memory_row_insert_ex(
-          tier, kind, norm_key, content, use_cases, confidence, session_id, ts, sensitivity,
+      int64_t new_id = db2_memory_row_insert_epistemic_ex(
+          tier, kind, epistemic_kind, norm_key, content, use_cases, confidence, session_id, ts, sensitivity,
           memory_base_evidence_strength(norm_key, content, confidence),
           memory_content_salience(content), memory_content_surprise(session_id, content),
           MEMORY_PROVENANCE_FOR(authority));
@@ -510,6 +518,14 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    }
 }
 
+int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
+                     const char *use_cases, double confidence, const char *session_id,
+                     memory_authority_t authority, memory_t *out)
+{
+   return memory_insert_epistemic_ex(tier, kind, "world_fact", key, content, use_cases,
+                                     confidence, session_id, authority, out);
+}
+
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out)
 {
@@ -539,6 +555,12 @@ int memory_update_content_as(int64_t id, const char *content, memory_authority_t
       *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
+   char epistemic_kind[32] = "world_fact";
+   (void)db2_memory_epistemic_kind(id, epistemic_kind, sizeof(epistemic_kind));
+   if (strcmp(epistemic_kind, "episode") == 0 || strcmp(epistemic_kind, "experience") == 0)
+      return -2;
+   if (strcmp(epistemic_kind, "instruction") == 0 || strcmp(epistemic_kind, "policy") == 0)
+      return -3;
 
    /* A model correction versions the old value instead of overwriting it. The
     * store's own write path already makes this choice — memory_store() routes a
@@ -551,8 +573,9 @@ int memory_update_content_as(int64_t id, const char *content, memory_authority_t
       double confidence = (memory_get(id, &old_mem) == 0) ? old_mem.confidence : 1.0;
       memory_t sup;
       memset(&sup, 0, sizeof(sup));
-      if (memory_supersede(id, content, confidence, NULL, &sup) != 0)
-         return -1;
+      int supersede_rc = memory_supersede(id, content, confidence, NULL, &sup);
+      if (supersede_rc != 0)
+         return supersede_rc;
       if (new_id_out)
          *new_id_out = sup.id;
       return 0;

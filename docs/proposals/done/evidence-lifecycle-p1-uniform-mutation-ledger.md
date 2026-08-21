@@ -1,6 +1,10 @@
 # Proposal: P1 — a uniform, transactional mutation ledger for every memory object
 
-- **State:** proposed (pending — not started)
+> **Archived proposal.** This records the implemented design; current behaviour
+> is defined by the code and acceptance validation.
+
+- **State:** done (2026-08-21) — implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 1 of 9. Foundational.
 - **Author:** JBailes
 - **Date:** 2026-08-21
@@ -204,5 +208,5 @@ Supersedes nothing. Extends the audit substrate recorded in
 [auditable WORM audit store](../done/auditable-worm-audit-store.md) and
 [governance decision records and action audit](../done/governance-decision-records-and-action-audit.md),
 and supplies the event source the pending
-[operator audit activity residual](operator-audit-activity-residual.md) needs to
+[operator audit activity residual](../pending/operator-audit-activity-residual.md) needs to
 render a complete activity view.

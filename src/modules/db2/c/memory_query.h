@@ -266,6 +266,13 @@ extern "C"
                                     const char *session_id, const char *ts, const char *sensitivity,
                                     double evidence_strength, double salience, double surprise,
                                     const char *provenance_category);
+   int64_t db2_memory_row_insert_epistemic_ex(
+       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
+       const char *content, const char *use_cases, double confidence, const char *session_id,
+       const char *ts, const char *sensitivity, double evidence_strength, double salience,
+       double surprise, const char *provenance_category);
+   int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap);
+   double db2_memory_outcome_adjustment(int64_t memory_id);
    int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
                                  const char *content, double confidence, const char *session_id,
                                  const char *ts, const char *sensitivity, double evidence_strength,

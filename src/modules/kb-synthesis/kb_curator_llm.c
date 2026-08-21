@@ -69,10 +69,11 @@ static cJSON *build_messages(const char *system_prompt, const char *request_json
    return msgs;
 }
 
-char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
+char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const char *system_prompt,
                          const char *request_json, cJSON *json_schema, const char *fallback_command,
                          int out_cap, char *errbuf, size_t errlen)
 {
+   (void)cfg; /* legacy resolver reads the process configuration atomically */
    if (errbuf && errlen)
       errbuf[0] = '\0';
 

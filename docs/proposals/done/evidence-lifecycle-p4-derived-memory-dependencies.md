@@ -1,6 +1,10 @@
 # Proposal: P4 — explicit dependencies and computed staleness for derived memory
 
-- **State:** proposed (pending — not started)
+> **Archived proposal.** This records the implemented design; current behaviour
+> is defined by the code and acceptance validation.
+
+- **State:** done (2026-08-21) — implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 4 of 9.
 - **Author:** JBailes
 - **Date:** 2026-08-21

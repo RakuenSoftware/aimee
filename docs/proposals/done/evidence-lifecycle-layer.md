@@ -1,7 +1,10 @@
 # Proposal: Evidence and lifecycle layer — series charter
 
-- **State:** proposed (pending — not started). Umbrella charter for nine member
-  proposals, `evidence-lifecycle-p1` … `p9`.
+> **Archived proposal.** This records the implemented design. Current behaviour
+> is defined by the schema, API and validation report linked below.
+
+- **State:** done (2026-08-21) — all nine members implemented in PR #2831; see
+  [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Author:** JBailes
 - **Date:** 2026-08-21
 - **Charter roles:** Persist, Review, Enforce, Calibrate, Gate-Promote.
@@ -184,8 +187,8 @@ may merge with a later member's table present but unwritten.
 This charter supersedes nothing. It coordinates work downstream of
 [typed-fact knowledge layer](../done/typed-fact-knowledge-layer.md) and adjacent
 to the pending
-[evidence provenance tiers](proposal-evidence-provenance-tiers.md),
-[operator audit activity residual](operator-audit-activity-residual.md),
-[kb_hybrid outcome residual](kb-hybrid-outcome-wiring-residual.md) and
-[per-query feature persistence residual](per-query-feature-persistence-residual.md)
+[evidence provenance tiers](../pending/proposal-evidence-provenance-tiers.md),
+[operator audit activity residual](../pending/operator-audit-activity-residual.md),
+[kb_hybrid outcome residual](../pending/kb-hybrid-outcome-wiring-residual.md) and
+[per-query feature persistence residual](../pending/per-query-feature-persistence-residual.md)
 proposals, each cited by the member that touches its surface.

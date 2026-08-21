@@ -373,11 +373,13 @@ static void test_get_doc_not_found(void)
    assert(status == 404);
 }
 
-static void test_delete_doc_ok(void)
+static void test_delete_doc_requires_lifecycle_preview(void)
 {
    char buf[256];
    int status = handle_delete_doc("42", buf, sizeof(buf));
-   assert(status == 200);
+   assert(status == 409);
+   assert(strstr(buf, "document.preview_lifecycle") != NULL);
+   assert(strstr(buf, "purge") != NULL);
 }
 
 static void test_delete_doc_not_found(void)
@@ -406,7 +408,7 @@ int main(void)
    test_post_docs_manifest_db_error();
    test_get_doc_ok();
    test_get_doc_not_found();
-   test_delete_doc_ok();
+   test_delete_doc_requires_lifecycle_preview();
    test_delete_doc_not_found();
    test_get_review_ok();
    test_post_pdf_requires_sensitivity();

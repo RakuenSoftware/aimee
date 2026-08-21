@@ -17,6 +17,8 @@
 #include "db_postgres.h" /* aimee_pg_* — the postgres-backed mode */
 #include "db_schema.h"
 #include "lifecycle.h" /* db2_set_embedding_dim */
+#include "kb_audit_worm.h"
+#include <aimee/audit/audit_worm_chain.h>
 
 #include <assert.h>
 #include <sqlite3.h>
@@ -358,6 +360,10 @@ void db2_test_shim_open_path(const char *path)
    char err[512] = {0};
    rc = db2_apply_schema_sqlite_shim(raw, err, sizeof(err));
    assert(rc == 0);
+   /* Production registers this host contract during KB module startup. The
+    * shim owns the equivalent test startup boundary, so mutation paths retain
+    * their mandatory WORM audit without every fixture reimplementing boot. */
+   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
 
    db2_register_shared_sqlite(raw);
    rc = db2_init("shim");

@@ -181,11 +181,13 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
     * never collides with a memory row id that happens to equal a doc_id, and the
     * memory demotion scorer (which reads retrieval_attribution) is untouched. */
    char err[256] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "SELECT payload FROM artifacts WHERE kind = 'ranker_outcome'"
-                        " ORDER BY created_at",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT payload::text,created_at FROM artifacts WHERE kind='ranker_outcome'"
+       " UNION ALL SELECT jsonb_build_object('retrieval_event_id',retrieval_event_id,"
+       " 'subject_id',subject_id,'subject_kind',subject_kind,'verdict',outcome,'weight',1)::text,"
+       " occurred_at FROM work_outcomes ORDER BY 2",
+       err, sizeof(err));
    if (!st)
       return -1;
 
@@ -211,18 +213,29 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
 
       cJSON *ev = cJSON_GetObjectItemCaseSensitive(p, "retrieval_event_id");
       cJSON *rid = cJSON_GetObjectItemCaseSensitive(p, "surfaced_row_id");
+      if (!rid)
+         rid = cJSON_GetObjectItemCaseSensitive(p, "subject_id");
+      cJSON *subject_kind_j = cJSON_GetObjectItemCaseSensitive(p, "subject_kind");
       cJSON *vj = cJSON_GetObjectItemCaseSensitive(p, "verdict");
       cJSON *wj = cJSON_GetObjectItemCaseSensitive(p, "weight");
       const char *group = cJSON_IsString(ev) ? ev->valuestring : "";
       const char *verdict = cJSON_IsString(vj) ? vj->valuestring : "";
-      if (!cJSON_IsNumber(rid))
+      if (cJSON_IsString(subject_kind_j) && strcmp(subject_kind_j->valuestring, sk) != 0)
       {
          cJSON_Delete(p);
          continue;
       }
 
       char subject_id[32];
-      snprintf(subject_id, sizeof(subject_id), "%lld", (long long)rid->valuedouble);
+      if (cJSON_IsNumber(rid))
+         snprintf(subject_id, sizeof(subject_id), "%lld", (long long)rid->valuedouble);
+      else if (cJSON_IsString(rid))
+         snprintf(subject_id, sizeof(subject_id), "%s", rid->valuestring);
+      else
+      {
+         cJSON_Delete(p);
+         continue;
+      }
 
       /* Join: does this candidate have a v1 feature vector on the ranker surface? */
       char feat_buf[1024];
@@ -240,7 +253,10 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
 
       /* Positive = the outcome accepted the surfaced row (used-in-answer /
        * positively attributed). Every corrective/negative verdict is a 0. */
-      int label = (strcmp(verdict, DEMOTION_VERDICT_ACCEPTED) == 0) ? 1 : 0;
+      int label = (strcmp(verdict, DEMOTION_VERDICT_ACCEPTED) == 0 ||
+                   strcmp(verdict, "useful") == 0)
+                      ? 1
+                      : 0;
 
       cJSON *row = cJSON_CreateObject();
       cJSON_AddStringToObject(row, "group", group);
