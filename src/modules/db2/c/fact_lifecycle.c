@@ -23,6 +23,17 @@ static void fl_now_utc(char *buf, size_t n)
    strftime(buf, n, "%Y-%m-%d %H:%M:%S", &tmv);
 }
 
+fact_authority_t fact_authority_from_provenance(const char *provenance_category)
+{
+   /* The literal, not MEMORY_PROVENANCE_USER: DB2's outbound header surface is
+    * frozen (scripts/check_db2_source_boundary.py) and naming the macro would add
+    * an edge to src/headers for one string. The vocabulary is defined once in
+    * memory_authority.h and written by db2_memory_row_insert_ex. */
+   return (provenance_category && strcmp(provenance_category, "user_stated") == 0)
+              ? FACT_AUTHORITY_USER
+              : FACT_AUTHORITY_MODEL;
+}
+
 double fact_class_confidence(const char *cls)
 {
    if (cls && cls[0] == 'A' && cls[1] == '\0')

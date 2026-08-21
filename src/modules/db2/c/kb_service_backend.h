@@ -2,6 +2,7 @@
 #define DEC_DB2_KB_SERVICE_BACKEND_H 1
 
 #include "vector_index_ops.h"
+#include "fact_lifecycle.h" /* fact_authority_t */
 #include "cJSON.h"
 
 #include <stddef.h>
@@ -300,12 +301,23 @@ extern "C"
    cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, const char *key,
                                             const char *content, double confidence,
                                             const char *session_id);
+   /* `authority` is persisted as the new row's provenance_category, which is what
+    * the typed-fact drain later reads to decide whether facts mined from this
+    * note may enter at Class A. The RPC handler derives it from the calling
+    * surface and the request's authentication — see memory.h's memory_insert_ex.
+    * Spelled `int` for the same frozen-boundary reason as the delete/update pair
+    * below, and with the same safe default: 0 is MEMORY_AUTHORITY_MODEL. */
    cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
                                                const char *content, const char *use_cases,
-                                               double confidence, const char *session_id);
+                                               double confidence, const char *session_id,
+                                               int authority);
    cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
+   /* `authority` is the typed-fact write authority for the §4 retraction this
+    * turn may perform; the RPC handler derives it from the request's
+    * authenticated actor, never from the request body. See db2_typed_fact_ingress
+    * (fact_ingest.h). */
    cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
-                                                   int limit);
+                                                   int limit, fact_authority_t authority);
    /* Read-only typed-fact recall for the turn: facts about entities named in the
     * query, PII-gated. Returns {status, facts} (facts="" when off/none). Lets the
     * server auto-inject facts without the full context-block assembly. */

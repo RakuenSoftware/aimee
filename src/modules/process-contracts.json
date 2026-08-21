@@ -56,7 +56,8 @@
       "runtime": "go",
       "principal_ref": 7,
       "placements": [
-        "server"
+        "server",
+        "kb"
       ],
       "stages": [
         {

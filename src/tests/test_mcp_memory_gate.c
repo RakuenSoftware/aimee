@@ -168,9 +168,45 @@ static void test_no_gate_is_read_only(void)
    printf("  PASS: no memory gate is satisfied by a read-only caller\n");
 }
 
+/* Capability answers "may they", attestation answers "who are they", and the two
+ * memory verbs that cannot be undone need the second question asked as well.
+ *
+ * CAP_MEMORY_ADMIN sits inside CAPS_AUTHENTICATED, so a bearer clears it — over
+ * TCP too, under remote_writes=DATA/FULL. That is the right answer for "may this
+ * caller delete", and the wrong one for "is this caller the user", which is what
+ * decides whether memory.delete destroys the row or retires it and whether a
+ * stored note may later mint Class-A facts. Only the two kernel/root-attested
+ * local shapes are a person. */
+static void test_attested_identity_is_not_capability(void)
+{
+   assert(server_attested_is_person(ATTEST_UDS_PEERCRED) == 1);
+   assert(server_attested_is_person(ATTEST_WEBCHAT_TRUSTED) == 1);
+
+   /* A shared token is a service or an agent, however much it may do. */
+   assert(server_attested_is_person(ATTEST_TCP_BEARER) == 0);
+   assert(server_attested_is_person(ATTEST_TLS_BEARER) == 0);
+   assert(server_attested_is_person(ATTEST_MTLS_CLIENT) == 0);
+
+   /* The zero value: a missed hop must never become a user. */
+   assert(server_attested_is_person(ATTEST_NONE) == 0);
+
+   assert(server_attested_memory_authority(ATTEST_UDS_PEERCRED) == MEMORY_AUTHORITY_USER);
+   assert(server_attested_memory_authority(ATTEST_WEBCHAT_TRUSTED) == MEMORY_AUTHORITY_USER);
+   assert(server_attested_memory_authority(ATTEST_TCP_BEARER) == MEMORY_AUTHORITY_MODEL);
+   assert(server_attested_memory_authority(ATTEST_MTLS_CLIENT) == MEMORY_AUTHORITY_MODEL);
+   assert(server_attested_memory_authority(ATTEST_NONE) == MEMORY_AUTHORITY_MODEL);
+
+   /* The point of the split: a caller can hold the destructive capability and
+    * still not be a person, which is exactly the case the mapping must catch. */
+   assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) != 0);
+   assert(server_attested_is_person(ATTEST_TCP_BEARER) == 0);
+   printf("  PASS: attested identity is asked separately from capability\n");
+}
+
 int main(void)
 {
    printf("mcp_memory_gate:\n");
+   test_attested_identity_is_not_capability();
    test_verb_methods();
    test_verb_grades_are_what_the_fix_intended();
    test_maintain_prune_requires_admin();

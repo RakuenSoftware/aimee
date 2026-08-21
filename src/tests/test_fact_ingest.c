@@ -107,6 +107,18 @@ static int invalid_scan(const char *text, int *is_retraction, int *has_attr,
    return 0;
 }
 
+/* Reads every turn as "retract works_for", so the authority the ingress was
+ * called with is the only thing that decides whether the fact goes. */
+static int scan_retract_works_for(const char *text, int *is_retraction, int *has_attr,
+                                  char attr[DB2_FACT_ATTR_MAX])
+{
+   (void)text;
+   *is_retraction = 1;
+   *has_attr = 1;
+   snprintf(attr, DB2_FACT_ATTR_MAX, "works_for");
+   return 0;
+}
+
 int main(void)
 {
    db2_test_shim_open();
@@ -149,17 +161,46 @@ int main(void)
    /* §4 retraction flow: no scanner, a failed scanner, or an inconsistent answer
     * cannot delete. The host-installed scanner then retracts only the named fact. */
    assert(db2_fact_current_count("user") == 2); /* email + city currently believed */
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 2);
    aimee_db2_register_fact_scan_provider(failing_scan);
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 2);
    aimee_db2_register_fact_scan_provider(invalid_scan);
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 2);
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 1); /* only city remains current */
+
+   /* §4/§5: the ingress retracts at the authority it was CALLED with, not at the
+    * user's. A turn asking to forget a user-stated (Class A) fact leaves it
+    * standing when the caller could only prove model authority — which is what
+    * every model-driven surface passes — and withdraws it at user authority. */
+   assert(db2_fact_commit("user", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("user") == 2); /* city + works_for */
+   aimee_db2_register_fact_scan_provider(scan_retract_works_for);
+   assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_MODEL, NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 2); /* model refused: Class A stands */
+   assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_USER, NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 1); /* the user's own retraction lands */
+
+   /* A SEED relation whose declared kinds disagree with the extractor's guess
+    * must still commit. The extractor infers kinds from the value's spelling --
+    * a bare number is NODE_OTHER -- while `age` declares tail NODE_SCALAR, so
+    * the gate rejected it and the fact vanished with no error anywhere. Most
+    * seed relations were unreachable from this path for that reason. */
+   assert(db2_fact_ingest_text("my age is 41", FACT_AUTHORITY_USER, 1) == 1);
+   {
+      edge_t e[16];
+      int n = db2_entity_edges_semantic_by_entity("user", e, 16);
+      int found = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(e[i].relation, "age") == 0 && strcmp(e[i].target, "41") == 0)
+            found = 1;
+      assert(found); /* rejected on kind before the fixup */
+   }
 
    /* Bad args. */
    assert(db2_fact_ingest_text(NULL, FACT_AUTHORITY_USER, 1) == -1);

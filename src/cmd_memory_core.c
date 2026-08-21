@@ -42,7 +42,10 @@ void mem_store(app_ctx_t *ctx, int argc, char **argv)
    const char *scope_value = cmd_memory_scope_value(&opts);
 
    memory_t mem;
-   if (kb_client_memory_insert(tier, kind, key, content, 1.0, session, &mem) != 0)
+   /* `aimee memory store` is the user typing a note at their own terminal, so the
+    * row records the user provenance and facts mined from it may be Class A. */
+   if (kb_client_memory_insert_as(tier, kind, key, content, "", 1.0, session, MEMORY_AUTHORITY_USER,
+                                  &mem) != 0)
       fatal("failed to store memory (key=%s, tier=%s) — check stderr for details", key, tier);
 
    /* Apply explicit workspace tag if provided */

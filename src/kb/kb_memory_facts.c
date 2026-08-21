@@ -406,8 +406,19 @@ static int mf_process_one(const mf_job_t *job)
    /* A negative result now means the extraction module gave no answer, not just
     * a bad argument. The drain still goes on to the LLM pass -- the job is not
     * failed over it -- but it is not silently nothing either: pattern facts are
-    * missing from this memory until it is reprocessed. */
-   if (db2_fact_ingest_text(mem.content, FACT_AUTHORITY_USER, 1) < 0)
+    * missing from this memory until it is reprocessed.
+    *
+    * The authority comes from the ROW, not from this worker. A drain has no
+    * caller to authenticate: it runs long after the write, so the only honest
+    * source is the provenance recorded when the note was stored — which the
+    * store path derives from the writer's attested identity and surface. Text
+    * the user actually typed can still yield Class-A facts; text the agent
+    * composed cannot, however confidently it was written (typed-fact §1/§5:
+    * a model-sourced triple never enters at Class A). This used to be a flat
+    * FACT_AUTHORITY_USER, which made every note the model chose to remember a
+    * source of permanent facts outranking the user's own. */
+   if (db2_fact_ingest_text(mem.content, fact_authority_from_provenance(mem.provenance_category),
+                            1) < 0)
       aimee_log(LOG_WARN, "kb.memory.facts", "pattern extraction gave no answer for memory %lld",
                 (long long)job->memory_id);
 

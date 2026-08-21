@@ -463,3 +463,15 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    return server_send_ok(conn, resp);
 }
+
+/* --- Attested identity: who, not what-may-they-do. See server.h. --- */
+
+int server_attested_is_person(attested_transport_t transport)
+{
+   return transport == ATTEST_UDS_PEERCRED || transport == ATTEST_WEBCHAT_TRUSTED;
+}
+
+memory_authority_t server_attested_memory_authority(attested_transport_t transport)
+{
+   return server_attested_is_person(transport) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+}

@@ -36,9 +36,13 @@ void db2_fill_memory_12col_pg(aimee_pg_stmt_t *stmt, memory_t *m)
    snprintf(m->updated_at, sizeof(m->updated_at), "%s", uat ? uat : "");
    snprintf(m->source_session, sizeof(m->source_session), "%s", src ? src : "");
    m->salience = aimee_pg_column_double(stmt, 11);
+   /* NULL is not "the user said it". The column is NOT NULL so this is the
+    * unreachable-in-practice branch, but the value feeds
+    * fact_authority_from_provenance, and a fallback that reads as user-stated is
+    * exactly the wrong way for that to fail. */
    const char *pcat = aimee_pg_column_text(stmt, 12);
    snprintf(m->provenance_category, sizeof(m->provenance_category), "%s",
-            pcat ? pcat : "user_stated");
+            pcat ? pcat : "agent_message");
    if (aimee_pg_column_count(stmt) > 13)
    {
       const char *use_cases = aimee_pg_column_text(stmt, 13);

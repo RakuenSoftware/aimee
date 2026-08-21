@@ -183,7 +183,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * Splitting it costs nothing at the wire: server_send_error and jo_err build the
  * identical {status:"error", message} envelope, so the bytes on the RPC path are
  * unchanged. handle_memory_store below is now only the connection write. */
-cJSON *memory_store_command(const cJSON *req)
+cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
 {
    const char *key, *content;
    if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
@@ -196,7 +196,8 @@ cJSON *memory_store_command(const cJSON *req)
    const char *sid = jo_str((cJSON *)req, "session_id", "");
 
    memory_t out;
-   if (kb_client_memory_insert(tier, kind, key, content, confidence, sid, &out) != 0)
+   if (kb_client_memory_insert_as(tier, kind, key, content, "", confidence, sid, authority, &out) !=
+       0)
       return jo_err("failed to store memory");
 
    cJSON *resp = jo_ok();
@@ -207,7 +208,13 @@ cJSON *memory_store_command(const cJSON *req)
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return send_and_free(conn, memory_store_command(req));
+   /* Whose words these are follows the connection's kernel-attested identity, the
+    * same rule facts.retract uses (server_facts.c) and for the same reason: this
+    * row's provenance decides whether the typed-fact drain may mine Class-A facts
+    * out of it, and a caller must not be able to claim that by asking. A bearer
+    * over TCP/TLS is a service or an agent, not a person. */
+   return send_and_free(
+       conn, memory_store_command(req, server_attested_memory_authority(conn->attested_transport)));
 }
 
 cJSON *memory_list_command(const cJSON *req)
@@ -342,30 +349,44 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * Gated on CAP_MEMORY_ADMIN — deliberately NOT the CAP_MEMORY_WRITE that
  * memory.store carries. This is the one memory path that destroys rather than
  * versions, so it is graded like rules.delete: holding "may remember" is not
- * holding "may forget". A caller that clears that gate is operator-grade, so the
- * delete runs with USER authority and is a real delete; the model-facing MCP
- * `forget` verb has no such authority and retires the memory instead. */
-cJSON *memory_delete_command(cJSON *req)
+ * holding "may forget". The model-facing MCP `forget` verb has no such authority
+ * and retires the memory instead.
+ *
+ * The capability decides whether the caller MAY delete. It does not decide
+ * whether the caller is a person, and only a person's delete destroys: the
+ * capability travels with a bearer, and CAP_MEMORY_ADMIN sits inside
+ * CAPS_AUTHENTICATED, so a TCP bearer under remote_writes=DATA/FULL clears this
+ * gate. Destroying a row and its provenance is irreversible and the audit event
+ * carries only the id, so a token that leaked cannot be allowed to spend the
+ * user's one non-recoverable verb. An un-attested caller that clears the
+ * capability still deletes — it retires the memory, which memory_fact_history
+ * can still read — so this narrows the blast radius rather than the feature. */
+cJSON *memory_delete_command(cJSON *req, attested_transport_t transport)
 {
    int64_t id = 0;
    if (memory_request_positive_id(req, "id", &id) != 0)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   if (kb_client_memory_delete_as(id, MEMORY_AUTHORITY_USER) != 0)
+   memory_authority_t authority = server_attested_memory_authority(transport);
+   if (kb_client_memory_delete_as(id, authority) != 0)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "id", (double)id);
    cJSON_AddBoolToObject(resp, "deleted", 1);
+   /* Say which happened. "deleted" alone would report a retire as a destroy, and
+    * a caller correcting a mistake needs to know whether the value is really gone
+    * or still readable through memory_fact_history. */
+   cJSON_AddBoolToObject(resp, "destroyed", authority == MEMORY_AUTHORITY_USER);
    return resp;
 }
 
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return server_send_ok(conn, memory_delete_command(req));
+   return server_send_ok(conn, memory_delete_command(req, conn->attested_transport));
 }
 
 cJSON *memory_get_command(cJSON *req)

@@ -17,6 +17,7 @@
  * `acfg` may be NULL to check only the built-in/adapter sets. */
 int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
+#include "memory_authority.h" /* memory_authority_t — attested write authority */
 
 /* Forward declaration */
 typedef struct cJSON cJSON;
@@ -357,6 +358,28 @@ int server_ct_equal(const char *a, const char *b);
 uint32_t server_capability_for_method(const char *method);
 const method_policy_t *server_policy_for_method(const char *method);
 
+/* Does this connection's attestation identify a PERSON?
+ *
+ * Capability answers what a caller may do; this answers who it is, which is a
+ * different question and the one the memory and typed-fact layers ask before
+ * letting a write speak as the user (typed-fact §5, memory_authority.h). Only
+ * the two kernel/root-attested local shapes qualify:
+ *
+ *   UDS_PEERCRED     a local OS user the kernel vouched for      -> 1
+ *   WEBCHAT_TRUSTED  a named webuser asserted over the root UDS  -> 1
+ *   TCP/TLS bearer   a shared token, which is what agent and     -> 0
+ *   MTLS_CLIENT      service processes present, not a person     -> 0
+ *   NONE             un-attested; a missed hop must not become   -> 0
+ *                    a user, as everywhere else attestation is read
+ *
+ * A caller this returns 0 for is not refused anything: it acts with model
+ * authority, which is non-destructive and cannot outrank the user's own facts. */
+int server_attested_is_person(attested_transport_t transport);
+
+/* The memory-write authority such a connection has earned. Shorthand for the
+ * above at the memory surfaces, so the mapping lives in exactly one place. */
+memory_authority_t server_attested_memory_authority(attested_transport_t transport);
+
 /* Session handlers (server_session.c) */
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -383,12 +406,23 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
  * RETURNS the result, writes to no connection. The handler above is now only the
  * RPC surface's connection write. This is the shape every surface needs, and the
  * lack of it is why capability surface was declared four separate times. */
-cJSON *memory_store_command(const cJSON *req);
+/* Takes the write's authority for the same reason: it is persisted as the new
+ * row's provenance and governs what the typed-fact drain may later mine from it
+ * (memory.h). handle_memory_store derives it from the connection's attestation. */
+cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
-cJSON *memory_delete_command(cJSON *req);
-/* Typed-fact correction surface (§3 / §4); all CAP_MEMORY_WRITE. */
-cJSON *facts_retract_command(cJSON *req);
+/* Takes the attested transport because only a person's delete DESTROYS; an
+ * un-attested caller that clears CAP_MEMORY_ADMIN retires the row instead. The
+ * response reports which happened via `destroyed`. */
+cJSON *memory_delete_command(cJSON *req, attested_transport_t transport);
+/* Typed-fact correction surface (§3 / §4); all CAP_MEMORY_WRITE.
+ *
+ * facts_retract_command takes the connection's ATTESTED transport because a
+ * retraction's authority (typed-fact §5) decides whether it may delete a
+ * user-stated Class-A fact. It is derived from that attestation via
+ * server_attested_is_person(), never from the request body. */
+cJSON *facts_retract_command(cJSON *req, attested_transport_t transport);
 cJSON *entities_merge_command(cJSON *req);
 cJSON *entities_unmerge_command(cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

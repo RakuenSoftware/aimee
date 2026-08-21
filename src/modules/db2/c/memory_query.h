@@ -253,11 +253,19 @@ extern "C"
     * observation_count=1) plus the caller-supplied tier/kind/key/content/
     * confidence/sensitivity/evidence/salience/surprise. `ts` is used for
     * last_used_at, created_at, updated_at. Returns the new rowid on
-    * success, -1 on SQL error. */
+    * success, -1 on SQL error.
+    *
+    * `provenance_category` records WHERE the content came from — it is what the
+    * typed-fact drain later reads to decide whether facts mined out of this note
+    * may enter at Class A (fact_authority_from_provenance). It is written
+    * explicitly on every insert rather than left to the column default, because a
+    * default is a guess and this one used to guess "user_stated" for text the
+    * model wrote. NULL/empty is stored as the fail-closed agent value. */
    int64_t db2_memory_row_insert_ex(const char *tier, const char *kind, const char *key,
                                     const char *content, const char *use_cases, double confidence,
                                     const char *session_id, const char *ts, const char *sensitivity,
-                                    double evidence_strength, double salience, double surprise);
+                                    double evidence_strength, double salience, double surprise,
+                                    const char *provenance_category);
    int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
                                  const char *content, double confidence, const char *session_id,
                                  const char *ts, const char *sensitivity, double evidence_strength,

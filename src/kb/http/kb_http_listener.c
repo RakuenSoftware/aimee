@@ -47,6 +47,14 @@ char g_bearer_token[256];
 
 static void serve_connection(int fd, const char *peer)
 {
+   /* The peer address is this listener's ONLY evidence about who is calling, and
+    * kb_login_throttle_peer_is_loopback() is where the rest of the kb asks about
+    * it — the /v1/health local exemption in kb_http.c, and now the typed-fact
+    * write authority in kb_service_memory.c. Set before routing and cleared
+    * after: an empty peer is not local, so a pooled worker cannot inherit the
+    * previous caller's address. Only this listener sets it, which is what makes
+    * it mean "arrived over plain HTTP from a loopback peer" and not merely
+    * "loopback" — the mTLS listener never does. */
    kb_login_throttle_set_peer(peer);
    handle_connection(fd);
    kb_login_throttle_set_peer("");

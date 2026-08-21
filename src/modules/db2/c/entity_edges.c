@@ -300,14 +300,48 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
       }
       else
       {
+         /* §5 authority guard on the correction itself. Class rank (A>B>C) IS the
+          * write's authority: only a direct user assertion earns A. A model-authored
+          * (Class B/C) write must therefore not supersede or tombstone a value that
+          * outranks it — without this, an ordinary model write silently replaces a
+          * user-stated Class-A fact on a single-valued relation, the hole the
+          * retraction path already closes with its `confidence_class <> 'A'` guard.
+          *
+          * Nor may the outranked write be inserted alongside: a functional relation
+          * would then hold two contradictory current values and recall would surface
+          * the model's next to the user's. It is dropped instead, exactly as the
+          * immutable branch drops a contradicting object. */
+         static const char *outranked =
+             "SELECT 1 FROM entity_edges WHERE source=?1 AND relation=?2 AND target<>?3"
+             " AND edge_class='semantic' AND superseded_at='' AND suppressed=0"
+             " AND (CASE confidence_class WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
+             "   > (CASE ?4 WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END) LIMIT 1";
+         aimee_pg_stmt_t *os = aimee_pg_prepare(conn, outranked, err, sizeof(err));
+         if (!os)
+            return -1; /* authority unprovable: never correct blind */
+         aimee_pg_bind_text(os, "?1", source);
+         aimee_pg_bind_text(os, "?2", relation);
+         aimee_pg_bind_text(os, "?3", target);
+         aimee_pg_bind_text(os, "?4", confidence_class);
+         int outranked_prior = (aimee_pg_step(os, err, sizeof(err)) == AIMEE_PG_ROW);
+         aimee_pg_finalize(os);
+         if (outranked_prior)
+            return 0; /* a higher-authority value stands: drop this write */
+
+         /* The rank test is repeated in the UPDATE so a higher-class row inserted
+          * between the probe and here is still not corrected by this write. */
          const char *upd =
              (corr == CORR_HARD_DELETE)
                  ? "UPDATE entity_edges SET suppressed=1, superseded_at=?4 WHERE source=?1"
                    " AND relation=?2 AND target<>?3 AND edge_class='semantic'"
                    " AND superseded_at='' AND suppressed=0"
+                   " AND (CASE confidence_class WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
+                   "   <= (CASE ?5 WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
                  : "UPDATE entity_edges SET superseded_at=?4 WHERE source=?1 AND relation=?2"
                    " AND target<>?3 AND edge_class='semantic' AND superseded_at='' AND "
-                   "suppressed=0";
+                   "suppressed=0"
+                   " AND (CASE confidence_class WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
+                   "   <= (CASE ?5 WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)";
          aimee_pg_stmt_t *us = aimee_pg_prepare(conn, upd, err, sizeof(err));
          if (us)
          {
@@ -315,6 +349,7 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
             aimee_pg_bind_text(us, "?2", relation);
             aimee_pg_bind_text(us, "?3", target);
             aimee_pg_bind_text(us, "?4", asserted_at);
+            aimee_pg_bind_text(us, "?5", confidence_class);
             (void)aimee_pg_step(us, err, sizeof(err));
             aimee_pg_finalize(us);
          }
