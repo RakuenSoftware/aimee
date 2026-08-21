@@ -852,3 +852,36 @@ aimee_module_call_result_t aimee_db2_task_add_edge_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_cross_repo_set_trust_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *project_name, const char *new_trust, const char *trust_actor,
+    const char *trust_request_id, uint32_t *trust_result, char *prior_trust,
+    size_t prior_trust_capacity, uint32_t *trust_changed, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CROSS_REPO_SET_TRUST_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_CROSS_REPO_SET_TRUST_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_cross_repo_set_trust_request_encode(project_name, new_trust, trust_actor,
+                                                     trust_request_id, request, sizeof(request),
+                                                     &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CROSS_REPO_SET_TRUST,
+            AIMEE_DB2_STAGE_CROSS_REPO_SET_TRUST, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_cross_repo_set_trust_reply_decode(response, response_len, trust_result,
+                                                   prior_trust, prior_trust_capacity,
+                                                   trust_changed) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

@@ -2677,6 +2677,109 @@ int main(int argc, char **argv)
                                        NULL) == AIMEE_MODULE_CALL_OK);
    assert(async_enqueue_acknowledged == 1);
 
+   /* The console login configuration, the corpus pipeline and a cross-repo trust write. The put
+    * runs before the get, and the drain after the status, so each read sees what the write left. */
+   uint32_t console_oidc_put_acknowledged = 99;
+   assert(aimee_db2_console_oidc_put_call(call_client, &client, 9421, 0, "https://issuer.replay",
+                                          "replay-audience", "https://issuer.replay/jwks", "groups",
+                                          "admins", &console_oidc_put_acknowledged, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   assert(console_oidc_put_acknowledged == 1);
+
+   uint32_t console_oidc_get_configured = 99;
+   static char console_oidc_get_oidc_issuer[AIMEE_DB2_CONSOLE_OIDC_GET_OIDC_ISSUER_MAX + 1];
+   console_oidc_get_oidc_issuer[0] = 'x';
+   static char console_oidc_get_oidc_audience[AIMEE_DB2_CONSOLE_OIDC_GET_OIDC_AUDIENCE_MAX + 1];
+   console_oidc_get_oidc_audience[0] = 'x';
+   static char console_oidc_get_oidc_jwks_url[AIMEE_DB2_CONSOLE_OIDC_GET_OIDC_JWKS_URL_MAX + 1];
+   console_oidc_get_oidc_jwks_url[0] = 'x';
+   static char
+       console_oidc_get_oidc_admin_claim[AIMEE_DB2_CONSOLE_OIDC_GET_OIDC_ADMIN_CLAIM_MAX + 1];
+   console_oidc_get_oidc_admin_claim[0] = 'x';
+   static char
+       console_oidc_get_oidc_admin_values[AIMEE_DB2_CONSOLE_OIDC_GET_OIDC_ADMIN_VALUES_MAX + 1];
+   console_oidc_get_oidc_admin_values[0] = 'x';
+   static char console_oidc_get_oidc_updated_at[AIMEE_DB2_CONSOLE_OIDC_GET_OIDC_UPDATED_AT_MAX + 1];
+   console_oidc_get_oidc_updated_at[0] = 'x';
+   assert(aimee_db2_console_oidc_get_call(
+              call_client, &client, 9422, 0, &console_oidc_get_configured,
+              console_oidc_get_oidc_issuer, sizeof(console_oidc_get_oidc_issuer),
+              console_oidc_get_oidc_audience, sizeof(console_oidc_get_oidc_audience),
+              console_oidc_get_oidc_jwks_url, sizeof(console_oidc_get_oidc_jwks_url),
+              console_oidc_get_oidc_admin_claim, sizeof(console_oidc_get_oidc_admin_claim),
+              console_oidc_get_oidc_admin_values, sizeof(console_oidc_get_oidc_admin_values),
+              console_oidc_get_oidc_updated_at, sizeof(console_oidc_get_oidc_updated_at), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* Reads back what the put above wrote, except the stamp: the put has no
+    * argument for it and the row takes DB2's clock, so a caller cannot send
+    * back what it read here. */
+   assert(console_oidc_get_configured == 1);
+   assert(strcmp(console_oidc_get_oidc_issuer, "https://issuer.replay") == 0);
+   assert(strcmp(console_oidc_get_oidc_audience, "replay-audience") == 0);
+   assert(strcmp(console_oidc_get_oidc_jwks_url, "https://issuer.replay/jwks") == 0);
+   assert(strcmp(console_oidc_get_oidc_admin_claim, "groups") == 0);
+   assert(strcmp(console_oidc_get_oidc_admin_values, "admins") == 0);
+   assert(console_oidc_get_oidc_updated_at[0] != '\0');
+
+   uint32_t corpus_pipeline_status_corpus_total = 99;
+   uint32_t corpus_pipeline_status_corpus_pending = 99;
+   uint32_t corpus_pipeline_status_corpus_running = 99;
+   uint32_t corpus_pipeline_status_corpus_failed = 99;
+   uint32_t corpus_pipeline_status_corpus_complete = 99;
+   uint32_t corpus_pipeline_status_corpus_processed = 99;
+   uint32_t corpus_pipeline_status_corpus_skipped = 99;
+   assert(aimee_db2_corpus_pipeline_status_call(
+              call_client, &client, 9423, 0, &corpus_pipeline_status_corpus_total,
+              &corpus_pipeline_status_corpus_pending, &corpus_pipeline_status_corpus_running,
+              &corpus_pipeline_status_corpus_failed, &corpus_pipeline_status_corpus_complete,
+              &corpus_pipeline_status_corpus_processed, &corpus_pipeline_status_corpus_skipped,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* No corpus job exists on the replay schema, so every count is zero --
+    * including corpus_processed, which this operation never sets whatever the
+    * pipeline has done. */
+   assert(corpus_pipeline_status_corpus_total == 0 && corpus_pipeline_status_corpus_pending == 0 &&
+          corpus_pipeline_status_corpus_running == 0 && corpus_pipeline_status_corpus_failed == 0 &&
+          corpus_pipeline_status_corpus_complete == 0 &&
+          corpus_pipeline_status_corpus_processed == 0 &&
+          corpus_pipeline_status_corpus_skipped == 0);
+
+   uint32_t corpus_pipeline_drain_drained = 99;
+   uint32_t corpus_pipeline_drain_corpus_total = 99;
+   uint32_t corpus_pipeline_drain_corpus_pending = 99;
+   uint32_t corpus_pipeline_drain_corpus_running = 99;
+   uint32_t corpus_pipeline_drain_corpus_failed = 99;
+   uint32_t corpus_pipeline_drain_corpus_complete = 99;
+   uint32_t corpus_pipeline_drain_corpus_processed = 99;
+   uint32_t corpus_pipeline_drain_corpus_skipped = 99;
+   assert(aimee_db2_corpus_pipeline_drain_call(
+              call_client, &client, 9424, 0, 4, &corpus_pipeline_drain_drained,
+              &corpus_pipeline_drain_corpus_total, &corpus_pipeline_drain_corpus_pending,
+              &corpus_pipeline_drain_corpus_running, &corpus_pipeline_drain_corpus_failed,
+              &corpus_pipeline_drain_corpus_complete, &corpus_pipeline_drain_corpus_processed,
+              &corpus_pipeline_drain_corpus_skipped, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* A drain with nothing to drain succeeds and reports zero steps, which is
+    * the same answer it gives after advancing a corpus that was already
+    * complete. */
+   assert(corpus_pipeline_drain_drained == 1 && corpus_pipeline_drain_corpus_total == 0 &&
+          corpus_pipeline_drain_corpus_pending == 0 && corpus_pipeline_drain_corpus_running == 0 &&
+          corpus_pipeline_drain_corpus_failed == 0 && corpus_pipeline_drain_corpus_complete == 0 &&
+          corpus_pipeline_drain_corpus_processed == 0 && corpus_pipeline_drain_corpus_skipped == 0);
+
+   uint32_t cross_repo_set_trust_trust_result = 99;
+   static char cross_repo_set_trust_prior_trust[AIMEE_DB2_CROSS_REPO_SET_TRUST_PRIOR_TRUST_MAX + 1];
+   cross_repo_set_trust_prior_trust[0] = 'x';
+   uint32_t cross_repo_set_trust_trust_changed = 99;
+   assert(aimee_db2_cross_repo_set_trust_call(
+              call_client, &client, 9425, 0, "replay-project", "untrusted", "replay-actor",
+              "replay-request", &cross_repo_set_trust_trust_result,
+              cross_repo_set_trust_prior_trust, sizeof(cross_repo_set_trust_prior_trust),
+              &cross_repo_set_trust_trust_changed, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The project an earlier case created is trusted, so this is a real
+    * transition: the prior trust comes back and the epoch is raised. */
+   assert(cross_repo_set_trust_trust_result == 0);
+   assert(strcmp(cross_repo_set_trust_prior_trust, "trusted") == 0);
+   assert(cross_repo_set_trust_trust_changed == 1);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -13288,6 +13288,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_kb_async_enqueue",
         "policy": {"writes": 200},
     },
+    "console_oidc_get": {
+        "key": ("custody", 7),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_console_oidc_get",
+        "policy": {"reads": 200},
+    },
+    "console_oidc_put": {
+        "key": ("custody", 8),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_console_oidc_put",
+        "policy": {"writes": 200},
+    },
+    "corpus_pipeline_status": {
+        "key": ("maintenance", 43),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_corpus_pipeline_status",
+        "policy": {"reads": 200},
+    },
+    "corpus_pipeline_drain": {
+        "key": ("maintenance", 44),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_corpus_pipeline_drain",
+        "policy": {"writes": 200},
+    },
+    "cross_repo_set_trust": {
+        "key": ("organization", 30),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_cross_repo_set_trust",
+        "policy": {"writes": 200},
+    },
 }
 
 

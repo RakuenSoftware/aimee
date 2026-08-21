@@ -5554,9 +5554,15 @@
           "line": 92
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.console_oidc_get operation reads the console's OIDC login configuration. There is one row for the whole installation -- the statement names id = 1 -- so this is install-wide configuration and no argument could narrow it. The backend distinguishes an unconfigured install from a failed read; the wire carries that as a flag, because an all-empty answer would otherwise be indistinguishable from a configuration written empty."
+      },
       "signature": "int db2_console_oidc_get ( db2_console_oidc_t * out )",
       "signature_sha256": "dce129591116d2080fc229e174ab2b74bf9d87695c5c2db6422b0bfcf031556d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_console_oidc_get"
     },
     {
@@ -5570,9 +5576,15 @@
           "line": 94
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.console_oidc_put operation replaces the console's OIDC login configuration. There is one row for the whole installation, so a write is always a replacement and the previous configuration is gone with it. The stamp is DB2's clock: the row carries an updated_at that custody.console_oidc_get returns and this cannot set, so a caller cannot round-trip what it read. Nothing validates the issuer or the JWKS URL here."
+      },
       "signature": "int db2_console_oidc_put ( const db2_console_oidc_t * in )",
       "signature_sha256": "c9be8e8324fa5210f54901ae4488f1c589e0012cdb8845d4013d4c3a18f5c683",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_console_oidc_put"
     },
     {
@@ -5801,9 +5813,15 @@
           "line": 72
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.corpus_pipeline_drain operation advances corpus jobs one stage at a time until the limit or the work runs out. Nothing wraps the run, so a stage that fails leaves every earlier advance committed and answers a plain failure with no count of what it did. A zero limit means ten thousand steps rather than none. corpus_skipped counts this run's skips, where the same field on maintenance.corpus_pipeline_status counts every skip the corpus ever recorded."
+      },
       "signature": "int db2_corpus_pipeline_drain ( int limit , db2_corpus_pipeline_stats_t * out )",
       "signature_sha256": "952608cef6644edec07e23dc45f80c628fcb7da20d16ea03d8794aa923452bee",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_corpus_pipeline_drain"
     },
     {
@@ -5854,9 +5872,15 @@
           "line": 70
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.corpus_pipeline_status operation counts the corpus pipeline's jobs by state and the stage transitions it has skipped. The counts come from one statement and the skipped total from another, outside a transaction, so a drain running alongside can move rows between them. corpus_processed is not a state this reads and is always zero here -- only maintenance.corpus_pipeline_drain sets it. A state the pipeline writes but this does not name is counted in the total and nowhere else."
+      },
       "signature": "int db2_corpus_pipeline_status ( db2_corpus_pipeline_stats_t * out )",
       "signature_sha256": "023a791f745a589dfd8f5756305107a07e7ce356327363f5ed87cb0f86366f35",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_corpus_pipeline_status"
     },
     {
@@ -6111,9 +6135,15 @@
           "line": 77
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.cross_repo_set_trust operation sets a project's trust and audits the call. Only 'trusted' and 'untrusted' are accepted, and that vocabulary is enforced in C rather than by the table, so a value the database would take is refused here. The epoch is raised only on a real transition. The prior trust is read and the row updated in one read-committed transaction, which does not serialise them: two callers racing both read the same prior and both audit as having made the change."
+      },
       "signature": "int db2_cross_repo_set_trust ( const char * project , const char * new_trust , const char * actor , const char * request_id , char * prior_out , size_t prior_cap , int * changed_out )",
       "signature_sha256": "6fe4b832a103aefec747fc0e6f838a8126c9a5a67b9fecce57319fbf45280b55",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_cross_repo_set_trust"
     },
     {
@@ -27642,15 +27672,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3f171bb1aaef4a8ce19c1fd694f1e4e29a0086ef0b7bdec3dc4a643676ca303d",
+  "fingerprint": "d33c514b798bcc119d8b99ff7636e67307c1fb10599a39f34c844be0c9175859",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 356,
+    "audit_pending": 351,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 603
+    "reviewed": 608
   }
 }

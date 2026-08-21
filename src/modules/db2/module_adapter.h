@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "cross_repo_stats.h"
 #include "feature_rows.h"
 #include "kb_audit_worm.h"
 #include "kb_payload.h"
@@ -468,6 +469,13 @@ typedef struct
    int (*feature_row_read)(const char *subject_id, const char *subject_kind,
                            const char *feature_set_version, char *buf, size_t len);
    int (*async_enqueue)(const char *kind, int64_t document_id, const char *project);
+   int (*console_oidc_get)(db2_console_oidc_t *out);
+   int (*console_oidc_put)(const db2_console_oidc_t *in);
+   int (*corpus_pipeline_status)(db2_corpus_pipeline_stats_t *out);
+   int (*corpus_pipeline_drain)(int limit, db2_corpus_pipeline_stats_t *out);
+   int (*cross_repo_set_trust)(const char *project, const char *new_trust, const char *actor,
+                               const char *request_id, char *prior_out, size_t prior_cap,
+                               int *changed_out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

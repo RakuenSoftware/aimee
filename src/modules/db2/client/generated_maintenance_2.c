@@ -31,3 +31,65 @@ aimee_db2_async_enqueue_call(aimee_db2_call_fn call, void *call_context, uint64_
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_corpus_pipeline_status_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t *corpus_total, uint32_t *corpus_pending, uint32_t *corpus_running,
+    uint32_t *corpus_failed, uint32_t *corpus_complete, uint32_t *corpus_processed,
+    uint32_t *corpus_skipped, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CORPUS_PIPELINE_STATUS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_CORPUS_PIPELINE_STATUS_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_corpus_pipeline_status_request_encode(request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CORPUS_PIPELINE_STATUS,
+            AIMEE_DB2_STAGE_CORPUS_PIPELINE_STATUS, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_corpus_pipeline_status_reply_decode(
+           response, response_len, corpus_total, corpus_pending, corpus_running, corpus_failed,
+           corpus_complete, corpus_processed, corpus_skipped) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_corpus_pipeline_drain_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t drain_limit, uint32_t *drained, uint32_t *corpus_total, uint32_t *corpus_pending,
+    uint32_t *corpus_running, uint32_t *corpus_failed, uint32_t *corpus_complete,
+    uint32_t *corpus_processed, uint32_t *corpus_skipped, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CORPUS_PIPELINE_DRAIN_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_CORPUS_PIPELINE_DRAIN_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_corpus_pipeline_drain_request_encode(drain_limit, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CORPUS_PIPELINE_DRAIN,
+            AIMEE_DB2_STAGE_CORPUS_PIPELINE_DRAIN, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_corpus_pipeline_drain_reply_decode(
+           response, response_len, drained, corpus_total, corpus_pending, corpus_running,
+           corpus_failed, corpus_complete, corpus_processed, corpus_skipped) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

@@ -55,8 +55,12 @@ def check(batch: list[dict[str, object]]) -> None:
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
     taken = {(str(item["family"]), int(item["id"])) for item in catalog["operations"]}
     names = {str(item["name"]) for item in catalog["operations"]}
-    ledger = {row["symbol"] for row in json.loads(LEDGER.read_text(encoding="utf-8"))
-              ["declarations"]}
+    ledger = {row["symbol"]: str(row.get("status", ""))
+              for row in json.loads(LEDGER.read_text(encoding="utf-8"))["declarations"]}
+    # A symbol already bound to an operation would be published twice under two
+    # names, and the second binding is the one nothing asked for.
+    bound = {symbol: str(item["name"])
+             for item in catalog["operations"] for symbol in item.get("c_symbols", [])}
     families = {str(item["name"]) for item in catalog["families"]}
     for operation in batch:
         missing = REQUIRED - set(operation)
@@ -74,8 +78,18 @@ def check(batch: list[dict[str, object]]) -> None:
         if operation["name"] in names:
             fail(f"{operation['name']} is already a catalog operation")
         names.add(str(operation["name"]))
-        if operation["symbol"] not in ledger:
-            fail(f"{operation['name']} names {operation['symbol']!r}, not a DB2 declaration")
+        symbol = str(operation["symbol"])
+        if symbol not in ledger:
+            fail(f"{operation['name']} names {symbol!r}, not a DB2 declaration")
+        if symbol in bound:
+            fail(f"{operation['name']} names {symbol!r}, already published as {bound[symbol]}")
+        bound[symbol] = str(operation["name"])
+        # Only a declaration still awaiting review becomes an operation. A symbol
+        # the review already settled -- private to DB2, called by tests alone, or
+        # reviewed and published -- is not one a batch may claim.
+        if ledger[symbol] != "audit-pending":
+            fail(f"{operation['name']} names {symbol!r}, which the ledger records as "
+                 f"{ledger[symbol]!r} rather than awaiting review")
         if len(str(operation["reason"]).encode("utf-8")) > 512:
             fail(f"{operation['name']} has a reason longer than the ledger allows")
 

@@ -13752,6 +13752,76 @@
       }
     },
     {
+      "family": "organization",
+      "id": 30,
+      "name": "cross_repo_set_trust",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projects, their trust and the trust audit are relational DB2 rows.",
+      "c_symbols": [
+        "db2_cross_repo_set_trust"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the prior trust is read and the row updated inside one transaction, but read-committed does not serialise that, so two callers racing both audit as though they made the change"
+        },
+        "fields": [
+          {
+            "name": "project_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "new_trust",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "trust_actor",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "trust_request_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "trust_result",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2
+          },
+          {
+            "name": "prior_trust",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "trust_changed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "custody",
       "id": 1,
       "name": "vector_rebuild_lock_try_acquire",
@@ -14008,6 +14078,139 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 2047
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "custody",
+      "id": 7,
+      "name": "console_oidc_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The console login configuration is a relational DB2 row.",
+      "c_symbols": [
+        "db2_console_oidc_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one row for the whole installation, so every caller reads the same login configuration"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "configured",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "oidc_issuer",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "oidc_audience",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "oidc_jwks_url",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "oidc_admin_claim",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "oidc_admin_values",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "oidc_updated_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "custody",
+      "id": 8,
+      "name": "console_oidc_put",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The console login configuration is a relational DB2 row.",
+      "c_symbols": [
+        "db2_console_oidc_put"
+      ],
+      "request": {
+        "policy": {
+          "writes": "one row for the whole installation, so a second write replaces the first rather than adding one"
+        },
+        "fields": [
+          {
+            "name": "oidc_issuer",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "oidc_audience",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "oidc_jwks_url",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "oidc_admin_claim",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "oidc_admin_values",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -16377,6 +16580,157 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 43,
+      "name": "corpus_pipeline_status",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Corpus pipeline jobs and their stage events are relational DB2 rows.",
+      "c_symbols": [
+        "db2_corpus_pipeline_status"
+      ],
+      "request": {
+        "policy": {
+          "reads": "two statements with no transaction, so the job counts and the skipped total can be read either side of a drain"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "corpus_total",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_pending",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_running",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_failed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_complete",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_processed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_skipped",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 44,
+      "name": "corpus_pipeline_drain",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Corpus pipeline jobs and their stage events are relational DB2 rows.",
+      "c_symbols": [
+        "db2_corpus_pipeline_drain"
+      ],
+      "request": {
+        "policy": {
+          "writes": "each stage advance is its own statement with no transaction over the run, so a run that stops partway keeps the stages it already advanced"
+        },
+        "fields": [
+          {
+            "name": "drain_limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 100000
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "drained",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "corpus_total",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_pending",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_running",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_failed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_complete",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_processed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "corpus_skipped",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
           }
         ]
       }

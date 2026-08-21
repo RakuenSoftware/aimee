@@ -3032,6 +3032,49 @@ int db2_kb_async_enqueue(const char *kind, int64_t document_id, const char *proj
    return 0;
 }
 
+int db2_console_oidc_get(db2_console_oidc_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_console_oidc_put(const db2_console_oidc_t *in)
+{
+   (void)in;
+   return -1;
+}
+
+int db2_corpus_pipeline_status(db2_corpus_pipeline_stats_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
+{
+   (void)limit;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                             const char *request_id, char *prior_out, size_t prior_cap,
+                             int *changed_out)
+{
+   (void)project;
+   (void)new_trust;
+   (void)actor;
+   (void)request_id;
+   if (prior_out && prior_cap)
+      prior_out[0] = '\0';
+   if (changed_out)
+      *changed_out = 0;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

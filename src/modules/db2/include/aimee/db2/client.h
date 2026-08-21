@@ -1183,6 +1183,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t edge_source_task, uint64_t edge_target_task, const char *edge_relation, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_cross_repo_set_trust_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project_name, const char *new_trust, const char *trust_actor, const char *trust_request_id, uint32_t *trust_result, char *prior_trust, size_t prior_trust_capacity, uint32_t *trust_changed, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_enrollment_active_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *cert_issuer, const char *cert_serial_norm, uint32_t *active,
@@ -1195,6 +1199,14 @@ extern "C"
    aimee_module_call_result_t aimee_db2_kb_audit_append_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *actor_role, const char *actor_principal, const char *audit_action, const char *audit_subject, const char *audit_verdict, const char *audit_detail, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_console_oidc_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *configured, char *oidc_issuer, size_t oidc_issuer_capacity, char *oidc_audience, size_t oidc_audience_capacity, char *oidc_jwks_url, size_t oidc_jwks_url_capacity, char *oidc_admin_claim, size_t oidc_admin_claim_capacity, char *oidc_admin_values, size_t oidc_admin_values_capacity, char *oidc_updated_at, size_t oidc_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_console_oidc_put_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *oidc_issuer, const char *oidc_audience, const char *oidc_jwks_url, const char *oidc_admin_claim, const char *oidc_admin_values, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_async_pending_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
@@ -1324,5 +1336,13 @@ extern "C"
    aimee_module_call_result_t aimee_db2_async_enqueue_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *job_kind, uint64_t document_id, const char *job_project, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_corpus_pipeline_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *corpus_total, uint32_t *corpus_pending, uint32_t *corpus_running, uint32_t *corpus_failed, uint32_t *corpus_complete, uint32_t *corpus_processed, uint32_t *corpus_skipped, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_corpus_pipeline_drain_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t drain_limit, uint32_t *drained, uint32_t *corpus_total, uint32_t *corpus_pending, uint32_t *corpus_running, uint32_t *corpus_failed, uint32_t *corpus_complete, uint32_t *corpus_processed, uint32_t *corpus_skipped, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

@@ -716,12 +716,44 @@
       "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
     },
     {
+      "symbol": "db2_console_oidc_get",
+      "signature_sha256": "dce129591116d2080fc229e174ab2b74bf9d87695c5c2db6422b0bfcf031556d",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.console_oidc_get operation reads the console's OIDC login configuration. There is one row for the whole installation -- the statement names id = 1 -- so this is install-wide configuration and no argument could narrow it. The backend distinguishes an unconfigured install from a failed read; the wire carries that as a flag, because an all-empty answer would otherwise be indistinguishable from a configuration written empty."
+    },
+    {
+      "symbol": "db2_console_oidc_put",
+      "signature_sha256": "c9be8e8324fa5210f54901ae4488f1c589e0012cdb8845d4013d4c3a18f5c683",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.console_oidc_put operation replaces the console's OIDC login configuration. There is one row for the whole installation, so a write is always a replacement and the previous configuration is gone with it. The stamp is DB2's clock: the row carries an updated_at that custody.console_oidc_get returns and this cannot set, so a caller cannot round-trip what it read. Nothing validates the issuer or the JWKS URL here."
+    },
+    {
+      "symbol": "db2_corpus_pipeline_drain",
+      "signature_sha256": "952608cef6644edec07e23dc45f80c628fcb7da20d16ea03d8794aa923452bee",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.corpus_pipeline_drain operation advances corpus jobs one stage at a time until the limit or the work runs out. Nothing wraps the run, so a stage that fails leaves every earlier advance committed and answers a plain failure with no count of what it did. A zero limit means ten thousand steps rather than none. corpus_skipped counts this run's skips, where the same field on maintenance.corpus_pipeline_status counts every skip the corpus ever recorded."
+    },
+    {
       "symbol": "db2_corpus_pipeline_stage_counts",
       "signature_sha256": "348be2d82431b2a0d991e99f7322e0581be771535e6ce3a3d70c828507c23598",
       "disposition": "wire-operation",
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.corpus_pipeline_stage_counts operation counts the corpus jobs in each stage and status. It groups over the jobs that exist, so a stage nothing has reached is missing from the reply rather than present with a count of zero -- a caller building a dashboard from this has to know the stages itself. The rows are ordered by stage then status, so the reply is stable between calls even though the counts are not."
+    },
+    {
+      "symbol": "db2_corpus_pipeline_status",
+      "signature_sha256": "023a791f745a589dfd8f5756305107a07e7ce356327363f5ed87cb0f86366f35",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.corpus_pipeline_status operation counts the corpus pipeline's jobs by state and the stage transitions it has skipped. The counts come from one statement and the skipped total from another, outside a transaction, so a drain running alongside can move rows between them. corpus_processed is not a state this reads and is always zero here -- only maintenance.corpus_pipeline_drain sets it. A state the pipeline writes but this does not name is counted in the total and nowhere else."
     },
     {
       "symbol": "db2_cross_repo_rebuild_build_deps",
@@ -746,6 +778,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.cross_repo_rebuild_routes operation replaces the pass that empties and rebuilds the cross-repo include route table inside one transaction. The routing heuristics are fixed policy and travel nowhere: quoted includes only, the fan-out threshold that suppresses ubiquitous headers, and the generated-build-header rejects. Each was tuned against live findings, and a caller able to send them could reroute a repository's symbol resolution."
+    },
+    {
+      "symbol": "db2_cross_repo_set_trust",
+      "signature_sha256": "6fe4b832a103aefec747fc0e6f838a8126c9a5a67b9fecce57319fbf45280b55",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.cross_repo_set_trust operation sets a project's trust and audits the call. Only 'trusted' and 'untrusted' are accepted, and that vocabulary is enforced in C rather than by the table, so a value the database would take is refused here. The epoch is raised only on a real transition. The prior trust is read and the row updated in one read-committed transaction, which does not serialise them: two callers racing both read the same prior and both audit as having made the change."
     },
     {
       "symbol": "db2_css_migration_assert_conventions",

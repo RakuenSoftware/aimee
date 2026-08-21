@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "89a02ef052f7bb0e4e3b51f69ad541eb4a54106bb689c3a4483ab0f5805ebc91"
+const ContractSHA256 = "b62f1ddbdc6e2a011c5d81f5c8a95294a6a5b9b8ba99a7e9f057ec3379a0c640"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -10079,6 +10079,82 @@ func DecodeTaskAddEdgeRequest(request []byte) (uint64, uint64, string, error) {
 	return edgeSourceTask, edgeTargetTask, edgeRelation, nil
 }
 
+const EventCrossRepoSetTrust = EventOrganization
+const StageCrossRepoSetTrust = FamilyOrganization
+const OperationCrossRepoSetTrust uint32 = 30
+const CrossRepoSetTrustProjectNameMin = 1
+const CrossRepoSetTrustProjectNameMax = 255
+const CrossRepoSetTrustNewTrustMin = 1
+const CrossRepoSetTrustNewTrustMax = 15
+const CrossRepoSetTrustTrustActorMin = 0
+const CrossRepoSetTrustTrustActorMax = 127
+const CrossRepoSetTrustTrustRequestIDMin = 0
+const CrossRepoSetTrustTrustRequestIDMax = 127
+
+// EncodeCrossRepoSetTrustRequest writes the schema cross_repo_set_trust declares, in order.
+func EncodeCrossRepoSetTrustRequest(projectName string, newTrust string, trustActor string, trustRequestID string) ([]byte, error) {
+	if len(projectName) < CrossRepoSetTrustProjectNameMin || len(projectName) > CrossRepoSetTrustProjectNameMax || hasNUL(projectName) ||
+		len(newTrust) < CrossRepoSetTrustNewTrustMin || len(newTrust) > CrossRepoSetTrustNewTrustMax || hasNUL(newTrust) ||
+		len(trustActor) < CrossRepoSetTrustTrustActorMin || len(trustActor) > CrossRepoSetTrustTrustActorMax || hasNUL(trustActor) ||
+		len(trustRequestID) < CrossRepoSetTrustTrustRequestIDMin || len(trustRequestID) > CrossRepoSetTrustTrustRequestIDMax || hasNUL(trustRequestID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, CrossRepoSetTrustProjectNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, newTrust, CrossRepoSetTrustNewTrustMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, trustActor, CrossRepoSetTrustTrustActorMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, trustRequestID, CrossRepoSetTrustTrustRequestIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCrossRepoSetTrust, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCrossRepoSetTrustRequest reads it back, checking each field against its own bound.
+func DecodeCrossRepoSetTrustRequest(request []byte) (string, string, string, string, error) {
+	var projectName string
+	var newTrust string
+	var trustActor string
+	var trustRequestID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCrossRepoSetTrust || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, CrossRepoSetTrustProjectNameMax); err != nil ||
+		len(projectName) < CrossRepoSetTrustProjectNameMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if newTrust, err = takeRowText(payload, &cursor, CrossRepoSetTrustNewTrustMax); err != nil ||
+		len(newTrust) < CrossRepoSetTrustNewTrustMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if trustActor, err = takeRowText(payload, &cursor, CrossRepoSetTrustTrustActorMax); err != nil ||
+		len(trustActor) < CrossRepoSetTrustTrustActorMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if trustRequestID, err = takeRowText(payload, &cursor, CrossRepoSetTrustTrustRequestIDMax); err != nil ||
+		len(trustRequestID) < CrossRepoSetTrustTrustRequestIDMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	return projectName, newTrust, trustActor, trustRequestID, nil
+}
+
 const EventEnrollmentActive = EventCustody
 const StageEnrollmentActive = FamilyCustody
 const OperationEnrollmentActive uint32 = 4
@@ -10310,6 +10386,124 @@ func DecodeKBAuditAppendRequest(request []byte) (string, string, string, string,
 		return "", "", "", "", "", "", ErrMalformedEnvelope
 	}
 	return actorRole, actorPrincipal, auditAction, auditSubject, auditVerdict, auditDetail, nil
+}
+
+const EventConsoleOidcGet = EventCustody
+const StageConsoleOidcGet = FamilyCustody
+const OperationConsoleOidcGet uint32 = 7
+
+
+// EncodeConsoleOidcGetRequest writes the schema console_oidc_get declares, in order.
+func EncodeConsoleOidcGetRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationConsoleOidcGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeConsoleOidcGetRequest reads it back, checking each field against its own bound.
+func DecodeConsoleOidcGetRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationConsoleOidcGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventConsoleOidcPut = EventCustody
+const StageConsoleOidcPut = FamilyCustody
+const OperationConsoleOidcPut uint32 = 8
+const ConsoleOidcPutOidcIssuerMin = 0
+const ConsoleOidcPutOidcIssuerMax = 255
+const ConsoleOidcPutOidcAudienceMin = 0
+const ConsoleOidcPutOidcAudienceMax = 255
+const ConsoleOidcPutOidcJwksURLMin = 0
+const ConsoleOidcPutOidcJwksURLMax = 511
+const ConsoleOidcPutOidcAdminClaimMin = 0
+const ConsoleOidcPutOidcAdminClaimMax = 63
+const ConsoleOidcPutOidcAdminValuesMin = 0
+const ConsoleOidcPutOidcAdminValuesMax = 511
+
+// EncodeConsoleOidcPutRequest writes the schema console_oidc_put declares, in order.
+func EncodeConsoleOidcPutRequest(oidcIssuer string, oidcAudience string, oidcJwksURL string, oidcAdminClaim string, oidcAdminValues string) ([]byte, error) {
+	if len(oidcIssuer) < ConsoleOidcPutOidcIssuerMin || len(oidcIssuer) > ConsoleOidcPutOidcIssuerMax || hasNUL(oidcIssuer) ||
+		len(oidcAudience) < ConsoleOidcPutOidcAudienceMin || len(oidcAudience) > ConsoleOidcPutOidcAudienceMax || hasNUL(oidcAudience) ||
+		len(oidcJwksURL) < ConsoleOidcPutOidcJwksURLMin || len(oidcJwksURL) > ConsoleOidcPutOidcJwksURLMax || hasNUL(oidcJwksURL) ||
+		len(oidcAdminClaim) < ConsoleOidcPutOidcAdminClaimMin || len(oidcAdminClaim) > ConsoleOidcPutOidcAdminClaimMax || hasNUL(oidcAdminClaim) ||
+		len(oidcAdminValues) < ConsoleOidcPutOidcAdminValuesMin || len(oidcAdminValues) > ConsoleOidcPutOidcAdminValuesMax || hasNUL(oidcAdminValues) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, oidcIssuer, ConsoleOidcPutOidcIssuerMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, oidcAudience, ConsoleOidcPutOidcAudienceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, oidcJwksURL, ConsoleOidcPutOidcJwksURLMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, oidcAdminClaim, ConsoleOidcPutOidcAdminClaimMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, oidcAdminValues, ConsoleOidcPutOidcAdminValuesMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationConsoleOidcPut, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeConsoleOidcPutRequest reads it back, checking each field against its own bound.
+func DecodeConsoleOidcPutRequest(request []byte) (string, string, string, string, string, error) {
+	var oidcIssuer string
+	var oidcAudience string
+	var oidcJwksURL string
+	var oidcAdminClaim string
+	var oidcAdminValues string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationConsoleOidcPut || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if oidcIssuer, err = takeRowText(payload, &cursor, ConsoleOidcPutOidcIssuerMax); err != nil ||
+		len(oidcIssuer) < ConsoleOidcPutOidcIssuerMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if oidcAudience, err = takeRowText(payload, &cursor, ConsoleOidcPutOidcAudienceMax); err != nil ||
+		len(oidcAudience) < ConsoleOidcPutOidcAudienceMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if oidcJwksURL, err = takeRowText(payload, &cursor, ConsoleOidcPutOidcJwksURLMax); err != nil ||
+		len(oidcJwksURL) < ConsoleOidcPutOidcJwksURLMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if oidcAdminClaim, err = takeRowText(payload, &cursor, ConsoleOidcPutOidcAdminClaimMax); err != nil ||
+		len(oidcAdminClaim) < ConsoleOidcPutOidcAdminClaimMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if oidcAdminValues, err = takeRowText(payload, &cursor, ConsoleOidcPutOidcAdminValuesMax); err != nil ||
+		len(oidcAdminValues) < ConsoleOidcPutOidcAdminValuesMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return oidcIssuer, oidcAudience, oidcJwksURL, oidcAdminClaim, oidcAdminValues, nil
 }
 
 const EventAsyncPendingCount = EventMaintenance
@@ -12133,6 +12327,84 @@ func DecodeAsyncEnqueueRequest(request []byte) (string, uint64, string, error) {
 		return "", 0, "", ErrMalformedEnvelope
 	}
 	return jobKind, documentID, jobProject, nil
+}
+
+const EventCorpusPipelineStatus = EventMaintenance
+const StageCorpusPipelineStatus = FamilyMaintenance
+const OperationCorpusPipelineStatus uint32 = 43
+
+
+// EncodeCorpusPipelineStatusRequest writes the schema corpus_pipeline_status declares, in order.
+func EncodeCorpusPipelineStatusRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationCorpusPipelineStatus, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCorpusPipelineStatusRequest reads it back, checking each field against its own bound.
+func DecodeCorpusPipelineStatusRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCorpusPipelineStatus || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventCorpusPipelineDrain = EventMaintenance
+const StageCorpusPipelineDrain = FamilyMaintenance
+const OperationCorpusPipelineDrain uint32 = 44
+const CorpusPipelineDrainDrainLimitMin uint32 = 0
+const CorpusPipelineDrainDrainLimitMax uint32 = 100000
+
+// EncodeCorpusPipelineDrainRequest writes the schema corpus_pipeline_drain declares, in order.
+func EncodeCorpusPipelineDrainRequest(drainLimit uint32) ([]byte, error) {
+	if drainLimit < CorpusPipelineDrainDrainLimitMin || drainLimit > CorpusPipelineDrainDrainLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var drainLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(drainLimitBytes[:], drainLimit)
+	payload = append(payload, drainLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationCorpusPipelineDrain, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCorpusPipelineDrainRequest reads it back, checking each field against its own bound.
+func DecodeCorpusPipelineDrainRequest(request []byte) (uint32, error) {
+	var drainLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCorpusPipelineDrain || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	drainLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if drainLimit < CorpusPipelineDrainDrainLimitMin || drainLimit > CorpusPipelineDrainDrainLimitMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return drainLimit, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex
