@@ -298,6 +298,63 @@ an explicit value, is a decision per default rather than one for the boundary:
 a default in a C signature and a default in a column mean different things to
 everything that reads the table directly.
 
+## Thirty writes acknowledge whether or not the row landed
+
+`aimee_pg_step` returns whether the statement ran. Thirty DB2 writes drop that
+value, and then have no way left to report a failure -- ten return 0 after
+it regardless, twenty return `void` and so have no channel at all.
+Thirteen are already published:
+
+    operation                      declaration                              shape
+    bandit_arm_stats_update        db2_bandit_arm_stats_update              returns 0
+    bandit_decision_close          db2_bandit_decision_close                returns 0
+    bandit_decision_insert         db2_bandit_decision_insert               returns 0
+    bandit_promotion_set           db2_bandit_promotion_set                 returns 0
+    demotion_profile_write         db2_demotion_profile_write               returns 0
+    feature_row_upsert             db2_feature_row_upsert                   returns 0
+    ingest_queue_fail              db2_kb_ingest_queue_fail                 returns 0
+    retrieval_attribution_write    db2_demotion_retrieval_attribution_write returns 0
+    code_index_op_record           db2_code_index_op_record                 void
+    enrollment_touch_last_seen     db2_enrollment_touch_last_seen           void
+    health_record                  db2_memory_health_record                 void
+    negation_tokens_update         db2_memory_negation_tokens_update        void
+    workspace_tag_insert           db2_memory_workspace_tag_insert          void
+
+Seventeen more are still pending review, most of them memory-graph inserts:
+`db2_memory_entity_insert`, `db2_memory_relation_insert`,
+`db2_memory_relation_upsert_full`, `db2_memory_alias_insert`,
+`db2_memory_temporal_insert`, `db2_memory_coref_audit_insert`,
+`db2_memory_scope_tag_insert`, `db2_memory_unit_episode_card_insert`,
+`db2_memory_mark_merged_into`, the three `db2_kb_documents_*` writes,
+`db2_kb_file_index_upsert`, `db2_calibration_profile_write`,
+`db2_mining_job_unlock` and the two `db2_vector_index_op_*` writes.
+
+In process this was survivable, because a caller that ignores a return value
+and a function that cannot produce one look the same from the call site. The
+boundary makes it visible and worse. Every one of these becomes an operation
+whose reply carries an `acknowledged` field, and that field is a constant: it
+says one because the statement was prepared, not because the row is there. A
+caller across the bus has strictly less information than an in-process caller
+-- it has a field that looks like an answer.
+
+The replay found it rather than the reading did. `learning.feature_row_upsert`
+acknowledged, and the row was in the table; the reason the assertion after it
+failed was that the column is `jsonb` and Postgres had normalised the text.
+Chasing that turned up the discarded step in the same function, and the
+pattern behind it.
+
+Three ways out, and the migration should not pick one alone. The ten that
+return 0 could check the step and return -1, which is a small change and a real
+one: callers that ignore failures today would begin seeing them, and whether
+that is a fix or a regression depends on the caller. The twenty `void`
+writes need a signature change before they can report anything. Or the reply
+field stops claiming what it cannot know and says the call was made -- which
+several reasons already say in words, and which the field itself should say in
+its name.
+
+Until that is decided, the reason on each published operation names it, so a
+reader of the review file is not told that an acknowledgement means a write.
+
 ## Operation ids are unique per family, and the envelope does not say the family
 
 Every operation carries an id that is unique within its family, so

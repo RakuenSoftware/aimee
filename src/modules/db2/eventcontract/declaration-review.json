@@ -361,7 +361,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.bandit_arm_stats_update operation folds one reward into an arm's running statistics. Both the decision count and the reward count are raised by one on every call, so an arm updated with a reward of zero is indistinguishable from one rewarded -- the counts measure calls rather than outcomes. The posteriors are the caller's, so what they mean is decided outside DB2, and every call overwrites them."
+      "reason": "The typed learning.bandit_arm_stats_update operation folds one reward into an arm's running statistics. Both the decision count and the reward count are raised by one on every call, so an arm updated with a reward of zero is indistinguishable from one rewarded -- the counts measure calls rather than outcomes. The posteriors are the caller's, and every call overwrites them. The backend discards the step result, so the acknowledgement says the statement was prepared and nothing more."
     },
     {
       "symbol": "db2_bandit_arms_list",
@@ -409,7 +409,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.bandit_promotion_set operation replaces the promotion write. There is one promotion per decision point, so setting a second replaces the first and the previous rollback arm is lost with it -- a caller wanting to keep it has to have read it first. The stamp is DB2's clock. An empty rollback arm is allowed, which records a promotion with nothing to fall back to."
+      "reason": "The typed learning.bandit_promotion_set operation replaces the promotion write. There is one promotion per decision point, so setting a second replaces the first and the previous rollback arm is lost with it. The stamp is DB2's clock. An empty rollback arm is allowed, which records a promotion with nothing to fall back to. The backend discards the step result, so the acknowledgement cannot say the row landed."
     },
     {
       "symbol": "db2_calibration_profile_read",
@@ -897,7 +897,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.demotion_profile_write operation records a demotion profile. It is not a table of its own: the profile is a committed artifact, and only its kind makes it a profile. The backend turns a null scope kind into 'global' and leaves an empty one empty -- and the wire cannot send null, so the global scope that learning.demotion_profile_read falls back to can be read through this boundary but never written through it."
+      "reason": "The typed learning.demotion_profile_write operation records a demotion profile. It is not a table of its own: the profile is a committed artifact, and only its kind makes it a profile. The backend turns a null scope kind into 'global' and leaves an empty one empty -- and the wire cannot send null, so the global scope that learning.demotion_profile_read falls back to can be read through this boundary but never written through it. The acknowledgement is unconditional."
     },
     {
       "symbol": "db2_demotion_retrieval_attribution_write",
@@ -905,7 +905,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.retrieval_attribution_write operation records that a surfaced memory earned a verdict. The attribution is stored as an artifact with a hand-assembled JSON payload, so the weight is written to six decimal places and read back as text -- a weight that needs more precision than that is silently rounded before anything can compare it. Nothing checks the retrieval event or the row it names exists."
+      "reason": "The typed learning.retrieval_attribution_write operation records that a surfaced memory earned a verdict. The attribution is stored as an artifact with a hand-assembled JSON payload, so the weight is written to six decimal places and read back as text -- a weight needing more precision is silently rounded before anything can compare it. Nothing checks the retrieval event exists, and the step result is discarded, so the acknowledgement says only that the statement was prepared."
     },
     {
       "symbol": "db2_demotion_retrieval_event_by_turn",
@@ -3249,7 +3249,7 @@
       "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them."
+      "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them. The backend returns nothing and discards its step result, so the reply says the call was made and can never say the row landed."
     },
     {
       "symbol": "db2_memory_health_set_effectiveness",

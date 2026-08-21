@@ -3923,7 +3923,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.bandit_arm_stats_update operation folds one reward into an arm's running statistics. Both the decision count and the reward count are raised by one on every call, so an arm updated with a reward of zero is indistinguishable from one rewarded -- the counts measure calls rather than outcomes. The posteriors are the caller's, so what they mean is decided outside DB2, and every call overwrites them."
+        "reason": "The typed learning.bandit_arm_stats_update operation folds one reward into an arm's running statistics. Both the decision count and the reward count are raised by one on every call, so an arm updated with a reward of zero is indistinguishable from one rewarded -- the counts measure calls rather than outcomes. The posteriors are the caller's, and every call overwrites them. The backend discards the step result, so the acknowledgement says the statement was prepared and nothing more."
       },
       "signature": "int db2_bandit_arm_stats_update ( const char * decision_point , const char * arm_id , double reward_delta , double posterior_alpha , double posterior_beta )",
       "signature_sha256": "a61e954e785a03e0b0fdb7b5f3cd34571a948266b93708a7be3dab9e0161400e",
@@ -4093,7 +4093,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.bandit_promotion_set operation replaces the promotion write. There is one promotion per decision point, so setting a second replaces the first and the previous rollback arm is lost with it -- a caller wanting to keep it has to have read it first. The stamp is DB2's clock. An empty rollback arm is allowed, which records a promotion with nothing to fall back to."
+        "reason": "The typed learning.bandit_promotion_set operation replaces the promotion write. There is one promotion per decision point, so setting a second replaces the first and the previous rollback arm is lost with it. The stamp is DB2's clock. An empty rollback arm is allowed, which records a promotion with nothing to fall back to. The backend discards the step result, so the acknowledgement cannot say the row landed."
       },
       "signature": "int db2_bandit_promotion_set ( const char * decision_point , const char * arm_id , const char * rollback_arm )",
       "signature_sha256": "833a9238464b16136566448ca67f94f8360e3c8c2555c89c8462bfcc2c92191b",
@@ -7082,7 +7082,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.demotion_profile_write operation records a demotion profile. It is not a table of its own: the profile is a committed artifact, and only its kind makes it a profile. The backend turns a null scope kind into 'global' and leaves an empty one empty -- and the wire cannot send null, so the global scope that learning.demotion_profile_read falls back to can be read through this boundary but never written through it."
+        "reason": "The typed learning.demotion_profile_write operation records a demotion profile. It is not a table of its own: the profile is a committed artifact, and only its kind makes it a profile. The backend turns a null scope kind into 'global' and leaves an empty one empty -- and the wire cannot send null, so the global scope that learning.demotion_profile_read falls back to can be read through this boundary but never written through it. The acknowledgement is unconditional."
       },
       "signature": "int db2_demotion_profile_write ( const char * memory_class , const char * scope_kind , const char * scope_id , const char * payload_json , char * id_out , int id_out_len )",
       "signature_sha256": "fbb594a297fb7f86ad959c94cf8d93228b809132399cc8cd67760985613fb5f5",
@@ -7104,7 +7104,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.retrieval_attribution_write operation records that a surfaced memory earned a verdict. The attribution is stored as an artifact with a hand-assembled JSON payload, so the weight is written to six decimal places and read back as text -- a weight that needs more precision than that is silently rounded before anything can compare it. Nothing checks the retrieval event or the row it names exists."
+        "reason": "The typed learning.retrieval_attribution_write operation records that a surfaced memory earned a verdict. The attribution is stored as an artifact with a hand-assembled JSON payload, so the weight is written to six decimal places and read back as text -- a weight needing more precision is silently rounded before anything can compare it. Nothing checks the retrieval event exists, and the step result is discarded, so the acknowledgement says only that the statement was prepared."
       },
       "signature": "int db2_demotion_retrieval_attribution_write ( const char * retrieval_event_id , int64_t surfaced_row_id , const char * verdict , double weight )",
       "signature_sha256": "40dea5af1c5de4aa996d9a3da093047be58b6a989cbe34f8741ebac6b09ee4dd",
@@ -17865,7 +17865,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
-        "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them."
+        "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them. The backend returns nothing and discards its step result, so the reply says the call was made and can never say the row landed."
       },
       "signature": "void db2_memory_health_record ( int total_memories , int contradictions_detected , int promotions , int demotions , int expirations )",
       "signature_sha256": "1721479092870132f590c9472bd062ad44b298ca88a30abd0f100b5564daf726",
@@ -27642,7 +27642,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "05c918808aab35b831f47aca1af515231ae1bde2663f182b00b94e6b75ba7b8f",
+  "fingerprint": "3f171bb1aaef4a8ce19c1fd694f1e4e29a0086ef0b7bdec3dc4a643676ca303d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
