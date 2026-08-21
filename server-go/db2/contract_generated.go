@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "3db8a2637eb41690632b592664423804bd3bb4e9f97ea56959a7b380ae77794b"
+const ContractSHA256 = "adf8ca4996b2a04e3a6ccba816f3a188293f182770cbd127e9242887eb43c000"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2592,6 +2592,80 @@ func DecodeMemoryConflictingL2Request(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return memoryKey, memoryContent, nil
+}
+
+const EventProspectiveCounts = EventMemory
+const StageProspectiveCounts = FamilyMemory
+const OperationProspectiveCounts uint32 = 103
+
+
+// EncodeProspectiveCountsRequest writes the schema prospective_counts declares, in order.
+func EncodeProspectiveCountsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationProspectiveCounts, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveCountsRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveCountsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveCounts || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventOntologyEvalCount = EventMemory
+const StageOntologyEvalCount = FamilyMemory
+const OperationOntologyEvalCount uint32 = 104
+const OntologyEvalCountRelTypeMin = 1
+const OntologyEvalCountRelTypeMax = 127
+
+// EncodeOntologyEvalCountRequest writes the schema ontology_eval_count declares, in order.
+func EncodeOntologyEvalCountRequest(relType string) ([]byte, error) {
+	if len(relType) < OntologyEvalCountRelTypeMin || len(relType) > OntologyEvalCountRelTypeMax || hasNUL(relType) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, relType, OntologyEvalCountRelTypeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationOntologyEvalCount, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeOntologyEvalCountRequest reads it back, checking each field against its own bound.
+func DecodeOntologyEvalCountRequest(request []byte) (string, error) {
+	var relType string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationOntologyEvalCount || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if relType, err = takeRowText(payload, &cursor, OntologyEvalCountRelTypeMax); err != nil ||
+		len(relType) < OntologyEvalCountRelTypeMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return relType, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -14423,6 +14497,118 @@ func DecodeKBReleaseRollbackRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return targetReleaseID, nil
+}
+
+const EventMiningJobGet = EventMaintenance
+const StageMiningJobGet = FamilyMaintenance
+const OperationMiningJobGet uint32 = 53
+const MiningJobGetMiningJobIDMin = 1
+const MiningJobGetMiningJobIDMax = 63
+
+// EncodeMiningJobGetRequest writes the schema mining_job_get declares, in order.
+func EncodeMiningJobGetRequest(miningJobID string) ([]byte, error) {
+	if len(miningJobID) < MiningJobGetMiningJobIDMin || len(miningJobID) > MiningJobGetMiningJobIDMax || hasNUL(miningJobID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, miningJobID, MiningJobGetMiningJobIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMiningJobGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMiningJobGetRequest reads it back, checking each field against its own bound.
+func DecodeMiningJobGetRequest(request []byte) (string, error) {
+	var miningJobID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMiningJobGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if miningJobID, err = takeRowText(payload, &cursor, MiningJobGetMiningJobIDMax); err != nil ||
+		len(miningJobID) < MiningJobGetMiningJobIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return miningJobID, nil
+}
+
+const EventMiningJobComplete = EventMaintenance
+const StageMiningJobComplete = FamilyMaintenance
+const OperationMiningJobComplete uint32 = 54
+const MiningJobCompleteMiningJobIDMin = 1
+const MiningJobCompleteMiningJobIDMax = 63
+const MiningJobCompleteHighWaterMarkMin uint64 = 0
+const MiningJobCompleteHighWaterMarkMax uint64 = 9223372036854775807
+const MiningJobCompleteLastErrorMin = 0
+const MiningJobCompleteLastErrorMax = 511
+
+// EncodeMiningJobCompleteRequest writes the schema mining_job_complete declares, in order.
+func EncodeMiningJobCompleteRequest(miningJobID string, highWaterMark uint64, lastError string) ([]byte, error) {
+	if len(miningJobID) < MiningJobCompleteMiningJobIDMin || len(miningJobID) > MiningJobCompleteMiningJobIDMax || hasNUL(miningJobID) ||
+		highWaterMark < MiningJobCompleteHighWaterMarkMin || highWaterMark > MiningJobCompleteHighWaterMarkMax ||
+		len(lastError) < MiningJobCompleteLastErrorMin || len(lastError) > MiningJobCompleteLastErrorMax || hasNUL(lastError) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, miningJobID, MiningJobCompleteMiningJobIDMax); err != nil {
+		return nil, err
+	}
+	var highWaterMarkBytes [8]byte
+	binary.LittleEndian.PutUint64(highWaterMarkBytes[:], highWaterMark)
+	payload = append(payload, highWaterMarkBytes[:]...)
+	if err := putRowText(&payload, lastError, MiningJobCompleteLastErrorMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMiningJobComplete, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMiningJobCompleteRequest reads it back, checking each field against its own bound.
+func DecodeMiningJobCompleteRequest(request []byte) (string, uint64, string, error) {
+	var miningJobID string
+	var highWaterMark uint64
+	var lastError string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMiningJobComplete || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if miningJobID, err = takeRowText(payload, &cursor, MiningJobCompleteMiningJobIDMax); err != nil ||
+		len(miningJobID) < MiningJobCompleteMiningJobIDMin {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	highWaterMark = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if highWaterMark < MiningJobCompleteHighWaterMarkMin || highWaterMark > MiningJobCompleteHighWaterMarkMax {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	if lastError, err = takeRowText(payload, &cursor, MiningJobCompleteLastErrorMax); err != nil ||
+		len(lastError) < MiningJobCompleteLastErrorMin {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	return miningJobID, highWaterMark, lastError, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

@@ -3404,6 +3404,41 @@ int db2_memory_find_conflicting_l2(const char *key, const char *content,
    return 0;
 }
 
+int db2_mining_job_get(const char *id, db2_mining_job_row_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_mining_job_complete(const char *id, int64_t hwm, const char *error)
+{
+   (void)id;
+   (void)hwm;
+   (void)error;
+   return -1;
+}
+
+void db2_prospective_count_by_state(int *armed_out, int *triggered_out, int *completed_out,
+                                    int *expired_out)
+{
+   if (armed_out)
+      *armed_out = 0;
+   if (triggered_out)
+      *triggered_out = 0;
+   if (completed_out)
+      *completed_out = 0;
+   if (expired_out)
+      *expired_out = 0;
+}
+
+long db2_ontology_eval_count(const char *rel_type)
+{
+   (void)rel_type;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

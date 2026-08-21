@@ -766,3 +766,62 @@ aimee_module_call_result_t aimee_db2_memory_conflicting_l2_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_prospective_counts_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t *prospective_armed, uint32_t *prospective_triggered, uint32_t *prospective_completed,
+    uint32_t *prospective_expired, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROSPECTIVE_COUNTS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_PROSPECTIVE_COUNTS_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_prospective_counts_request_encode(request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROSPECTIVE_COUNTS, AIMEE_DB2_STAGE_PROSPECTIVE_COUNTS,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_prospective_counts_reply_decode(response, response_len, prospective_armed,
+                                                 prospective_triggered, prospective_completed,
+                                                 prospective_expired) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_ontology_eval_count_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *rel_type, uint32_t *eval_found,
+                                   uint64_t *occurrence_count, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ONTOLOGY_EVAL_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ONTOLOGY_EVAL_COUNT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_ontology_eval_count_request_encode(rel_type, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ONTOLOGY_EVAL_COUNT, AIMEE_DB2_STAGE_ONTOLOGY_EVAL_COUNT,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_ontology_eval_count_reply_decode(response, response_len, eval_found,
+                                                  occurrence_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

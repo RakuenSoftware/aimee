@@ -16,6 +16,9 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "mining.h"
+#include "ontology_evolution.h"
+#include "prospective_memories.h"
 #include "memory_lifecycle.h"
 #include "kb_releases.h"
 #include "db2_learning.h"
@@ -536,6 +539,11 @@ typedef struct
    int (*memory_last_retro_scan)(char *out, int out_len);
    int (*memory_conflicting_l2)(const char *key, const char *content,
                                 double *existing_confidence_out);
+   int (*mining_job_get)(const char *id, db2_mining_job_row_t *out);
+   int (*mining_job_complete)(const char *id, int64_t hwm, const char *error);
+   void (*prospective_counts)(int *armed_out, int *triggered_out, int *completed_out,
+                              int *expired_out);
+   long (*ontology_eval_count)(const char *rel_type);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

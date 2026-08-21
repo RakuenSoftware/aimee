@@ -20691,9 +20691,15 @@
           "line": 36
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.mining_job_complete operation records that a mining job ran. The high-water mark only moves forward -- a lower one sent is discarded silently, so a job re-run over earlier data cannot say so. The error is written unconditionally, so completing without one erases the last failure and the job reads as though it never failed. Nothing checks a row matched, so completing a job that does not exist is acknowledged."
+      },
       "signature": "int db2_mining_job_complete ( const char * id , int64_t hwm , const char * error )",
       "signature_sha256": "16048b137ea0cc787b2f4ae26c15940c107649861878985e2c5b5037fa2f1cd0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_mining_job_complete"
     },
     {
@@ -20707,9 +20713,15 @@
           "line": 35
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.mining_job_get operation reads one mining job's schedule and last outcome. The identifier is a name the caller chose rather than one the database assigned, so two callers using the same name share a job without either learning of the other. The last error is the last one recorded, not the last one that mattered: a successful run overwrites it with an empty string, so a job that has failed and then succeeded looks like one that never failed."
+      },
       "signature": "int db2_mining_job_get ( const char * id , db2_mining_job_row_t * out )",
       "signature_sha256": "0c4ff69bfbdf37e3ca9dd43ec76a5cc2697ce9f8b376af87f2ad7a05745d0937",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_mining_job_get"
     },
     {
@@ -21039,9 +21051,15 @@
           "line": 37
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.ontology_eval_count operation reads how often a relation type has been seen. The type is normalised before the lookup, so two spellings of the same relation answer as one and a caller cannot tell which spelling the stored row used. A relation type that normalises to nothing is refused the same way a failed read is, and the reply carries the found flag the backend's single negative return value could not."
+      },
       "signature": "long db2_ontology_eval_count ( const char * rel_type )",
       "signature_sha256": "96a44edb346a47b3e1a6a4e18cc7eab924e5b92814da8be3008c499269352659",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_ontology_eval_count"
     },
     {
@@ -21756,9 +21774,15 @@
           "line": 71
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_counts operation counts prospective memories by state. The backend returns nothing -- it is a void function -- so a database it could not reach is four zeros and an empty table is four zeros, and the reply cannot separate them. It names four states and drops every other group, so the four need not add up to the table. There is no scope: this is every prospective memory the installation holds."
+      },
       "signature": "void db2_prospective_count_by_state ( int * armed_out , int * triggered_out , int * completed_out , int * expired_out )",
       "signature_sha256": "034c44d997270a9d5e7251a84cf1629622a0ad91cda02ccf5be87da570d4b59b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_count_by_state"
     },
     {
@@ -27882,15 +27906,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1a2efba14ed19b3b7d86fd99e1a2eb0af92d5bcd4791ce8f69c7e155c999841f",
+  "fingerprint": "eb255811a7de6cd4bb1f8fb28152bf241de77a4a4621b852c2467db33f879f4e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 316,
+    "audit_pending": 312,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 643
+    "reviewed": 647
   }
 }

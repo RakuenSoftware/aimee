@@ -340,3 +340,63 @@ aimee_db2_kb_release_rollback_call(aimee_db2_call_fn call, void *call_context, u
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_mining_job_get_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *mining_job_id, uint32_t *mining_job_found, char *last_run_at,
+    size_t last_run_at_capacity, uint64_t *high_water_mark, uint32_t *interval_seconds,
+    uint32_t *job_enabled, char *last_error, size_t last_error_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MINING_JOB_GET_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_MINING_JOB_GET_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_mining_job_get_request_encode(mining_job_id, request, sizeof(request),
+                                               &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MINING_JOB_GET, AIMEE_DB2_STAGE_MINING_JOB_GET, trace_id,
+            deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_mining_job_get_reply_decode(
+           response, response_len, mining_job_found, last_run_at, last_run_at_capacity,
+           high_water_mark, interval_seconds, job_enabled, last_error, last_error_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_mining_job_complete_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *mining_job_id, uint64_t high_water_mark, const char *last_error,
+    uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MINING_JOB_COMPLETE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_MINING_JOB_COMPLETE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_mining_job_complete_request_encode(mining_job_id, high_water_mark, last_error,
+                                                    request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MINING_JOB_COMPLETE, AIMEE_DB2_STAGE_MINING_JOB_COMPLETE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_mining_job_complete_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

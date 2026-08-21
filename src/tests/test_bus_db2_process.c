@@ -3302,6 +3302,83 @@ int main(int argc, char **argv)
    assert(memory_conflicting_l2_conflict_found == 0 &&
           memory_conflicting_l2_existing_confidence == 0.0);
 
+   /* A mining job, and the two things completing one does not tell you. The
+    * high-water mark only ever moves forward, so a lower one sent is discarded
+    * without a word; and the error is written whatever it was before, so a run
+    * that succeeds erases the last failure. The schema ships a pattern_cluster
+    * job, which is what these calls use. */
+   uint32_t mining_job_complete_acknowledged = 99;
+   uint32_t mining_job_get_mining_job_found = 99;
+   static char mining_job_get_last_run_at[AIMEE_DB2_MINING_JOB_GET_LAST_RUN_AT_MAX + 1];
+   uint64_t mining_job_get_high_water_mark = 99;
+   uint32_t mining_job_get_interval_seconds = 99;
+   uint32_t mining_job_get_job_enabled = 99;
+   static char mining_job_get_last_error[AIMEE_DB2_MINING_JOB_GET_LAST_ERROR_MAX + 1];
+
+   assert(aimee_db2_mining_job_complete_call(call_client, &client, 9466, 0, "pattern_cluster", 99,
+                                             "replayed failure", &mining_job_complete_acknowledged,
+                                             NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(mining_job_complete_acknowledged == 1);
+   mining_job_get_mining_job_found = 99;
+   mining_job_get_high_water_mark = 99;
+   mining_job_get_last_error[0] = 'x';
+   assert(aimee_db2_mining_job_get_call(
+              call_client, &client, 9467, 0, "pattern_cluster", &mining_job_get_mining_job_found,
+              mining_job_get_last_run_at, sizeof(mining_job_get_last_run_at),
+              &mining_job_get_high_water_mark, &mining_job_get_interval_seconds,
+              &mining_job_get_job_enabled, mining_job_get_last_error,
+              sizeof(mining_job_get_last_error), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(mining_job_get_mining_job_found == 1 && mining_job_get_high_water_mark == 99);
+   assert(strcmp(mining_job_get_last_error, "replayed failure") == 0);
+
+   /* Complete it again, further back and without an error. */
+   mining_job_complete_acknowledged = 99;
+   assert(aimee_db2_mining_job_complete_call(call_client, &client, 9468, 0, "pattern_cluster", 5,
+                                             "", &mining_job_complete_acknowledged, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(mining_job_complete_acknowledged == 1);
+   mining_job_get_mining_job_found = 99;
+   mining_job_get_high_water_mark = 99;
+   mining_job_get_last_error[0] = 'x';
+   assert(aimee_db2_mining_job_get_call(
+              call_client, &client, 9469, 0, "pattern_cluster", &mining_job_get_mining_job_found,
+              mining_job_get_last_run_at, sizeof(mining_job_get_last_run_at),
+              &mining_job_get_high_water_mark, &mining_job_get_interval_seconds,
+              &mining_job_get_job_enabled, mining_job_get_last_error,
+              sizeof(mining_job_get_last_error), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The mark did not move back, and nothing said the five was ignored. The
+    * failure recorded a moment ago is gone, so the job reads as one that never
+    * failed. */
+   assert(mining_job_get_mining_job_found == 1 && mining_job_get_high_water_mark == 99);
+   assert(mining_job_get_last_error[0] == '\0');
+
+   /* And a job nobody created is completed just the same. */
+   mining_job_complete_acknowledged = 99;
+   assert(aimee_db2_mining_job_complete_call(call_client, &client, 9470, 0, "a-job-nobody-created",
+                                             1, "", &mining_job_complete_acknowledged, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(mining_job_complete_acknowledged == 1);
+
+   uint32_t prospective_counts_prospective_armed = 99;
+   uint32_t prospective_counts_prospective_triggered = 99;
+   uint32_t prospective_counts_prospective_completed = 99;
+   uint32_t prospective_counts_prospective_expired = 99;
+   assert(aimee_db2_prospective_counts_call(
+              call_client, &client, 9468, 0, &prospective_counts_prospective_armed,
+              &prospective_counts_prospective_triggered, &prospective_counts_prospective_completed,
+              &prospective_counts_prospective_expired, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(prospective_counts_prospective_armed == 0 &&
+          prospective_counts_prospective_triggered == 0 &&
+          prospective_counts_prospective_completed == 0 &&
+          prospective_counts_prospective_expired == 0);
+
+   uint32_t ontology_eval_count_eval_found = 99;
+   uint64_t ontology_eval_count_occurrence_count = 99;
+   assert(aimee_db2_ontology_eval_count_call(
+              call_client, &client, 9469, 0, "replay_relation", &ontology_eval_count_eval_found,
+              &ontology_eval_count_occurrence_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ontology_eval_count_eval_found == 0 && ontology_eval_count_occurrence_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -6400,6 +6400,103 @@
       }
     },
     {
+      "family": "memory",
+      "id": 103,
+      "name": "prospective_counts",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_count_by_state"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one grouped count over every prospective memory, with no scope and no way to report a failure"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "prospective_armed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "prospective_triggered",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "prospective_completed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "prospective_expired",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 104,
+      "name": "ontology_eval_count",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ontology evaluations are relational DB2 rows.",
+      "c_symbols": [
+        "db2_ontology_eval_count"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the relation type is normalised before the lookup, so two spellings answer as one"
+        },
+        "fields": [
+          {
+            "name": "rel_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "eval_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "occurrence_count",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
@@ -18700,6 +18797,128 @@
             "type": "u64",
             "minimum": 0,
             "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 53,
+      "name": "mining_job_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Mining jobs are relational DB2 rows.",
+      "c_symbols": [
+        "db2_mining_job_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one job by its name, which is the whole key"
+        },
+        "fields": [
+          {
+            "name": "mining_job_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "mining_job_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "last_run_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "high_water_mark",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "interval_seconds",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "job_enabled",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "last_error",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 54,
+      "name": "mining_job_complete",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Mining jobs are relational DB2 rows.",
+      "c_symbols": [
+        "db2_mining_job_complete"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the high-water mark only ever moves forward, and the error is written whatever it was before"
+        },
+        "fields": [
+          {
+            "name": "mining_job_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "high_water_mark",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "last_error",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },

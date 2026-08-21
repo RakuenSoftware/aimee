@@ -4196,6 +4196,22 @@
       "reason": "The typed memory.workspace_tag_insert operation replaces the workspace attribution insert, bounded to DB2's own workspace identifier width. The backend returns void and its statement is ON CONFLICT DO NOTHING, so the acknowledgement carries no count: a repeat is a no-op rather than a failure and there is nothing to report either way."
     },
     {
+      "symbol": "db2_mining_job_complete",
+      "signature_sha256": "16048b137ea0cc787b2f4ae26c15940c107649861878985e2c5b5037fa2f1cd0",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.mining_job_complete operation records that a mining job ran. The high-water mark only moves forward -- a lower one sent is discarded silently, so a job re-run over earlier data cannot say so. The error is written unconditionally, so completing without one erases the last failure and the job reads as though it never failed. Nothing checks a row matched, so completing a job that does not exist is acknowledged."
+    },
+    {
+      "symbol": "db2_mining_job_get",
+      "signature_sha256": "0c4ff69bfbdf37e3ca9dd43ec76a5cc2697ce9f8b376af87f2ad7a05745d0937",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.mining_job_get operation reads one mining job's schedule and last outcome. The identifier is a name the caller chose rather than one the database assigned, so two callers using the same name share a job without either learning of the other. The last error is the last one recorded, not the last one that mattered: a successful run overwrites it with an empty string, so a job that has failed and then succeeded looks like one that never failed."
+    },
+    {
       "symbol": "db2_mining_job_try_lock",
       "signature_sha256": "88acd043065f20c6f345f368a8d3d2ba401e13dc849a222bb30de19185c3cd29",
       "disposition": "wire-operation",
@@ -4218,6 +4234,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.ontology_approve operation approves a proposed relationship type. The name is normalized before anything is matched, so two spellings can reach the same type. Promoting the type to active is best-effort and its result is discarded -- a seeded type is already active -- while marking the evaluation approved must match exactly one row or the whole transaction rolls back. So a refusal means there was no evaluation to approve, never that the type failed to be promoted."
+    },
+    {
+      "symbol": "db2_ontology_eval_count",
+      "signature_sha256": "96a44edb346a47b3e1a6a4e18cc7eab924e5b92814da8be3008c499269352659",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.ontology_eval_count operation reads how often a relation type has been seen. The type is normalised before the lookup, so two spellings of the same relation answer as one and a caller cannot tell which spelling the stored row used. A relation type that normalises to nothing is refused the same way a failed read is, and the reply carries the found flag the backend's single negative return value could not."
     },
     {
       "symbol": "db2_ontology_eval_status",
@@ -4266,6 +4290,14 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The injected embedder callback is a process-local compatibility seam and cannot cross the bus; callers resolve the running endpoint's dimension before submitting the typed reset operation, which always carries an explicit target."
+    },
+    {
+      "symbol": "db2_prospective_count_by_state",
+      "signature_sha256": "034c44d997270a9d5e7251a84cf1629622a0ad91cda02ccf5be87da570d4b59b",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.prospective_counts operation counts prospective memories by state. The backend returns nothing -- it is a void function -- so a database it could not reach is four zeros and an empty table is four zeros, and the reply cannot separate them. It names four states and drops every other group, so the four need not add up to the table. There is no scope: this is every prospective memory the installation holds."
     },
     {
       "symbol": "db2_prospective_list",

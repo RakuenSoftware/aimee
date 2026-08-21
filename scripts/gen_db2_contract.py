@@ -13528,6 +13528,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_find_conflicting_l2",
         "policy": {"reads": 200},
     },
+    "mining_job_get": {
+        "key": ("maintenance", 53),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_mining_job_get",
+        "policy": {"reads": 200},
+    },
+    "mining_job_complete": {
+        "key": ("maintenance", 54),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_mining_job_complete",
+        "policy": {"writes": 200},
+    },
+    "prospective_counts": {
+        "key": ("memory", 103),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_count_by_state",
+        "policy": {"reads": 200},
+    },
+    "ontology_eval_count": {
+        "key": ("memory", 104),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_ontology_eval_count",
+        "policy": {"reads": 200},
+    },
 }
 
 
