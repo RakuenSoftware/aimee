@@ -78,9 +78,16 @@ kb_client_result_status_t kb_client_last_result_status(void)
 {
    return KB_CLIENT_RESULT_OK;
 }
+/* Recall is QUERY-SENSITIVE on purpose. A stub that ignores its query cannot
+ * tell "the stage asked the right thing" from "the stage asked the persona
+ * blob", which is precisely the regression test_ir_stage_prefers_supplied_query
+ * exists to catch -- and with (void)query it passed with the fix reverted.
+ * Anything that does not mention the subject recalls nothing, exactly as the
+ * real kb did when handed 5773 characters of persona. */
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
-   (void)query;
+   if (query && (!strstr(query, "deploy") || strstr(query, "aimee-persona")))
+      return 0;
    (void)limit;
    if (g_no_recall || !out || max <= 0)
       return 0;
@@ -293,6 +300,40 @@ static void test_ir_stage_appends_system_block(void)
    printf("ir_stage_appends_system_block OK\n");
 }
 
+/* The query must be the USER's, not whatever else has been prepended to their
+ * message by the time this stage runs.
+ *
+ * aimee_ir_apply_request_stages() inserts the persona onto the first user
+ * message BEFORE the stage list runs, so reading the message here recalls
+ * against the persona text. On the box that turned a question which recalls one
+ * row into one that recalls none: the block assembled empty and
+ * ingress_preinject_build returned NULL, killing pre-injection on the opening
+ * turn of every session with no error logged anywhere. The caller now hands the
+ * pristine query through `ud`. */
+static void test_ir_stage_prefers_supplied_query(void)
+{
+   aimee_request_t ir;
+   /* The message as it looks AFTER a persona prepend: the real question is in
+    * there, buried, exactly as the stage would otherwise read it. */
+   mk_user_ir(&ir, "<aimee-persona>lots of persona guidance here</aimee-persona> deploy matrix");
+   assert(ir_stage_memory(&ir, (void *)"deploy matrix") == 1);
+
+   /* The envelope must be the one the CLEAN query produces. */
+   char *direct = ingress_preinject_build("deploy matrix", 0);
+   assert(direct && ir.system[0].text && strstr(ir.system[0].text, direct) != NULL);
+   free(direct);
+   aimee_request_free(&ir);
+
+   /* And a NULL/empty ud still falls back to the message, so callers that supply
+    * nothing behave exactly as before. */
+   aimee_request_t ir2;
+   mk_user_ir(&ir2, "deploy matrix");
+   assert(ir_stage_memory(&ir2, NULL) == 1);
+   assert(ir2.n_system == 1);
+   aimee_request_free(&ir2);
+   printf("ir_stage_prefers_supplied_query OK\n");
+}
+
 /* Mid-session with empty recall: nothing to say, so nothing is injected. The
  * guidance already shipped on the opening turn and is not repeated per turn. */
 static void test_ir_stage_no_recall_midsession_noop(void)
@@ -438,6 +479,7 @@ int main(void)
    test_system_prompt_raw_env();
    test_disabled_noop();
    test_ir_stage_appends_system_block();
+   test_ir_stage_prefers_supplied_query();
    test_ir_stage_no_recall_midsession_noop();
    test_ir_stage_session_start_guidance_without_recall();
    test_ir_stage_guidance_not_repeated_midsession();

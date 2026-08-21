@@ -244,55 +244,56 @@ unconditionally (`kb_memory_facts.c`), which is the right asymmetry: the pattern
 extractor reproduces what the user actually wrote, while an LLM's reading of the
 same note is inference.
 
-- **The module's server-only stages, and the five gates in front of them.**
-  `RERANK` (the ingress confidence tier) and `RETRIEVE` (the PII recall gate) are
-  called only by aimee-server, only while ingress pre-injection builds an
-  envelope. Getting a real chat turn to that point needs, in order:
+### RERANK, and the bug that was hiding it
 
-  1. a chat provider configured (`install-chat-provider.sh`, Qwen3.8 over the
-     tunnel) -- done, and a turn does answer;
-  2. the request on `/v1/messages`, not `/v1/chat/completions`: pre-injection
-     hooks the Anthropic-native ingress, not the native chat route;
-  3. `ingress_preinject_anthropic_enabled` on -- opt-in (P5 §2.3), no env
-     override, so `start-server.sh` writes it into the config;
-  4. an ACTIVE REPOSITORY. `ingress_preinject_resolve_active_scope()` derives the
-     project identity from the server's cwd, and without one
-     `ingress_preinject_build()` returns NULL before assembling anything, so that
-     agent ingress cannot "silently broaden to global recall"
-     (`make-scope-repo.sh` gives it a git repo);
-  5. the memory SCOPED to that project -- `ingress_preinject_build` calls
-     `kb_client_memory_scope_context_set(workspace, project, 0)` before
-     recalling, so an untagged memory is invisible however well it scores
-     unscoped (`memory.tag_workspace` + `memory.tag_scope`);
-  6. `code_context_mode` NOT `on`. It defaults to `on`, which is strict: an `on`
-     packet may carry only validated current-project code evidence, so
-     `facts_on = 0` AND `legacy_preview_on = 0` and nothing is gathered at all.
-     `observe` admits memory previews and typed facts.
+Chasing a live chat turn as far as the memory module's `RERANK` stage found a
+real defect, not just configuration.
 
-  With all six satisfied the run gets as far as pre-injection actually querying
-  the kb -- a turn-scoped trace of the kb log shows `memory.diagnose_scoped` and
-  `memory.facts` called during the turn, and both return the seeded row. But the
-  assembled block still comes out empty, so `ingress_preinject_build` returns
-  NULL before it ever reaches the confidence call, and RERANK is still not
-  exercised. Measured, not inferred: a session-start turn is 1696 input tokens
-  against 185 for a mid-session turn (the ~1500-token guidance block, which
-  proves `ir_stage_memory` is live), and a matching query scores 1695 against
-  1689 for a nonsense one -- a six-token delta that is just the query text.
+`aimee_ir_apply_request_stages()` inserts the persona onto the first user message
+BEFORE running the stage list, and `ir_stage_memory` then took its query from
+`aimee_ir_last_user_text()` -- the whole message, persona included, up to 16384
+bytes. So on any turn delivering a persona, which is the opening turn of every
+session, the "query" put to recall was thousands of characters of persona with
+the real question buried at the end.
 
-  Two things are worth keeping from that. `ingress_preinject_confidence()`
-  failing does not degrade the envelope, it DELETES it
-  ("rerank confidence unavailable; omitting pre-injection envelope"), so a
-  missing memory module silently costs the whole injection rather than just its
-  confidence line. And the module-up/module-down control used earlier is invalid
-  for this: stopping the module cannot change whether the envelope is BUILT,
-  only whether it survives that check.
+Measured on the box: the same question recalls **1 row** asked plainly and
+**0 rows** asked the way the stage asked it (5773 chars). Recall returned empty,
+the block assembled empty, and `ingress_preinject_build` returned NULL before it
+ever reached the confidence call. Memory pre-injection was silently dead on the
+first turn of every session -- with no error logged anywhere, because "recall
+found nothing" is not an error.
 
-  There is real signal short of the goal. The guidance block DOES inject -- the
-  model's replies start citing `aimee index` -- which proves `ir_stage_memory`
-  runs and the IR seam is live; only the retrieval layer is gated off. And kb-side
-  recall for the same query returns the seeded fact at score 0.75, so the memory
-  and the query are fine. The remaining gap is project registration, not the
-  module.
+The caller now captures the user's query before the persona is prepended and
+hands it to the stage through the transform's `ud`, which was unused. A caller
+that supplies none still falls back to the message, so nothing else changes.
+
+The fix is visible in the prompt that actually goes upstream, read through a
+capture proxy rather than inferred from token counts: the system message grows
+2186 -> 2498 chars and gains `recommended (memory previews)` and
+`aimee-context`, both previously absent.
+
+And that makes RERANK observable, because a failed confidence call does not
+degrade the envelope, it DELETES it:
+
+    LOG_WARN("memory", "rerank confidence unavailable; omitting pre-injection envelope");
+
+So the envelope's presence is proof the module answered. Stopping and restarting
+the server-side module around the same turn:
+
+    module RUNNING    envelope PRESENT
+    module STOPPED    envelope ABSENT   + exactly 1 "rerank confidence unavailable"
+    module RESTARTED  envelope PRESENT
+
+RERANK is exercised by a live chat turn, and the module answering it is
+load-bearing for the whole injection rather than for one confidence line.
+
+The gates that had to be satisfied first, each of which looked like the last:
+a chat provider; `/v1/messages` rather than `/v1/chat/completions` (pre-injection
+hooks the Anthropic-native ingress); `ingress_preinject_anthropic_enabled` ON
+(opt-in, no env override); an ACTIVE REPOSITORY, without which
+`ingress_preinject_build` refuses to broaden to global recall; the memory SCOPED
+to that project; and `code_context_mode` not `on`, whose strict mode zeroes both
+the preview and facts layers.
 
 - **The module's other stages.** aimee-server calls four memory stages --
   EXTRACT_INDEX, WRITE, RETRIEVE (the PII recall gate) and RERANK (the ingress
