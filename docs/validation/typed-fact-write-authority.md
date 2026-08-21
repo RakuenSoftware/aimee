@@ -244,7 +244,34 @@ unconditionally (`kb_memory_facts.c`), which is the right asymmetry: the pattern
 extractor reproduces what the user actually wrote, while an LLM's reading of the
 same note is inference.
 
-- **The module's server-only stages.** aimee-server calls four memory stages --
+- **The module's server-only stages, and the five gates in front of them.**
+  `RERANK` (the ingress confidence tier) and `RETRIEVE` (the PII recall gate) are
+  called only by aimee-server, only while ingress pre-injection builds an
+  envelope. Getting a real chat turn to that point needs, in order:
+
+  1. a chat provider configured (`install-chat-provider.sh`, Qwen3.8 over the
+     tunnel) -- done, and a turn does answer;
+  2. the request on `/v1/messages`, not `/v1/chat/completions`: pre-injection
+     hooks the Anthropic-native ingress, not the native chat route;
+  3. `ingress_preinject_anthropic_enabled` on -- opt-in (P5 §2.3), no env
+     override, so `start-server.sh` writes it into the config;
+  4. an ACTIVE REPOSITORY. `ingress_preinject_resolve_active_scope()` derives the
+     project identity from the server's cwd, and without one
+     `ingress_preinject_build()` returns NULL before assembling anything, so that
+     agent ingress cannot "silently broaden to global recall"
+     (`make-scope-repo.sh` gives it a git repo);
+  5. that project REGISTERED with the kb. This is where the run stopped: the
+     container reports `watching 0 project root(s)`, and the retrieval envelope
+     is still NULL.
+
+  There is real signal short of the goal. The guidance block DOES inject -- the
+  model's replies start citing `aimee index` -- which proves `ir_stage_memory`
+  runs and the IR seam is live; only the retrieval layer is gated off. And kb-side
+  recall for the same query returns the seeded fact at score 0.75, so the memory
+  and the query are fine. The remaining gap is project registration, not the
+  module.
+
+- **The module's other stages.** aimee-server calls four memory stages --
   EXTRACT_INDEX, WRITE, RETRIEVE (the PII recall gate) and RERANK (the ingress
   confidence tier). The module is installed and ATTACHED on the server's own bus
   with its own grant, verified running, and the first two are the same code paths
