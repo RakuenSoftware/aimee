@@ -556,7 +556,8 @@ int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe
 int64_t db2_memory_row_insert_ex(const char *tier, const char *kind, const char *key,
                                  const char *content, const char *use_cases, double confidence,
                                  const char *session_id, const char *ts, const char *sensitivity,
-                                 double evidence_strength, double salience, double surprise)
+                                 double evidence_strength, double salience, double surprise,
+                                 const char *provenance_category)
 {
    if (!tier || !kind || !key || !ts)
       return -1;
@@ -567,8 +568,9 @@ int64_t db2_memory_row_insert_ex(const char *tier, const char *kind, const char 
    static const char *sql =
        "INSERT INTO memories (tier, kind, key, content, use_cases, confidence,"
        " use_count, last_used_at, source_session, created_at,"
-       " updated_at, sensitivity, evidence_strength, salience, surprise, observation_count)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1)"
+       " updated_at, sensitivity, evidence_strength, salience, surprise, observation_count,"
+       " provenance_category)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15)"
        " RETURNING id";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -588,6 +590,15 @@ int64_t db2_memory_row_insert_ex(const char *tier, const char *kind, const char 
    aimee_pg_bind_double(st, "?12", evidence_strength);
    aimee_pg_bind_double(st, "?13", salience);
    aimee_pg_bind_double(st, "?14", surprise);
+   /* Fail closed: a caller that names no provenance did not establish one, and
+    * the typed-fact drain must not read that as the user having spoken. Spelled
+    * as a literal rather than MEMORY_PROVENANCE_AGENT because DB2's outbound
+    * header surface is frozen (scripts/check_db2_source_boundary.py) and this
+    * would be a new edge to src/headers for one string; the vocabulary itself is
+    * defined once, in memory_authority.h. */
+   aimee_pg_bind_text(st, "?15",
+                      (provenance_category && provenance_category[0]) ? provenance_category
+                                                                      : "agent_message");
    int64_t new_id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
@@ -601,7 +612,7 @@ int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *ke
                               double salience, double surprise)
 {
    return db2_memory_row_insert_ex(tier, kind, key, content, "", confidence, session_id, ts,
-                                   sensitivity, evidence_strength, salience, surprise);
+                                   sensitivity, evidence_strength, salience, surprise, NULL);
 }
 
 int db2_memory_count_versions(const char *key_prefix)

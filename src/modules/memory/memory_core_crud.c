@@ -237,7 +237,7 @@ static int memory_keys_have_different_numeric_tokens(const char *a, const char *
 
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
                      const char *use_cases, double confidence, const char *session_id,
-                     memory_t *out)
+                     memory_authority_t authority, memory_t *out)
 {
    if (!tier || !kind || !key)
       return -1;
@@ -480,7 +480,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
       int64_t new_id = db2_memory_row_insert_ex(
           tier, kind, norm_key, content, use_cases, confidence, session_id, ts, sensitivity,
           memory_base_evidence_strength(norm_key, content, confidence),
-          memory_content_salience(content), memory_content_surprise(session_id, content));
+          memory_content_salience(content), memory_content_surprise(session_id, content),
+          MEMORY_PROVENANCE_FOR(authority));
       if (new_id < 0)
       {
          aimee_log(LOG_ERROR, "memory", "memory insert failed");
@@ -512,7 +513,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out)
 {
-   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
+   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id,
+                           MEMORY_AUTHORITY_MODEL, out);
 }
 
 int memory_get(int64_t id, memory_t *out)

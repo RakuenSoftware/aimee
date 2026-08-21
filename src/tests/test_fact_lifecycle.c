@@ -32,6 +32,27 @@ static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, i
    return 0;
 }
 
+/* The single currently-believed target of (src, rel), or "" when there is none.
+ * Asserting on the value — not just the count — is what distinguishes "the user's
+ * fact still stands" from "the model's replaced it". */
+static void current_target(const char *src, const char *rel, char *out, size_t cap)
+{
+   out[0] = '\0';
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT target FROM entity_edges WHERE source = ?1 AND relation = ?2"
+                        " AND edge_class = 'semantic' AND superseded_at = '' AND suppressed = 0"
+                        " LIMIT 1",
+                        err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", src);
+   aimee_pg_bind_text(st, "?2", rel);
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      snprintf(out, cap, "%s", aimee_pg_column_text(st, 0));
+   aimee_pg_finalize(st);
+}
+
 /* Read the stored §4/§5 fields of a semantic edge (first match). */
 static est_t edge_state(const char *src, const char *rel)
 {
@@ -90,6 +111,22 @@ static void test_pure(void)
    assert(strcmp(fact_class_for(FACT_AUTHORITY_MODEL, FACT_GATE_NOVEL), "C") == 0);
    /* a novel rel_type is speculation — Class C even from a user authority. */
    assert(strcmp(fact_class_for(FACT_AUTHORITY_USER, FACT_GATE_NOVEL), "C") == 0);
+
+   /* Provenance -> authority: exactly one value is a recorded yes, and every
+    * other answer to "did the user say this" is no. The unknown/NULL/empty cases
+    * are the ones that matter — they are what a writer that established no
+    * provenance leaves behind, and reading those as the user is the bug this
+    * mapping exists to prevent. */
+   assert(fact_authority_from_provenance("user_stated") == FACT_AUTHORITY_USER);
+   assert(fact_authority_from_provenance("agent_message") == FACT_AUTHORITY_MODEL);
+   assert(fact_authority_from_provenance("web") == FACT_AUTHORITY_MODEL);
+   assert(fact_authority_from_provenance("document") == FACT_AUTHORITY_MODEL);
+   assert(fact_authority_from_provenance("tool") == FACT_AUTHORITY_MODEL);
+   assert(fact_authority_from_provenance("delegate") == FACT_AUTHORITY_MODEL);
+   assert(fact_authority_from_provenance("synthesis") == FACT_AUTHORITY_MODEL);
+   assert(fact_authority_from_provenance("User_Stated") == FACT_AUTHORITY_MODEL); /* exact match */
+   assert(fact_authority_from_provenance("") == FACT_AUTHORITY_MODEL);
+   assert(fact_authority_from_provenance(NULL) == FACT_AUTHORITY_MODEL);
    printf("  PASS: test_pure\n");
 }
 
@@ -211,6 +248,38 @@ int main(void)
    assert(db2_fact_commit("hank", NODE_PERSON, "works_for", "globex", NODE_ORG, FACT_AUTHORITY_USER,
                           1) == FACT_GATE_ACCEPT);
    assert(db2_fact_current_count("hank") == 1); /* globex supersedes acme */
+
+   /* §5 authority on a FUNCTIONAL correction. A model-authored (Class B) write may
+    * not supersede the user's Class-A value — and may not be inserted beside it
+    * either, which would leave works_for holding two current values. */
+   char cur[128] = "";
+   assert(db2_fact_commit("ivy", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_commit("ivy", NODE_PERSON, "works_for", "globex", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("ivy") == 1); /* not two contradictory values */
+   current_target("ivy", "works_for", cur, sizeof(cur));
+   assert(strcmp(cur, "acme") == 0); /* the user's fact stands */
+
+   /* The reverse direction still works: a user write outranks a model-authored
+    * value and supersedes it, taking the edge to Class A. */
+   assert(db2_fact_commit("jack", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_commit("jack", NODE_PERSON, "works_for", "globex", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("jack") == 1);
+   current_target("jack", "works_for", cur, sizeof(cur));
+   assert(strcmp(cur, "globex") == 0);
+
+   /* Equal rank corrects as before: a model write supersedes a model-authored
+    * value (the guard bounds authority, it does not freeze the relation). */
+   assert(db2_fact_commit("kim", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_commit("kim", NODE_PERSON, "works_for", "globex", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("kim") == 1);
+   current_target("kim", "works_for", cur, sizeof(cur));
+   assert(strcmp(cur, "globex") == 0);
 
    /* Commit correction: an IMMUTABLE relation rejects a contradicting object. iris
     * born_in kyoto is fixed; a later born_in osaka is dropped. */

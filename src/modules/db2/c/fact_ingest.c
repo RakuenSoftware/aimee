@@ -78,7 +78,8 @@ int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabl
    return written;
 }
 
-int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
+int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *facts_out,
+                           size_t facts_cap)
 {
    if (facts_out && facts_cap)
       facts_out[0] = '\0';
@@ -91,8 +92,13 @@ int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
    int requests_sensitive = memory_pii_turn_requests_sensitive(query);
 
    /* §4: a retraction turn corrects rather than asserts — retract the named
-    * attribute about the user (a user retraction always wins; an imprecise attr
-    * safely no-ops). This stays synchronous: it is a cheap Postgres write, no LLM.
+    * attribute about the user at the CALLER'S authority (an imprecise attr safely
+    * no-ops). The authority is the caller's authenticated one, passed in: this
+    * path deletes, and `query` is a caller-supplied string, so a turn that merely
+    * says "forget my ..." must not thereby speak as the user. Under
+    * FACT_AUTHORITY_MODEL db2_fact_retract skips Class-A rows and refuses an
+    * immutable relation, which is what a model-issued correction should do.
+    * This stays synchronous: it is a cheap Postgres write, no LLM.
     * Fact EXTRACTION is offline-only (the memory_facts drain runs pattern + LLM),
     * so we do NOT run db2_fact_ingest_text() on the turn hot path. */
    int is_retraction = 0;
@@ -106,7 +112,7 @@ int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
        * again) where deleting one they did not name is not. */
       LOG_WARN("memory", "retraction scan gave no answer; not retracting this turn");
    else if (is_retraction && has_attr)
-      (void)db2_fact_retract("user", attr, NULL, FACT_AUTHORITY_USER);
+      (void)db2_fact_retract("user", attr, NULL, authority);
 
    /* §7 read: the user's facts + facts about any entity named in the turn,
     * PII-gated, into the envelope. */

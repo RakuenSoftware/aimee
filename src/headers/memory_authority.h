@@ -22,4 +22,21 @@ typedef enum
    MEMORY_AUTHORITY_USER = 1,  /* user/operator-initiated: may destroy */
 } memory_authority_t;
 
+/* The same distinction PERSISTED on the row that a write creates, in the
+ * memories.provenance_category column. A destructive edit's authority matters
+ * only while the request runs; a stored note's origin has to outlive it, because
+ * the typed-fact drain mines that note into facts LATER and must know whether
+ * they may enter at Class A (typed-fact §5: user-stated facts win all conflicts,
+ * so only the user can create one).
+ *
+ * Both values already exist in the column's vocabulary (integrity_source_name).
+ * `agent_message` is the fail-closed one: it is what an omitted, unknown, or
+ * un-established provenance resolves to. */
+#define MEMORY_PROVENANCE_USER  "user_stated"
+#define MEMORY_PROVENANCE_AGENT "agent_message"
+
+/* The provenance a write of this authority records. */
+#define MEMORY_PROVENANCE_FOR(authority)                                                           \
+   ((authority) == MEMORY_AUTHORITY_USER ? MEMORY_PROVENANCE_USER : MEMORY_PROVENANCE_AGENT)
+
 #endif /* MEMORY_AUTHORITY_H */

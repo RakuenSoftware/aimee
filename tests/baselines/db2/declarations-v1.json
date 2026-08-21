@@ -4031,7 +4031,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 114
+          "line": 115
         }
       ],
       "signature": "int db2_code_audit_edge_target_like ( const char * relation , const char * project , char * out , size_t cap )",
@@ -7429,7 +7429,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 240
+          "line": 248
         }
       ],
       "signature": "int db2_entity_edge_backfill_utility_touched_at ( void )",
@@ -7442,7 +7442,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 270
+          "line": 278
         }
       ],
       "signature": "int db2_entity_edge_build_unique_index ( int * out_already_exists )",
@@ -7457,7 +7457,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 125
+          "line": 133
         }
       ],
       "signature": "int db2_entity_edge_bump_utility ( const char * key , double delta )",
@@ -7472,7 +7472,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 120
+          "line": 128
         }
       ],
       "signature": "int db2_entity_edge_co_targets ( const char * node , const char * relation , int min_weight , char ( * out ) [ 128 ] , int max )",
@@ -7487,7 +7487,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 255
+          "line": 263
         }
       ],
       "signature": "int db2_entity_edge_dedup_audit ( db2_entity_edge_dedup_report_t * out )",
@@ -7502,7 +7502,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 261
+          "line": 269
         }
       ],
       "signature": "int db2_entity_edge_dedup_migrate ( const char * rollback_path , int dry_run , db2_entity_edge_dedup_report_t * out )",
@@ -7521,7 +7521,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 178
+          "line": 186
         }
       ],
       "signature": "int db2_entity_edge_explain_by_entity ( const char * entity , db2_entity_edge_explain_t * out , int max )",
@@ -7538,7 +7538,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 61
+          "line": 69
         }
       ],
       "signature": "int db2_entity_edge_list_by_entity ( const char * entity , edge_t * out , int max )",
@@ -7554,7 +7554,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 65
+          "line": 73
         }
       ],
       "signature": "int db2_entity_edge_neighbors ( const char * entity , db2_entity_neighbor_t * out , int max , int limit_sql )",
@@ -7569,7 +7569,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 72
+          "line": 80
         }
       ],
       "signature": "int db2_entity_edge_neighbors_filtered ( const char * entity , const char * rel_a , const char * rel_b , int order_by_weight , db2_entity_neighbor_t * out , int max , int limit_sql )",
@@ -7585,7 +7585,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 216
+          "line": 224
         }
       ],
       "signature": "int db2_entity_edge_neighbors_weighted ( const char * entity , db2_entity_edge_weighted_neighbor_t * out , int max , int limit_sql , int utility_scoring_enabled )",
@@ -7600,7 +7600,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 146
+          "line": 154
         }
       ],
       "signature": "int db2_entity_edge_normalize_weights ( void )",
@@ -7615,7 +7615,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 129
+          "line": 137
         }
       ],
       "signature": "int db2_entity_edge_outbound_neighbors ( const char * source , db2_entity_neighbor_t * out , int max , int limit_sql )",
@@ -7630,7 +7630,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 142
+          "line": 150
         }
       ],
       "signature": "int db2_entity_edge_prune_orphans ( void )",
@@ -7645,7 +7645,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 210
+          "line": 218
         }
       ],
       "signature": "double db2_entity_edge_prune_priority ( int weight , double decayed_utility , double utility_weight )",
@@ -7661,7 +7661,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 135
+          "line": 143
         }
       ],
       "signature": "int db2_entity_edge_search_by_token ( const char * token , edge_t * out , int max , int limit_sql )",
@@ -7676,7 +7676,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 115
+          "line": 123
         }
       ],
       "signature": "int db2_entity_edge_top_distinct_triples ( edge_t * out , int max )",
@@ -7691,7 +7691,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 111
+          "line": 119
         }
       ],
       "signature": "int db2_entity_edge_top_partners_by_relation ( const char * entity , const char * relation , db2_entity_neighbor_t * out , int max )",
@@ -7706,7 +7706,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 106
+          "line": 114
         }
       ],
       "signature": "int db2_entity_edge_top_targets_by_relation ( const char * source , const char * relation , db2_entity_neighbor_t * out , int max )",
@@ -7721,7 +7721,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 234
+          "line": 242
         }
       ],
       "signature": "int db2_entity_edge_two_hop_neighbors ( const char * entity , int max , int limit_per_hop , db2_entity_edge_hop_t * out )",
@@ -7734,7 +7734,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 265
+          "line": 273
         }
       ],
       "signature": "int db2_entity_edge_unique_index_exists ( void )",
@@ -7767,7 +7767,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 50
+          "line": 58
         }
       ],
       "signature": "int db2_entity_edge_upsert_semantic ( const char * source , const char * relation , const char * target , int relation_id , int subject_kind , int object_kind , const char * confidence_class , double confidence , int * out_added )",
@@ -7782,7 +7782,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 204
+          "line": 212
         }
       ],
       "signature": "double db2_entity_edge_utility_decay ( double raw_score , const char * touched_at , int half_life_days )",
@@ -7797,7 +7797,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 78
+          "line": 86
         }
       ],
       "signature": "int db2_entity_edge_walk_step ( const char * node , edge_t * out , int max )",
@@ -7812,7 +7812,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 101
+          "line": 109
         }
       ],
       "signature": "int db2_entity_edge_walk_step_with_kinds ( const char * node , db2_entity_edge_with_kinds_t * out , int max )",
@@ -7828,7 +7828,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 57
+          "line": 65
         }
       ],
       "signature": "int db2_entity_edges_semantic_by_entity ( const char * entity , edge_t * out , int max )",
@@ -8385,6 +8385,7 @@
     {
       "consumers": [
         "src/kb/kb_memory_facts.c",
+        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fact_recall.c",
         "src/tests/test_rel_types_store.c",
@@ -8409,7 +8410,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 90
+          "line": 103
         }
       ],
       "signature": "int db2_fact_current_count ( const char * entity )",
@@ -8425,7 +8426,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 56
+          "line": 69
         }
       ],
       "signature": "int db2_fact_expire_speculative ( int ttl_days )",
@@ -8457,7 +8458,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 61
+          "line": 74
         }
       ],
       "signature": "int db2_fact_promote_durable ( int threshold )",
@@ -8507,7 +8508,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 84
+          "line": 97
         }
       ],
       "signature": "int db2_fact_retract ( const char * source , const char * relation , const char * target , fact_authority_t authority )",
@@ -9593,7 +9594,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 376
+          "line": 388
         }
       ],
       "signature": "int db2_kb_file_index_delete_current_project ( const char * project )",
@@ -9609,7 +9610,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 375
+          "line": 387
         }
       ],
       "signature": "int db2_kb_file_index_delete_project ( const char * project )",
@@ -9624,7 +9625,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 372
+          "line": 384
         }
       ],
       "signature": "int db2_kb_file_index_get ( const char * project , const char * file_path , char * hash_out , size_t hash_cap , char * ingested_at_out , size_t ingested_at_cap )",
@@ -9640,7 +9641,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 374
+          "line": 386
         }
       ],
       "signature": "char * db2_kb_file_index_get_content ( const char * project , const char * file_path )",
@@ -9655,7 +9656,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 377
+          "line": 389
         }
       ],
       "signature": "cJSON * db2_kb_file_index_snapshot_json ( const char * project )",
@@ -9671,7 +9672,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 370
+          "line": 382
         }
       ],
       "signature": "int db2_kb_file_index_upsert ( const char * project , const char * file_path , const char * file_hash , const char * content )",
@@ -9713,7 +9714,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 363
+          "line": 375
         }
       ],
       "signature": "int db2_kb_ingest_queue_claim_next ( db2_kb_ingest_job_t * out )",
@@ -9729,7 +9730,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 364
+          "line": 376
         }
       ],
       "signature": "int db2_kb_ingest_queue_complete ( int64_t job_id , int files_indexed , int chunks_added , int embeddings_added )",
@@ -9748,7 +9749,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 361
+          "line": 373
         }
       ],
       "signature": "int db2_kb_ingest_queue_enqueue ( const char * project , const char * root_path , const char * workspace , int force , int priority )",
@@ -9764,7 +9765,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 366
+          "line": 378
         }
       ],
       "signature": "int db2_kb_ingest_queue_fail ( int64_t job_id , const char * error_message )",
@@ -9779,7 +9780,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 368
+          "line": 380
         }
       ],
       "signature": "int db2_kb_ingest_queue_recent ( db2_kb_ingest_recent_t * rows , int max_rows )",
@@ -9794,7 +9795,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 348
+          "line": 360
         }
       ],
       "signature": "int db2_kb_ingest_queue_reset_running ( void )",
@@ -9809,7 +9810,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 367
+          "line": 379
         }
       ],
       "signature": "int db2_kb_ingest_queue_stats ( db2_kb_ingest_queue_stats_t * out )",
@@ -10299,7 +10300,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 165
+          "line": 166
         }
       ],
       "review": {
@@ -10321,7 +10322,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 160
+          "line": 161
         }
       ],
       "review": {
@@ -10343,7 +10344,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 194
+          "line": 195
         }
       ],
       "review": {
@@ -10365,7 +10366,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 192
+          "line": 193
         }
       ],
       "review": {
@@ -10387,7 +10388,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 191
+          "line": 192
         }
       ],
       "review": {
@@ -10409,7 +10410,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 180
+          "line": 181
         }
       ],
       "review": {
@@ -10431,7 +10432,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 179
+          "line": 180
         }
       ],
       "review": {
@@ -10453,7 +10454,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 178
+          "line": 179
         }
       ],
       "review": {
@@ -10475,7 +10476,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 188
+          "line": 189
         }
       ],
       "review": {
@@ -10497,7 +10498,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 187
+          "line": 188
         }
       ],
       "review": {
@@ -10519,7 +10520,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 380
+          "line": 392
         }
       ],
       "signature": "int db2_kb_service_async_job_get ( int64_t job_id , db2_kb_service_async_job_t * out )",
@@ -10537,7 +10538,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 384
+          "line": 396
         }
       ],
       "signature": "int db2_kb_service_async_queue_drain ( const char * claimed_by , const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
@@ -10552,7 +10553,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 381
+          "line": 393
         }
       ],
       "signature": "int db2_kb_service_async_queue_spawn_worker ( void )",
@@ -10570,7 +10571,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 379
+          "line": 391
         }
       ],
       "signature": "int db2_kb_service_async_queue_status ( db2_kb_service_async_queue_stats_t * out )",
@@ -10588,7 +10589,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 392
+          "line": 404
         }
       ],
       "signature": "int db2_kb_service_clear_current_project ( const char * project )",
@@ -10605,7 +10606,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 391
+          "line": 403
         }
       ],
       "signature": "int db2_kb_service_clear_project ( const char * project )",
@@ -10622,7 +10623,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 116
+          "line": 117
         }
       ],
       "review": {
@@ -10644,7 +10645,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 151
+          "line": 152
         }
       ],
       "review": {
@@ -10666,7 +10667,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 154
+          "line": 155
         }
       ],
       "review": {
@@ -10688,7 +10689,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 150
+          "line": 151
         }
       ],
       "review": {
@@ -10710,7 +10711,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 149
+          "line": 150
         }
       ],
       "review": {
@@ -10732,7 +10733,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 147
+          "line": 148
         }
       ],
       "review": {
@@ -10754,7 +10755,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 152
+          "line": 153
         }
       ],
       "review": {
@@ -10776,7 +10777,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 153
+          "line": 154
         }
       ],
       "review": {
@@ -10797,7 +10798,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 86
+          "line": 87
         }
       ],
       "signature": "int db2_kb_service_collect_memory_verify ( int include_failed_detail , int max_attempts , db2_kb_service_memory_verify_t * out )",
@@ -10813,7 +10814,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 389
+          "line": 401
         }
       ],
       "signature": "int db2_kb_service_collect_project_status ( const char * project , db2_kb_service_project_status_t * out )",
@@ -10828,7 +10829,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 91
+          "line": 92
         }
       ],
       "signature": "int db2_kb_service_collect_reembed_status ( db2_kb_service_reembed_status_t * out )",
@@ -10843,7 +10844,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 88
+          "line": 89
         }
       ],
       "signature": "int db2_kb_service_collect_verify_snapshot ( db2_kb_service_verify_snapshot_t * out )",
@@ -10858,7 +10859,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 99
+          "line": 100
         }
       ],
       "signature": "int db2_kb_service_count_embeddings_for_version ( const char * version )",
@@ -10873,7 +10874,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 118
+          "line": 119
         }
       ],
       "review": {
@@ -10894,7 +10895,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 124
+          "line": 125
         }
       ],
       "review": {
@@ -10915,7 +10916,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 117
+          "line": 118
         }
       ],
       "review": {
@@ -10936,7 +10937,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 123
+          "line": 124
         }
       ],
       "review": {
@@ -10958,7 +10959,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 131
+          "line": 132
         }
       ],
       "review": {
@@ -10979,7 +10980,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 122
+          "line": 123
         }
       ],
       "review": {
@@ -11000,7 +11001,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 125
+          "line": 126
         }
       ],
       "review": {
@@ -11022,7 +11023,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 230
+          "line": 231
         }
       ],
       "review": {
@@ -11044,7 +11045,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 227
+          "line": 228
         }
       ],
       "review": {
@@ -11066,7 +11067,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 226
+          "line": 227
         }
       ],
       "review": {
@@ -11088,7 +11089,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 229
+          "line": 230
         }
       ],
       "review": {
@@ -11110,7 +11111,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 228
+          "line": 229
         }
       ],
       "review": {
@@ -11132,7 +11133,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 183
+          "line": 184
         }
       ],
       "review": {
@@ -11154,7 +11155,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 186
+          "line": 187
         }
       ],
       "review": {
@@ -11175,7 +11176,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 103
+          "line": 104
         }
       ],
       "signature": "int db2_kb_service_directive_create ( const char * question , const char * topic , const char * anchor_entity , const char * anchor_file , const char * cause , int priority , int64_t memory_a_id , int64_t memory_b_id , const char * evidence , const char * source_session , const char * valid_until , int * dedup_out , cJSON * * directive_out )",
@@ -11191,7 +11192,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 222
+          "line": 223
         }
       ],
       "review": {
@@ -11212,7 +11213,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 112
+          "line": 113
         }
       ],
       "review": {
@@ -11233,7 +11234,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 109
+          "line": 110
         }
       ],
       "signature": "int db2_kb_service_directive_resolve ( int64_t id , int64_t resolution_memory_id , const char * note )",
@@ -11248,7 +11249,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 110
+          "line": 111
         }
       ],
       "signature": "int db2_kb_service_directive_suppress ( int64_t id )",
@@ -11263,7 +11264,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 111
+          "line": 112
         }
       ],
       "signature": "int db2_kb_service_directive_sweep_expired ( void )",
@@ -11279,7 +11280,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 210
+          "line": 211
         }
       ],
       "signature": "cJSON * db2_kb_service_entities_merge_json ( int64_t from_id , int64_t into_id )",
@@ -11295,7 +11296,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 211
+          "line": 212
         }
       ],
       "signature": "cJSON * db2_kb_service_entities_unmerge_json ( int64_t merge_id )",
@@ -11311,7 +11312,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 207
+          "line": 208
         }
       ],
       "signature": "cJSON * db2_kb_service_facts_retract_json ( const char * source , const char * relation , const char * target , const char * authority )",
@@ -11327,7 +11328,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 198
+          "line": 199
         }
       ],
       "review": {
@@ -11348,7 +11349,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 89
+          "line": 90
         }
       ],
       "signature": "int db2_kb_service_get_active_embedder_version ( char * out , size_t out_len )",
@@ -11364,7 +11365,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 102
+          "line": 103
         }
       ],
       "signature": "int db2_kb_service_kb_document_exists ( int64_t document_id )",
@@ -11379,7 +11380,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 394
+          "line": 406
         }
       ],
       "review": {
@@ -11400,7 +11401,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 393
+          "line": 405
         }
       ],
       "review": {
@@ -11422,7 +11423,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 158
+          "line": 159
         }
       ],
       "review": {
@@ -11443,7 +11444,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 395
+          "line": 407
         }
       ],
       "review": {
@@ -11464,7 +11465,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 100
+          "line": 101
         }
       ],
       "signature": "int db2_kb_service_list_memory_ids_by_updated ( int limit , int64_t * ids , int max_ids )",
@@ -11479,7 +11480,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 97
+          "line": 98
         }
       ],
       "signature": "int db2_kb_service_list_pending_reembed_memory_ids ( const char * version , int resume_last_id , int64_t * ids , int max_ids )",
@@ -11494,7 +11495,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 96
+          "line": 97
         }
       ],
       "signature": "int db2_kb_service_list_unembedded_memory_ids ( const char * version , int64_t * ids , int max_ids )",
@@ -11509,7 +11510,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 92
+          "line": 93
         }
       ],
       "signature": "int db2_kb_service_mark_reembed_finished ( const char * finished_at )",
@@ -11525,7 +11526,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 258
+          "line": 259
         }
       ],
       "review": {
@@ -11547,7 +11548,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 319
+          "line": 331
         }
       ],
       "review": {
@@ -11569,7 +11570,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 287
+          "line": 288
         }
       ],
       "review": {
@@ -11591,7 +11592,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 306
+          "line": 314
         }
       ],
       "review": {
@@ -11613,7 +11614,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 212
+          "line": 213
         }
       ],
       "review": {
@@ -11635,7 +11636,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 286
+          "line": 287
         }
       ],
       "review": {
@@ -11657,7 +11658,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 307
+          "line": 319
         }
       ],
       "review": {
@@ -11666,8 +11667,8 @@
         "family": "memory",
         "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
       },
-      "signature": "cJSON * db2_kb_service_memory_context_block_json ( const char * query , const char * block_type , int limit )",
-      "signature_sha256": "632049b1f218704e51fd623ed69c34e3938f1cd1bcaa91e0240f941642b79b0c",
+      "signature": "cJSON * db2_kb_service_memory_context_block_json ( const char * query , const char * block_type , int limit , fact_authority_t authority )",
+      "signature_sha256": "8c9ed979ae2752b963bdb0ea04561b2590970bc66a458d9dd6c6f21cb31d87a0",
       "status": "reviewed",
       "symbol": "db2_kb_service_memory_context_block_json"
     },
@@ -11679,7 +11680,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 145
+          "line": 146
         }
       ],
       "review": {
@@ -11701,7 +11702,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 277
+          "line": 278
         }
       ],
       "review": {
@@ -11723,7 +11724,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 293
+          "line": 294
         }
       ],
       "review": {
@@ -11745,7 +11746,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 284
+          "line": 285
         }
       ],
       "review": {
@@ -11767,7 +11768,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 314
+          "line": 326
         }
       ],
       "review": {
@@ -11789,7 +11790,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 313
+          "line": 325
         }
       ],
       "review": {
@@ -11811,7 +11812,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 251
+          "line": 252
         }
       ],
       "review": {
@@ -11833,7 +11834,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 295
+          "line": 296
         }
       ],
       "review": {
@@ -11855,7 +11856,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 144
+          "line": 145
         }
       ],
       "review": {
@@ -11877,7 +11878,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 202
+          "line": 203
         }
       ],
       "review": {
@@ -11899,7 +11900,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 312
+          "line": 324
         }
       ],
       "review": {
@@ -11921,7 +11922,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 231
+          "line": 232
         }
       ],
       "review": {
@@ -11943,7 +11944,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 291
+          "line": 292
         }
       ],
       "review": {
@@ -11965,7 +11966,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 289
+          "line": 290
         }
       ],
       "review": {
@@ -11987,7 +11988,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 166
+          "line": 167
         }
       ],
       "review": {
@@ -12009,7 +12010,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 195
+          "line": 196
         }
       ],
       "review": {
@@ -12031,7 +12032,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 318
+          "line": 330
         }
       ],
       "review": {
@@ -12053,7 +12054,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 233
+          "line": 234
         }
       ],
       "review": {
@@ -12075,7 +12076,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 247
+          "line": 248
         }
       ],
       "review": {
@@ -12097,7 +12098,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 303
+          "line": 310
         }
       ],
       "review": {
@@ -12106,8 +12107,8 @@
         "family": "memory",
         "reason": "The extended-insert cJSON facade is not the mutation boundary; one typed memory.insert operation validates all bounded fields and owns the complete transactional insert."
       },
-      "signature": "cJSON * db2_kb_service_memory_insert_ex_json ( const char * tier , const char * kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id )",
-      "signature_sha256": "3e639110365710819aa0845d3737615c088a39e2f6c271ed84bb831aea6f5791",
+      "signature": "cJSON * db2_kb_service_memory_insert_ex_json ( const char * tier , const char * kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id , int authority )",
+      "signature_sha256": "dcc24d31a3c30dbd0de3f55f2d3ecdcddd9545612344c2a16b5daced5c1e2bb7",
       "status": "reviewed",
       "symbol": "db2_kb_service_memory_insert_ex_json"
     },
@@ -12121,7 +12122,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 300
+          "line": 301
         }
       ],
       "review": {
@@ -12143,7 +12144,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 146
+          "line": 147
         }
       ],
       "review": {
@@ -12165,7 +12166,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 182
+          "line": 183
         }
       ],
       "review": {
@@ -12187,7 +12188,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 296
+          "line": 297
         }
       ],
       "review": {
@@ -12209,7 +12210,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 299
+          "line": 300
         }
       ],
       "review": {
@@ -12231,7 +12232,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 298
+          "line": 299
         }
       ],
       "review": {
@@ -12253,7 +12254,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 400
+          "line": 412
         }
       ],
       "review": {
@@ -12275,7 +12276,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 282
+          "line": 283
         }
       ],
       "review": {
@@ -12297,7 +12298,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 232
+          "line": 233
         }
       ],
       "review": {
@@ -12319,7 +12320,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 216
+          "line": 217
         }
       ],
       "review": {
@@ -12341,7 +12342,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 214
+          "line": 215
         }
       ],
       "review": {
@@ -12363,7 +12364,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 215
+          "line": 216
         }
       ],
       "review": {
@@ -12385,7 +12386,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 218
+          "line": 219
         }
       ],
       "review": {
@@ -12407,7 +12408,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 217
+          "line": 218
         }
       ],
       "review": {
@@ -12429,7 +12430,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 234
+          "line": 235
         }
       ],
       "review": {
@@ -12451,7 +12452,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 257
+          "line": 258
         }
       ],
       "review": {
@@ -12473,7 +12474,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 243
+          "line": 244
         }
       ],
       "review": {
@@ -12495,7 +12496,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 240
+          "line": 241
         }
       ],
       "review": {
@@ -12517,7 +12518,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 238
+          "line": 239
         }
       ],
       "review": {
@@ -12539,7 +12540,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 255
+          "line": 256
         }
       ],
       "review": {
@@ -12561,7 +12562,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 244
+          "line": 245
         }
       ],
       "review": {
@@ -12583,7 +12584,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 256
+          "line": 257
         }
       ],
       "review": {
@@ -12605,7 +12606,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 285
+          "line": 286
         }
       ],
       "review": {
@@ -12627,7 +12628,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 283
+          "line": 284
         }
       ],
       "review": {
@@ -12649,7 +12650,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 259
+          "line": 260
         }
       ],
       "review": {
@@ -12671,7 +12672,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 101
+          "line": 102
         }
       ],
       "signature": "int db2_kb_service_memory_record_exists ( int64_t record_id )",
@@ -12687,7 +12688,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 280
+          "line": 281
         }
       ],
       "review": {
@@ -12709,7 +12710,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 223
+          "line": 224
         }
       ],
       "review": {
@@ -12731,7 +12732,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 248
+          "line": 249
         }
       ],
       "review": {
@@ -12753,7 +12754,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 167
+          "line": 168
         }
       ],
       "review": {
@@ -12775,7 +12776,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 316
+          "line": 328
         }
       ],
       "review": {
@@ -12797,7 +12798,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 315
+          "line": 327
         }
       ],
       "review": {
@@ -12819,7 +12820,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 288
+          "line": 289
         }
       ],
       "review": {
@@ -12841,7 +12842,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 219
+          "line": 220
         }
       ],
       "review": {
@@ -12863,7 +12864,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 281
+          "line": 282
         }
       ],
       "review": {
@@ -12885,7 +12886,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 200
+          "line": 201
         }
       ],
       "review": {
@@ -12907,7 +12908,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 253
+          "line": 254
         }
       ],
       "review": {
@@ -12929,7 +12930,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 252
+          "line": 253
         }
       ],
       "review": {
@@ -12951,7 +12952,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 235
+          "line": 236
         }
       ],
       "review": {
@@ -12973,7 +12974,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 278
+          "line": 279
         }
       ],
       "review": {
@@ -12995,7 +12996,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 279
+          "line": 280
         }
       ],
       "review": {
@@ -13017,7 +13018,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 261
+          "line": 262
         }
       ],
       "review": {
@@ -13038,7 +13039,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 132
+          "line": 133
         }
       ],
       "review": {
@@ -13059,7 +13060,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 134
+          "line": 135
         }
       ],
       "review": {
@@ -13080,7 +13081,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 135
+          "line": 136
         }
       ],
       "review": {
@@ -13101,7 +13102,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 93
+          "line": 94
         }
       ],
       "signature": "int db2_kb_service_prepare_reembed_start ( const char * version , const char * started_at , db2_kb_service_reembed_start_t * out )",
@@ -13117,7 +13118,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 143
+          "line": 144
         }
       ],
       "review": {
@@ -13138,7 +13139,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 84
+          "line": 85
         }
       ],
       "signature": "int db2_kb_service_reset_stuck_vector_ops ( int max_attempts )",
@@ -13154,7 +13155,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 181
+          "line": 182
         }
       ],
       "review": {
@@ -13176,7 +13177,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 196
+          "line": 197
         }
       ],
       "review": {
@@ -13198,7 +13199,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 138
+          "line": 139
         }
       ],
       "review": {
@@ -13220,7 +13221,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 137
+          "line": 138
         }
       ],
       "review": {
@@ -13242,7 +13243,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 139
+          "line": 140
         }
       ],
       "review": {
@@ -13264,7 +13265,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 136
+          "line": 137
         }
       ],
       "review": {
@@ -13286,7 +13287,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 197
+          "line": 198
         }
       ],
       "review": {
@@ -13307,7 +13308,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 397
+          "line": 409
         }
       ],
       "review": {
@@ -13328,7 +13329,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 398
+          "line": 410
         }
       ],
       "review": {
@@ -13350,7 +13351,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 236
+          "line": 237
         }
       ],
       "review": {
@@ -13372,7 +13373,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 237
+          "line": 238
         }
       ],
       "review": {
@@ -13393,7 +13394,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 90
+          "line": 91
         }
       ],
       "signature": "int db2_kb_service_set_active_embedder_version ( const char * version , const char * updated_at )",
@@ -13409,7 +13410,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 173
+          "line": 174
         }
       ],
       "review": {
@@ -13431,7 +13432,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 169
+          "line": 170
         }
       ],
       "review": {
@@ -13453,7 +13454,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 172
+          "line": 173
         }
       ],
       "review": {
@@ -13475,7 +13476,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 174
+          "line": 175
         }
       ],
       "review": {
@@ -13497,7 +13498,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 168
+          "line": 169
         }
       ],
       "review": {
@@ -13519,7 +13520,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 171
+          "line": 172
         }
       ],
       "review": {
@@ -13541,7 +13542,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 142
+          "line": 143
         }
       ],
       "review": {
@@ -13563,7 +13564,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 141
+          "line": 142
         }
       ],
       "review": {
@@ -13584,7 +13585,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 95
+          "line": 96
         }
       ],
       "signature": "int db2_kb_service_update_reembed_progress ( int last_id , int done )",
@@ -15302,7 +15303,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 683
+          "line": 691
         }
       ],
       "signature": "int db2_memory_aggregate ( const char * entity_seed , const char * keyword , memory_t * out , int max , int * truncated_out )",
@@ -15317,7 +15318,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1038
+          "line": 1046
         }
       ],
       "signature": "void db2_memory_alias_insert ( int64_t memory_id , const char * alias , double weight )",
@@ -15332,7 +15333,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 963
+          "line": 971
         }
       ],
       "signature": "void db2_memory_aliases_delete_for_memory ( int64_t memory_id )",
@@ -15347,7 +15348,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 823
+          "line": 831
         }
       ],
       "signature": "int db2_memory_alloc_all_ids ( int64_t * * out_ids , size_t * out_count )",
@@ -15440,7 +15441,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1034
+          "line": 1042
         }
       ],
       "signature": "void db2_memory_chunk_upsert ( int64_t memory_id , int chunk_index , const char * chunk_text )",
@@ -15455,7 +15456,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 960
+          "line": 968
         }
       ],
       "signature": "void db2_memory_chunks_delete_for_memory ( int64_t memory_id )",
@@ -15470,7 +15471,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1030
+          "line": 1038
         }
       ],
       "signature": "int db2_memory_chunks_list ( int64_t memory_id , db2_memory_chunk_row_t * out , int max )",
@@ -15531,7 +15532,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 635
+          "line": 643
         }
       ],
       "signature": "int db2_memory_collect_relation_token_matches ( const char * token , int limit , memory_t * out , int max )",
@@ -15676,7 +15677,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 866
+          "line": 874
         }
       ],
       "signature": "void db2_memory_coref_audit_insert ( int64_t memory_id , const char * session_id , const char * outcome , const char * entity , const char * mode , double confidence )",
@@ -15713,7 +15714,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 432
+          "line": 440
         }
       ],
       "signature": "int db2_memory_count_and_max_updated ( int * out_count , char * out_ts , int out_ts_len )",
@@ -15728,7 +15729,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 812
+          "line": 820
         }
       ],
       "signature": "int db2_memory_count_by_tier_kind ( db2_memory_tier_kind_count_t * out , int max )",
@@ -15744,7 +15745,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 574
+          "line": 582
         }
       ],
       "review": {
@@ -15765,7 +15766,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 560
+          "line": 568
         }
       ],
       "review": {
@@ -15786,7 +15787,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 577
+          "line": 585
         }
       ],
       "review": {
@@ -15808,7 +15809,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 582
+          "line": 590
         }
       ],
       "review": {
@@ -15829,7 +15830,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 268
+          "line": 276
         }
       ],
       "review": {
@@ -15850,7 +15851,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 367
+          "line": 375
         }
       ],
       "signature": "void db2_memory_decay_confidence ( int64_t memory_id )",
@@ -15880,7 +15881,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 690
+          "line": 698
         }
       ],
       "signature": "int db2_memory_dedupe_by_key ( int dry_run )",
@@ -15895,7 +15896,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 718
+          "line": 726
         }
       ],
       "signature": "int db2_memory_delete_row ( int64_t memory_id )",
@@ -15910,7 +15911,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 836
+          "line": 844
         }
       ],
       "signature": "void db2_memory_entities_delete_for_memory ( int64_t memory_id )",
@@ -15927,7 +15928,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1020
+          "line": 1028
         }
       ],
       "signature": "int db2_memory_entities_list_weighted ( int64_t memory_id , db2_memory_entity_row_t * out , int max )",
@@ -15944,7 +15945,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 827
+          "line": 835
         }
       ],
       "signature": "void db2_memory_entity_insert ( int64_t memory_id , const char * entity , const char * role , double weight )",
@@ -15990,7 +15991,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 897
+          "line": 905
         }
       ],
       "signature": "int64_t db2_memory_episode_insert ( int64_t memory_id , const char * episode_key , const char * episode_text , const char * source_session , const char * reference_time )",
@@ -16005,7 +16006,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1043
+          "line": 1051
         }
       ],
       "signature": "int db2_memory_episode_unit_ids_for_session ( int64_t memory_id , const char * source_session , int64_t * out , int max )",
@@ -16020,7 +16021,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1049
+          "line": 1057
         }
       ],
       "signature": "int db2_memory_episode_unit_ids_supersedes ( int64_t source_memory_id , int64_t * out , int max )",
@@ -16035,7 +16036,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 915
+          "line": 923
         }
       ],
       "signature": "void db2_memory_episodes_delete_for_memory ( int64_t memory_id )",
@@ -16066,7 +16067,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 952
+          "line": 960
         }
       ],
       "signature": "void db2_memory_event_frame_insert ( int64_t memory_id , const char * actor , const char * action , const char * object , const char * location , const char * event_time , const char * evidence_kind )",
@@ -16081,7 +16082,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 957
+          "line": 965
         }
       ],
       "signature": "void db2_memory_event_frames_delete_for_memory ( int64_t memory_id )",
@@ -16097,7 +16098,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 948
+          "line": 956
         }
       ],
       "signature": "int db2_memory_event_frames_list ( int64_t memory_id , db2_memory_event_frame_row_t * out , int max )",
@@ -16163,7 +16164,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 649
+          "line": 657
         }
       ],
       "signature": "int db2_memory_filter_archived_ids ( const int64_t * ids , int n , int64_t * out , int max )",
@@ -16178,7 +16179,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 755
+          "line": 763
         }
       ],
       "signature": "int db2_memory_find_conflicting_l2 ( const char * key , const char * content , double * existing_confidence_out )",
@@ -16211,7 +16212,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 762
+          "line": 770
         }
       ],
       "review": {
@@ -16239,7 +16240,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 704
+          "line": 712
         }
       ],
       "signature": "int db2_memory_get ( int64_t memory_id , memory_t * out )",
@@ -16255,7 +16256,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 904
+          "line": 912
         }
       ],
       "signature": "int db2_memory_get_by_unit_id ( int64_t unit_id , memory_t * out )",
@@ -16285,7 +16286,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 330
+          "line": 338
         }
       ],
       "signature": "int db2_memory_get_content ( int64_t memory_id , char * out , int out_len )",
@@ -16346,7 +16347,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 995
+          "line": 1003
         }
       ],
       "signature": "int db2_memory_get_session_kinds ( int64_t memory_id , char * session_out , int session_len , char * kind_out , int kind_len , char * explicit_kind_out , int explicit_kind_len )",
@@ -16361,7 +16362,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 851
+          "line": 859
         }
       ],
       "signature": "int db2_memory_get_source_session ( int64_t memory_id , char * out , int out_len )",
@@ -16711,7 +16712,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 767
+          "line": 775
         }
       ],
       "review": {
@@ -16732,7 +16733,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 516
+          "line": 524
         }
       ],
       "signature": "int db2_memory_l1_session_clusters ( const char * excluded_source , int min_count , db2_memory_l1_cluster_row_t * rows , int max )",
@@ -16747,7 +16748,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 538
+          "line": 546
         }
       ],
       "signature": "int db2_memory_l1_session_content ( const char * session_id , db2_memory_content_row_t * rows , int max )",
@@ -16762,7 +16763,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 527
+          "line": 535
         }
       ],
       "signature": "int db2_memory_l1_session_created_at ( const char * session_id , db2_memory_created_at_row_t * rows , int max )",
@@ -16777,7 +16778,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 603
+          "line": 611
         }
       ],
       "signature": "int db2_memory_l2_cross_key_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
@@ -16792,7 +16793,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 608
+          "line": 616
         }
       ],
       "signature": "int db2_memory_l2_fact_vs_decision_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
@@ -16807,7 +16808,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 571
+          "line": 579
         }
       ],
       "signature": "int db2_memory_last_retro_scan ( char * out , int out_len )",
@@ -16944,7 +16945,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 730
+          "line": 738
         }
       ],
       "signature": "int db2_memory_lineage_get ( const char * object_type , int64_t object_id , memory_lineage_t * out , int max )",
@@ -16959,7 +16960,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 616
+          "line": 624
         }
       ],
       "signature": "int64_t db2_memory_lineage_insert ( const char * object_type , int64_t object_id , const char * source_kind , const char * source_ref , double confidence )",
@@ -17020,7 +17021,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 976
+          "line": 984
         }
       ],
       "signature": "int db2_memory_links_with_targets ( int64_t memory_id , db2_memory_link_target_row_t * out , int max )",
@@ -17036,7 +17037,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 737
+          "line": 745
         }
       ],
       "signature": "int db2_memory_list ( const char * tier , const char * kind , int hide_archived , int limit , memory_t * out , int max )",
@@ -17051,7 +17052,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 362
+          "line": 370
         }
       ],
       "signature": "int db2_memory_list_artifact_hashed ( db2_memory_artifact_row_t * rows , int max )",
@@ -17082,7 +17083,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 502
+          "line": 510
         }
       ],
       "signature": "int db2_memory_list_candidates ( db2_memory_cand_filter_t filter , db2_memory_cand_row_t * rows , int max )",
@@ -17097,7 +17098,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 474
+          "line": 482
         }
       ],
       "signature": "int db2_memory_list_depends_on_keys ( int64_t memory_id , db2_memory_key_row_t * rows , int max )",
@@ -17112,7 +17113,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 398
+          "line": 406
         }
       ],
       "signature": "int db2_memory_list_episode_cards ( db2_memory_episode_card_row_t * rows , int max )",
@@ -17127,7 +17128,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 403
+          "line": 411
         }
       ],
       "signature": "int db2_memory_list_global_constraints ( db2_memory_kv_row_t * rows , int max )",
@@ -17142,7 +17143,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1060
+          "line": 1068
         }
       ],
       "signature": "int db2_memory_list_id_key_content ( int limit , db2_memory_id_key_content_row_t * out , int max )",
@@ -17157,7 +17158,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 426
+          "line": 434
         }
       ],
       "signature": "int db2_memory_list_id_kv_ws_section ( db2_memory_ws_section_t section , db2_memory_id_kv_row_t * rows , int max )",
@@ -17172,7 +17173,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 464
+          "line": 472
         }
       ],
       "signature": "int db2_memory_list_key_facts_with_provenance ( db2_memory_key_fact_row_t * rows , int max )",
@@ -17187,7 +17188,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 388
+          "line": 396
         }
       ],
       "signature": "int db2_memory_list_kv_section ( db2_memory_section_t section , db2_memory_kv_row_t * rows , int max )",
@@ -17202,7 +17203,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 290
+          "line": 298
         }
       ],
       "signature": "int db2_memory_list_low_effectiveness ( double threshold , int limit , db2_memory_low_eff_row_t * rows , int max )",
@@ -17218,7 +17219,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 862
+          "line": 870
         }
       ],
       "signature": "int db2_memory_list_prior_in_session ( const char * session_id , int64_t before_id , int limit , db2_memory_prior_row_t * out , int max )",
@@ -17234,7 +17235,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 554
+          "line": 562
         }
       ],
       "signature": "int db2_memory_list_recall_section ( db2_memory_recall_section_t section , db2_memory_cand_row_t * rows , int max )",
@@ -17265,7 +17266,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 783
+          "line": 791
         }
       ],
       "signature": "int db2_memory_list_session_scope_priority ( memory_t * out , int max )",
@@ -17281,7 +17282,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 791
+          "line": 799
         }
       ],
       "signature": "int db2_memory_list_session_scope_priority_like ( const char * pattern , memory_t * out , int max )",
@@ -17296,7 +17297,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 316
+          "line": 324
         }
       ],
       "signature": "int db2_memory_list_superseded_keys ( int min_versions , db2_memory_superseded_row_t * rows , int max )",
@@ -17311,7 +17312,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 305
+          "line": 313
         }
       ],
       "signature": "int db2_memory_list_unused_l2 ( int days , db2_memory_unused_l2_row_t * rows , int max )",
@@ -17326,7 +17327,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 749
+          "line": 757
         }
       ],
       "signature": "int db2_memory_load_eval_corpus ( memory_t * out , int max , char * label_out , size_t label_len )",
@@ -17371,7 +17372,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 885
+          "line": 893
         }
       ],
       "signature": "void db2_memory_lookup_primary_entity ( int64_t memory_id , char * out , int out_len )",
@@ -17386,7 +17387,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 890
+          "line": 898
         }
       ],
       "signature": "void db2_memory_lookup_time_bounds ( int64_t memory_id , char * valid_at_out , int valid_len , char * invalid_at_out , int invalid_len )",
@@ -17401,7 +17402,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 348
+          "line": 356
         }
       ],
       "signature": "void db2_memory_mark_merged_into ( int64_t merged_into , const char * session_id , double max_confidence )",
@@ -17459,7 +17460,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 847
+          "line": 855
         }
       ],
       "signature": "void db2_memory_negation_tokens_update ( int64_t memory_id , const char * new_tokens )",
@@ -17474,7 +17475,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 843
+          "line": 851
         }
       ],
       "signature": "int db2_memory_parse_created_date ( int64_t memory_id , int * year , int * month , int * day )",
@@ -17489,7 +17490,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 675
+          "line": 683
         }
       ],
       "signature": "int db2_memory_pick_first_temporal_ref ( int64_t memory_id , char * out , int out_len )",
@@ -17821,7 +17822,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 711
+          "line": 719
         }
       ],
       "review": {
@@ -17879,7 +17880,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 587
+          "line": 595
         }
       ],
       "signature": "int db2_memory_prune_orphaned_l0 ( void )",
@@ -17894,7 +17895,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 612
+          "line": 620
         }
       ],
       "signature": "void db2_memory_record_retro_scan_marker ( const char * ts )",
@@ -17909,7 +17910,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 725
+          "line": 733
         }
       ],
       "signature": "int db2_memory_reject ( int64_t memory_id , const char * reason )",
@@ -17971,7 +17972,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 912
+          "line": 920
         }
       ],
       "signature": "void db2_memory_relations_delete_for_memory ( int64_t memory_id )",
@@ -18048,7 +18049,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 261
+          "line": 269
         }
       ],
       "signature": "int64_t db2_memory_row_insert ( const char * tier , const char * kind , const char * key , const char * content , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise )",
@@ -18063,7 +18064,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 257
+          "line": 264
         }
       ],
       "review": {
@@ -18072,8 +18073,8 @@
         "family": "memory",
         "reason": "The raw row insert is private implementation of a complete memory.insert operation, which must validate input, insert the canonical row, attach provenance and scope, and commit before replying."
       },
-      "signature": "int64_t db2_memory_row_insert_ex ( const char * tier , const char * kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise )",
-      "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
+      "signature": "int64_t db2_memory_row_insert_ex ( const char * tier , const char * kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise , const char * provenance_category )",
+      "signature_sha256": "de78809fdd631d91ea77d8459db864e2672c99ec225f4cc1540687b8dee46786",
       "status": "reviewed",
       "symbol": "db2_memory_row_insert_ex"
     },
@@ -18314,7 +18315,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 798
+          "line": 806
         }
       ],
       "signature": "int db2_memory_search_facts_patterns_by_keyword ( const char * keyword , memory_t * out , int max )",
@@ -18365,7 +18366,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 565
+          "line": 573
         }
       ],
       "review": {
@@ -18386,7 +18387,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 667
+          "line": 675
         }
       ],
       "signature": "int db2_memory_session_neighbors_after ( const char * session_id , int64_t after_id , int limit , memory_t * out , int max )",
@@ -18401,7 +18402,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 662
+          "line": 670
         }
       ],
       "signature": "int db2_memory_session_neighbors_before ( const char * session_id , int64_t before_id , int limit , memory_t * out , int max )",
@@ -18416,7 +18417,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 322
+          "line": 330
         }
       ],
       "signature": "int db2_memory_set_artifact ( int64_t memory_id , const char * artifact_type , const char * artifact_ref , const char * artifact_hash )",
@@ -18431,7 +18432,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 326
+          "line": 334
         }
       ],
       "signature": "void db2_memory_set_cognified_kind ( int64_t memory_id , const char * kind )",
@@ -18461,7 +18462,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 275
+          "line": 283
         }
       ],
       "review": {
@@ -18482,7 +18483,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 272
+          "line": 280
         }
       ],
       "review": {
@@ -18524,7 +18525,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 934
+          "line": 942
         }
       ],
       "signature": "void db2_memory_summaries_delete_for_memory ( int64_t memory_id )",
@@ -18541,7 +18542,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 926
+          "line": 934
         }
       ],
       "signature": "int db2_memory_summaries_list ( int64_t memory_id , int limit , db2_memory_summary_row_t * out , int max )",
@@ -18556,7 +18557,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 343
+          "line": 351
         }
       ],
       "signature": "int db2_memory_summarise_clusters ( double max_confidence , int min_count , db2_memory_summary_cluster_t * rows , int max )",
@@ -18571,7 +18572,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 931
+          "line": 939
         }
       ],
       "signature": "void db2_memory_summary_upsert ( int64_t memory_id , const char * scope , const char * summary )",
@@ -18586,7 +18587,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 449
+          "line": 457
         }
       ],
       "signature": "int db2_memory_supersede_lookup ( int64_t new_memory_id , db2_memory_supersede_pair_t * out )",
@@ -18601,7 +18602,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 832
+          "line": 840
         }
       ],
       "signature": "void db2_memory_temporal_insert ( int64_t memory_id , const char * ref_key , const char * granularity , double weight )",
@@ -18616,7 +18617,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 839
+          "line": 847
         }
       ],
       "signature": "void db2_memory_temporal_refs_delete_for_memory ( int64_t memory_id )",
@@ -18632,7 +18633,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1008
+          "line": 1016
         }
       ],
       "signature": "int db2_memory_temporal_refs_list ( int64_t memory_id , db2_memory_temporal_ref_row_t * out , int max )",
@@ -18648,7 +18649,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 776
+          "line": 784
         }
       ],
       "signature": "int db2_memory_top_l2_facts ( memory_t * out , int max )",
@@ -18663,7 +18664,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 694
+          "line": 702
         }
       ],
       "signature": "int db2_memory_touch ( int64_t memory_id )",
@@ -18678,7 +18679,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 701
+          "line": 709
         }
       ],
       "signature": "int db2_memory_touch_many ( const int64_t * ids , int n )",
@@ -18693,7 +18694,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 656
+          "line": 664
         }
       ],
       "signature": "int db2_memory_unit_active_meta ( int64_t unit_id , double * weight_out , char * unit_type_out , int unit_type_len , char * unit_kind_out , int unit_kind_len )",
@@ -18723,7 +18724,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 908
+          "line": 916
         }
       ],
       "signature": "void db2_memory_unit_edge_insert ( int64_t src_unit_id , int64_t dst_unit_id , const char * edge_type , double weight )",
@@ -18738,7 +18739,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 988
+          "line": 996
         }
       ],
       "signature": "void db2_memory_unit_edges_delete_for_memory ( int64_t memory_id )",
@@ -18783,7 +18784,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 983
+          "line": 991
         }
       ],
       "signature": "int64_t db2_memory_unit_insert ( int64_t memory_id , const char * unit_type , const char * memory_kind , const char * unit_key , const char * unit_text , double weight )",
@@ -18799,7 +18800,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 715
+          "line": 723
         }
       ],
       "signature": "int db2_memory_unit_list_ids ( int64_t memory_id , int64_t * out , int max )",
@@ -18814,7 +18815,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 991
+          "line": 999
         }
       ],
       "signature": "void db2_memory_units_delete_for_memory ( int64_t memory_id )",
@@ -18830,7 +18831,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 881
+          "line": 889
         }
       ],
       "signature": "int db2_memory_units_list ( int64_t memory_id , db2_memory_unit_row_t * out , int max )",
@@ -18845,7 +18846,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 721
+          "line": 729
         }
       ],
       "signature": "int db2_memory_update_content ( int64_t memory_id , const char * content )",
@@ -20283,7 +20284,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 161
+          "line": 169
         }
       ],
       "signature": "int db2_relation_schema_list ( db2_relation_schema_row_t * out , int max )",
@@ -20343,7 +20344,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 706
+          "line": 714
         }
       ],
       "signature": "int db2_retrieval_shortcut_lookup ( const char * normalized_query , int64_t * ids , int max , int * promoted_out , int64_t * hit_count_out )",
@@ -20358,7 +20359,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 708
+          "line": 716
         }
       ],
       "signature": "int db2_retrieval_shortcut_observe ( const char * normalized_query , const int64_t * ids , int count )",
@@ -22295,11 +22296,11 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 62
+          "line": 70
         }
       ],
-      "signature": "int db2_typed_fact_ingress ( const char * query , char * facts_out , size_t facts_cap )",
-      "signature_sha256": "817159ecbf73497fe49e1264536b4a4816a1472309a997dfe6b0f490b44a4fc3",
+      "signature": "int db2_typed_fact_ingress ( const char * query , fact_authority_t authority , char * facts_out , size_t facts_cap )",
+      "signature_sha256": "6168a4026ed0e1eabcc53a358e84e8f0cd2ae86dec3661ebddf0cba0f42c9159",
       "status": "audit-pending",
       "symbol": "db2_typed_fact_ingress"
     },
@@ -24010,12 +24011,28 @@
     },
     {
       "consumers": [
+        "src/kb/kb_memory_facts.c",
         "src/tests/test_fact_lifecycle.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 39
+          "line": 48
+        }
+      ],
+      "signature": "fact_authority_t fact_authority_from_provenance ( const char * provenance_category )",
+      "signature_sha256": "bed125a3b3d886893169ceca39ab8ec2d6575b3eaac1be30bb7d995c85938cd4",
+      "status": "audit-pending",
+      "symbol": "fact_authority_from_provenance"
+    },
+    {
+      "consumers": [
+        "src/tests/test_fact_lifecycle.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/fact_lifecycle.h",
+          "line": 52
         }
       ],
       "signature": "double fact_class_confidence ( const char * cls )",
@@ -24030,7 +24047,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 48
+          "line": 61
         }
       ],
       "signature": "const char * fact_class_for ( fact_authority_t authority , fact_gate_verdict_t verdict )",
@@ -24045,7 +24062,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 42
+          "line": 55
         }
       ],
       "signature": "int fact_class_rank ( const char * cls )",
@@ -25940,12 +25957,12 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "35032e52c4121a4d6bc5a30f5c0826d7b4002d444f9a0f734ee31f0215f1ca86",
+  "fingerprint": "82ffbfd47ea3380af2e3d82ceda6fdb47b75e8bccf311bfcbe55f32698642f5e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 673,
-    "declarations": 1404,
+    "audit_pending": 674,
+    "declarations": 1405,
     "headers": 138,
     "internal_unconsumed": 154,
     "private_test_only": 283,

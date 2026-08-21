@@ -830,6 +830,17 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
                                const char *content, const char *use_cases, double confidence,
                                const char *session_id, memory_t *out);
 
+/* Same, but says whose words these are. The authority is recorded as the row's
+ * provenance and decides whether the typed-fact drain may later mint Class-A
+ * facts from this note (memory.h, memory_insert_ex). MEMORY_AUTHORITY_USER is
+ * for a surface where the USER is the author — the `memory store` CLI, the
+ * onboarding wizard — never for text the agent composed, and the kb still checks
+ * that the request authenticated as a person before honouring it. The two
+ * spellings above are the MODEL-authority ones. */
+int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_authority_t authority, memory_t *out);
+
 /* Look up a memory id by (key, kind) via aimee-kb.  Returns 0 if no
  * row matches or kb is unreachable; the row id otherwise.  Mirrors
  * db2_memory_find_id_by_key_kind(). */

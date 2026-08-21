@@ -17,16 +17,61 @@
 #include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
+#include "kb/kb_login_throttle.h" /* kb_login_throttle_peer_is_loopback — the canonical local test */
+#include "kb_reqctx.h"            /* kb_reqctx_actor — authenticated caller for write authority */
 #include "kb_service_memory.h"
 #include "log.h"
 #include "modules/memory/memory_graph_fusion.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 /* Defined in kb_service.c; non-static so this file can call them. */
 int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
+
+/* The typed-fact write authority of the request being served (typed-fact §5).
+ *
+ * Derived from the request's AUTHENTICATED actor and nothing else — never from a
+ * field in the request (verify-then-trust, kb_verifier.h). Class A is reserved
+ * for a direct assertion by the user, so only a named human identity qualifies:
+ * an OIDC subject, or a host account the calling service asserted over the mTLS
+ * listener after its certificate, bearer and service identity all verified
+ * (kb_tls_serve.c -> kb_reqctx_apply_asserted). Everything else is an agent-side
+ * or service origin and gets MODEL authority — a bearer/owner credential, an
+ * mTLS machine identity, and an unauthenticated caller alike.
+ *
+ * The actor answers WHO is calling. It does not answer whether the payload is
+ * that person's own words: an agent's tool call, made mid-turn, inherits the
+ * human's request context. So a caller that relays model-composed text must not
+ * use this — see kb_handle_memory_context_block.
+ *
+ * The owner bearer from a LOOPBACK PEER is the third case, and it is a
+ * deployment fact rather than a weaker rule. Only the plain HTTP listener
+ * records a peer address (kb_http_listener.c), so this condition means
+ * specifically "arrived over plain loopback HTTP" — never mTLS, never a remote
+ * peer, and never a direct in-process call, all of which leave the peer empty
+ * and are not local. That listener serves exactly one client, aimee-server on
+ * this host, because kb_client refuses to put the bearer on a cleartext link to
+ * anywhere else; and it has no peer certificate to bind a caller assertion to,
+ * so kb_http_conn.c rejects the caller header outright (B5). aimee-server has
+ * already derived the authority from the kernel-attested peer of ITS OWN socket
+ * and only asks for "user" when it attested a person. Nothing the model can
+ * reach bypasses that: its tool calls go through the server, which resolves
+ * authority from attestation and never from the payload. Over mTLS the human
+ * arrives as an asserted host actor instead, handled above. */
+static fact_authority_t kb_memory_request_authority(void)
+{
+   const kb_principal_t *actor = kb_reqctx_actor(); /* NULL unless authenticated */
+   if (!actor)
+      return FACT_AUTHORITY_MODEL;
+   if (actor->kind == KB_PRIN_OIDC || actor->kind == KB_PRIN_HOST)
+      return FACT_AUTHORITY_USER;
+   if (actor->kind == KB_PRIN_OWNER && kb_login_throttle_peer_is_loopback())
+      return FACT_AUTHORITY_USER;
+   return FACT_AUTHORITY_MODEL;
+}
 
 static int kb_memory_scope_begin(cJSON *req, int force, int *missing_out)
 {
@@ -564,12 +609,22 @@ int kb_handle_memory_effectiveness_stats(int fd, cJSON *req)
 
 /* Read the request's destructive-edit authority. Only the exact string "user"
  * grants it: an absent, misspelled, or non-string field means MODEL, so a caller
- * that does not know about this field cannot destroy anything by accident. */
+ * that does not know about this field cannot destroy anything by accident.
+ *
+ * And asking is not the same as being granted. `authority` is a REQUEST — these
+ * actions are reachable from outside as POST /v1/actions/memory.delete and
+ * .update, where "user" means destroy rather than retire — so it is capped by
+ * what the request actually authenticated as (kb_memory_request_authority,
+ * below). A caller that cannot prove a human never destroys a memory outright. */
 static memory_authority_t kb_memory_authority(cJSON *req)
 {
    cJSON *a = cJSON_GetObjectItemCaseSensitive(req, "authority");
-   if (cJSON_IsString(a) && a->valuestring && strcmp(a->valuestring, "user") == 0)
+   int wants_user = cJSON_IsString(a) && a->valuestring && strcmp(a->valuestring, "user") == 0;
+   if (wants_user && kb_memory_request_authority() == FACT_AUTHORITY_USER)
       return MEMORY_AUTHORITY_USER;
+   if (wants_user)
+      LOG_WARN("kb.memory", "user-authority memory edit served at model authority: the request "
+                            "carries no authenticated human actor");
    return MEMORY_AUTHORITY_MODEL;
 }
 
@@ -810,7 +865,16 @@ int kb_handle_memory_context_block(int fd, cJSON *req)
 
    int missing = 0;
    int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_context_block_json(query_j->valuestring, block_type, limit);
+   /* MODEL authority, structurally — not kb_memory_request_authority(). This
+    * action's only caller is the get_context_block MCP tool, so `query` is a
+    * string the MODEL composed, even though the request carries the human's
+    * authenticated identity (a tool call runs inside the user's turn and inherits
+    * its context). Authenticating the caller therefore proves nothing about who
+    * wrote the text, and the §4 retraction this query can trigger deletes facts.
+    * A future caller that really does relay the user's own turn should pass
+    * FACT_AUTHORITY_USER here — and nothing else should. */
+   cJSON *resp = db2_kb_service_memory_context_block_json(query_j->valuestring, block_type, limit,
+                                                          FACT_AUTHORITY_MODEL);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to build context block");
 }
@@ -1350,9 +1414,32 @@ int kb_handle_facts_retract(int fd, cJSON *req)
    if (auth_j && !cJSON_IsString(auth_j))
       return kb_send_error(fd, "facts.retract authority must be a string");
 
+   /* This action is reachable from outside (POST /v1/actions/facts.retract), so
+    * the body's `authority` is a request, not a grant: it may only lower what the
+    * caller authenticated as. Without an authenticated human actor a "user"
+    * retraction is served at model authority, and db2_fact_retract then leaves
+    * Class-A facts and immutable relations alone.
+    *
+    * aimee-server carries the human across this hop as X-Aimee-Caller-Subject,
+    * which the mTLS listener turns into a KB_PRIN_HOST actor after the peer
+    * certificate, bearer and service identity have verified. The PLAIN listener
+    * has no peer to attest and rejects that header by design (B5), so on a
+    * plain-loopback kb a user retraction lands at model authority and reports
+    * retracted: 0. That is a deployment property, not a silent failure — say so,
+    * because "nothing happened and nothing was logged" is the hard version. */
+   const char *requested = cJSON_IsString(auth_j) ? auth_j->valuestring : NULL;
+   int wants_user = requested && strcmp(requested, "user") == 0;
+   int granted_user = wants_user && kb_memory_request_authority() == FACT_AUTHORITY_USER;
+   const char *authority = granted_user ? "user" : "model";
+   if (wants_user && !granted_user)
+      LOG_WARN("kb.facts",
+               "user retraction of %s/%s served at model authority: the request "
+               "carries no authenticated human actor",
+               src_j->valuestring, rel_j->valuestring);
+
    cJSON *resp = db2_kb_service_facts_retract_json(
        src_j->valuestring, rel_j->valuestring, cJSON_IsString(tgt_j) ? tgt_j->valuestring : NULL,
-       cJSON_IsString(auth_j) ? auth_j->valuestring : NULL);
+       authority);
    return kb_reply_or_error(fd, resp, "failed to retract fact");
 }
 
@@ -1580,7 +1667,13 @@ int kb_handle_memory_store(int fd, cJSON *req)
    const char *session_id = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
    const char *use_cases = cJSON_IsString(use_cases_j) ? use_cases_j->valuestring : "";
 
-   cJSON *resp = db2_kb_service_memory_insert_ex_json(
-       tier, kind, key_j->valuestring, content_j->valuestring, use_cases, confidence, session_id);
+   /* The write's authority is persisted as the row's provenance, so the drain can
+    * tell later whether facts mined from this note may be Class A. Same rule as
+    * every other authority on this surface: the body asks, the request's
+    * authentication grants (kb_memory_authority). A caller that says nothing —
+    * every internal writer — records the fail-closed agent provenance. */
+   cJSON *resp = db2_kb_service_memory_insert_ex_json(tier, kind, key_j->valuestring,
+                                                      content_j->valuestring, use_cases, confidence,
+                                                      session_id, (int)kb_memory_authority(req));
    return kb_reply_or_error(fd, resp, "failed to store memory");
 }

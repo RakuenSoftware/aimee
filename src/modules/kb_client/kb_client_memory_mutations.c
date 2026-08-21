@@ -402,6 +402,14 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
                                const char *content, const char *use_cases, double confidence,
                                const char *session_id, memory_t *out)
 {
+   return kb_client_memory_insert_as(tier, kind, key, content, use_cases, confidence, session_id,
+                                     MEMORY_AUTHORITY_MODEL, out);
+}
+
+int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_authority_t authority, memory_t *out)
+{
    if (!key || !content)
       return -1;
 
@@ -417,6 +425,11 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
    cJSON_AddNumberToObject(req, "confidence", confidence);
    if (session_id && session_id[0])
       cJSON_AddStringToObject(req, "session_id", session_id);
+   /* Asks for the user provenance; the kb grants it only if this request
+    * authenticated as a person (kb_handle_memory_store). Omitted otherwise, so a
+    * caller that never thought about it records the agent provenance. */
+   if (authority == MEMORY_AUTHORITY_USER)
+      cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.store", req);
    if (!json)
       return -1;

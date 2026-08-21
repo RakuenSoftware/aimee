@@ -368,8 +368,18 @@ DO $trgm_ext$ BEGIN
 END $trgm_ext$;
 
 ALTER TABLE memories
-   ADD COLUMN IF NOT EXISTS provenance_category TEXT NOT NULL DEFAULT 'user_stated',
+   ADD COLUMN IF NOT EXISTS provenance_category TEXT NOT NULL DEFAULT 'agent_message',
    ADD COLUMN IF NOT EXISTS use_cases TEXT NOT NULL DEFAULT '';
+
+-- The column's default used to be 'user_stated', which read every row nobody had
+-- classified as something the USER said. That is the wrong way for a default to
+-- fail: this value decides whether the typed-fact drain may mine Class-A facts
+-- out of a note (fact_authority_from_provenance), and Class A wins every
+-- conflict. Every insert now writes the column explicitly, so the default only
+-- covers writers that never thought about it -- exactly the case that must not
+-- be read as the user speaking. SET DEFAULT applies to future inserts only:
+-- existing rows keep the value they were stored with.
+ALTER TABLE memories ALTER COLUMN provenance_category SET DEFAULT 'agent_message';
 
 ALTER TABLE memories
    ADD COLUMN IF NOT EXISTS memories_fts_tsv tsvector GENERATED ALWAYS AS (

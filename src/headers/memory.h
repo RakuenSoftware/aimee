@@ -349,12 +349,23 @@ int memory_approve_l4_promotion(int64_t memory_id, const char *approver, const c
  * own dependency-free header so the kb_service backend contract can name it. */
 #include "memory_authority.h"
 
-/* --- Tiered Memory --- */
+/* --- Tiered Memory ---
+ *
+ * memory_insert_ex() takes the write's `authority`, which it PERSISTS as the
+ * row's provenance_category (MEMORY_PROVENANCE_FOR). It is not about this write's
+ * permissions — an insert destroys nothing — but about what the typed-fact drain
+ * may later mine out of the note: only text the user actually stated can produce
+ * a Class-A fact (typed-fact §5). It must therefore be derived from the calling
+ * SURFACE and the caller's authentication, never from a request field.
+ *
+ * memory_insert() is the MODEL-authority spelling, which is what its callers are:
+ * promotion, synthesis, learning, trace analysis and the benchmarks all write
+ * text the system produced, not text the user said. */
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out);
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
                      const char *use_cases, double confidence, const char *session_id,
-                     memory_t *out);
+                     memory_authority_t authority, memory_t *out);
 int memory_get(int64_t id, memory_t *out);
 int memory_touch(int64_t id);
 /* Batch memory_touch, for the recall path: one statement per chunk of ids

@@ -1196,22 +1196,25 @@ cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, con
                                          const char *content, double confidence,
                                          const char *session_id)
 {
-   return db2_kb_service_memory_insert_ex_json(tier, kind, key, content, "", confidence,
-                                               session_id);
+   /* No authority named: this spelling has no caller that established one, so the
+    * row records the fail-closed agent provenance. */
+   return db2_kb_service_memory_insert_ex_json(tier, kind, key, content, "", confidence, session_id,
+                                               MEMORY_AUTHORITY_MODEL);
 }
 
 cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
                                             const char *content, const char *use_cases,
-                                            double confidence, const char *session_id)
+                                            double confidence, const char *session_id,
+                                            int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
 
    memory_t out;
-   int rc =
-       memory_insert_ex(tier ? tier : "", kind ? kind : "", key ? key : "", content ? content : "",
-                        use_cases ? use_cases : "", confidence, session_id ? session_id : "", &out);
+   int rc = memory_insert_ex(tier ? tier : "", kind ? kind : "", key ? key : "",
+                             content ? content : "", use_cases ? use_cases : "", confidence,
+                             session_id ? session_id : "", (memory_authority_t)authority, &out);
    if (rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
@@ -1253,16 +1256,19 @@ cJSON *db2_kb_service_memory_briefing_json(int limit_tokens)
 }
 
 cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
-                                                int limit)
+                                                int limit, fact_authority_t authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
 
    /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Default-off via
-    * typed_facts_enabled (writes facts="" when off); orchestration in fact_ingest. */
+    * typed_facts_enabled (writes facts="" when off); orchestration in fact_ingest.
+    * `authority` is the caller's authenticated write authority, resolved by the
+    * RPC handler — this call can retract facts, so it must not be inferred from
+    * `query`, which the caller supplies. */
    char facts[2048] = "";
-   (void)db2_typed_fact_ingress(query, facts, sizeof(facts));
+   (void)db2_typed_fact_ingress(query, authority, facts, sizeof(facts));
 
    char *block = memory_get_context_block(query ? query : "",
                                           (block_type && block_type[0]) ? block_type : "general",
@@ -2044,7 +2050,13 @@ cJSON *db2_kb_service_facts_retract_json(const char *source, const char *relatio
     * user-stated Class A fact. Anything else — including an absent or
     * unrecognised value — is treated as model authority, the conservative
     * reading, since a caller that cannot name its authority must not inherit the
-    * user's. */
+    * user's.
+    *
+    * `authority` reaches here ALREADY RESOLVED against the caller's
+    * authentication by the request boundary that has it — kb_handle_facts_retract
+    * (authenticated actor) and facts_retract_command (attested transport). It is
+    * not a field a client can set on the way in; do not add a path that forwards
+    * a request body's value here unresolved. */
    fact_authority_t auth =
        (authority && strcmp(authority, "user") == 0) ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
 

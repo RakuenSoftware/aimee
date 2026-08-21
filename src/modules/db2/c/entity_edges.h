@@ -46,7 +46,15 @@ extern "C"
     * the typed-fact gate (db2_fact_commit) — callers route through it, not here
     * directly. Bumps weight on a repeat (source,relation,target) and upgrades the
     * stored confidence_class/confidence when the new write outranks it (§5; never
-    * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C"). 0/-1. */
+    * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C").
+    *
+    * On a FUNCTIONAL (single-valued) relation a differing object contradicts the
+    * prior one, so the relation's correction_behavior applies — bounded by class
+    * rank (§5): a write only corrects values it outranks or matches, and a write
+    * outranked by a current value is DROPPED rather than left contradicting it.
+    * So a model-authored (Class B/C) assertion can neither supersede nor sit
+    * beside a user-stated Class-A fact. Returns 0 on success (including a dropped
+    * outranked write, which leaves *out_added = 0), -1 on error. */
    int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
                                        int relation_id, int subject_kind, int object_kind,
                                        const char *confidence_class, double confidence,

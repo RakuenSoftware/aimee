@@ -19,7 +19,7 @@
  * closest analogue, since none of them destroys a row: retraction stamps or
  * tombstones (the row is retained and auditable) and unmerge flips an audit
  * flag. Delete's tier would misdescribe what they do. */
-cJSON *facts_retract_command(cJSON *req)
+cJSON *facts_retract_command(cJSON *req, attested_transport_t transport)
 {
    cJSON *jsrc = cJSON_GetObjectItemCaseSensitive(req, "source");
    cJSON *jrel = cJSON_GetObjectItemCaseSensitive(req, "relation");
@@ -40,11 +40,20 @@ cJSON *facts_retract_command(cJSON *req)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "facts.retract authority must be \"user\" or \"model\"", NULL);
 
+   /* The body's `authority` REQUESTS a level; the connection's attestation grants
+    * it. "user" is honoured only when the transport attested a person, so the
+    * documented default stays "model" (least privilege: naming no authority never
+    * escalates) and naming "user" without having earned it no longer does either.
+    * This is the whole difference between a declared identity and an
+    * authenticated one. */
+   int wants_user = cJSON_IsString(jauth) && strcmp(jauth->valuestring, "user") == 0;
+   const char *authority = (wants_user && server_attested_is_person(transport)) ? "user" : "model";
+
    int retracted = 0;
    int immutable = 0;
-   if (kb_client_facts_retract(
-           jsrc->valuestring, jrel->valuestring, cJSON_IsString(jtgt) ? jtgt->valuestring : NULL,
-           cJSON_IsString(jauth) ? jauth->valuestring : NULL, &retracted, &immutable) != 0)
+   if (kb_client_facts_retract(jsrc->valuestring, jrel->valuestring,
+                               cJSON_IsString(jtgt) ? jtgt->valuestring : NULL, authority,
+                               &retracted, &immutable) != 0)
    {
       if (immutable)
          return server_error_kind_json(
@@ -65,7 +74,7 @@ cJSON *facts_retract_command(cJSON *req)
 int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return server_send_ok(conn, facts_retract_command(req));
+   return server_send_ok(conn, facts_retract_command(req, conn->attested_transport));
 }
 
 cJSON *entities_merge_command(cJSON *req)

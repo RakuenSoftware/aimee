@@ -3543,6 +3543,14 @@ paths:
         Delete is for content that should not exist at all, such as a credential, PII
         under an erasure request, or data written to the wrong store.
         Requires the memory-write capability.
+
+        Whether the row is DESTROYED or merely retired depends on the connection,
+        not on the capability. A caller the transport attested as a person (a
+        local UDS peer, or a webuser over the trusted socket) destroys the row and
+        its provenance irreversibly. Any other caller that clears the capability
+        gate, including a bearer over TCP, retires it instead: it stops answering
+        recall under its key but stays readable through memory.fact_history. The
+        response reports which happened as `destroyed`.
       requestBody:
         required: true
         content:
@@ -3554,7 +3562,7 @@ paths:
                 id: { type: integer, minimum: 1, maximum: 9007199254740991 }
       responses:
         "200":
-          description: Deletion result ({ id, deleted })
+          description: Deletion result ({ id, deleted, destroyed })
           content:
             application/json:
               schema: { type: object }
@@ -3617,6 +3625,13 @@ paths:
         user-stated Class A fact; those edges are skipped rather than refused,
         so a partial retraction reports how many edges it actually affected.
         `retracted: 0` is a success meaning nothing current matched.
+
+        `authority: "user"` REQUESTS user authority; it does not confer it. The
+        request is granted only when the connection itself attested a person: a
+        local UDS peer whose uid the kernel vouched for, or a webuser asserted
+        over the trusted socket. A bearer token or client certificate identifies
+        a service, not a user, so requests carrying one are served at model
+        authority however they label themselves, and the user's own facts stand.
 
         An immutable relation is refused with 400 unless the authority is "user".
         Requires the memory-write capability.

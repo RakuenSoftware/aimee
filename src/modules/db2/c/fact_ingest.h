@@ -58,8 +58,17 @@ extern "C"
     * retraction-cue turn — then write the §7-PII-gated recall block (the user's
     * facts + facts about entities named in the turn) into facts_out. No-op with
     * facts_out="" when the flag is off or the query is empty. Returns the number
-    * of recalled facts (>=0). */
-   int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap);
+    * of recalled facts (>=0).
+    *
+    * `authority` is the WRITE authority of the retraction this turn may perform,
+    * and is explicit because it decides whether a Class-A user fact can be deleted
+    * here. It must be derived from the caller's authenticated identity — never
+    * from the request body and never from `query`, which on every current surface
+    * is a model-supplied string (verify-then-trust, kb_verifier.h). A caller that
+    * cannot prove an authenticated human actor passes FACT_AUTHORITY_MODEL, and
+    * db2_fact_retract's §4/§5 guards then leave user-stated facts standing. */
+   int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *facts_out,
+                              size_t facts_cap);
 
 #ifdef __cplusplus
 }

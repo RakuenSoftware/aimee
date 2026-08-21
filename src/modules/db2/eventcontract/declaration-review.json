@@ -565,7 +565,7 @@
     },
     {
       "symbol": "db2_kb_service_memory_context_block_json",
-      "signature_sha256": "632049b1f218704e51fd623ed69c34e3938f1cd1bcaa91e0240f941642b79b0c",
+      "signature_sha256": "8c9ed979ae2752b963bdb0ea04561b2590970bc66a458d9dd6c6f21cb31d87a0",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
@@ -725,7 +725,7 @@
     },
     {
       "symbol": "db2_kb_service_memory_insert_ex_json",
-      "signature_sha256": "3e639110365710819aa0845d3737615c088a39e2f6c271ed84bb831aea6f5791",
+      "signature_sha256": "dcc24d31a3c30dbd0de3f55f2d3ecdcddd9545612344c2a16b5daced5c1e2bb7",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
@@ -1609,7 +1609,7 @@
       "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy — tier, kinds, confidence floor, use count, and settling window — so callers cannot promote rows into the slow-changing tier on terms of their own."
+      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
     },
     {
       "symbol": "db2_memory_promotion_reclassify_directives",
@@ -1645,7 +1645,7 @@
     },
     {
       "symbol": "db2_memory_row_insert_ex",
-      "signature_sha256": "c5f15199fa192a5765c30fc02b588a9726672dee853f875d171e65ae047d7ee4",
+      "signature_sha256": "de78809fdd631d91ea77d8459db864e2672c99ec225f4cc1540687b8dee46786",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
