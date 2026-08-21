@@ -769,6 +769,26 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t directive_id, uint32_t *directive_found, char *directive_question, size_t directive_question_capacity, char *directive_topic, size_t directive_topic_capacity, char *anchor_entity, size_t anchor_entity_capacity, char *anchor_file, size_t anchor_file_capacity, char *directive_cause, size_t directive_cause_capacity, uint32_t *directive_priority, char *directive_state, size_t directive_state_capacity, uint64_t *memory_a_id, uint64_t *memory_b_id, uint64_t *resolution_memory_id, char *directive_evidence, size_t directive_evidence_capacity, char *source_session, size_t source_session_capacity, uint32_t *surfaced_count, char *last_surfaced_at, size_t last_surfaced_at_capacity, char *resolved_at, size_t resolved_at_capacity, char *valid_until, size_t valid_until_capacity, char *directive_created_at, size_t directive_created_at_capacity, char *directive_updated_at, size_t directive_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_briefing_key_facts_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_briefing_key_facts_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_briefing_recent_activity_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_briefing_recent_activity_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_tier_kind_counts_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_memory_tier_kind_counts_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_key_facts_provenance_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_memory_key_facts_provenance_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_low_effectiveness_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       double effectiveness_threshold, uint32_t row_limit, aimee_db2_memory_low_effectiveness_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_observation_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *entity_id, uint32_t *count, aimee_module_cancelled_fn cancelled,

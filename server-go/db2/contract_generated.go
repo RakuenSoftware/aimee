@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "75ebf007911af7b58367f23f64da40d000a5939ebfea59404bfe99d2947ba3a6"
+const ContractSHA256 = "53bcc25fc60d14576074f1e6d42f135fde458de915667257f92be8071f51e9b0"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -3477,6 +3477,194 @@ func DecodeDirectiveGetRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return directiveID, nil
+}
+
+const EventBriefingKeyFacts = EventMemory
+const StageBriefingKeyFacts = FamilyMemory
+const OperationBriefingKeyFacts uint32 = 122
+
+
+// EncodeBriefingKeyFactsRequest writes the schema briefing_key_facts declares, in order.
+func EncodeBriefingKeyFactsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationBriefingKeyFacts, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBriefingKeyFactsRequest reads it back, checking each field against its own bound.
+func DecodeBriefingKeyFactsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBriefingKeyFacts || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventBriefingRecentActivity = EventMemory
+const StageBriefingRecentActivity = FamilyMemory
+const OperationBriefingRecentActivity uint32 = 123
+
+
+// EncodeBriefingRecentActivityRequest writes the schema briefing_recent_activity declares, in order.
+func EncodeBriefingRecentActivityRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationBriefingRecentActivity, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBriefingRecentActivityRequest reads it back, checking each field against its own bound.
+func DecodeBriefingRecentActivityRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBriefingRecentActivity || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventMemoryTierKindCounts = EventMemory
+const StageMemoryTierKindCounts = FamilyMemory
+const OperationMemoryTierKindCounts uint32 = 124
+
+
+// EncodeMemoryTierKindCountsRequest writes the schema memory_tier_kind_counts declares, in order.
+func EncodeMemoryTierKindCountsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationMemoryTierKindCounts, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryTierKindCountsRequest reads it back, checking each field against its own bound.
+func DecodeMemoryTierKindCountsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryTierKindCounts || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventMemoryKeyFactsProvenance = EventMemory
+const StageMemoryKeyFactsProvenance = FamilyMemory
+const OperationMemoryKeyFactsProvenance uint32 = 125
+
+
+// EncodeMemoryKeyFactsProvenanceRequest writes the schema memory_key_facts_provenance declares, in order.
+func EncodeMemoryKeyFactsProvenanceRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationMemoryKeyFactsProvenance, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryKeyFactsProvenanceRequest reads it back, checking each field against its own bound.
+func DecodeMemoryKeyFactsProvenanceRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryKeyFactsProvenance || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventMemoryLowEffectiveness = EventMemory
+const StageMemoryLowEffectiveness = FamilyMemory
+const OperationMemoryLowEffectiveness uint32 = 126
+const MemoryLowEffectivenessEffectivenessThresholdMaxMagnitudeBits uint64 = 4741671816366391296
+const MemoryLowEffectivenessRowLimitMin uint32 = 0
+const MemoryLowEffectivenessRowLimitMax uint32 = 65535
+
+// EncodeMemoryLowEffectivenessRequest writes the schema memory_low_effectiveness declares, in order.
+func EncodeMemoryLowEffectivenessRequest(effectivenessThreshold float64, rowLimit uint32) ([]byte, error) {
+	if math.Float64bits(effectivenessThreshold)&0x7fffffffffffffff > MemoryLowEffectivenessEffectivenessThresholdMaxMagnitudeBits ||
+		rowLimit < MemoryLowEffectivenessRowLimitMin || rowLimit > MemoryLowEffectivenessRowLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var effectivenessThresholdBytes [8]byte
+	binary.LittleEndian.PutUint64(effectivenessThresholdBytes[:], math.Float64bits(effectivenessThreshold))
+	payload = append(payload, effectivenessThresholdBytes[:]...)
+	var rowLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
+	payload = append(payload, rowLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryLowEffectiveness, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryLowEffectivenessRequest reads it back, checking each field against its own bound.
+func DecodeMemoryLowEffectivenessRequest(request []byte) (float64, uint32, error) {
+	var effectivenessThreshold float64
+	var rowLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryLowEffectiveness || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemoryLowEffectivenessEffectivenessThresholdMaxMagnitudeBits {
+			return 0, 0, ErrMalformedEnvelope
+		}
+		effectivenessThreshold = math.Float64frombits(bits)
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if rowLimit < MemoryLowEffectivenessRowLimitMin || rowLimit > MemoryLowEffectivenessRowLimitMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return effectivenessThreshold, rowLimit, nil
 }
 
 const EventEntityObservationCount = EventIndex

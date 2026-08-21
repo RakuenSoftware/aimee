@@ -1053,6 +1053,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_edge_explain = db2_entity_edge_explain_by_entity,
        .evidence_pending_list = db2_evidence_list_pending,
        .directive_get = db2_directive_get,
+       .briefing_key_facts = db2_memory_briefing_list_key_facts,
+       .briefing_recent_activity = db2_memory_briefing_list_recent_activity,
+       .memory_tier_kind_counts = db2_memory_count_by_tier_kind,
+       .memory_key_facts_provenance = db2_memory_list_key_facts_with_provenance,
+       .memory_low_effectiveness = db2_memory_list_low_effectiveness,
    };
    return &backend;
 }
@@ -4644,6 +4649,277 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_briefing_key_facts_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_BRIEFING_KEY_FACTS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->briefing_key_facts)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_briefing_key_facts_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_briefing_fact_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->briefing_key_facts(listed,
+                                                      (int)AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].memory_id =
+                      listed[index].memory_id > 0 ? (uint64_t)listed[index].memory_id : 0u;
+                  snprintf(rows[index].memory_tier, sizeof(rows[index].memory_tier), "%s",
+                           listed[index].tier);
+                  snprintf(rows[index].memory_kind, sizeof(rows[index].memory_kind), "%s",
+                           listed[index].kind);
+                  snprintf(rows[index].memory_key, sizeof(rows[index].memory_key), "%s",
+                           listed[index].key);
+                  snprintf(rows[index].memory_text, sizeof(rows[index].memory_text), "%s",
+                           listed[index].text);
+                  rows[index].memory_confidence = listed[index].confidence;
+                  rows[index].evidence_strength = listed[index].evidence_strength;
+                  rows[index].observation_count = listed[index].observation_count > 0
+                                                      ? (uint32_t)listed[index].observation_count
+                                                      : 0u;
+                  rows[index].use_count =
+                      listed[index].use_count > 0 ? (uint32_t)listed[index].use_count : 0u;
+                  snprintf(rows[index].last_seen_at, sizeof(rows[index].last_seen_at), "%s",
+                           listed[index].last_seen_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_briefing_key_facts_reply_encode(rows, count, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_briefing_recent_activity_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->briefing_recent_activity)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_briefing_recent_activity_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_briefing_activity_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->briefing_recent_activity(
+                      listed, (int)AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].session_id, sizeof(rows[index].session_id), "%s",
+                           listed[index].session_id);
+                  snprintf(rows[index].activity_summary, sizeof(rows[index].activity_summary), "%s",
+                           listed[index].summary);
+                  snprintf(rows[index].reference_time, sizeof(rows[index].reference_time), "%s",
+                           listed[index].reference_time);
+                  snprintf(rows[index].activity_created_at, sizeof(rows[index].activity_created_at),
+                           "%s", listed[index].created_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_briefing_recent_activity_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_memory_tier_kind_counts_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_TIER_KIND_COUNTS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_tier_kind_counts)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_tier_kind_counts_row_t
+                rows[AIMEE_DB2_MEMORY_TIER_KIND_COUNTS_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_memory_tier_kind_count_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_TIER_KIND_COUNTS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_tier_kind_counts(
+                      listed, (int)AIMEE_DB2_MEMORY_TIER_KIND_COUNTS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].memory_tier, sizeof(rows[index].memory_tier), "%s",
+                           listed[index].tier);
+                  snprintf(rows[index].memory_kind, sizeof(rows[index].memory_kind), "%s",
+                           listed[index].kind);
+                  rows[index].memory_count =
+                      listed[index].count > 0 ? (uint32_t)listed[index].count : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_tier_kind_counts_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_memory_key_facts_provenance_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_key_facts_provenance)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_key_facts_provenance_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_key_fact_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_key_facts_provenance(
+                      listed, (int)AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].memory_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].memory_key, sizeof(rows[index].memory_key), "%s",
+                           listed[index].key);
+                  snprintf(rows[index].memory_content, sizeof(rows[index].memory_content), "%s",
+                           listed[index].content);
+                  snprintf(rows[index].supersede_date, sizeof(rows[index].supersede_date), "%s",
+                           listed[index].supersede_date);
+                  snprintf(rows[index].memory_provenance, sizeof(rows[index].memory_provenance),
+                           "%s", listed[index].provenance);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_key_facts_provenance_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         double effectiveness_threshold = 0.0;
+         uint32_t row_limit = 0u;
+         if (aimee_db2_memory_low_effectiveness_request_decode(
+                 request_body, request_len, &effectiveness_threshold, &row_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_LOW_EFFECTIVENESS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_low_effectiveness)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_low_effectiveness_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_LOW_EFFECTIVENESS_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_low_eff_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_LOW_EFFECTIVENESS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_low_effectiveness(
+                      effectiveness_threshold, (int)row_limit, listed,
+                      (int)AIMEE_DB2_MEMORY_LOW_EFFECTIVENESS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].memory_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].memory_tier, sizeof(rows[index].memory_tier), "%s",
+                           listed[index].tier);
+                  snprintf(rows[index].memory_kind, sizeof(rows[index].memory_kind), "%s",
+                           listed[index].kind);
+                  snprintf(rows[index].memory_key, sizeof(rows[index].memory_key), "%s",
+                           listed[index].key);
+                  rows[index].memory_effectiveness = listed[index].effectiveness;
+                  rows[index].use_count =
+                      listed[index].use_count > 0 ? (uint32_t)listed[index].use_count : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_low_effectiveness_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }

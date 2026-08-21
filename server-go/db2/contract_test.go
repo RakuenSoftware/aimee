@@ -139,345 +139,347 @@ type wireBaseline struct {
 		Name    string `json:"name"`
 		Family  string `json:"family"`
 		Request struct {
-			Positive                       string   `json:"positive"`
-			SourceSession                  string   `json:"source_session"`
-			Key                            string   `json:"key"`
-			Kind                           string   `json:"kind"`
-			SessionID                      string   `json:"session_id"`
-			Tokens                         string   `json:"tokens"`
-			Cleared                        string   `json:"cleared"`
-			TierA                          string   `json:"tier_a"`
-			TierB                          string   `json:"tier_b"`
-			MemoryID                       uint64   `json:"memory_id"`
-			LinkID                         uint64   `json:"link_id"`
-			AsOf                           string   `json:"as_of"`
-			ScopeType                      string   `json:"scope_type"`
-			Content                        string   `json:"content"`
-			Workspace                      string   `json:"workspace"`
-			HasValue                       uint32   `json:"has_value"`
-			ValueBits                      uint64   `json:"value_bits"`
-			ThresholdBits                  uint64   `json:"threshold_bits"`
-			LowThresholdBits               uint64   `json:"low_threshold_bits"`
-			MaximumIDs                     uint32   `json:"maximum_ids"`
-			Limit                          uint32   `json:"limit"`
-			ScopeFlags                     uint32   `json:"scope_flags"`
-			Term                           string   `json:"term"`
-			AnchorID                       uint64   `json:"anchor_id"`
-			AnchorZero                     string   `json:"anchor_zero"`
-			UnitID                         uint64   `json:"unit_id"`
-			NormalizedKey                  string   `json:"normalized_key"`
-			HideArchived                   uint32   `json:"hide_archived"`
-			Tier                           string   `json:"tier"`
-			Unfiltered                     string   `json:"unfiltered"`
-			EntitySeed                     string   `json:"entity_seed"`
-			Keyword                        string   `json:"keyword"`
-			Unselected                     string   `json:"unselected"`
-			RecordID                       uint64   `json:"record_id"`
-			DocumentID                     uint64   `json:"document_id"`
-			LastTraceID                    uint64   `json:"last_trace_id"`
-			Pattern                        string   `json:"pattern"`
-			SourceRef                      string   `json:"source_ref"`
-			ArtifactID                     string   `json:"artifact_id"`
-			Sink                           string   `json:"sink"`
-			EntityID                       string   `json:"entity_id"`
-			TurnID                         string   `json:"turn_id"`
-			BlobRef                        string   `json:"blob_ref"`
-			QueryNorm                      string   `json:"query_norm"`
-			StateKey                       string   `json:"state_key"`
-			FinishedAt                     string   `json:"finished_at"`
-			JobID                          string   `json:"job_id"`
-			State                          string   `json:"state"`
-			Collection                     string   `json:"collection"`
-			LastError                      string   `json:"last_error"`
-			StateValue                     string   `json:"state_value"`
-			Version                        string   `json:"version"`
-			UpdatedAt                      string   `json:"updated_at"`
-			Window                         string   `json:"window"`
-			ContentHash                    string   `json:"content_hash"`
-			Scope                          string   `json:"scope"`
-			FilePath                       string   `json:"file_path"`
-			CertIssuer                     string   `json:"cert_issuer"`
-			CertSerialNorm                 string   `json:"cert_serial_norm"`
-			Project                        string   `json:"project"`
-			StaleL1Tier                    string   `json:"stale_l1_tier"`
-			MaximumKinds                   uint32   `json:"maximum_kinds"`
-			DemoteTier                     string   `json:"demote_tier"`
-			SourceTier                     string   `json:"source_tier"`
-			TargetTier                     string   `json:"target_tier"`
-			Kinds                          []string `json:"kinds"`
-			ConfidenceBits                 uint64   `json:"confidence_bits"`
-			UseCount                       uint32   `json:"use_count"`
-			StableDays                     uint32   `json:"stable_days"`
-			GatedKind                      string   `json:"gated_kind"`
-			RequireApproval                uint32   `json:"require_approval"`
-			OpenPositive                   string   `json:"open_positive"`
-			Approver                       string   `json:"approver"`
-			Note                           string   `json:"note"`
-			BarePositive                   string   `json:"bare_positive"`
-			Promotions                     uint32   `json:"promotions"`
-			Demotions                      uint32   `json:"demotions"`
-			Expirations                    uint32   `json:"expirations"`
-			ConflictWindowDays             uint32   `json:"conflict_window_days"`
-			SnapshotRetentionDays          uint32   `json:"snapshot_retention_days"`
-			ContradictionRetentionDays     uint32   `json:"contradiction_retention_days"`
-			PromoteUseCount                uint32   `json:"promote_use_count"`
-			PromoteConfidenceBits          uint64   `json:"promote_confidence_bits"`
-			DecisionPoint                  string   `json:"decision_point"`
-			RelType                        string   `json:"rel_type"`
-			ProspectiveID                  uint64   `json:"prospective_id"`
-			NewState                       string   `json:"new_state"`
-			GenerationID                   uint64   `json:"generation_id"`
-			ErrorMessage                   string   `json:"error_message"`
-			SourceHash                     string   `json:"source_hash"`
-			ProjectID                      uint64   `json:"project_id"`
-			PathGlob                       string   `json:"path_glob"`
-			DecisionID                     uint64   `json:"decision_id"`
-			Outcome                        string   `json:"outcome"`
-			Status                         string   `json:"status"`
-			RevisitWhen                    string   `json:"revisit_when"`
-			TaskID                         uint64   `json:"task_id"`
-			IngestJobID                    uint64   `json:"ingest_job_id"`
-			DryRun                         uint32   `json:"dry_run"`
-			RuleID                         uint32   `json:"rule_id"`
-			ProposalID                     uint32   `json:"proposal_id"`
-			RuleRowID                      uint32   `json:"rule_row_id"`
-			MinRows                        uint32   `json:"min_rows"`
-			MaxAttempts                    uint32   `json:"max_attempts"`
-			SceneMemoryID                  uint64   `json:"scene_memory_id"`
-			SceneID                        uint64   `json:"scene_id"`
-			UnitIDA                        uint64   `json:"unit_id_a"`
-			UnitIDB                        uint64   `json:"unit_id_b"`
-			CitingArtifactID               string   `json:"citing_artifact_id"`
-			SourceKind                     string   `json:"source_kind"`
-			SourceID                       string   `json:"source_id"`
-			FromArtifactID                 string   `json:"from_artifact_id"`
-			ToArtifactID                   string   `json:"to_artifact_id"`
-			LinkKind                       string   `json:"link_kind"`
-			ArmID                          string   `json:"arm_id"`
-			RollbackArm                    string   `json:"rollback_arm"`
-			RuleText                       string   `json:"rule_text"`
-			RuleReason                     string   `json:"rule_reason"`
-			ProposedBy                     string   `json:"proposed_by"`
-			ReleaseID                      uint64   `json:"release_id"`
-			DocID                          uint64   `json:"doc_id"`
-			DirectiveID                    uint64   `json:"directive_id"`
-			ResolutionMemoryID             uint64   `json:"resolution_memory_id"`
-			DirectiveType                  string   `json:"directive_type"`
-			FlagReason                     string   `json:"flag_reason"`
-			VerdictTag                     string   `json:"verdict_tag"`
-			VerdictScope                   string   `json:"verdict_scope"`
-			DocumentKey                    string   `json:"document_key"`
-			MappedTo                       string   `json:"mapped_to"`
-			NowIso                         string   `json:"now_iso"`
-			ReleaseName                    string   `json:"release_name"`
-			ExemplarProject                string   `json:"exemplar_project"`
-			Basename                       string   `json:"basename"`
-			Generation                     string   `json:"generation"`
-			PurgeID                        string   `json:"purge_id"`
-			FileHash                       string   `json:"file_hash"`
-			ErrorLowered                   string   `json:"error_lowered"`
-			Entity                         string   `json:"entity"`
-			RelationA                      string   `json:"relation_a"`
-			RelationB                      string   `json:"relation_b"`
-			OrderByWeight                  uint32   `json:"order_by_weight"`
-			Relation                       string   `json:"relation"`
-			Query                          string   `json:"query"`
-			Enrich                         uint32   `json:"enrich"`
-			ExcludedProject                string   `json:"excluded_project"`
-			Node                           string   `json:"node"`
-			UtilityDelta                   float64  `json:"utility_delta"`
-			UtilityScoringEnabled          uint32   `json:"utility_scoring_enabled"`
-			BanditDecisionID               string   `json:"bandit_decision_id"`
-			Reward                         float64  `json:"reward"`
-			UtilityDeltaBinary64Bits       uint64   `json:"utility_delta_binary64_bits"`
-			RewardBinary64Bits             uint64   `json:"reward_binary64_bits"`
-			StateFilter                    string   `json:"state_filter"`
-			EntityLowered                  string   `json:"entity_lowered"`
-			FileAnchor                     string   `json:"file_anchor"`
-			TurnText                       string   `json:"turn_text"`
-			CauseFilter                    string   `json:"cause_filter"`
-			MatchClause                    string   `json:"match_clause"`
-			RelationQuery                  string   `json:"relation_query"`
-			EntityToken                    string   `json:"entity_token"`
-			Token                          string   `json:"token"`
-			ProjectionGeneration           uint64   `json:"projection_generation"`
-			Identifier                     string   `json:"identifier"`
-			Callee                         string   `json:"callee"`
-			MinWeight                      uint32   `json:"min_weight"`
-			HitThreshold                   uint32   `json:"hit_threshold"`
-			Command                        string   `json:"command"`
-			TaskStateFilter                string   `json:"task_state_filter"`
-			TaskSessionFilter              string   `json:"task_session_filter"`
-			ParentTask                     uint64   `json:"parent_task"`
-			FactSubject                    string   `json:"fact_subject"`
-			RelationFilter                 string   `json:"relation_filter"`
-			OutcomeFilter                  string   `json:"outcome_filter"`
-			DecisionSubjectFilter          string   `json:"decision_subject_filter"`
-			StatusFilter                   string   `json:"status_filter"`
-			KvSection                      uint32   `json:"kv_section"`
-			MemoryKeyExact                 string   `json:"memory_key_exact"`
-			MemorySessionID                string   `json:"memory_session_id"`
-			CandidateFilter                uint32   `json:"candidate_filter"`
-			RecallSection                  uint32   `json:"recall_section"`
-			MaxPairs                       uint32   `json:"max_pairs"`
-			LinkSourceID                   uint64   `json:"link_source_id"`
-			LinkTargetID                   uint64   `json:"link_target_id"`
-			LinkRelation                   string   `json:"link_relation"`
-			EdgeSourceTask                 uint64   `json:"edge_source_task"`
-			EdgeTargetTask                 uint64   `json:"edge_target_task"`
-			EdgeRelation                   string   `json:"edge_relation"`
-			ResolutionNote                 string   `json:"resolution_note"`
-			DecisionSubject                string   `json:"decision_subject"`
-			LinkedPolicy                   uint64   `json:"linked_policy"`
-			NodeKey                        string   `json:"node_key"`
-			Alias                          string   `json:"alias"`
-			AliasKind                      string   `json:"alias_kind"`
-			AliasProject                   string   `json:"alias_project"`
-			AliasGeneration                uint64   `json:"alias_generation"`
-			EdgeSource                     string   `json:"edge_source"`
-			EdgeTarget                     string   `json:"edge_target"`
-			WindowID                       uint64   `json:"window_id"`
-			RelationID                     uint32   `json:"relation_id"`
-			SubjectKind                    uint32   `json:"subject_kind"`
-			ObjectKind                     uint32   `json:"object_kind"`
-			ContextHash                    string   `json:"context_hash"`
-			PropensityBinary64Bits         uint64   `json:"propensity_binary64_bits"`
-			IsExploration                  uint32   `json:"is_exploration"`
-			ArtifactKind                   string   `json:"artifact_kind"`
-			ArtifactState                  string   `json:"artifact_state"`
-			ScopeKind                      string   `json:"scope_kind"`
-			ScopeID                        string   `json:"scope_id"`
-			OperatorID                     string   `json:"operator_id"`
-			ArtifactConfidenceBinary64Bits uint64   `json:"artifact_confidence_binary64_bits"`
-			PayloadJson                    string   `json:"payload_json"`
-			AttemptCount                   uint32   `json:"attempt_count"`
-			AgentName                      string   `json:"agent_name"`
-			AgentRole                      string   `json:"agent_role"`
-			OutcomeKind                    string   `json:"outcome_kind"`
-			OutcomeReason                  string   `json:"outcome_reason"`
-			TurnsUsed                      uint32   `json:"turns_used"`
-			ToolsCalled                    uint32   `json:"tools_called"`
-			TokensUsed                     uint64   `json:"tokens_used"`
-			ToolErrorPattern               string   `json:"tool_error_pattern"`
-			CounterExample                 string   `json:"counter_example"`
-			BeforeJson                     string   `json:"before_json"`
-			ModifiedSince                  uint64   `json:"modified_since"`
-			ScannedAt                      string   `json:"scanned_at"`
-			AuditID                        string   `json:"audit_id"`
-			SourceArtifactID               string   `json:"source_artifact_id"`
-			AuditTargetSurface             string   `json:"audit_target_surface"`
-			AuditTargetID                  string   `json:"audit_target_id"`
-			AuditOperatorID                string   `json:"audit_operator_id"`
-			AuditScopeKind                 string   `json:"audit_scope_kind"`
-			AuditScopeID                   string   `json:"audit_scope_id"`
-			AppliedConfidenceBinary64Bits  uint64   `json:"applied_confidence_binary64_bits"`
-			FlaggedForReview               uint32   `json:"flagged_for_review"`
-			BeforeSnapshot                 string   `json:"before_snapshot"`
-			AfterSnapshot                  string   `json:"after_snapshot"`
-			RewardDeltaBinary64Bits        uint64   `json:"reward_delta_binary64_bits"`
-			PosteriorAlphaBinary64Bits     uint64   `json:"posterior_alpha_binary64_bits"`
-			PosteriorBetaBinary64Bits      uint64   `json:"posterior_beta_binary64_bits"`
-			PointID                        uint64   `json:"point_id"`
-			IndexOK                        uint32   `json:"index_ok"`
-			ProjectRoot                    string   `json:"project_root"`
-			MemoryClass                    string   `json:"memory_class"`
-			ProfileScopeKind               string   `json:"profile_scope_kind"`
-			ProfileScopeID                 string   `json:"profile_scope_id"`
-			RetrievalEventID               string   `json:"retrieval_event_id"`
-			SurfacedRowID                  uint64   `json:"surfaced_row_id"`
-			AttributionVerdict             string   `json:"attribution_verdict"`
-			AttributionWeightBinary64Bits  uint64   `json:"attribution_weight_binary64_bits"`
-			UnitPath                       string   `json:"unit_path"`
-			RenderPhase                    string   `json:"render_phase"`
-			SnapshotJson                   string   `json:"snapshot_json"`
-			CapturedAt                     string   `json:"captured_at"`
-			NodeKind                       uint32   `json:"node_kind"`
-			NodeProject                    string   `json:"node_project"`
-			DisplayName                    string   `json:"display_name"`
-			FullKey                        string   `json:"full_key"`
-			NodeFilePath                   string   `json:"node_file_path"`
-			NodeSymbol                     string   `json:"node_symbol"`
-			NodeOrigin                     string   `json:"node_origin"`
-			NodeGeneration                 uint64   `json:"node_generation"`
-			CanonicalName                  string   `json:"canonical_name"`
-			ObservationCount               uint32   `json:"observation_count"`
-			CardJson                       string   `json:"card_json"`
-			CertFingerprint                string   `json:"cert_fingerprint"`
-			EnrollmentScope                string   `json:"enrollment_scope"`
-			MemoryAID                      uint64   `json:"memory_a_id"`
-			MemoryBID                      uint64   `json:"memory_b_id"`
-			SubjectID                      string   `json:"subject_id"`
-			FeatureSubjectKind             string   `json:"feature_subject_kind"`
-			FeatureScopeKind               string   `json:"feature_scope_kind"`
-			FeatureScopeID                 string   `json:"feature_scope_id"`
-			FeatureSetVersion              string   `json:"feature_set_version"`
-			FeaturesJson                   string   `json:"features_json"`
-			ComputedAt                     string   `json:"computed_at"`
-			ActorRole                      string   `json:"actor_role"`
-			ActorPrincipal                 string   `json:"actor_principal"`
-			AuditAction                    string   `json:"audit_action"`
-			AuditSubject                   string   `json:"audit_subject"`
-			AuditVerdict                   string   `json:"audit_verdict"`
-			AuditDetail                    string   `json:"audit_detail"`
-			JobKind                        string   `json:"job_kind"`
-			JobProject                     string   `json:"job_project"`
-			ProjectName                    string   `json:"project_name"`
-			NewTrust                       string   `json:"new_trust"`
-			TrustActor                     string   `json:"trust_actor"`
-			TrustRequestID                 string   `json:"trust_request_id"`
-			OidcIssuer                     string   `json:"oidc_issuer"`
-			OidcAudience                   string   `json:"oidc_audience"`
-			OidcJwksURL                    string   `json:"oidc_jwks_url"`
-			OidcAdminClaim                 string   `json:"oidc_admin_claim"`
-			OidcAdminValues                string   `json:"oidc_admin_values"`
-			DrainLimit                     uint32   `json:"drain_limit"`
-			WindowSeconds                  uint32   `json:"window_seconds"`
-			CalleeRepoMin                  uint32   `json:"callee_repo_min"`
-			DefinitionRepoMin              uint32   `json:"definition_repo_min"`
-			SymbolLengthMin                uint32   `json:"symbol_length_min"`
-			TargetSurface                  string   `json:"target_surface"`
-			DemotionRowID                  uint64   `json:"demotion_row_id"`
-			WindowSize                     uint32   `json:"window_size"`
-			HalfLifeDaysBinary64Bits       uint64   `json:"half_life_days_binary64_bits"`
-			NMin                           uint32   `json:"n_min"`
-			RulePolarity                   string   `json:"rule_polarity"`
-			RuleTitle                      string   `json:"rule_title"`
-			RuleDescription                string   `json:"rule_description"`
-			WeightOverride                 uint32   `json:"weight_override"`
-			DocState                       string   `json:"doc_state"`
-			ClearReviewNeeded              uint32   `json:"clear_review_needed"`
-			ReviewReason                   string   `json:"review_reason"`
-			WindowDays                     uint32   `json:"window_days"`
-			FilesIndexed                   uint32   `json:"files_indexed"`
-			ChunksAdded                    uint32   `json:"chunks_added"`
-			EmbeddingsAdded                uint32   `json:"embeddings_added"`
-			EmbeddingVersion               string   `json:"embedding_version"`
-			ArchiveReason                  string   `json:"archive_reason"`
-			TargetReleaseID                uint64   `json:"target_release_id"`
-			TtlDays                        uint32   `json:"ttl_days"`
-			LifecycleState                 string   `json:"lifecycle_state"`
-			DefaultValueBinary64Bits       uint64   `json:"default_value_binary64_bits"`
-			MemoryKey                      string   `json:"memory_key"`
-			MemoryContent                  string   `json:"memory_content"`
-			MiningJobID                    string   `json:"mining_job_id"`
-			HighWaterMark                  uint64   `json:"high_water_mark"`
-			ArtifactType                   string   `json:"artifact_type"`
-			ArtifactRef                    string   `json:"artifact_ref"`
-			ArtifactHash                   string   `json:"artifact_hash"`
-			RuleWeight                     uint32   `json:"rule_weight"`
-			SetWeight                      uint32   `json:"set_weight"`
-			TaskTitle                      string   `json:"task_title"`
-			ParentTaskID                   uint64   `json:"parent_task_id"`
-			ToolName                       string   `json:"tool_name"`
-			PatternText                    string   `json:"pattern_text"`
-			PatternDescription             string   `json:"pattern_description"`
-			PatternSource                  string   `json:"pattern_source"`
-			PatternSourceRef               string   `json:"pattern_source_ref"`
-			PatternConfidenceBinary64Bits  uint64   `json:"pattern_confidence_binary64_bits"`
-			KBDocumentID                   uint64   `json:"kb_document_id"`
-			SummaryLimit                   uint32   `json:"summary_limit"`
-			GraphEntity                    string   `json:"graph_entity"`
-			Negative                       []struct {
+			Positive                           string   `json:"positive"`
+			SourceSession                      string   `json:"source_session"`
+			Key                                string   `json:"key"`
+			Kind                               string   `json:"kind"`
+			SessionID                          string   `json:"session_id"`
+			Tokens                             string   `json:"tokens"`
+			Cleared                            string   `json:"cleared"`
+			TierA                              string   `json:"tier_a"`
+			TierB                              string   `json:"tier_b"`
+			MemoryID                           uint64   `json:"memory_id"`
+			LinkID                             uint64   `json:"link_id"`
+			AsOf                               string   `json:"as_of"`
+			ScopeType                          string   `json:"scope_type"`
+			Content                            string   `json:"content"`
+			Workspace                          string   `json:"workspace"`
+			HasValue                           uint32   `json:"has_value"`
+			ValueBits                          uint64   `json:"value_bits"`
+			ThresholdBits                      uint64   `json:"threshold_bits"`
+			LowThresholdBits                   uint64   `json:"low_threshold_bits"`
+			MaximumIDs                         uint32   `json:"maximum_ids"`
+			Limit                              uint32   `json:"limit"`
+			ScopeFlags                         uint32   `json:"scope_flags"`
+			Term                               string   `json:"term"`
+			AnchorID                           uint64   `json:"anchor_id"`
+			AnchorZero                         string   `json:"anchor_zero"`
+			UnitID                             uint64   `json:"unit_id"`
+			NormalizedKey                      string   `json:"normalized_key"`
+			HideArchived                       uint32   `json:"hide_archived"`
+			Tier                               string   `json:"tier"`
+			Unfiltered                         string   `json:"unfiltered"`
+			EntitySeed                         string   `json:"entity_seed"`
+			Keyword                            string   `json:"keyword"`
+			Unselected                         string   `json:"unselected"`
+			RecordID                           uint64   `json:"record_id"`
+			DocumentID                         uint64   `json:"document_id"`
+			LastTraceID                        uint64   `json:"last_trace_id"`
+			Pattern                            string   `json:"pattern"`
+			SourceRef                          string   `json:"source_ref"`
+			ArtifactID                         string   `json:"artifact_id"`
+			Sink                               string   `json:"sink"`
+			EntityID                           string   `json:"entity_id"`
+			TurnID                             string   `json:"turn_id"`
+			BlobRef                            string   `json:"blob_ref"`
+			QueryNorm                          string   `json:"query_norm"`
+			StateKey                           string   `json:"state_key"`
+			FinishedAt                         string   `json:"finished_at"`
+			JobID                              string   `json:"job_id"`
+			State                              string   `json:"state"`
+			Collection                         string   `json:"collection"`
+			LastError                          string   `json:"last_error"`
+			StateValue                         string   `json:"state_value"`
+			Version                            string   `json:"version"`
+			UpdatedAt                          string   `json:"updated_at"`
+			Window                             string   `json:"window"`
+			ContentHash                        string   `json:"content_hash"`
+			Scope                              string   `json:"scope"`
+			FilePath                           string   `json:"file_path"`
+			CertIssuer                         string   `json:"cert_issuer"`
+			CertSerialNorm                     string   `json:"cert_serial_norm"`
+			Project                            string   `json:"project"`
+			StaleL1Tier                        string   `json:"stale_l1_tier"`
+			MaximumKinds                       uint32   `json:"maximum_kinds"`
+			DemoteTier                         string   `json:"demote_tier"`
+			SourceTier                         string   `json:"source_tier"`
+			TargetTier                         string   `json:"target_tier"`
+			Kinds                              []string `json:"kinds"`
+			ConfidenceBits                     uint64   `json:"confidence_bits"`
+			UseCount                           uint32   `json:"use_count"`
+			StableDays                         uint32   `json:"stable_days"`
+			GatedKind                          string   `json:"gated_kind"`
+			RequireApproval                    uint32   `json:"require_approval"`
+			OpenPositive                       string   `json:"open_positive"`
+			Approver                           string   `json:"approver"`
+			Note                               string   `json:"note"`
+			BarePositive                       string   `json:"bare_positive"`
+			Promotions                         uint32   `json:"promotions"`
+			Demotions                          uint32   `json:"demotions"`
+			Expirations                        uint32   `json:"expirations"`
+			ConflictWindowDays                 uint32   `json:"conflict_window_days"`
+			SnapshotRetentionDays              uint32   `json:"snapshot_retention_days"`
+			ContradictionRetentionDays         uint32   `json:"contradiction_retention_days"`
+			PromoteUseCount                    uint32   `json:"promote_use_count"`
+			PromoteConfidenceBits              uint64   `json:"promote_confidence_bits"`
+			DecisionPoint                      string   `json:"decision_point"`
+			RelType                            string   `json:"rel_type"`
+			ProspectiveID                      uint64   `json:"prospective_id"`
+			NewState                           string   `json:"new_state"`
+			GenerationID                       uint64   `json:"generation_id"`
+			ErrorMessage                       string   `json:"error_message"`
+			SourceHash                         string   `json:"source_hash"`
+			ProjectID                          uint64   `json:"project_id"`
+			PathGlob                           string   `json:"path_glob"`
+			DecisionID                         uint64   `json:"decision_id"`
+			Outcome                            string   `json:"outcome"`
+			Status                             string   `json:"status"`
+			RevisitWhen                        string   `json:"revisit_when"`
+			TaskID                             uint64   `json:"task_id"`
+			IngestJobID                        uint64   `json:"ingest_job_id"`
+			DryRun                             uint32   `json:"dry_run"`
+			RuleID                             uint32   `json:"rule_id"`
+			ProposalID                         uint32   `json:"proposal_id"`
+			RuleRowID                          uint32   `json:"rule_row_id"`
+			MinRows                            uint32   `json:"min_rows"`
+			MaxAttempts                        uint32   `json:"max_attempts"`
+			SceneMemoryID                      uint64   `json:"scene_memory_id"`
+			SceneID                            uint64   `json:"scene_id"`
+			UnitIDA                            uint64   `json:"unit_id_a"`
+			UnitIDB                            uint64   `json:"unit_id_b"`
+			CitingArtifactID                   string   `json:"citing_artifact_id"`
+			SourceKind                         string   `json:"source_kind"`
+			SourceID                           string   `json:"source_id"`
+			FromArtifactID                     string   `json:"from_artifact_id"`
+			ToArtifactID                       string   `json:"to_artifact_id"`
+			LinkKind                           string   `json:"link_kind"`
+			ArmID                              string   `json:"arm_id"`
+			RollbackArm                        string   `json:"rollback_arm"`
+			RuleText                           string   `json:"rule_text"`
+			RuleReason                         string   `json:"rule_reason"`
+			ProposedBy                         string   `json:"proposed_by"`
+			ReleaseID                          uint64   `json:"release_id"`
+			DocID                              uint64   `json:"doc_id"`
+			DirectiveID                        uint64   `json:"directive_id"`
+			ResolutionMemoryID                 uint64   `json:"resolution_memory_id"`
+			DirectiveType                      string   `json:"directive_type"`
+			FlagReason                         string   `json:"flag_reason"`
+			VerdictTag                         string   `json:"verdict_tag"`
+			VerdictScope                       string   `json:"verdict_scope"`
+			DocumentKey                        string   `json:"document_key"`
+			MappedTo                           string   `json:"mapped_to"`
+			NowIso                             string   `json:"now_iso"`
+			ReleaseName                        string   `json:"release_name"`
+			ExemplarProject                    string   `json:"exemplar_project"`
+			Basename                           string   `json:"basename"`
+			Generation                         string   `json:"generation"`
+			PurgeID                            string   `json:"purge_id"`
+			FileHash                           string   `json:"file_hash"`
+			ErrorLowered                       string   `json:"error_lowered"`
+			Entity                             string   `json:"entity"`
+			RelationA                          string   `json:"relation_a"`
+			RelationB                          string   `json:"relation_b"`
+			OrderByWeight                      uint32   `json:"order_by_weight"`
+			Relation                           string   `json:"relation"`
+			Query                              string   `json:"query"`
+			Enrich                             uint32   `json:"enrich"`
+			ExcludedProject                    string   `json:"excluded_project"`
+			Node                               string   `json:"node"`
+			UtilityDelta                       float64  `json:"utility_delta"`
+			UtilityScoringEnabled              uint32   `json:"utility_scoring_enabled"`
+			BanditDecisionID                   string   `json:"bandit_decision_id"`
+			Reward                             float64  `json:"reward"`
+			UtilityDeltaBinary64Bits           uint64   `json:"utility_delta_binary64_bits"`
+			RewardBinary64Bits                 uint64   `json:"reward_binary64_bits"`
+			StateFilter                        string   `json:"state_filter"`
+			EntityLowered                      string   `json:"entity_lowered"`
+			FileAnchor                         string   `json:"file_anchor"`
+			TurnText                           string   `json:"turn_text"`
+			CauseFilter                        string   `json:"cause_filter"`
+			MatchClause                        string   `json:"match_clause"`
+			RelationQuery                      string   `json:"relation_query"`
+			EntityToken                        string   `json:"entity_token"`
+			Token                              string   `json:"token"`
+			ProjectionGeneration               uint64   `json:"projection_generation"`
+			Identifier                         string   `json:"identifier"`
+			Callee                             string   `json:"callee"`
+			MinWeight                          uint32   `json:"min_weight"`
+			HitThreshold                       uint32   `json:"hit_threshold"`
+			Command                            string   `json:"command"`
+			TaskStateFilter                    string   `json:"task_state_filter"`
+			TaskSessionFilter                  string   `json:"task_session_filter"`
+			ParentTask                         uint64   `json:"parent_task"`
+			FactSubject                        string   `json:"fact_subject"`
+			RelationFilter                     string   `json:"relation_filter"`
+			OutcomeFilter                      string   `json:"outcome_filter"`
+			DecisionSubjectFilter              string   `json:"decision_subject_filter"`
+			StatusFilter                       string   `json:"status_filter"`
+			KvSection                          uint32   `json:"kv_section"`
+			MemoryKeyExact                     string   `json:"memory_key_exact"`
+			MemorySessionID                    string   `json:"memory_session_id"`
+			CandidateFilter                    uint32   `json:"candidate_filter"`
+			RecallSection                      uint32   `json:"recall_section"`
+			MaxPairs                           uint32   `json:"max_pairs"`
+			LinkSourceID                       uint64   `json:"link_source_id"`
+			LinkTargetID                       uint64   `json:"link_target_id"`
+			LinkRelation                       string   `json:"link_relation"`
+			EdgeSourceTask                     uint64   `json:"edge_source_task"`
+			EdgeTargetTask                     uint64   `json:"edge_target_task"`
+			EdgeRelation                       string   `json:"edge_relation"`
+			ResolutionNote                     string   `json:"resolution_note"`
+			DecisionSubject                    string   `json:"decision_subject"`
+			LinkedPolicy                       uint64   `json:"linked_policy"`
+			NodeKey                            string   `json:"node_key"`
+			Alias                              string   `json:"alias"`
+			AliasKind                          string   `json:"alias_kind"`
+			AliasProject                       string   `json:"alias_project"`
+			AliasGeneration                    uint64   `json:"alias_generation"`
+			EdgeSource                         string   `json:"edge_source"`
+			EdgeTarget                         string   `json:"edge_target"`
+			WindowID                           uint64   `json:"window_id"`
+			RelationID                         uint32   `json:"relation_id"`
+			SubjectKind                        uint32   `json:"subject_kind"`
+			ObjectKind                         uint32   `json:"object_kind"`
+			ContextHash                        string   `json:"context_hash"`
+			PropensityBinary64Bits             uint64   `json:"propensity_binary64_bits"`
+			IsExploration                      uint32   `json:"is_exploration"`
+			ArtifactKind                       string   `json:"artifact_kind"`
+			ArtifactState                      string   `json:"artifact_state"`
+			ScopeKind                          string   `json:"scope_kind"`
+			ScopeID                            string   `json:"scope_id"`
+			OperatorID                         string   `json:"operator_id"`
+			ArtifactConfidenceBinary64Bits     uint64   `json:"artifact_confidence_binary64_bits"`
+			PayloadJson                        string   `json:"payload_json"`
+			AttemptCount                       uint32   `json:"attempt_count"`
+			AgentName                          string   `json:"agent_name"`
+			AgentRole                          string   `json:"agent_role"`
+			OutcomeKind                        string   `json:"outcome_kind"`
+			OutcomeReason                      string   `json:"outcome_reason"`
+			TurnsUsed                          uint32   `json:"turns_used"`
+			ToolsCalled                        uint32   `json:"tools_called"`
+			TokensUsed                         uint64   `json:"tokens_used"`
+			ToolErrorPattern                   string   `json:"tool_error_pattern"`
+			CounterExample                     string   `json:"counter_example"`
+			BeforeJson                         string   `json:"before_json"`
+			ModifiedSince                      uint64   `json:"modified_since"`
+			ScannedAt                          string   `json:"scanned_at"`
+			AuditID                            string   `json:"audit_id"`
+			SourceArtifactID                   string   `json:"source_artifact_id"`
+			AuditTargetSurface                 string   `json:"audit_target_surface"`
+			AuditTargetID                      string   `json:"audit_target_id"`
+			AuditOperatorID                    string   `json:"audit_operator_id"`
+			AuditScopeKind                     string   `json:"audit_scope_kind"`
+			AuditScopeID                       string   `json:"audit_scope_id"`
+			AppliedConfidenceBinary64Bits      uint64   `json:"applied_confidence_binary64_bits"`
+			FlaggedForReview                   uint32   `json:"flagged_for_review"`
+			BeforeSnapshot                     string   `json:"before_snapshot"`
+			AfterSnapshot                      string   `json:"after_snapshot"`
+			RewardDeltaBinary64Bits            uint64   `json:"reward_delta_binary64_bits"`
+			PosteriorAlphaBinary64Bits         uint64   `json:"posterior_alpha_binary64_bits"`
+			PosteriorBetaBinary64Bits          uint64   `json:"posterior_beta_binary64_bits"`
+			PointID                            uint64   `json:"point_id"`
+			IndexOK                            uint32   `json:"index_ok"`
+			ProjectRoot                        string   `json:"project_root"`
+			MemoryClass                        string   `json:"memory_class"`
+			ProfileScopeKind                   string   `json:"profile_scope_kind"`
+			ProfileScopeID                     string   `json:"profile_scope_id"`
+			RetrievalEventID                   string   `json:"retrieval_event_id"`
+			SurfacedRowID                      uint64   `json:"surfaced_row_id"`
+			AttributionVerdict                 string   `json:"attribution_verdict"`
+			AttributionWeightBinary64Bits      uint64   `json:"attribution_weight_binary64_bits"`
+			UnitPath                           string   `json:"unit_path"`
+			RenderPhase                        string   `json:"render_phase"`
+			SnapshotJson                       string   `json:"snapshot_json"`
+			CapturedAt                         string   `json:"captured_at"`
+			NodeKind                           uint32   `json:"node_kind"`
+			NodeProject                        string   `json:"node_project"`
+			DisplayName                        string   `json:"display_name"`
+			FullKey                            string   `json:"full_key"`
+			NodeFilePath                       string   `json:"node_file_path"`
+			NodeSymbol                         string   `json:"node_symbol"`
+			NodeOrigin                         string   `json:"node_origin"`
+			NodeGeneration                     uint64   `json:"node_generation"`
+			CanonicalName                      string   `json:"canonical_name"`
+			ObservationCount                   uint32   `json:"observation_count"`
+			CardJson                           string   `json:"card_json"`
+			CertFingerprint                    string   `json:"cert_fingerprint"`
+			EnrollmentScope                    string   `json:"enrollment_scope"`
+			MemoryAID                          uint64   `json:"memory_a_id"`
+			MemoryBID                          uint64   `json:"memory_b_id"`
+			SubjectID                          string   `json:"subject_id"`
+			FeatureSubjectKind                 string   `json:"feature_subject_kind"`
+			FeatureScopeKind                   string   `json:"feature_scope_kind"`
+			FeatureScopeID                     string   `json:"feature_scope_id"`
+			FeatureSetVersion                  string   `json:"feature_set_version"`
+			FeaturesJson                       string   `json:"features_json"`
+			ComputedAt                         string   `json:"computed_at"`
+			ActorRole                          string   `json:"actor_role"`
+			ActorPrincipal                     string   `json:"actor_principal"`
+			AuditAction                        string   `json:"audit_action"`
+			AuditSubject                       string   `json:"audit_subject"`
+			AuditVerdict                       string   `json:"audit_verdict"`
+			AuditDetail                        string   `json:"audit_detail"`
+			JobKind                            string   `json:"job_kind"`
+			JobProject                         string   `json:"job_project"`
+			ProjectName                        string   `json:"project_name"`
+			NewTrust                           string   `json:"new_trust"`
+			TrustActor                         string   `json:"trust_actor"`
+			TrustRequestID                     string   `json:"trust_request_id"`
+			OidcIssuer                         string   `json:"oidc_issuer"`
+			OidcAudience                       string   `json:"oidc_audience"`
+			OidcJwksURL                        string   `json:"oidc_jwks_url"`
+			OidcAdminClaim                     string   `json:"oidc_admin_claim"`
+			OidcAdminValues                    string   `json:"oidc_admin_values"`
+			DrainLimit                         uint32   `json:"drain_limit"`
+			WindowSeconds                      uint32   `json:"window_seconds"`
+			CalleeRepoMin                      uint32   `json:"callee_repo_min"`
+			DefinitionRepoMin                  uint32   `json:"definition_repo_min"`
+			SymbolLengthMin                    uint32   `json:"symbol_length_min"`
+			TargetSurface                      string   `json:"target_surface"`
+			DemotionRowID                      uint64   `json:"demotion_row_id"`
+			WindowSize                         uint32   `json:"window_size"`
+			HalfLifeDaysBinary64Bits           uint64   `json:"half_life_days_binary64_bits"`
+			NMin                               uint32   `json:"n_min"`
+			RulePolarity                       string   `json:"rule_polarity"`
+			RuleTitle                          string   `json:"rule_title"`
+			RuleDescription                    string   `json:"rule_description"`
+			WeightOverride                     uint32   `json:"weight_override"`
+			DocState                           string   `json:"doc_state"`
+			ClearReviewNeeded                  uint32   `json:"clear_review_needed"`
+			ReviewReason                       string   `json:"review_reason"`
+			WindowDays                         uint32   `json:"window_days"`
+			FilesIndexed                       uint32   `json:"files_indexed"`
+			ChunksAdded                        uint32   `json:"chunks_added"`
+			EmbeddingsAdded                    uint32   `json:"embeddings_added"`
+			EmbeddingVersion                   string   `json:"embedding_version"`
+			ArchiveReason                      string   `json:"archive_reason"`
+			TargetReleaseID                    uint64   `json:"target_release_id"`
+			TtlDays                            uint32   `json:"ttl_days"`
+			LifecycleState                     string   `json:"lifecycle_state"`
+			DefaultValueBinary64Bits           uint64   `json:"default_value_binary64_bits"`
+			MemoryKey                          string   `json:"memory_key"`
+			MemoryContent                      string   `json:"memory_content"`
+			MiningJobID                        string   `json:"mining_job_id"`
+			HighWaterMark                      uint64   `json:"high_water_mark"`
+			ArtifactType                       string   `json:"artifact_type"`
+			ArtifactRef                        string   `json:"artifact_ref"`
+			ArtifactHash                       string   `json:"artifact_hash"`
+			RuleWeight                         uint32   `json:"rule_weight"`
+			SetWeight                          uint32   `json:"set_weight"`
+			TaskTitle                          string   `json:"task_title"`
+			ParentTaskID                       uint64   `json:"parent_task_id"`
+			ToolName                           string   `json:"tool_name"`
+			PatternText                        string   `json:"pattern_text"`
+			PatternDescription                 string   `json:"pattern_description"`
+			PatternSource                      string   `json:"pattern_source"`
+			PatternSourceRef                   string   `json:"pattern_source_ref"`
+			PatternConfidenceBinary64Bits      uint64   `json:"pattern_confidence_binary64_bits"`
+			KBDocumentID                       uint64   `json:"kb_document_id"`
+			SummaryLimit                       uint32   `json:"summary_limit"`
+			GraphEntity                        string   `json:"graph_entity"`
+			EffectivenessThresholdBinary64Bits uint64   `json:"effectiveness_threshold_binary64_bits"`
+			RowLimit                           uint32   `json:"row_limit"`
+			Negative                           []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
 			} `json:"negative"`
@@ -592,7 +594,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 373 ||
+	if len(baseline.Operations) != 378 ||
 		baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
@@ -724,248 +726,253 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[128].Name != "memory_depends_on_keys" ||
 		baseline.Operations[129].Name != "entity_edge_explain" ||
 		baseline.Operations[130].Name != "directive_get" ||
-		baseline.Operations[131].Name != "entity_edge_prune_orphans" ||
-		baseline.Operations[132].Name != "entity_edge_normalize_weights" ||
-		baseline.Operations[133].Name != "project_count" ||
-		baseline.Operations[134].Name != "purge_hidden_pollution" ||
-		baseline.Operations[135].Name != "requeue_drifted" ||
-		baseline.Operations[136].Name != "cross_repo_rebuild_routes" ||
-		baseline.Operations[137].Name != "cross_repo_rebuild_identities" ||
-		baseline.Operations[138].Name != "cross_repo_rebuild_build_deps" ||
-		baseline.Operations[139].Name != "drift_candidates" ||
-		baseline.Operations[140].Name != "file_index_delete_project" ||
-		baseline.Operations[141].Name != "entity_observation_count" ||
-		baseline.Operations[142].Name != "entity_profile_fresh" ||
-		baseline.Operations[143].Name != "project_fingerprint" ||
-		baseline.Operations[144].Name != "visible_source_hash" ||
-		baseline.Operations[145].Name != "entity_profile_card" ||
-		baseline.Operations[146].Name != "generation_abort" ||
-		baseline.Operations[147].Name != "generation_set_source_hash" ||
-		baseline.Operations[148].Name != "generation_publish" ||
-		baseline.Operations[149].Name != "purge_files_matching" ||
-		baseline.Operations[150].Name != "file_index_delete_current_generation" ||
-		baseline.Operations[151].Name != "project_delete" ||
-		baseline.Operations[152].Name != "minhash_delete_current_generation" ||
-		baseline.Operations[153].Name != "minhash_delete_file" ||
-		baseline.Operations[154].Name != "project_current_generation" ||
-		baseline.Operations[155].Name != "projection_generation_create" ||
-		baseline.Operations[156].Name != "projection_visible_id" ||
-		baseline.Operations[157].Name != "unique_file_basename" ||
-		baseline.Operations[158].Name != "entity_neighbors" ||
-		baseline.Operations[159].Name != "entity_neighbors_filtered" ||
-		baseline.Operations[160].Name != "entity_outbound_neighbors" ||
-		baseline.Operations[161].Name != "entity_top_partners" ||
-		baseline.Operations[162].Name != "entity_top_targets" ||
-		baseline.Operations[163].Name != "file_definitions" ||
-		baseline.Operations[164].Name != "code_search" ||
-		baseline.Operations[165].Name != "code_search_excluding_project" ||
-		baseline.Operations[166].Name != "project_last_scan" ||
-		baseline.Operations[167].Name != "entity_walk_step_typed" ||
-		baseline.Operations[168].Name != "projection_generations_list" ||
-		baseline.Operations[169].Name != "entity_edge_bump_utility" ||
-		baseline.Operations[170].Name != "entity_neighbors_weighted" ||
-		baseline.Operations[171].Name != "entity_edges_for_entity" ||
-		baseline.Operations[172].Name != "entity_edges_by_token" ||
-		baseline.Operations[173].Name != "entity_top_triples" ||
-		baseline.Operations[174].Name != "projection_edges" ||
-		baseline.Operations[175].Name != "projection_edges_for_generation" ||
-		baseline.Operations[176].Name != "term_find" ||
-		baseline.Operations[177].Name != "term_find_in_project" ||
-		baseline.Operations[178].Name != "term_find_excluding_project" ||
-		baseline.Operations[179].Name != "callers_find" ||
-		baseline.Operations[180].Name != "callers_find_scoped" ||
-		baseline.Operations[181].Name != "callers_find_excluding_project" ||
-		baseline.Operations[182].Name != "entity_node_get" ||
-		baseline.Operations[183].Name != "entity_node_alias_upsert" ||
-		baseline.Operations[184].Name != "entity_edge_upsert" ||
-		baseline.Operations[185].Name != "code_file_hash" ||
-		baseline.Operations[186].Name != "file_modified_since" ||
-		baseline.Operations[187].Name != "code_file_upsert" ||
-		baseline.Operations[188].Name != "code_index_op_record" ||
-		baseline.Operations[189].Name != "code_project_upsert" ||
-		baseline.Operations[190].Name != "entity_node_upsert" ||
-		baseline.Operations[191].Name != "entity_profile_upsert" ||
-		baseline.Operations[192].Name != "project_stats" ||
-		baseline.Operations[193].Name != "projection_generation_meta" ||
-		baseline.Operations[194].Name != "projection_sync_project" ||
-		baseline.Operations[195].Name != "rules_decay" ||
-		baseline.Operations[196].Name != "curiosity_rescore_all" ||
-		baseline.Operations[197].Name != "mining_seed_job_defaults" ||
-		baseline.Operations[198].Name != "proposals_archive_expired" ||
-		baseline.Operations[199].Name != "trace_mining_last_id" ||
-		baseline.Operations[200].Name != "anti_pattern_bump" ||
-		baseline.Operations[201].Name != "anti_pattern_delete" ||
-		baseline.Operations[202].Name != "trace_mining_record" ||
-		baseline.Operations[203].Name != "anti_pattern_exists_exact" ||
-		baseline.Operations[204].Name != "anti_pattern_exists_by_source_ref" ||
-		baseline.Operations[205].Name != "artifact_citation_count" ||
-		baseline.Operations[206].Name != "commits_in_last_7_days" ||
-		baseline.Operations[207].Name != "fidelity_attribution_count" ||
-		baseline.Operations[208].Name != "artifact_stamp_reflected" ||
-		baseline.Operations[209].Name != "failed_query_bump" ||
-		baseline.Operations[210].Name != "artifact_set_state" ||
-		baseline.Operations[211].Name != "artifact_register_exemplar" ||
-		baseline.Operations[212].Name != "evidence_enqueue" ||
-		baseline.Operations[213].Name != "evidence_mark_failed" ||
-		baseline.Operations[214].Name != "bandit_arms_list" ||
-		baseline.Operations[215].Name != "bandit_promotion_get" ||
-		baseline.Operations[216].Name != "decision_log_set_outcome" ||
-		baseline.Operations[217].Name != "decision_log_set_status" ||
-		baseline.Operations[218].Name != "decision_log_set_revisit" ||
-		baseline.Operations[219].Name != "collab_rule_approve" ||
-		baseline.Operations[220].Name != "collab_rule_reject" ||
-		baseline.Operations[221].Name != "collab_rule_retire" ||
-		baseline.Operations[222].Name != "proposal_bump_corroboration" ||
-		baseline.Operations[223].Name != "proposal_mark_committed" ||
-		baseline.Operations[224].Name != "rules_delete_by_id" ||
-		baseline.Operations[225].Name != "calibration_surfaces_with_data" ||
-		baseline.Operations[226].Name != "artifact_cite" ||
-		baseline.Operations[227].Name != "artifact_link" ||
-		baseline.Operations[228].Name != "bandit_promotion_set" ||
-		baseline.Operations[229].Name != "collab_rule_propose" ||
-		baseline.Operations[230].Name != "rules_delete_by_directive_type" ||
-		baseline.Operations[231].Name != "artifact_flag_review" ||
-		baseline.Operations[232].Name != "verdict_suppressed" ||
-		baseline.Operations[233].Name != "curator_invalidate_doc" ||
-		baseline.Operations[234].Name != "bandit_decision_points" ||
-		baseline.Operations[235].Name != "bandit_decision_close" ||
-		baseline.Operations[236].Name != "rules_list" ||
-		baseline.Operations[237].Name != "rules_list_by_tier" ||
-		baseline.Operations[238].Name != "rules_list_hard" ||
-		baseline.Operations[239].Name != "anti_pattern_list" ||
-		baseline.Operations[240].Name != "anti_pattern_list_hot" ||
-		baseline.Operations[241].Name != "anti_pattern_check" ||
-		baseline.Operations[242].Name != "bandit_decision_insert" ||
-		baseline.Operations[243].Name != "artifact_write" ||
-		baseline.Operations[244].Name != "artifact_write_ex" ||
-		baseline.Operations[245].Name != "artifact_target_surface" ||
-		baseline.Operations[246].Name != "agent_outcome_record" ||
-		baseline.Operations[247].Name != "artifact_reject" ||
-		baseline.Operations[248].Name != "audit_event_write" ||
-		baseline.Operations[249].Name != "audit_latest_before" ||
-		baseline.Operations[250].Name != "bandit_arm_stats_update" ||
-		baseline.Operations[251].Name != "demotion_profile_read" ||
-		baseline.Operations[252].Name != "demotion_profile_write" ||
-		baseline.Operations[253].Name != "retrieval_attribution_write" ||
-		baseline.Operations[254].Name != "retrieval_event_by_turn" ||
-		baseline.Operations[255].Name != "feature_row_upsert" ||
-		baseline.Operations[256].Name != "feature_row_read" ||
-		baseline.Operations[257].Name != "bandit_explore_stats" ||
-		baseline.Operations[258].Name != "bandit_arm_stats_read" ||
-		baseline.Operations[259].Name != "artifact_write_evidence" ||
-		baseline.Operations[260].Name != "calibration_profile_write" ||
-		baseline.Operations[261].Name != "demotion_score" ||
-		baseline.Operations[262].Name != "decision_log_get" ||
-		baseline.Operations[263].Name != "fidelity_report_by_turn" ||
-		baseline.Operations[264].Name != "feedback_record" ||
-		baseline.Operations[265].Name != "proposals_settled_counts" ||
-		baseline.Operations[266].Name != "proposal_archive" ||
-		baseline.Operations[267].Name != "rules_find_by_title" ||
-		baseline.Operations[268].Name != "rules_insert" ||
-		baseline.Operations[269].Name != "rules_update_directive_type" ||
-		baseline.Operations[270].Name != "rules_reinforce_directive" ||
-		baseline.Operations[271].Name != "workflow_pattern_insert" ||
-		baseline.Operations[272].Name != "anti_pattern_insert" ||
-		baseline.Operations[273].Name != "artifact_links_read" ||
-		baseline.Operations[274].Name != "calibration_surface_list" ||
-		baseline.Operations[275].Name != "evidence_pending_list" ||
-		baseline.Operations[276].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[277].Name != "doc_delete" ||
-		baseline.Operations[278].Name != "task_delete" ||
-		baseline.Operations[279].Name != "clear_project" ||
-		baseline.Operations[280].Name != "clear_current_project" ||
-		baseline.Operations[281].Name != "document_exists" ||
-		baseline.Operations[282].Name != "blob_referenced" ||
-		baseline.Operations[283].Name != "fence_active" ||
-		baseline.Operations[284].Name != "doc_exists_by_hash" ||
-		baseline.Operations[285].Name != "pdf_quarantine_confirm" ||
-		baseline.Operations[286].Name != "pdf_quarantine_reject" ||
-		baseline.Operations[287].Name != "ontology_eval_status" ||
-		baseline.Operations[288].Name != "task_update_state" ||
-		baseline.Operations[289].Name != "release_add_doc" ||
-		baseline.Operations[290].Name != "ontology_approve" ||
-		baseline.Operations[291].Name != "ontology_reject" ||
-		baseline.Operations[292].Name != "doc_assets_delete_for_doc" ||
-		baseline.Operations[293].Name != "ontology_map" ||
-		baseline.Operations[294].Name != "release_create" ||
-		baseline.Operations[295].Name != "purge_fence_heartbeat" ||
-		baseline.Operations[296].Name != "purge_fence_clear" ||
-		baseline.Operations[297].Name != "document_stored_hash" ||
-		baseline.Operations[298].Name != "document_hash_exists" ||
-		baseline.Operations[299].Name != "pdf_tsr_state" ||
-		baseline.Operations[300].Name != "document_chunk_ids" ||
-		baseline.Operations[301].Name != "task_edges" ||
-		baseline.Operations[302].Name != "task_list" ||
-		baseline.Operations[303].Name != "task_subtasks" ||
-		baseline.Operations[304].Name != "task_add_edge" ||
-		baseline.Operations[305].Name != "cross_repo_set_trust" ||
-		baseline.Operations[306].Name != "recompute_blocked_symbols" ||
-		baseline.Operations[307].Name != "task_create" ||
-		baseline.Operations[308].Name != "task_get" ||
-		baseline.Operations[309].Name != "tool_registry_lookup" ||
-		baseline.Operations[310].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[311].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[312].Name != "release_get_active" ||
-		baseline.Operations[313].Name != "enrollment_active" ||
-		baseline.Operations[314].Name != "enrollment_touch_last_seen" ||
-		baseline.Operations[315].Name != "kb_audit_append" ||
-		baseline.Operations[316].Name != "console_oidc_get" ||
-		baseline.Operations[317].Name != "console_oidc_put" ||
-		baseline.Operations[318].Name != "enrollment_authority_resolve" ||
-		baseline.Operations[319].Name != "prospective_sweep_expired" ||
-		baseline.Operations[320].Name != "directive_sweep_expired" ||
-		baseline.Operations[321].Name != "mark_revisit_due" ||
-		baseline.Operations[322].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[323].Name != "evidence_reembed_all" ||
-		baseline.Operations[324].Name != "curator_reembed_all" ||
-		baseline.Operations[325].Name != "synth_reenqueue_all" ||
-		baseline.Operations[326].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[327].Name != "directive_suppress" ||
-		baseline.Operations[328].Name != "directive_record_surface" ||
-		baseline.Operations[329].Name != "async_pending_count" ||
-		baseline.Operations[330].Name != "runtime_state_touch" ||
-		baseline.Operations[331].Name != "synth_enqueue" ||
-		baseline.Operations[332].Name != "synth_mark_done" ||
-		baseline.Operations[333].Name != "reembed_mark_finished" ||
-		baseline.Operations[334].Name != "mining_job_try_lock" ||
-		baseline.Operations[335].Name != "synth_mark_failed" ||
-		baseline.Operations[336].Name != "runtime_state_set" ||
-		baseline.Operations[337].Name != "set_active_embedder_version" ||
-		baseline.Operations[338].Name != "runtime_state_get" ||
-		baseline.Operations[339].Name != "ingest_queue_fail" ||
-		baseline.Operations[340].Name != "reset_stuck_vector_ops" ||
-		baseline.Operations[341].Name != "directive_resolve" ||
-		baseline.Operations[342].Name != "css_migration_enumerate" ||
-		baseline.Operations[343].Name != "css_migration_assert_conventions" ||
-		baseline.Operations[344].Name != "css_migration_rules_doc" ||
-		baseline.Operations[345].Name != "retryable_index_failures" ||
-		baseline.Operations[346].Name != "active_embedder_version" ||
-		baseline.Operations[347].Name != "corpus_pipeline_stage_counts" ||
-		baseline.Operations[348].Name != "directive_list" ||
-		baseline.Operations[349].Name != "directive_by_entity" ||
-		baseline.Operations[350].Name != "directive_by_file" ||
-		baseline.Operations[351].Name != "directive_by_lexical" ||
-		baseline.Operations[352].Name != "memory_lint" ||
-		baseline.Operations[353].Name != "decision_log_list" ||
-		baseline.Operations[354].Name != "decision_log_list_scoped" ||
-		baseline.Operations[355].Name != "kb_directive_resolve" ||
-		baseline.Operations[356].Name != "decision_log_active_id" ||
-		baseline.Operations[357].Name != "css_render_snapshot_store" ||
-		baseline.Operations[358].Name != "resolve_contradiction" ||
-		baseline.Operations[359].Name != "async_enqueue" ||
-		baseline.Operations[360].Name != "corpus_pipeline_status" ||
-		baseline.Operations[361].Name != "corpus_pipeline_drain" ||
-		baseline.Operations[362].Name != "kb_doc_read" ||
-		baseline.Operations[363].Name != "kb_doc_set_state" ||
-		baseline.Operations[364].Name != "kb_file_index_get" ||
-		baseline.Operations[365].Name != "kb_ingest_queue_complete" ||
-		baseline.Operations[366].Name != "count_embeddings_for_version" ||
-		baseline.Operations[367].Name != "kb_release_read" ||
-		baseline.Operations[368].Name != "kb_release_promote" ||
-		baseline.Operations[369].Name != "kb_release_rollback" ||
-		baseline.Operations[370].Name != "mining_job_get" ||
-		baseline.Operations[371].Name != "mining_job_complete" ||
-		baseline.Operations[372].Name != "kb_document_fetch" {
+		baseline.Operations[131].Name != "briefing_key_facts" ||
+		baseline.Operations[132].Name != "briefing_recent_activity" ||
+		baseline.Operations[133].Name != "memory_tier_kind_counts" ||
+		baseline.Operations[134].Name != "memory_key_facts_provenance" ||
+		baseline.Operations[135].Name != "memory_low_effectiveness" ||
+		baseline.Operations[136].Name != "entity_edge_prune_orphans" ||
+		baseline.Operations[137].Name != "entity_edge_normalize_weights" ||
+		baseline.Operations[138].Name != "project_count" ||
+		baseline.Operations[139].Name != "purge_hidden_pollution" ||
+		baseline.Operations[140].Name != "requeue_drifted" ||
+		baseline.Operations[141].Name != "cross_repo_rebuild_routes" ||
+		baseline.Operations[142].Name != "cross_repo_rebuild_identities" ||
+		baseline.Operations[143].Name != "cross_repo_rebuild_build_deps" ||
+		baseline.Operations[144].Name != "drift_candidates" ||
+		baseline.Operations[145].Name != "file_index_delete_project" ||
+		baseline.Operations[146].Name != "entity_observation_count" ||
+		baseline.Operations[147].Name != "entity_profile_fresh" ||
+		baseline.Operations[148].Name != "project_fingerprint" ||
+		baseline.Operations[149].Name != "visible_source_hash" ||
+		baseline.Operations[150].Name != "entity_profile_card" ||
+		baseline.Operations[151].Name != "generation_abort" ||
+		baseline.Operations[152].Name != "generation_set_source_hash" ||
+		baseline.Operations[153].Name != "generation_publish" ||
+		baseline.Operations[154].Name != "purge_files_matching" ||
+		baseline.Operations[155].Name != "file_index_delete_current_generation" ||
+		baseline.Operations[156].Name != "project_delete" ||
+		baseline.Operations[157].Name != "minhash_delete_current_generation" ||
+		baseline.Operations[158].Name != "minhash_delete_file" ||
+		baseline.Operations[159].Name != "project_current_generation" ||
+		baseline.Operations[160].Name != "projection_generation_create" ||
+		baseline.Operations[161].Name != "projection_visible_id" ||
+		baseline.Operations[162].Name != "unique_file_basename" ||
+		baseline.Operations[163].Name != "entity_neighbors" ||
+		baseline.Operations[164].Name != "entity_neighbors_filtered" ||
+		baseline.Operations[165].Name != "entity_outbound_neighbors" ||
+		baseline.Operations[166].Name != "entity_top_partners" ||
+		baseline.Operations[167].Name != "entity_top_targets" ||
+		baseline.Operations[168].Name != "file_definitions" ||
+		baseline.Operations[169].Name != "code_search" ||
+		baseline.Operations[170].Name != "code_search_excluding_project" ||
+		baseline.Operations[171].Name != "project_last_scan" ||
+		baseline.Operations[172].Name != "entity_walk_step_typed" ||
+		baseline.Operations[173].Name != "projection_generations_list" ||
+		baseline.Operations[174].Name != "entity_edge_bump_utility" ||
+		baseline.Operations[175].Name != "entity_neighbors_weighted" ||
+		baseline.Operations[176].Name != "entity_edges_for_entity" ||
+		baseline.Operations[177].Name != "entity_edges_by_token" ||
+		baseline.Operations[178].Name != "entity_top_triples" ||
+		baseline.Operations[179].Name != "projection_edges" ||
+		baseline.Operations[180].Name != "projection_edges_for_generation" ||
+		baseline.Operations[181].Name != "term_find" ||
+		baseline.Operations[182].Name != "term_find_in_project" ||
+		baseline.Operations[183].Name != "term_find_excluding_project" ||
+		baseline.Operations[184].Name != "callers_find" ||
+		baseline.Operations[185].Name != "callers_find_scoped" ||
+		baseline.Operations[186].Name != "callers_find_excluding_project" ||
+		baseline.Operations[187].Name != "entity_node_get" ||
+		baseline.Operations[188].Name != "entity_node_alias_upsert" ||
+		baseline.Operations[189].Name != "entity_edge_upsert" ||
+		baseline.Operations[190].Name != "code_file_hash" ||
+		baseline.Operations[191].Name != "file_modified_since" ||
+		baseline.Operations[192].Name != "code_file_upsert" ||
+		baseline.Operations[193].Name != "code_index_op_record" ||
+		baseline.Operations[194].Name != "code_project_upsert" ||
+		baseline.Operations[195].Name != "entity_node_upsert" ||
+		baseline.Operations[196].Name != "entity_profile_upsert" ||
+		baseline.Operations[197].Name != "project_stats" ||
+		baseline.Operations[198].Name != "projection_generation_meta" ||
+		baseline.Operations[199].Name != "projection_sync_project" ||
+		baseline.Operations[200].Name != "rules_decay" ||
+		baseline.Operations[201].Name != "curiosity_rescore_all" ||
+		baseline.Operations[202].Name != "mining_seed_job_defaults" ||
+		baseline.Operations[203].Name != "proposals_archive_expired" ||
+		baseline.Operations[204].Name != "trace_mining_last_id" ||
+		baseline.Operations[205].Name != "anti_pattern_bump" ||
+		baseline.Operations[206].Name != "anti_pattern_delete" ||
+		baseline.Operations[207].Name != "trace_mining_record" ||
+		baseline.Operations[208].Name != "anti_pattern_exists_exact" ||
+		baseline.Operations[209].Name != "anti_pattern_exists_by_source_ref" ||
+		baseline.Operations[210].Name != "artifact_citation_count" ||
+		baseline.Operations[211].Name != "commits_in_last_7_days" ||
+		baseline.Operations[212].Name != "fidelity_attribution_count" ||
+		baseline.Operations[213].Name != "artifact_stamp_reflected" ||
+		baseline.Operations[214].Name != "failed_query_bump" ||
+		baseline.Operations[215].Name != "artifact_set_state" ||
+		baseline.Operations[216].Name != "artifact_register_exemplar" ||
+		baseline.Operations[217].Name != "evidence_enqueue" ||
+		baseline.Operations[218].Name != "evidence_mark_failed" ||
+		baseline.Operations[219].Name != "bandit_arms_list" ||
+		baseline.Operations[220].Name != "bandit_promotion_get" ||
+		baseline.Operations[221].Name != "decision_log_set_outcome" ||
+		baseline.Operations[222].Name != "decision_log_set_status" ||
+		baseline.Operations[223].Name != "decision_log_set_revisit" ||
+		baseline.Operations[224].Name != "collab_rule_approve" ||
+		baseline.Operations[225].Name != "collab_rule_reject" ||
+		baseline.Operations[226].Name != "collab_rule_retire" ||
+		baseline.Operations[227].Name != "proposal_bump_corroboration" ||
+		baseline.Operations[228].Name != "proposal_mark_committed" ||
+		baseline.Operations[229].Name != "rules_delete_by_id" ||
+		baseline.Operations[230].Name != "calibration_surfaces_with_data" ||
+		baseline.Operations[231].Name != "artifact_cite" ||
+		baseline.Operations[232].Name != "artifact_link" ||
+		baseline.Operations[233].Name != "bandit_promotion_set" ||
+		baseline.Operations[234].Name != "collab_rule_propose" ||
+		baseline.Operations[235].Name != "rules_delete_by_directive_type" ||
+		baseline.Operations[236].Name != "artifact_flag_review" ||
+		baseline.Operations[237].Name != "verdict_suppressed" ||
+		baseline.Operations[238].Name != "curator_invalidate_doc" ||
+		baseline.Operations[239].Name != "bandit_decision_points" ||
+		baseline.Operations[240].Name != "bandit_decision_close" ||
+		baseline.Operations[241].Name != "rules_list" ||
+		baseline.Operations[242].Name != "rules_list_by_tier" ||
+		baseline.Operations[243].Name != "rules_list_hard" ||
+		baseline.Operations[244].Name != "anti_pattern_list" ||
+		baseline.Operations[245].Name != "anti_pattern_list_hot" ||
+		baseline.Operations[246].Name != "anti_pattern_check" ||
+		baseline.Operations[247].Name != "bandit_decision_insert" ||
+		baseline.Operations[248].Name != "artifact_write" ||
+		baseline.Operations[249].Name != "artifact_write_ex" ||
+		baseline.Operations[250].Name != "artifact_target_surface" ||
+		baseline.Operations[251].Name != "agent_outcome_record" ||
+		baseline.Operations[252].Name != "artifact_reject" ||
+		baseline.Operations[253].Name != "audit_event_write" ||
+		baseline.Operations[254].Name != "audit_latest_before" ||
+		baseline.Operations[255].Name != "bandit_arm_stats_update" ||
+		baseline.Operations[256].Name != "demotion_profile_read" ||
+		baseline.Operations[257].Name != "demotion_profile_write" ||
+		baseline.Operations[258].Name != "retrieval_attribution_write" ||
+		baseline.Operations[259].Name != "retrieval_event_by_turn" ||
+		baseline.Operations[260].Name != "feature_row_upsert" ||
+		baseline.Operations[261].Name != "feature_row_read" ||
+		baseline.Operations[262].Name != "bandit_explore_stats" ||
+		baseline.Operations[263].Name != "bandit_arm_stats_read" ||
+		baseline.Operations[264].Name != "artifact_write_evidence" ||
+		baseline.Operations[265].Name != "calibration_profile_write" ||
+		baseline.Operations[266].Name != "demotion_score" ||
+		baseline.Operations[267].Name != "decision_log_get" ||
+		baseline.Operations[268].Name != "fidelity_report_by_turn" ||
+		baseline.Operations[269].Name != "feedback_record" ||
+		baseline.Operations[270].Name != "proposals_settled_counts" ||
+		baseline.Operations[271].Name != "proposal_archive" ||
+		baseline.Operations[272].Name != "rules_find_by_title" ||
+		baseline.Operations[273].Name != "rules_insert" ||
+		baseline.Operations[274].Name != "rules_update_directive_type" ||
+		baseline.Operations[275].Name != "rules_reinforce_directive" ||
+		baseline.Operations[276].Name != "workflow_pattern_insert" ||
+		baseline.Operations[277].Name != "anti_pattern_insert" ||
+		baseline.Operations[278].Name != "artifact_links_read" ||
+		baseline.Operations[279].Name != "calibration_surface_list" ||
+		baseline.Operations[280].Name != "evidence_pending_list" ||
+		baseline.Operations[281].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[282].Name != "doc_delete" ||
+		baseline.Operations[283].Name != "task_delete" ||
+		baseline.Operations[284].Name != "clear_project" ||
+		baseline.Operations[285].Name != "clear_current_project" ||
+		baseline.Operations[286].Name != "document_exists" ||
+		baseline.Operations[287].Name != "blob_referenced" ||
+		baseline.Operations[288].Name != "fence_active" ||
+		baseline.Operations[289].Name != "doc_exists_by_hash" ||
+		baseline.Operations[290].Name != "pdf_quarantine_confirm" ||
+		baseline.Operations[291].Name != "pdf_quarantine_reject" ||
+		baseline.Operations[292].Name != "ontology_eval_status" ||
+		baseline.Operations[293].Name != "task_update_state" ||
+		baseline.Operations[294].Name != "release_add_doc" ||
+		baseline.Operations[295].Name != "ontology_approve" ||
+		baseline.Operations[296].Name != "ontology_reject" ||
+		baseline.Operations[297].Name != "doc_assets_delete_for_doc" ||
+		baseline.Operations[298].Name != "ontology_map" ||
+		baseline.Operations[299].Name != "release_create" ||
+		baseline.Operations[300].Name != "purge_fence_heartbeat" ||
+		baseline.Operations[301].Name != "purge_fence_clear" ||
+		baseline.Operations[302].Name != "document_stored_hash" ||
+		baseline.Operations[303].Name != "document_hash_exists" ||
+		baseline.Operations[304].Name != "pdf_tsr_state" ||
+		baseline.Operations[305].Name != "document_chunk_ids" ||
+		baseline.Operations[306].Name != "task_edges" ||
+		baseline.Operations[307].Name != "task_list" ||
+		baseline.Operations[308].Name != "task_subtasks" ||
+		baseline.Operations[309].Name != "task_add_edge" ||
+		baseline.Operations[310].Name != "cross_repo_set_trust" ||
+		baseline.Operations[311].Name != "recompute_blocked_symbols" ||
+		baseline.Operations[312].Name != "task_create" ||
+		baseline.Operations[313].Name != "task_get" ||
+		baseline.Operations[314].Name != "tool_registry_lookup" ||
+		baseline.Operations[315].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[316].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[317].Name != "release_get_active" ||
+		baseline.Operations[318].Name != "enrollment_active" ||
+		baseline.Operations[319].Name != "enrollment_touch_last_seen" ||
+		baseline.Operations[320].Name != "kb_audit_append" ||
+		baseline.Operations[321].Name != "console_oidc_get" ||
+		baseline.Operations[322].Name != "console_oidc_put" ||
+		baseline.Operations[323].Name != "enrollment_authority_resolve" ||
+		baseline.Operations[324].Name != "prospective_sweep_expired" ||
+		baseline.Operations[325].Name != "directive_sweep_expired" ||
+		baseline.Operations[326].Name != "mark_revisit_due" ||
+		baseline.Operations[327].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[328].Name != "evidence_reembed_all" ||
+		baseline.Operations[329].Name != "curator_reembed_all" ||
+		baseline.Operations[330].Name != "synth_reenqueue_all" ||
+		baseline.Operations[331].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[332].Name != "directive_suppress" ||
+		baseline.Operations[333].Name != "directive_record_surface" ||
+		baseline.Operations[334].Name != "async_pending_count" ||
+		baseline.Operations[335].Name != "runtime_state_touch" ||
+		baseline.Operations[336].Name != "synth_enqueue" ||
+		baseline.Operations[337].Name != "synth_mark_done" ||
+		baseline.Operations[338].Name != "reembed_mark_finished" ||
+		baseline.Operations[339].Name != "mining_job_try_lock" ||
+		baseline.Operations[340].Name != "synth_mark_failed" ||
+		baseline.Operations[341].Name != "runtime_state_set" ||
+		baseline.Operations[342].Name != "set_active_embedder_version" ||
+		baseline.Operations[343].Name != "runtime_state_get" ||
+		baseline.Operations[344].Name != "ingest_queue_fail" ||
+		baseline.Operations[345].Name != "reset_stuck_vector_ops" ||
+		baseline.Operations[346].Name != "directive_resolve" ||
+		baseline.Operations[347].Name != "css_migration_enumerate" ||
+		baseline.Operations[348].Name != "css_migration_assert_conventions" ||
+		baseline.Operations[349].Name != "css_migration_rules_doc" ||
+		baseline.Operations[350].Name != "retryable_index_failures" ||
+		baseline.Operations[351].Name != "active_embedder_version" ||
+		baseline.Operations[352].Name != "corpus_pipeline_stage_counts" ||
+		baseline.Operations[353].Name != "directive_list" ||
+		baseline.Operations[354].Name != "directive_by_entity" ||
+		baseline.Operations[355].Name != "directive_by_file" ||
+		baseline.Operations[356].Name != "directive_by_lexical" ||
+		baseline.Operations[357].Name != "memory_lint" ||
+		baseline.Operations[358].Name != "decision_log_list" ||
+		baseline.Operations[359].Name != "decision_log_list_scoped" ||
+		baseline.Operations[360].Name != "kb_directive_resolve" ||
+		baseline.Operations[361].Name != "decision_log_active_id" ||
+		baseline.Operations[362].Name != "css_render_snapshot_store" ||
+		baseline.Operations[363].Name != "resolve_contradiction" ||
+		baseline.Operations[364].Name != "async_enqueue" ||
+		baseline.Operations[365].Name != "corpus_pipeline_status" ||
+		baseline.Operations[366].Name != "corpus_pipeline_drain" ||
+		baseline.Operations[367].Name != "kb_doc_read" ||
+		baseline.Operations[368].Name != "kb_doc_set_state" ||
+		baseline.Operations[369].Name != "kb_file_index_get" ||
+		baseline.Operations[370].Name != "kb_ingest_queue_complete" ||
+		baseline.Operations[371].Name != "count_embeddings_for_version" ||
+		baseline.Operations[372].Name != "kb_release_read" ||
+		baseline.Operations[373].Name != "kb_release_promote" ||
+		baseline.Operations[374].Name != "kb_release_rollback" ||
+		baseline.Operations[375].Name != "mining_job_get" ||
+		baseline.Operations[376].Name != "mining_job_complete" ||
+		baseline.Operations[377].Name != "kb_document_fetch" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -4425,6 +4432,98 @@ func TestDirectiveGetMatchesEverySharedCVector(t *testing.T) {
 	}
 	for _, vector := range operation.Request.Negative {
 		if _, err := DecodeDirectiveGetRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestBriefingKeyFactsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "briefing_key_facts")]
+
+	request, err := EncodeBriefingKeyFactsRequest()
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	if err := DecodeBriefingKeyFactsRequest(request); err != nil {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeBriefingKeyFactsRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestBriefingRecentActivityMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "briefing_recent_activity")]
+
+	request, err := EncodeBriefingRecentActivityRequest()
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	if err := DecodeBriefingRecentActivityRequest(request); err != nil {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeBriefingRecentActivityRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestMemoryTierKindCountsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_tier_kind_counts")]
+
+	request, err := EncodeMemoryTierKindCountsRequest()
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	if err := DecodeMemoryTierKindCountsRequest(request); err != nil {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeMemoryTierKindCountsRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestMemoryKeyFactsProvenanceMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_key_facts_provenance")]
+
+	request, err := EncodeMemoryKeyFactsProvenanceRequest()
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	if err := DecodeMemoryKeyFactsProvenanceRequest(request); err != nil {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeMemoryKeyFactsProvenanceRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestMemoryLowEffectivenessMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_low_effectiveness")]
+
+	request, err := EncodeMemoryLowEffectivenessRequest(math.Float64frombits(operation.Request.EffectivenessThresholdBinary64Bits), operation.Request.RowLimit)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	effectivenessThreshold, rowLimit, err := DecodeMemoryLowEffectivenessRequest(request)
+	if err != nil || effectivenessThreshold != math.Float64frombits(operation.Request.EffectivenessThresholdBinary64Bits) ||
+		rowLimit != operation.Request.RowLimit {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeMemoryLowEffectivenessRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}

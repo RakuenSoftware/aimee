@@ -591,6 +591,12 @@ typedef struct
    int (*entity_edge_explain)(const char *entity, db2_entity_edge_explain_t *out, int max);
    int (*evidence_pending_list)(db2_evidence_pending_t *out, int max);
    int (*directive_get)(int64_t id, memory_directive_t *out);
+   int (*briefing_key_facts)(db2_memory_briefing_fact_t *out, int max);
+   int (*briefing_recent_activity)(db2_memory_briefing_activity_t *out, int max);
+   int (*memory_tier_kind_counts)(db2_memory_tier_kind_count_t *out, int max);
+   int (*memory_key_facts_provenance)(db2_memory_key_fact_row_t *rows, int max);
+   int (*memory_low_effectiveness)(double threshold, int limit, db2_memory_low_eff_row_t *rows,
+                                   int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

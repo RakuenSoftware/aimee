@@ -3124,6 +3124,22 @@
       "reason": "The typed memory.briefing_active_entities operation ranks the entities mentioned by recently touched memories. The window is roughly the last month, and a memory with no last-used stamp counts as recent rather than as old, so a freshly written memory that has never been read still ranks. The ordering leads with the newest memory identifier rather than the mention count, so one new memory can move an entity above a more mentioned one."
     },
     {
+      "symbol": "db2_memory_briefing_list_key_facts",
+      "signature_sha256": "65c3756051fa8cbeee223f8f0980aa40b7dbdee6d74b8870ff571ef1f906a0ec",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.briefing_key_facts operation lists the facts a session briefing opens with. Only the durable tiers are listed -- L2 through L5 -- so a fact still in a session tier is absent however important it is. The ordering is a scope-rank expression the statement carries, then confidence, so what reaches a briefing is decided by that expression and a caller cannot ask for a different order. Its caller asks for one row, which makes the ordering the whole answer."
+    },
+    {
+      "symbol": "db2_memory_briefing_list_recent_activity",
+      "signature_sha256": "2480658cf4bb0258ea214fb6de1129897730ff213f5fe2a527d6035b25386cce",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.briefing_recent_activity operation lists what happened recently, one episode a session. The one is chosen by a window function inside the statement, which the query's own comment says exists so a limit cannot eliminate an older active-project session before the ranking runs -- so the row a session contributes is decided there, not by recency. The reference time is a text column separate from the created stamp, so an episode can be about a time other than when it was written."
+    },
+    {
       "symbol": "db2_memory_chunk_upsert",
       "signature_sha256": "864fed8dd3b3b0294e1c368f9a68555ad7dcf6435e926623d7047e48e02978ff",
       "disposition": "private-db2",
@@ -3250,6 +3266,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.count_and_max_updated operation replaces the aggregate that fingerprints the memory corpus. The stamp is empty for an empty corpus, which is a real answer rather than an absent one, so the reply carries a zero-minimum string alongside the count and reserves invalid_state for an aggregate that could not be computed."
+    },
+    {
+      "symbol": "db2_memory_count_by_tier_kind",
+      "signature_sha256": "0c0a3433a43ba84d81cba1759417bd3328f314ddebaab6776995f32b988844ce",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.tier_kind_counts operation counts memories by tier and kind. Unlike the other counting operations here it names no states of its own -- it returns whatever pairs the column holds -- so nothing is dropped and the counts do add up to the table. That also means a misspelt tier or kind appears as its own row rather than vanishing, which is the property the state-counting operations lack."
     },
     {
       "symbol": "db2_memory_count_l2",
@@ -3772,12 +3796,28 @@
       "reason": "The typed memory.global_constraints operation lists the preferences and policies that constrain everything. It leads its ordering with the memory identifier, so the newest constraint comes first and confidence only breaks ties -- a recent low-confidence preference outranks a long-standing high-confidence one. L0 is excluded, so a constraint still in the scratch tier does not constrain anything."
     },
     {
+      "symbol": "db2_memory_list_key_facts_with_provenance",
+      "signature_sha256": "4fac2dab5bdf23f81755bf5ea20421fed8d4baacd407ef8b12e5249c4e82d7a7",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.key_facts_provenance operation lists durable facts and preferences with where each came from. The provenance is a sentence the statement assembles -- an action and a session joined by the word 'during' -- so a caller reading it is reading prose composed in SQL rather than fields it can separate. Both it and the supersede date are correlated subqueries evaluated a row at a time, so the cost grows with the limit rather than with the result."
+    },
+    {
       "symbol": "db2_memory_list_kv_section",
       "signature_sha256": "c26d34b99dae0d6ea6cde2d9e1dec0aa07d8e61c7c8aee054d2bf209122a07b5",
       "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.kv_section operation fetches one of five fixed context sections. The section is a number selecting a statement, not a filter, so the five differ in tier, kind and order in ways the reply cannot show -- and a caller has to know which number means which section. The bound admits one to five, so a mistaken number is refused at the boundary rather than reading nothing inside."
+    },
+    {
+      "symbol": "db2_memory_list_low_effectiveness",
+      "signature_sha256": "597215ce6155dfb239cfb309a6bcc211367d0996f873c7159e999bc049845842",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.low_effectiveness operation lists the memories scoring below a threshold, worst first. A memory whose effectiveness was never scored is null rather than zero and the statement requires a value, so it is absent from this list entirely -- an unscored memory and a well-performing one are equally invisible here, and the two are not the same thing. The tier column is four bytes wide, so a tier name longer than three characters is truncated before the wire sees it."
     },
     {
       "symbol": "db2_memory_list_recall_section",

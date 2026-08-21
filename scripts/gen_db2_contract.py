@@ -13739,6 +13739,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_directive_get",
         "policy": {"reads": 200},
     },
+    "briefing_key_facts": {
+        "key": ("memory", 122),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_briefing_list_key_facts",
+        "policy": {"reads": 200},
+    },
+    "briefing_recent_activity": {
+        "key": ("memory", 123),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_briefing_list_recent_activity",
+        "policy": {"reads": 200},
+    },
+    "memory_tier_kind_counts": {
+        "key": ("memory", 124),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_count_by_tier_kind",
+        "policy": {"reads": 200},
+    },
+    "memory_key_facts_provenance": {
+        "key": ("memory", 125),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_key_facts_with_provenance",
+        "policy": {"reads": 200},
+    },
+    "memory_low_effectiveness": {
+        "key": ("memory", 126),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_low_effectiveness",
+        "policy": {"reads": 200},
+    },
 }
 
 

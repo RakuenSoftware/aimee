@@ -3816,6 +3816,52 @@ int main(int argc, char **argv)
           directive_get_valid_until[0] == '\0' && directive_get_directive_created_at[0] == '\0' &&
           directive_get_directive_updated_at[0] == '\0');
 
+   /* The briefing lists and three memory inventories, over an empty corpus. */
+   static aimee_db2_briefing_key_facts_row_t
+       briefing_key_facts_rows[AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS];
+   uint32_t briefing_key_facts_count = 99;
+   assert(aimee_db2_briefing_key_facts_call(call_client, &client, 9502, 0, briefing_key_facts_rows,
+                                            AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS,
+                                            &briefing_key_facts_count, NULL,
+                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(briefing_key_facts_count == 0);
+
+   static aimee_db2_briefing_recent_activity_row_t
+       briefing_recent_activity_rows[AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_MAX_ROWS];
+   uint32_t briefing_recent_activity_count = 99;
+   assert(aimee_db2_briefing_recent_activity_call(
+              call_client, &client, 9503, 0, briefing_recent_activity_rows,
+              AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_MAX_ROWS, &briefing_recent_activity_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(briefing_recent_activity_count == 0);
+
+   static aimee_db2_memory_tier_kind_counts_row_t
+       memory_tier_kind_counts_rows[AIMEE_DB2_MEMORY_TIER_KIND_COUNTS_MAX_ROWS];
+   uint32_t memory_tier_kind_counts_count = 99;
+   assert(aimee_db2_memory_tier_kind_counts_call(
+              call_client, &client, 9504, 0, memory_tier_kind_counts_rows,
+              AIMEE_DB2_MEMORY_TIER_KIND_COUNTS_MAX_ROWS, &memory_tier_kind_counts_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_tier_kind_counts_count == 0);
+
+   static aimee_db2_memory_key_facts_provenance_row_t
+       memory_key_facts_provenance_rows[AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MAX_ROWS];
+   uint32_t memory_key_facts_provenance_count = 99;
+   assert(aimee_db2_memory_key_facts_provenance_call(
+              call_client, &client, 9505, 0, memory_key_facts_provenance_rows,
+              AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MAX_ROWS, &memory_key_facts_provenance_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_key_facts_provenance_count == 0);
+
+   static aimee_db2_memory_low_effectiveness_row_t
+       memory_low_effectiveness_rows[AIMEE_DB2_MEMORY_LOW_EFFECTIVENESS_MAX_ROWS];
+   uint32_t memory_low_effectiveness_count = 99;
+   assert(aimee_db2_memory_low_effectiveness_call(
+              call_client, &client, 9506, 0, 0.5, 16, memory_low_effectiveness_rows,
+              AIMEE_DB2_MEMORY_LOW_EFFECTIVENESS_MAX_ROWS, &memory_low_effectiveness_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_low_effectiveness_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

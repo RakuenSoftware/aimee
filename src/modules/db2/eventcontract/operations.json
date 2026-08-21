@@ -7574,6 +7574,337 @@
       }
     },
     {
+      "family": "memory",
+      "id": 122,
+      "name": "briefing_key_facts",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and their scores are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_briefing_list_key_facts"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only the durable tiers are listed, ranked by a scope expression written into the statement"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_tier",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 7
+            },
+            {
+              "name": "memory_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "memory_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "memory_confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "evidence_strength",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "observation_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "use_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "last_seen_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 123,
+      "name": "briefing_recent_activity",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and their scores are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_briefing_list_recent_activity"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one episode per session, chosen by a window function before the limit applies"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "session_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "activity_summary",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "reference_time",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "activity_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 124,
+      "name": "memory_tier_kind_counts",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and their scores are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_count_by_tier_kind"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one grouped count over every memory, with no scope and no filter"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_tier",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "memory_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "memory_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 125,
+      "name": "memory_key_facts_provenance",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories and their scores are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_key_facts_with_provenance"
+      ],
+      "request": {
+        "policy": {
+          "reads": "two correlated subqueries a row, and only facts and preferences in the durable tiers"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "supersede_date",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "memory_provenance",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 126,
+      "name": "memory_low_effectiveness",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory effectiveness scores are relational DB2 columns.",
+      "c_symbols": [
+        "db2_memory_list_low_effectiveness"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a memory whose effectiveness was never scored is absent rather than counted as low"
+        },
+        "fields": [
+          {
+            "name": "effectiveness_threshold",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          },
+          {
+            "name": "row_limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_tier",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 3
+            },
+            {
+              "name": "memory_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "memory_effectiveness",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "use_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

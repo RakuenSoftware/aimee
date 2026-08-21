@@ -3389,6 +3389,44 @@ int db2_directive_get(int64_t id, memory_directive_t *out)
    return -1;
 }
 
+int db2_memory_briefing_list_key_facts(db2_memory_briefing_fact_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_briefing_list_recent_activity(db2_memory_briefing_activity_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_count_by_tier_kind(db2_memory_tier_kind_count_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_key_facts_with_provenance(db2_memory_key_fact_row_t *rows, int max)
+{
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_low_effectiveness(double threshold, int limit, db2_memory_low_eff_row_t *rows,
+                                      int max)
+{
+   (void)threshold;
+   (void)limit;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
