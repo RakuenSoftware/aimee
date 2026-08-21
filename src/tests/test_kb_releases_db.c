@@ -163,7 +163,29 @@ static void test_rollback_no_prior_fails(void)
    printf("  rollback_no_prior_fails: ok\n");
 }
 
-/* ---- 7. staged-doc release membership gates which docs are live ---- */
+/* ---- 7. promoting a release that does not exist leaves the active one alone ---- */
+static void test_promote_missing_keeps_active(void)
+{
+   open_db();
+   int64_t a = db2_kb_release_create("rel-a");
+   assert(a > 0);
+   assert(db2_kb_release_promote(a) == 0);
+   assert(db2_kb_release_get_active() == a);
+
+   /* db2_kb_release_set_state reports success when its UPDATE matches no row, so
+    * without the existence check this retired A, returned 0, and left the
+    * installation with no active release and a runtime pointer to nothing. */
+   assert(db2_kb_release_promote(a + 100000) == -1);
+   assert(db2_kb_release_get_active() == a);
+
+   db2_kb_release_t row;
+   assert(db2_kb_release_read(a, &row) == 0);
+   assert(strcmp(row.state, "active") == 0);
+   close_db();
+   printf("  promote_missing_keeps_active: ok\n");
+}
+
+/* ---- 8. staged-doc release membership gates which docs are live ---- */
 static void test_release_membership(void)
 {
    open_db();
@@ -197,6 +219,7 @@ int main(void)
    test_rollback_restores_prior();
    test_rollback_explicit_target();
    test_rollback_no_prior_fails();
+   test_promote_missing_keeps_active();
    test_release_membership();
    printf("All kb_releases_db tests passed.\n");
    return 0;

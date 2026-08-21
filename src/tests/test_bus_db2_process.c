@@ -3112,11 +3112,11 @@ int main(int argc, char **argv)
    assert(proposals_settled_counts_committed_count == 0 &&
           proposals_settled_counts_terminal_count == 0);
 
-   /* Documentation releases. Promoting a release that does not exist retires the
-    * one that did, is acknowledged, and points the runtime at nothing -- three
-    * statements with no transaction and no check that any row matched. These
-    * calls walk that: promote a real release, promote a fake one, and read the
-    * real one back to see what happened to it. */
+   /* Documentation releases. A promote is a retire, a promote and a runtime
+    * pointer, and it now reads the target first: promoting a release that does
+    * not exist is refused and the release that is active stays active. Before
+    * that read, it retired the active release, reported success, and left the
+    * installation with none. */
    uint32_t kb_release_read_release_found = 99;
    static char kb_release_read_release_name[AIMEE_DB2_KB_RELEASE_READ_RELEASE_NAME_MAX + 1];
    static char kb_release_read_release_state[AIMEE_DB2_KB_RELEASE_READ_RELEASE_STATE_MAX + 1];
@@ -3150,7 +3150,7 @@ int main(int argc, char **argv)
    assert(aimee_db2_kb_release_promote_call(call_client, &client, 9449, 0, 4242,
                                             &kb_release_promote_acknowledged, NULL,
                                             NULL) == AIMEE_MODULE_CALL_OK);
-   assert(kb_release_promote_acknowledged == 1);
+   assert(kb_release_promote_acknowledged == 0);
    kb_release_read_release_found = 99;
    kb_release_read_release_state[0] = 'x';
    assert(aimee_db2_kb_release_read_call(
@@ -3172,30 +3172,18 @@ int main(int argc, char **argv)
               kb_release_read_retired_at, sizeof(kb_release_read_retired_at),
               kb_release_read_release_created_at, sizeof(kb_release_read_release_created_at), NULL,
               NULL) == AIMEE_MODULE_CALL_OK);
-   /* The release that was active is retired, and the release now promoted does
-    * not exist. Nothing refused, and nothing says the installation has no active
-    * release. */
+   /* The release that was active is still active. This is the assertion the fix
+    * is for: before it, this read found "retired". */
    assert(kb_release_read_release_found == 1 &&
-          strcmp(kb_release_read_release_state, "retired") == 0);
+          strcmp(kb_release_read_release_state, "active") == 0);
 
-   /* Rolling back with no target finds the most recently retired release, which
-    * is the one the promote above retired, and promotes it again. */
+   /* Rolling back with no target promotes the most recently retired release, and
+    * nothing is retired -- the refused promote above no longer leaves one behind.
+    * A rollback with nothing to roll back to is refused. */
    assert(aimee_db2_kb_release_rollback_call(call_client, &client, 9452, 0, 0,
                                              &kb_release_rollback_acknowledged, NULL,
                                              NULL) == AIMEE_MODULE_CALL_OK);
-   assert(kb_release_rollback_acknowledged == 1);
-   kb_release_read_release_found = 99;
-   kb_release_read_release_state[0] = 'x';
-   assert(aimee_db2_kb_release_read_call(
-              call_client, &client, 9453, 0, 1, &kb_release_read_release_found,
-              kb_release_read_release_name, sizeof(kb_release_read_release_name),
-              kb_release_read_release_state, sizeof(kb_release_read_release_state),
-              kb_release_read_promoted_at, sizeof(kb_release_read_promoted_at),
-              kb_release_read_retired_at, sizeof(kb_release_read_retired_at),
-              kb_release_read_release_created_at, sizeof(kb_release_read_release_created_at), NULL,
-              NULL) == AIMEE_MODULE_CALL_OK);
-   assert(kb_release_read_release_found == 1 &&
-          strcmp(kb_release_read_release_state, "active") == 0);
+   assert(kb_release_rollback_acknowledged == 0);
 
    /* Archiving a proposal that does not exist: the update names no current state
     * and checks no row matched, so it is acknowledged. */

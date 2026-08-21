@@ -11196,7 +11196,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "maintenance",
-        "reason": "The typed maintenance.kb_release_promote operation retires the active release, promotes another and points the runtime at it. Three statements, no transaction, and none of the updates checks that a row matched. Promoting a release that does not exist therefore retires the one that did, succeeds, and leaves the installation with no active release and a runtime pointer to a release that was never there. The replay does exactly that."
+        "reason": "The typed maintenance.kb_release_promote operation retires the active release, promotes another and points the runtime at it. The target is read first, because db2_kb_release_set_state reports success when its UPDATE matches no row: without that read, promoting a release that did not exist retired the one that did, succeeded, and left the installation with no active release. The three writes are one transaction, so a failure partway leaves the release that was active still active."
       },
       "signature": "int db2_kb_release_promote ( int64_t id )",
       "signature_sha256": "733f06867ad4372b8a784420e9e9eb1614c1b0b0b4a1eecc8d966f72410f6698",
@@ -11240,7 +11240,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "maintenance",
-        "reason": "The typed maintenance.kb_release_rollback operation promotes a release back. A target of zero means the most recently retired one, found by a separate read before the promote, so a rollback racing another promote can pick a release that stopped being the newest retired one in between. With a target it is maintenance.kb_release_promote and carries everything that carries -- including retiring the active release before checking the target exists."
+        "reason": "The typed maintenance.kb_release_rollback operation promotes a release back. A target of zero means the most recently retired one, found by a separate read before the promote, so a rollback racing another promote can pick a release that stopped being the newest retired one in between. With a target it is maintenance.kb_release_promote and carries what that carries. A rollback with nothing retired to return to is refused."
       },
       "signature": "int db2_kb_release_rollback ( int64_t target_id )",
       "signature_sha256": "d1bf19f681c37ff31a7987ed556e949787beed1d24706086f5e7b823f804b04d",
@@ -27816,7 +27816,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "6ed08e1523fb3f8fddb7d975d3f8ebabb6204efee350595d9e5b0ccc383f50a8",
+  "fingerprint": "11849b26fcba11b27236a5089b66bbc3f637a6e47c00c8f7f94f7690e5f75bf5",
   "module": "db2",
   "schema_version": 1,
   "summary": {

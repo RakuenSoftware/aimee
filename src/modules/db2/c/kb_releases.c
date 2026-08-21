@@ -132,22 +132,45 @@ int db2_kb_release_set_state(int64_t id, const char *state, const char *ts_field
 
 int db2_kb_release_promote(int64_t id)
 {
-   int64_t current_active = db2_kb_release_get_active();
-   if (current_active > 0)
-   {
-      if (db2_kb_release_set_state(current_active, "retired", "retired_at") != 0)
-         return -1;
-   }
-
-   if (db2_kb_release_set_state(id, "active", "promoted_at") != 0)
+   /* Check the target exists before touching the release that is active.
+    * db2_kb_release_set_state reports success when its UPDATE matches no row, so
+    * without this a promote of an identifier naming nothing retired the active
+    * release, succeeded, and left the installation with none -- with the runtime
+    * pointer naming a release that was never there. */
+   db2_kb_release_t target;
+   if (db2_kb_release_read(id, &target) != 0)
       return -1;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* The retire, the promote and the runtime pointer are one change. Committing
+    * any of them without the rest is a state no reader can make sense of. */
+   char err[256] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   int ok = 1;
+   int64_t current_active = db2_kb_release_get_active();
+   if (ok && current_active > 0 &&
+       db2_kb_release_set_state(current_active, "retired", "retired_at") != 0)
+      ok = 0;
+
+   if (ok && db2_kb_release_set_state(id, "active", "promoted_at") != 0)
+      ok = 0;
 
    char id_str[32];
    snprintf(id_str, sizeof(id_str), "%lld", (long long)id);
-   if (db2_kb_runtime_state_set("active_release_id", id_str) != 0)
-      return -1;
+   if (ok && db2_kb_runtime_state_set("active_release_id", id_str) != 0)
+      ok = 0;
 
-   return 0;
+   if (!ok)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   return aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) == 0 ? 0 : -1;
 }
 
 int db2_kb_release_rollback(int64_t target_id)
