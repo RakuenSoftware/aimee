@@ -1851,7 +1851,7 @@ paths:
               schema: { type: object, additionalProperties: true }
         "400": { description: Invalid action or request }
         "403": { description: Authenticated operator required }
-        "409": { description: Conflict, stale preview, authority refusal, or atomic failure }
+        "409": { description: "Conflict, stale preview, authority refusal, or atomic failure" }
 
   /console/typed_facts/assertion:
     post:
