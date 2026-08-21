@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "203236a673a296d14e5643b2808dc854655c158e57beef4e90bd1e3d8623053c"
+const ContractSHA256 = "45fc35dfc2c28df60ef89db4df44537614ce649608a9607d199cd5a2fe804b93"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4837,6 +4837,225 @@ func DecodeCodeProjectUpsertRequest(request []byte) (string, string, error) {
 	return project, projectRoot, nil
 }
 
+const EventEntityNodeUpsert = EventIndex
+const StageEntityNodeUpsert = FamilyIndex
+const OperationEntityNodeUpsert uint32 = 62
+const EntityNodeUpsertNodeKeyMin = 1
+const EntityNodeUpsertNodeKeyMax = 511
+const EntityNodeUpsertNodeKindMin uint32 = 0
+const EntityNodeUpsertNodeKindMax uint32 = 4294967295
+const EntityNodeUpsertNodeProjectMin = 0
+const EntityNodeUpsertNodeProjectMax = 255
+const EntityNodeUpsertDisplayNameMin = 0
+const EntityNodeUpsertDisplayNameMax = 255
+const EntityNodeUpsertFullKeyMin = 0
+const EntityNodeUpsertFullKeyMax = 511
+const EntityNodeUpsertNodeFilePathMin = 0
+const EntityNodeUpsertNodeFilePathMax = 511
+const EntityNodeUpsertNodeSymbolMin = 0
+const EntityNodeUpsertNodeSymbolMax = 255
+const EntityNodeUpsertNodeOriginMin = 0
+const EntityNodeUpsertNodeOriginMax = 31
+const EntityNodeUpsertNodeGenerationMin uint64 = 0
+const EntityNodeUpsertNodeGenerationMax uint64 = 9223372036854775807
+
+// EncodeEntityNodeUpsertRequest writes the schema entity_node_upsert declares, in order.
+func EncodeEntityNodeUpsertRequest(nodeKey string, nodeKind uint32, nodeProject string, displayName string, fullKey string, nodeFilePath string, nodeSymbol string, nodeOrigin string, nodeGeneration uint64) ([]byte, error) {
+	if len(nodeKey) < EntityNodeUpsertNodeKeyMin || len(nodeKey) > EntityNodeUpsertNodeKeyMax || hasNUL(nodeKey) ||
+		nodeKind < EntityNodeUpsertNodeKindMin || nodeKind > EntityNodeUpsertNodeKindMax ||
+		len(nodeProject) < EntityNodeUpsertNodeProjectMin || len(nodeProject) > EntityNodeUpsertNodeProjectMax || hasNUL(nodeProject) ||
+		len(displayName) < EntityNodeUpsertDisplayNameMin || len(displayName) > EntityNodeUpsertDisplayNameMax || hasNUL(displayName) ||
+		len(fullKey) < EntityNodeUpsertFullKeyMin || len(fullKey) > EntityNodeUpsertFullKeyMax || hasNUL(fullKey) ||
+		len(nodeFilePath) < EntityNodeUpsertNodeFilePathMin || len(nodeFilePath) > EntityNodeUpsertNodeFilePathMax || hasNUL(nodeFilePath) ||
+		len(nodeSymbol) < EntityNodeUpsertNodeSymbolMin || len(nodeSymbol) > EntityNodeUpsertNodeSymbolMax || hasNUL(nodeSymbol) ||
+		len(nodeOrigin) < EntityNodeUpsertNodeOriginMin || len(nodeOrigin) > EntityNodeUpsertNodeOriginMax || hasNUL(nodeOrigin) ||
+		nodeGeneration < EntityNodeUpsertNodeGenerationMin || nodeGeneration > EntityNodeUpsertNodeGenerationMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, nodeKey, EntityNodeUpsertNodeKeyMax); err != nil {
+		return nil, err
+	}
+	var nodeKindBytes [4]byte
+	binary.LittleEndian.PutUint32(nodeKindBytes[:], nodeKind)
+	payload = append(payload, nodeKindBytes[:]...)
+	if err := putRowText(&payload, nodeProject, EntityNodeUpsertNodeProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, displayName, EntityNodeUpsertDisplayNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, fullKey, EntityNodeUpsertFullKeyMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, nodeFilePath, EntityNodeUpsertNodeFilePathMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, nodeSymbol, EntityNodeUpsertNodeSymbolMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, nodeOrigin, EntityNodeUpsertNodeOriginMax); err != nil {
+		return nil, err
+	}
+	var nodeGenerationBytes [8]byte
+	binary.LittleEndian.PutUint64(nodeGenerationBytes[:], nodeGeneration)
+	payload = append(payload, nodeGenerationBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEntityNodeUpsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityNodeUpsertRequest reads it back, checking each field against its own bound.
+func DecodeEntityNodeUpsertRequest(request []byte) (string, uint32, string, string, string, string, string, string, uint64, error) {
+	var nodeKey string
+	var nodeKind uint32
+	var nodeProject string
+	var displayName string
+	var fullKey string
+	var nodeFilePath string
+	var nodeSymbol string
+	var nodeOrigin string
+	var nodeGeneration uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityNodeUpsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if nodeKey, err = takeRowText(payload, &cursor, EntityNodeUpsertNodeKeyMax); err != nil ||
+		len(nodeKey) < EntityNodeUpsertNodeKeyMin {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	nodeKind = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if nodeKind < EntityNodeUpsertNodeKindMin || nodeKind > EntityNodeUpsertNodeKindMax {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if nodeProject, err = takeRowText(payload, &cursor, EntityNodeUpsertNodeProjectMax); err != nil ||
+		len(nodeProject) < EntityNodeUpsertNodeProjectMin {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if displayName, err = takeRowText(payload, &cursor, EntityNodeUpsertDisplayNameMax); err != nil ||
+		len(displayName) < EntityNodeUpsertDisplayNameMin {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if fullKey, err = takeRowText(payload, &cursor, EntityNodeUpsertFullKeyMax); err != nil ||
+		len(fullKey) < EntityNodeUpsertFullKeyMin {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if nodeFilePath, err = takeRowText(payload, &cursor, EntityNodeUpsertNodeFilePathMax); err != nil ||
+		len(nodeFilePath) < EntityNodeUpsertNodeFilePathMin {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if nodeSymbol, err = takeRowText(payload, &cursor, EntityNodeUpsertNodeSymbolMax); err != nil ||
+		len(nodeSymbol) < EntityNodeUpsertNodeSymbolMin {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if nodeOrigin, err = takeRowText(payload, &cursor, EntityNodeUpsertNodeOriginMax); err != nil ||
+		len(nodeOrigin) < EntityNodeUpsertNodeOriginMin {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	nodeGeneration = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if nodeGeneration < EntityNodeUpsertNodeGenerationMin || nodeGeneration > EntityNodeUpsertNodeGenerationMax {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, "", "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	return nodeKey, nodeKind, nodeProject, displayName, fullKey, nodeFilePath, nodeSymbol, nodeOrigin, nodeGeneration, nil
+}
+
+const EventEntityProfileUpsert = EventIndex
+const StageEntityProfileUpsert = FamilyIndex
+const OperationEntityProfileUpsert uint32 = 63
+const EntityProfileUpsertEntityIDMin = 1
+const EntityProfileUpsertEntityIDMax = 255
+const EntityProfileUpsertCanonicalNameMin = 0
+const EntityProfileUpsertCanonicalNameMax = 255
+const EntityProfileUpsertObservationCountMin uint32 = 0
+const EntityProfileUpsertObservationCountMax uint32 = 4294967295
+const EntityProfileUpsertCardJsonMin = 0
+const EntityProfileUpsertCardJsonMax = 4095
+
+// EncodeEntityProfileUpsertRequest writes the schema entity_profile_upsert declares, in order.
+func EncodeEntityProfileUpsertRequest(entityID string, canonicalName string, observationCount uint32, cardJson string) ([]byte, error) {
+	if len(entityID) < EntityProfileUpsertEntityIDMin || len(entityID) > EntityProfileUpsertEntityIDMax || hasNUL(entityID) ||
+		len(canonicalName) < EntityProfileUpsertCanonicalNameMin || len(canonicalName) > EntityProfileUpsertCanonicalNameMax || hasNUL(canonicalName) ||
+		observationCount < EntityProfileUpsertObservationCountMin || observationCount > EntityProfileUpsertObservationCountMax ||
+		len(cardJson) < EntityProfileUpsertCardJsonMin || len(cardJson) > EntityProfileUpsertCardJsonMax || hasNUL(cardJson) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, entityID, EntityProfileUpsertEntityIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, canonicalName, EntityProfileUpsertCanonicalNameMax); err != nil {
+		return nil, err
+	}
+	var observationCountBytes [4]byte
+	binary.LittleEndian.PutUint32(observationCountBytes[:], observationCount)
+	payload = append(payload, observationCountBytes[:]...)
+	if err := putRowText(&payload, cardJson, EntityProfileUpsertCardJsonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEntityProfileUpsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEntityProfileUpsertRequest reads it back, checking each field against its own bound.
+func DecodeEntityProfileUpsertRequest(request []byte) (string, string, uint32, string, error) {
+	var entityID string
+	var canonicalName string
+	var observationCount uint32
+	var cardJson string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEntityProfileUpsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if entityID, err = takeRowText(payload, &cursor, EntityProfileUpsertEntityIDMax); err != nil ||
+		len(entityID) < EntityProfileUpsertEntityIDMin {
+		return "", "", 0, "", ErrMalformedEnvelope
+	}
+	if canonicalName, err = takeRowText(payload, &cursor, EntityProfileUpsertCanonicalNameMax); err != nil ||
+		len(canonicalName) < EntityProfileUpsertCanonicalNameMin {
+		return "", "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, "", ErrMalformedEnvelope
+	}
+	observationCount = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if observationCount < EntityProfileUpsertObservationCountMin || observationCount > EntityProfileUpsertObservationCountMax {
+		return "", "", 0, "", ErrMalformedEnvelope
+	}
+	if cardJson, err = takeRowText(payload, &cursor, EntityProfileUpsertCardJsonMax); err != nil ||
+		len(cardJson) < EntityProfileUpsertCardJsonMin {
+		return "", "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, "", ErrMalformedEnvelope
+	}
+	return entityID, canonicalName, observationCount, cardJson, nil
+}
+
 const EventTraceMiningRecord = EventLearning
 const StageTraceMiningRecord = FamilyLearning
 const OperationTraceMiningRecord uint32 = 8
@@ -8203,6 +8422,49 @@ func DecodeRetrievalAttributionWriteRequest(request []byte) (string, uint64, str
 	return retrievalEventID, surfacedRowID, attributionVerdict, attributionWeight, nil
 }
 
+const EventRetrievalEventByTurn = EventLearning
+const StageRetrievalEventByTurn = FamilyLearning
+const OperationRetrievalEventByTurn uint32 = 61
+const RetrievalEventByTurnTurnIDMin = 1
+const RetrievalEventByTurnTurnIDMax = 127
+
+// EncodeRetrievalEventByTurnRequest writes the schema retrieval_event_by_turn declares, in order.
+func EncodeRetrievalEventByTurnRequest(turnID string) ([]byte, error) {
+	if len(turnID) < RetrievalEventByTurnTurnIDMin || len(turnID) > RetrievalEventByTurnTurnIDMax || hasNUL(turnID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, turnID, RetrievalEventByTurnTurnIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationRetrievalEventByTurn, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRetrievalEventByTurnRequest reads it back, checking each field against its own bound.
+func DecodeRetrievalEventByTurnRequest(request []byte) (string, error) {
+	var turnID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRetrievalEventByTurn || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if turnID, err = takeRowText(payload, &cursor, RetrievalEventByTurnTurnIDMax); err != nil ||
+		len(turnID) < RetrievalEventByTurnTurnIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return turnID, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -9722,6 +9984,60 @@ func DecodeEnrollmentActiveReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return value, nil
+}
+
+const EventEnrollmentTouchLastSeen = EventCustody
+const StageEnrollmentTouchLastSeen = FamilyCustody
+const OperationEnrollmentTouchLastSeen uint32 = 5
+const EnrollmentTouchLastSeenCertFingerprintMin = 1
+const EnrollmentTouchLastSeenCertFingerprintMax = 255
+const EnrollmentTouchLastSeenEnrollmentScopeMin = 0
+const EnrollmentTouchLastSeenEnrollmentScopeMax = 127
+
+// EncodeEnrollmentTouchLastSeenRequest writes the schema enrollment_touch_last_seen declares, in order.
+func EncodeEnrollmentTouchLastSeenRequest(certFingerprint string, enrollmentScope string) ([]byte, error) {
+	if len(certFingerprint) < EnrollmentTouchLastSeenCertFingerprintMin || len(certFingerprint) > EnrollmentTouchLastSeenCertFingerprintMax || hasNUL(certFingerprint) ||
+		len(enrollmentScope) < EnrollmentTouchLastSeenEnrollmentScopeMin || len(enrollmentScope) > EnrollmentTouchLastSeenEnrollmentScopeMax || hasNUL(enrollmentScope) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, certFingerprint, EnrollmentTouchLastSeenCertFingerprintMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, enrollmentScope, EnrollmentTouchLastSeenEnrollmentScopeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEnrollmentTouchLastSeen, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEnrollmentTouchLastSeenRequest reads it back, checking each field against its own bound.
+func DecodeEnrollmentTouchLastSeenRequest(request []byte) (string, string, error) {
+	var certFingerprint string
+	var enrollmentScope string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEnrollmentTouchLastSeen || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if certFingerprint, err = takeRowText(payload, &cursor, EnrollmentTouchLastSeenCertFingerprintMax); err != nil ||
+		len(certFingerprint) < EnrollmentTouchLastSeenCertFingerprintMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if enrollmentScope, err = takeRowText(payload, &cursor, EnrollmentTouchLastSeenEnrollmentScopeMax); err != nil ||
+		len(enrollmentScope) < EnrollmentTouchLastSeenEnrollmentScopeMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return certFingerprint, enrollmentScope, nil
 }
 
 const EventAsyncPendingCount = EventMaintenance
@@ -11399,6 +11715,83 @@ func DecodeCssRenderSnapshotStoreRequest(request []byte) (string, string, string
 		return "", "", "", "", "", ErrMalformedEnvelope
 	}
 	return project, unitPath, renderPhase, snapshotJson, capturedAt, nil
+}
+
+const EventResolveContradiction = EventMaintenance
+const StageResolveContradiction = FamilyMaintenance
+const OperationResolveContradiction uint32 = 41
+const ResolveContradictionMemoryAIDMin uint64 = 1
+const ResolveContradictionMemoryAIDMax uint64 = 9223372036854775807
+const ResolveContradictionMemoryBIDMin uint64 = 1
+const ResolveContradictionMemoryBIDMax uint64 = 9223372036854775807
+const ResolveContradictionResolutionMemoryIDMin uint64 = 0
+const ResolveContradictionResolutionMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeResolveContradictionRequest writes the schema resolve_contradiction declares, in order.
+func EncodeResolveContradictionRequest(memoryAID uint64, memoryBID uint64, resolutionMemoryID uint64) ([]byte, error) {
+	if memoryAID < ResolveContradictionMemoryAIDMin || memoryAID > ResolveContradictionMemoryAIDMax ||
+		memoryBID < ResolveContradictionMemoryBIDMin || memoryBID > ResolveContradictionMemoryBIDMax ||
+		resolutionMemoryID < ResolveContradictionResolutionMemoryIDMin || resolutionMemoryID > ResolveContradictionResolutionMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryAIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryAIDBytes[:], memoryAID)
+	payload = append(payload, memoryAIDBytes[:]...)
+	var memoryBIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryBIDBytes[:], memoryBID)
+	payload = append(payload, memoryBIDBytes[:]...)
+	var resolutionMemoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(resolutionMemoryIDBytes[:], resolutionMemoryID)
+	payload = append(payload, resolutionMemoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationResolveContradiction, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeResolveContradictionRequest reads it back, checking each field against its own bound.
+func DecodeResolveContradictionRequest(request []byte) (uint64, uint64, uint64, error) {
+	var memoryAID uint64
+	var memoryBID uint64
+	var resolutionMemoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationResolveContradiction || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	memoryAID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryAID < ResolveContradictionMemoryAIDMin || memoryAID > ResolveContradictionMemoryAIDMax {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	memoryBID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryBID < ResolveContradictionMemoryBIDMin || memoryBID > ResolveContradictionMemoryBIDMax {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	resolutionMemoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if resolutionMemoryID < ResolveContradictionResolutionMemoryIDMin || resolutionMemoryID > ResolveContradictionResolutionMemoryIDMax {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	return memoryAID, memoryBID, resolutionMemoryID, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

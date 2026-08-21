@@ -2935,6 +2935,58 @@ int db2_css_render_snapshot_store(const char *project, const char *unit_path, co
    return 0;
 }
 
+int db2_entity_node_upsert(const char *node_key, int node_kind, const char *project,
+                           const char *display_name, const char *full_key, const char *file_path,
+                           const char *symbol, const char *node_origin, int64_t generation_id)
+{
+   (void)node_key;
+   (void)node_kind;
+   (void)project;
+   (void)display_name;
+   (void)full_key;
+   (void)file_path;
+   (void)symbol;
+   (void)node_origin;
+   (void)generation_id;
+   return 0;
+}
+
+int db2_entity_profile_upsert(const char *entity_id, const char *canonical_name,
+                              int observation_count, const char *card_json)
+{
+   (void)entity_id;
+   (void)canonical_name;
+   (void)observation_count;
+   (void)card_json;
+   return 0;
+}
+
+int db2_directive_resolve_contradiction(int64_t memory_a_id, int64_t memory_b_id,
+                                        int64_t resolution_memory_id)
+{
+   (void)memory_a_id;
+   (void)memory_b_id;
+   (void)resolution_memory_id;
+   return 0;
+}
+
+void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
+{
+   (void)fingerprint;
+   (void)scope;
+}
+
+int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
+                                         char *payload_out, int payload_out_len)
+{
+   (void)turn_id;
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (payload_out && payload_out_len > 0)
+      payload_out[0] = '\0';
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

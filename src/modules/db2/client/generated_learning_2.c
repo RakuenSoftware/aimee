@@ -656,3 +656,35 @@ aimee_module_call_result_t aimee_db2_retrieval_attribution_write_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_retrieval_event_by_turn_call(aimee_db2_call_fn call, void *call_context,
+                                       uint64_t trace_id, uint64_t deadline_ns, const char *turn_id,
+                                       char *retrieval_event_id, size_t retrieval_event_id_capacity,
+                                       char *retrieval_payload, size_t retrieval_payload_capacity,
+                                       aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_retrieval_event_by_turn_request_encode(turn_id, request, sizeof(request),
+                                                        &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RETRIEVAL_EVENT_BY_TURN,
+            AIMEE_DB2_STAGE_RETRIEVAL_EVENT_BY_TURN, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_retrieval_event_by_turn_reply_decode(
+           response, response_len, retrieval_event_id, retrieval_event_id_capacity,
+           retrieval_payload, retrieval_payload_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

@@ -9014,6 +9014,152 @@
       }
     },
     {
+      "family": "index",
+      "id": 62,
+      "name": "entity_node_upsert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity graph nodes and their origins are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_node_upsert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "re-recording a node replaces every column, so a caller has to restate all of them or blank the ones it leaves out"
+        },
+        "fields": [
+          {
+            "name": "node_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "node_kind",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "node_project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "display_name",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "full_key",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "node_file_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "node_symbol",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "node_origin",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "node_generation",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 63,
+      "name": "entity_profile_upsert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity profiles and their observation counts are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_profile_upsert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the canonical name is written once and never replaced, so an entity renamed later keeps the name it was first recorded under"
+        },
+        "fields": [
+          {
+            "name": "entity_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "canonical_name",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "observation_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "card_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -12036,6 +12182,52 @@
       }
     },
     {
+      "family": "learning",
+      "id": 61,
+      "name": "retrieval_event_by_turn",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Retrieval events are stored as relational DB2 artifact rows.",
+      "c_symbols": [
+        "db2_demotion_retrieval_event_by_turn"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one event is returned even when a turn has several, and which one is arbitrary"
+        },
+        "fields": [
+          {
+            "name": "turn_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "retrieval_event_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "retrieval_payload",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -13584,6 +13776,52 @@
           "minimum": 0,
           "maximum": 1
         }
+      }
+    },
+    {
+      "family": "custody",
+      "id": 5,
+      "name": "enrollment_touch_last_seen",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Certificate enrolments and when they were last seen are relational DB2 rows.",
+      "c_symbols": [
+        "db2_enrollment_touch_last_seen"
+      ],
+      "request": {
+        "policy": {
+          "writes": "a fingerprint nobody enrolled is enrolled as legacy, and the backend returns nothing, so the reply is a receipt for the call"
+        },
+        "fields": [
+          {
+            "name": "cert_fingerprint",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "enrollment_scope",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "recorded",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 1
+          }
+        ]
       }
     },
     {
@@ -15827,6 +16065,58 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 41,
+      "name": "resolve_contradiction",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Epistemic directives and the memories they contradict are relational DB2 rows.",
+      "c_symbols": [
+        "db2_directive_resolve_contradiction"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the pair is matched either way round, so the argument order does not matter, and only open contradiction directives are touched"
+        },
+        "fields": [
+          {
+            "name": "memory_a_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "memory_b_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "resolution_memory_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
           }
         ]
       },

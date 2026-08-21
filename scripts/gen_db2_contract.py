@@ -13234,6 +13234,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_css_render_snapshot_store",
         "policy": {"writes": 200},
     },
+    "entity_node_upsert": {
+        "key": ("index", 62),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_node_upsert",
+        "policy": {"writes": 200},
+    },
+    "entity_profile_upsert": {
+        "key": ("index", 63),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_profile_upsert",
+        "policy": {"writes": 200},
+    },
+    "resolve_contradiction": {
+        "key": ("maintenance", 41),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_resolve_contradiction",
+        "policy": {"writes": 200},
+    },
+    "enrollment_touch_last_seen": {
+        "key": ("custody", 5),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_enrollment_touch_last_seen",
+        "policy": {"writes": 200},
+    },
+    "retrieval_event_by_turn": {
+        "key": ("learning", 61),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_demotion_retrieval_event_by_turn",
+        "policy": {"reads": 200},
+    },
 }
 
 

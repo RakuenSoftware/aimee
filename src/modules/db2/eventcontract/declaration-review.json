@@ -908,6 +908,14 @@
       "reason": "The typed learning.retrieval_attribution_write operation records that a surfaced memory earned a verdict. The attribution is stored as an artifact with a hand-assembled JSON payload, so the weight is written to six decimal places and read back as text -- a weight that needs more precision than that is silently rounded before anything can compare it. Nothing checks the retrieval event or the row it names exists."
     },
     {
+      "symbol": "db2_demotion_retrieval_event_by_turn",
+      "signature_sha256": "41c4f3fe58c55038a7b3c88842486c7598f903feb782a3a22addc57dedc10e7e",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.retrieval_event_by_turn operation finds the retrieval event a turn recorded. Nothing stops a turn having several -- the write does not deduplicate on the turn -- and this takes the first of them in no particular order, so a turn with two answers with an arbitrary one and never says there was a choice. The event is an artifact, so its payload is text the writer assembled rather than columns."
+    },
+    {
       "symbol": "db2_dim_change_reset",
       "signature_sha256": "8f32ca424989ca4e817c4f2bf3787162e3709076b26bf5a7ad4a530a0885bac5",
       "disposition": "wire-operation",
@@ -964,6 +972,14 @@
       "reason": "The typed maintenance.directive_resolve operation replaces the resolution write. Only an open directive is touched, so resolving one twice does nothing the second time. The resolving memory is stored without being checked to exist -- there is no foreign key here -- so a caller can point a resolved directive at a memory that was never created, and nothing will notice until something tries to read it."
     },
     {
+      "symbol": "db2_directive_resolve_contradiction",
+      "signature_sha256": "47937e7ca65730ca8cd38ed95244839ed33ab8b093beb5c2c813a8db52563ea6",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.resolve_contradiction operation resolves the directive raised about a pair of contradicting memories. The pair is matched either way round, so the argument order does not matter -- unlike memory.scene_member_exists, whose reply looks the same and whose order does. Only open directives caused by contradiction are touched, so this cannot resolve a directive raised for any other reason, and the reply cannot say which of the two is why nothing changed."
+    },
+    {
       "symbol": "db2_directive_suppress",
       "signature_sha256": "e39bdc3089eab0be1e0f2af41d17d6836e67ec6b2a5132d61d7af7ef4951bd2e",
       "disposition": "wire-operation",
@@ -1018,6 +1034,14 @@
       "family": "custody",
       "db3_placement": "retained-db2",
       "reason": "The typed custody.enrollment_active operation replaces the enrollment probe. A revoked enrollment reads as inactive, exactly like one that was never enrolled, so a caller cannot tell the two apart through this operation -- which matters because they mean different things to whoever is deciding what to do next."
+    },
+    {
+      "symbol": "db2_enrollment_touch_last_seen",
+      "signature_sha256": "a8da7cf45784a439bc2dee705be5b774af4597e44bfb343a1df070607ecca243",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.enrollment_touch_last_seen operation marks a certificate as seen. A fingerprint nobody enrolled is not refused: it is enrolled, flagged legacy, with the scope the caller sent -- so touching an unknown certificate creates the enrolment rather than reporting it missing. The backend returns nothing, so the reply says the call was made and can never say the row landed."
     },
     {
       "symbol": "db2_entity_count_observations",
@@ -1172,6 +1196,14 @@
       "reason": "The symbol counterpart of the file key builder, and private for the same reason. Both encode their components the same way and both must stay that way; a divergence produces keys that look valid and match nothing."
     },
     {
+      "symbol": "db2_entity_node_upsert",
+      "signature_sha256": "ad49dbfd9c3d22d11bad36b450d60788764b00d21efd6be373a7985e9dfa27e6",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_node_upsert operation records a graph node. Re-recording one replaces every column from what the caller sent, so an argument left empty blanks the stored value rather than keeping it -- a caller updating one field has to restate the rest or lose them. The node kind is the number the column stores, which nothing at this boundary publishes the meaning of."
+    },
+    {
       "symbol": "db2_entity_profile_get_card",
       "signature_sha256": "1ce87ea1c2bab7d6ea8a967d4badf61070621e466d4fef755dec49035bd0a29c",
       "disposition": "wire-operation",
@@ -1186,6 +1218,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_profile_fresh operation replaces the freshness probe. The window is a Postgres interval the caller supplies and DB2 evaluates against its own clock, so an unparseable interval makes the statement fail rather than answer false; the wire bounds its length but cannot check its syntax."
+    },
+    {
+      "symbol": "db2_entity_profile_upsert",
+      "signature_sha256": "bf1074079808100046c48b6dfd53c7df093a28be816a8e6a6f9c0fc7c79de724",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_profile_upsert operation records an entity's profile. Re-recording replaces the observation count, the card and the refresh stamp -- but not the canonical name, which is written when the profile is created and never again. So an entity whose name is corrected later keeps the one it was first recorded under, and nothing here can change it. The observation count is the caller's, so it counts whatever the caller counted."
     },
     {
       "symbol": "db2_evidence_enqueue",

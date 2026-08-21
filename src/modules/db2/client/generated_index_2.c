@@ -721,3 +721,65 @@ aimee_db2_code_project_upsert_call(aimee_db2_call_fn call, void *call_context, u
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_entity_node_upsert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *node_key, uint32_t node_kind, const char *node_project, const char *display_name,
+    const char *full_key, const char *node_file_path, const char *node_symbol,
+    const char *node_origin, uint64_t node_generation, uint32_t *acknowledged,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ENTITY_NODE_UPSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ENTITY_NODE_UPSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_entity_node_upsert_request_encode(
+           node_key, node_kind, node_project, display_name, full_key, node_file_path, node_symbol,
+           node_origin, node_generation, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENTITY_NODE_UPSERT, AIMEE_DB2_STAGE_ENTITY_NODE_UPSERT,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_entity_node_upsert_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_entity_profile_upsert_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, const char *entity_id,
+                                     const char *canonical_name, uint32_t observation_count,
+                                     const char *card_json, uint32_t *acknowledged,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ENTITY_PROFILE_UPSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ENTITY_PROFILE_UPSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_entity_profile_upsert_request_encode(entity_id, canonical_name, observation_count,
+                                                      card_json, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENTITY_PROFILE_UPSERT,
+            AIMEE_DB2_STAGE_ENTITY_PROFILE_UPSERT, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_entity_profile_upsert_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

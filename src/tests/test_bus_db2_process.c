@@ -2586,6 +2586,58 @@ int main(int argc, char **argv)
     * project that had not just been created. */
    assert(css_render_snapshot_store_acknowledged == 1);
 
+   /* The node, profile, contradiction and enrolment writers. entity_node_upsert creates the node
+    * that the alias upsert further up needs, so the two together show the foreign key both ways
+    * round. */
+   uint32_t entity_node_upsert_acknowledged = 99;
+   assert(aimee_db2_entity_node_upsert_call(
+              call_client, &client, 9401, 0, "replay-node", 3u, "demo", "Replay Node",
+              "full/replay", "src/replay.c", "replay_symbol", "scan", 7,
+              &entity_node_upsert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Lands. This node is what the alias upsert further up needed and did
+    * not have -- run in the other order, that write would have been
+    * accepted rather than refused by the foreign key. */
+   assert(entity_node_upsert_acknowledged == 1);
+
+   uint32_t entity_profile_upsert_acknowledged = 99;
+   assert(aimee_db2_entity_profile_upsert_call(
+              call_client, &client, 9402, 0, "replay-entity", "Replay Entity", 4u, "{}",
+              &entity_profile_upsert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(entity_profile_upsert_acknowledged == 1);
+
+   uint32_t resolve_contradiction_acknowledged = 99;
+   assert(aimee_db2_resolve_contradiction_call(call_client, &client, 9403, 0, 4242, 4243, 4244,
+                                               &resolve_contradiction_acknowledged, NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   /* No open contradiction directive exists, so nothing changes -- and
+    * this still acknowledges, because it reports that its statement ran
+    * rather than that a row moved. */
+   assert(resolve_contradiction_acknowledged == 1);
+
+   uint32_t enrollment_touch_last_seen_recorded = 99;
+   assert(aimee_db2_enrollment_touch_last_seen_call(
+              call_client, &client, 9404, 0, "replay-fingerprint", "kb",
+              &enrollment_touch_last_seen_recorded, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Always one: the backend returns nothing. Touching a fingerprint
+    * nobody enrolled creates the enrolment, flagged legacy, which is why
+    * this cannot be used to ask whether a certificate is known. */
+   assert(enrollment_touch_last_seen_recorded == 1);
+
+   static char retrieval_event_by_turn_retrieval_event_id
+       [AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RETRIEVAL_EVENT_ID_MAX + 1];
+   retrieval_event_by_turn_retrieval_event_id[0] = 'x';
+   static char retrieval_event_by_turn_retrieval_payload
+       [AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RETRIEVAL_PAYLOAD_MAX + 1];
+   retrieval_event_by_turn_retrieval_payload[0] = 'x';
+   assert(aimee_db2_retrieval_event_by_turn_call(call_client, &client, 9405, 0, "replay-turn",
+                                                 retrieval_event_by_turn_retrieval_event_id,
+                                                 sizeof(retrieval_event_by_turn_retrieval_event_id),
+                                                 retrieval_event_by_turn_retrieval_payload,
+                                                 sizeof(retrieval_event_by_turn_retrieval_payload),
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(retrieval_event_by_turn_retrieval_event_id[0] == '\0' &&
+          retrieval_event_by_turn_retrieval_payload[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

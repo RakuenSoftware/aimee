@@ -963,6 +963,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .demotion_profile_write = db2_demotion_profile_write,
        .retrieval_attribution_write = db2_demotion_retrieval_attribution_write,
        .css_render_snapshot_store = db2_css_render_snapshot_store,
+       .entity_node_upsert = db2_entity_node_upsert,
+       .entity_profile_upsert = db2_entity_profile_upsert,
+       .resolve_contradiction = db2_directive_resolve_contradiction,
+       .enrollment_touch_last_seen = db2_enrollment_touch_last_seen,
+       .retrieval_event_by_turn = db2_demotion_retrieval_event_by_turn,
    };
    return &backend;
 }
@@ -5730,6 +5735,75 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char node_key[AIMEE_DB2_ENTITY_NODE_UPSERT_NODE_KEY_MAX + 1] = "";
+         uint32_t node_kind = 0u;
+         char node_project[AIMEE_DB2_ENTITY_NODE_UPSERT_NODE_PROJECT_MAX + 1] = "";
+         char display_name[AIMEE_DB2_ENTITY_NODE_UPSERT_DISPLAY_NAME_MAX + 1] = "";
+         char full_key[AIMEE_DB2_ENTITY_NODE_UPSERT_FULL_KEY_MAX + 1] = "";
+         char node_file_path[AIMEE_DB2_ENTITY_NODE_UPSERT_NODE_FILE_PATH_MAX + 1] = "";
+         char node_symbol[AIMEE_DB2_ENTITY_NODE_UPSERT_NODE_SYMBOL_MAX + 1] = "";
+         char node_origin[AIMEE_DB2_ENTITY_NODE_UPSERT_NODE_ORIGIN_MAX + 1] = "";
+         uint64_t node_generation = 0u;
+         if (aimee_db2_entity_node_upsert_request_decode(
+                 request_body, request_len, node_key, sizeof(node_key), &node_kind, node_project,
+                 sizeof(node_project), display_name, sizeof(display_name), full_key,
+                 sizeof(full_key), node_file_path, sizeof(node_file_path), node_symbol,
+                 sizeof(node_symbol), node_origin, sizeof(node_origin), &node_generation) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_NODE_UPSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_node_upsert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->entity_node_upsert(node_key, (int)node_kind, node_project, display_name,
+                                            full_key, node_file_path, node_symbol, node_origin,
+                                            (int64_t)node_generation) == 0
+                    ? 1u
+                    : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_node_upsert_reply_encode(acknowledged, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char entity_id[AIMEE_DB2_ENTITY_PROFILE_UPSERT_ENTITY_ID_MAX + 1] = "";
+         char canonical_name[AIMEE_DB2_ENTITY_PROFILE_UPSERT_CANONICAL_NAME_MAX + 1] = "";
+         uint32_t observation_count = 0u;
+         char card_json[AIMEE_DB2_ENTITY_PROFILE_UPSERT_CARD_JSON_MAX + 1] = "";
+         if (aimee_db2_entity_profile_upsert_request_decode(
+                 request_body, request_len, entity_id, sizeof(entity_id), canonical_name,
+                 sizeof(canonical_name), &observation_count, card_json, sizeof(card_json)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_PROFILE_UPSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_profile_upsert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->entity_profile_upsert(entity_id, canonical_name,
+                                                          (int)observation_count, card_json) == 0
+                               ? 1u
+                               : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_profile_upsert_reply_encode(acknowledged, response_body,
+                                                             response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -5923,6 +5997,32 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE)
    {
+      {
+         char cert_fingerprint[AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_CERT_FINGERPRINT_MAX + 1] = "";
+         char enrollment_scope[AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_ENROLLMENT_SCOPE_MAX + 1] = "";
+         if (aimee_db2_enrollment_touch_last_seen_request_decode(
+                 request_body, request_len, cert_fingerprint, sizeof(cert_fingerprint),
+                 enrollment_scope, sizeof(enrollment_scope)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->enrollment_touch_last_seen)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t recorded = 0u;
+            backend->enrollment_touch_last_seen(cert_fingerprint, enrollment_scope);
+            recorded = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_enrollment_touch_last_seen_reply_encode(
+                    recorded, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       {
          /* Every db2-envelope-string-pair-u32-v1 operation this family owns. */
          const db2_string_pair_count_binding_t bindings[] = {
@@ -8063,6 +8163,35 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char turn_id[AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_TURN_ID_MAX + 1] = "";
+         if (aimee_db2_retrieval_event_by_turn_request_decode(request_body, request_len, turn_id,
+                                                              sizeof(turn_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->retrieval_event_by_turn)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char retrieval_event_id[AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RETRIEVAL_EVENT_ID_MAX + 1] =
+                "";
+            char retrieval_payload[AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RETRIEVAL_PAYLOAD_MAX + 1] =
+                "";
+            (void)backend->retrieval_event_by_turn(
+                turn_id, retrieval_event_id, (int)sizeof(retrieval_event_id), retrieval_payload,
+                (int)sizeof(retrieval_payload));
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_retrieval_event_by_turn_reply_encode(
+                    retrieval_event_id, retrieval_payload, response_body, response_capacity,
+                    response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
@@ -9058,6 +9187,35 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_css_render_snapshot_store_reply_encode(
                     acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_a_id = 0u;
+         uint64_t memory_b_id = 0u;
+         uint64_t resolution_memory_id = 0u;
+         if (aimee_db2_resolve_contradiction_request_decode(
+                 request_body, request_len, &memory_a_id, &memory_b_id, &resolution_memory_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RESOLVE_CONTRADICTION_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->resolve_contradiction)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->resolve_contradiction((int64_t)memory_a_id, (int64_t)memory_b_id,
+                                               (int64_t)resolution_memory_id) == 0
+                    ? 1u
+                    : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_resolve_contradiction_reply_encode(acknowledged, response_body,
+                                                             response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

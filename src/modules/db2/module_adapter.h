@@ -16,6 +16,9 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "enrollments.h"
+#include "entity_profiles.h"
+#include "epistemic_directives.h"
 #include "css_render.h"
 #include "demotion.h"
 #include "code_index.h"
@@ -443,6 +446,16 @@ typedef struct
                                       const char *verdict, double weight);
    int (*css_render_snapshot_store)(const char *project, const char *unit_path, const char *phase,
                                     const char *snapshot_json, const char *now_iso);
+   int (*entity_node_upsert)(const char *node_key, int node_kind, const char *project,
+                             const char *display_name, const char *full_key, const char *file_path,
+                             const char *symbol, const char *node_origin, int64_t generation_id);
+   int (*entity_profile_upsert)(const char *entity_id, const char *canonical_name,
+                                int observation_count, const char *card_json);
+   int (*resolve_contradiction)(int64_t memory_a_id, int64_t memory_b_id,
+                                int64_t resolution_memory_id);
+   void (*enrollment_touch_last_seen)(const char *fingerprint, const char *scope);
+   int (*retrieval_event_by_turn)(const char *turn_id, char *id_out, int id_out_len,
+                                  char *payload_out, int payload_out_len);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

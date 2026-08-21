@@ -7123,9 +7123,15 @@
           "line": 59
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.retrieval_event_by_turn operation finds the retrieval event a turn recorded. Nothing stops a turn having several -- the write does not deduplicate on the turn -- and this takes the first of them in no particular order, so a turn with two answers with an arbitrary one and never says there was a choice. The event is an artifact, so its payload is text the writer assembled rather than columns."
+      },
       "signature": "int db2_demotion_retrieval_event_by_turn ( const char * turn_id , char * id_out , int id_out_len , char * payload_out , int payload_out_len )",
       "signature_sha256": "41c4f3fe58c55038a7b3c88842486c7598f903feb782a3a22addc57dedc10e7e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_demotion_retrieval_event_by_turn"
     },
     {
@@ -7459,9 +7465,15 @@
           "line": 78
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.resolve_contradiction operation resolves the directive raised about a pair of contradicting memories. The pair is matched either way round, so the argument order does not matter -- unlike memory.scene_member_exists, whose reply looks the same and whose order does. Only open directives caused by contradiction are touched, so this cannot resolve a directive raised for any other reason, and the reply cannot say which of the two is why nothing changed."
+      },
       "signature": "int db2_directive_resolve_contradiction ( int64_t memory_a_id , int64_t memory_b_id , int64_t resolution_memory_id )",
       "signature_sha256": "47937e7ca65730ca8cd38ed95244839ed33ab8b093beb5c2c813a8db52563ea6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_resolve_contradiction"
     },
     {
@@ -7917,9 +7929,15 @@
           "line": 75
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.enrollment_touch_last_seen operation marks a certificate as seen. A fingerprint nobody enrolled is not refused: it is enrolled, flagged legacy, with the scope the caller sent -- so touching an unknown certificate creates the enrolment rather than reporting it missing. The backend returns nothing, so the reply says the call was made and can never say the row landed."
+      },
       "signature": "void db2_enrollment_touch_last_seen ( const char * fingerprint , const char * scope )",
       "signature_sha256": "a8da7cf45784a439bc2dee705be5b774af4597e44bfb343a1df070607ecca243",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_enrollment_touch_last_seen"
     },
     {
@@ -8778,9 +8796,15 @@
           "line": 49
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_node_upsert operation records a graph node. Re-recording one replaces every column from what the caller sent, so an argument left empty blanks the stored value rather than keeping it -- a caller updating one field has to restate the rest or lose them. The node kind is the number the column stores, which nothing at this boundary publishes the meaning of."
+      },
       "signature": "int db2_entity_node_upsert ( const char * node_key , int node_kind , const char * project , const char * display_name , const char * full_key , const char * file_path , const char * symbol , const char * node_origin , int64_t generation_id )",
       "signature_sha256": "ad49dbfd9c3d22d11bad36b450d60788764b00d21efd6be373a7985e9dfa27e6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_node_upsert"
     },
     {
@@ -8835,9 +8859,15 @@
           "line": 16
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_profile_upsert operation records an entity's profile. Re-recording replaces the observation count, the card and the refresh stamp -- but not the canonical name, which is written when the profile is created and never again. So an entity whose name is corrected later keeps the one it was first recorded under, and nothing here can change it. The observation count is the caller's, so it counts whatever the caller counted."
+      },
       "signature": "int db2_entity_profile_upsert ( const char * entity_id , const char * canonical_name , int observation_count , const char * card_json )",
       "signature_sha256": "bf1074079808100046c48b6dfd53c7df093a28be816a8e6a6f9c0fc7c79de724",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_profile_upsert"
     },
     {
@@ -27588,15 +27618,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ad9928901b24698917895995ca804488da0b2822968cacb2ef51b947920c30f9",
+  "fingerprint": "258b3c3d9fc392e6e260e89587e989ff4a12a6814b413e6271aaf16f29fcae78",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 365,
+    "audit_pending": 360,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 594
+    "reviewed": 599
   }
 }
