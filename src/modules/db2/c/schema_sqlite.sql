@@ -307,6 +307,16 @@ INSERT OR IGNORE INTO kind_lifecycle VALUES('task',3,0.900000000000000022,14,0.6
 INSERT OR IGNORE INTO kind_lifecycle VALUES('scratch',5,0.949999999999999955,7,0.699999999999999955,3,0.25);
 INSERT OR IGNORE INTO kind_lifecycle VALUES('procedure',2,0.800000000000000044,180,0.5,90,3.0);
 INSERT OR IGNORE INTO kind_lifecycle VALUES('policy',1,0.699999999999999955,365,0.299999999999999988,180,5.0);
+INSERT INTO kind_lifecycle(kind,promote_use_count,promote_confidence,demote_days,demote_confidence,expire_days,demotion_resistance) VALUES
+ ('world_fact',3,0.90,60,0.70,30,1.0),
+ ('episode',5,0.90,30,0.70,36500,0.5),
+ ('experience',5,0.90,30,0.70,14,0.5),
+ ('mental_model',2,0.80,180,0.50,90,3.0),
+ ('preference',2,0.80,90,0.60,90,1.5),
+ ('instruction',3,0.90,14,0.70,7,0.5),
+ ('policy',1,0.70,365,0.30,36500,5.0),
+ ('hypothesis',5,0.95,7,0.70,3,0.25)
+ ON CONFLICT(kind) DO UPDATE SET expire_days=excluded.expire_days;
 CREATE TABLE IF NOT EXISTS sketch_store (  id INTEGER PRIMARY KEY AUTOINCREMENT,  sketch_kind TEXT NOT NULL,  scope_kind TEXT NOT NULL,  scope_id TEXT NOT NULL DEFAULT '',  feature_family TEXT NOT NULL,  state_bytes BLOB NOT NULL,  item_count INTEGER NOT NULL DEFAULT 0,  params_json TEXT NOT NULL DEFAULT '{}',  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE (sketch_kind, scope_kind, scope_id, feature_family));
 CREATE TABLE IF NOT EXISTS kb_minhash_signatures (  project TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),  file_path TEXT NOT NULL,  file_hash TEXT NOT NULL DEFAULT '',  signature_bytes BLOB NOT NULL,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY (project, generation, file_path));
 CREATE INDEX IF NOT EXISTS idx_kb_minhash_signatures_project ON kb_minhash_signatures(project);

@@ -17980,7 +17980,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 51
+          "line": 55
         }
       ],
       "review": {
@@ -18001,7 +18001,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 50
+          "line": 54
         }
       ],
       "review": {
@@ -18022,7 +18022,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 56
+          "line": 60
         }
       ],
       "review": {
@@ -18043,7 +18043,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 55
+          "line": 59
         }
       ],
       "review": {
@@ -18064,7 +18064,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 47
+          "line": 51
         }
       ],
       "review": {
@@ -18086,7 +18086,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 65
+          "line": 69
         }
       ],
       "signature": "int db2_memory_promotion_demote_id ( int64_t memory_id )",
@@ -18101,7 +18101,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 42
+          "line": 46
         }
       ],
       "review": {
@@ -18122,13 +18122,28 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 100
+          "line": 104
         }
       ],
       "signature": "int db2_memory_promotion_l5_pattern_candidates ( db2_memory_l5_candidate_t * out , int max )",
       "signature_sha256": "e9530081ed44f35e252fb9872f5eb8deec464a285e5c4d13b3c5367ca93619c5",
       "status": "audit-pending",
       "symbol": "db2_memory_promotion_l5_pattern_candidates"
+    },
+    {
+      "consumers": [
+        "src/modules/memory/memory_logic.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/memory_promotion.h",
+          "line": 27
+        }
+      ],
+      "signature": "int db2_memory_promotion_list_epistemic_kinds_in_tier ( const char * tier , db2_memory_promotion_kind_t * out , int max )",
+      "signature_sha256": "ce48bd963532011487d217fd3c6b6a6be04f367ca4786bcbef447f50d3faa775",
+      "status": "audit-pending",
+      "symbol": "db2_memory_promotion_list_epistemic_kinds_in_tier"
     },
     {
       "consumers": [
@@ -18158,7 +18173,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 69
+          "line": 73
         }
       ],
       "signature": "int db2_memory_promotion_list_unembedded_l2 ( const char * version , int64_t * ids_out , int max )",
@@ -18173,7 +18188,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 61
+          "line": 65
         }
       ],
       "signature": "int db2_memory_promotion_match_error_keys ( const char * error_lowered , int64_t * ids_out , int max )",
@@ -18188,7 +18203,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 28
+          "line": 32
         }
       ],
       "signature": "int db2_memory_promotion_promote_kind ( const char * ts , const char * kind , int promote_use_count , double promote_confidence )",
@@ -18203,7 +18218,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 35
+          "line": 39
         }
       ],
       "signature": "int db2_memory_promotion_promote_kind_slot ( const char * ts , const char * kind , int promote_use_count , double promote_confidence , int slot_modulo , int slot_remainder , int slot_match )",
@@ -18218,7 +18233,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 74
+          "line": 78
         }
       ],
       "review": {
@@ -18239,7 +18254,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 80
+          "line": 84
         }
       ],
       "review": {
@@ -18260,7 +18275,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 84
+          "line": 88
         }
       ],
       "review": {
@@ -26459,12 +26474,12 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4c4066074cfeefe7a1e7b3eef56d80514e258473dbbb40d0d2cf3f01d886fbb7",
+  "fingerprint": "3785efafa1e9a23986e9791eb380121d06cd23cb7e27d8710f1023a98d22b604",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 694,
-    "declarations": 1437,
+    "audit_pending": 695,
+    "declarations": 1438,
     "headers": 140,
     "internal_unconsumed": 162,
     "private_test_only": 287,

@@ -15301,6 +15301,20 @@ INSERT INTO kind_lifecycle(kind,promote_use_count,promote_confidence,demote_days
  ('policy',3,0.95,3650,0.80,36500,5.0),
  ('hypothesis',5,0.95,7,0.70,3,0.25)
 ON CONFLICT(kind) DO NOTHING;
+-- Three epistemic labels overlap legacy free-text kind labels. Migrate only
+-- expiry (the P6 behaviour change), leaving promotion/demotion thresholds
+-- untouched. A marker makes this operator-overridable after the one-time move.
+DO $$ BEGIN
+  IF NOT EXISTS(SELECT 1 FROM kb_meta WHERE key='epistemic_kind_lifecycle_v1_migrated') THEN
+    UPDATE kind_lifecycle SET expire_days=CASE kind
+      WHEN 'world_fact' THEN 30 WHEN 'episode' THEN 36500 WHEN 'experience' THEN 14
+      WHEN 'mental_model' THEN 90 WHEN 'preference' THEN 90 WHEN 'instruction' THEN 7
+      WHEN 'policy' THEN 36500 WHEN 'hypothesis' THEN 3 ELSE expire_days END
+      WHERE kind IN ('world_fact','episode','experience','mental_model','preference',
+                     'instruction','policy','hypothesis');
+    INSERT INTO kb_meta(key,value) VALUES('epistemic_kind_lifecycle_v1_migrated','1');
+  END IF;
+END $$;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='memories_epistemic_kind_check') THEN
     ALTER TABLE memories ADD CONSTRAINT memories_epistemic_kind_check CHECK(epistemic_kind IN

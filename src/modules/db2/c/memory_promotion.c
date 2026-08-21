@@ -10,16 +10,17 @@
 
 #define MP_ERRBUF 256
 
-int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promotion_kind_t *out,
-                                            int max)
+static int list_distinct_kinds_in_tier(const char *column, const char *tier,
+                                       db2_memory_promotion_kind_t *out, int max)
 {
-   if (!tier || !*tier || !out || max <= 0)
+   if (!column || !tier || !*tier || !out || max <= 0)
       return 0;
    void *conn = db2_conn();
    if (!conn)
       return 0;
 
-   static const char *sql = "SELECT DISTINCT epistemic_kind FROM memories WHERE tier = ?1";
+   char sql[96];
+   snprintf(sql, sizeof(sql), "SELECT DISTINCT %s FROM memories WHERE tier = ?1", column);
    char err[MP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -39,6 +40,18 @@ int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promoti
    return n;
 }
 
+int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promotion_kind_t *out,
+                                            int max)
+{
+   return list_distinct_kinds_in_tier("kind", tier, out, max);
+}
+
+int db2_memory_promotion_list_epistemic_kinds_in_tier(const char *tier,
+                                                      db2_memory_promotion_kind_t *out, int max)
+{
+   return list_distinct_kinds_in_tier("epistemic_kind", tier, out, max);
+}
+
 int db2_memory_promotion_promote_kind(const char *ts, const char *kind, int promote_use_count,
                                       double promote_confidence)
 {
@@ -49,7 +62,7 @@ int db2_memory_promotion_promote_kind(const char *ts, const char *kind, int prom
       return 0;
 
    static const char *sql = "UPDATE memories SET tier = 'L2', updated_at = ?1"
-                            " WHERE tier = 'L1' AND epistemic_kind = ?2"
+                            " WHERE tier = 'L1' AND kind = ?2"
                             "   AND (use_count >= ?3 OR confidence >= ?4)";
    char err[MP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -81,7 +94,7 @@ int db2_memory_promotion_promote_kind_slot(const char *ts, const char *kind, int
    char sql[384];
    snprintf(sql, sizeof(sql),
             "UPDATE memories SET tier = 'L2', updated_at = ?1"
-            " WHERE tier = 'L1' AND epistemic_kind = ?2"
+            " WHERE tier = 'L1' AND kind = ?2"
             "   AND (use_count >= ?3 OR confidence >= ?4)"
             "%s",
             slot_filter);
@@ -112,7 +125,7 @@ int db2_memory_promotion_demote_kind(const char *ts, const char *kind, double de
       return 0;
 
    static const char *sql = "UPDATE memories SET tier = 'L1', updated_at = ?1"
-                            " WHERE tier = 'L2' AND epistemic_kind = ?2"
+                            " WHERE tier = 'L2' AND kind = ?2"
                             "   AND confidence < ?3"
                             "   AND last_used_at < pg_now_text(?4 || ' days')";
    char err[MP_ERRBUF] = "";
