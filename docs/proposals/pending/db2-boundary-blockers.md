@@ -393,7 +393,7 @@ the envelope should carry an explicit family discriminator is a wire-format
 decision, and changing it later is a breaking change; recorded now while the
 wire is still only spoken by this repository.
 
-## Six list operations still return more rows than one reply can hold
+## Twelve list operations still return more rows than one reply can hold
 
 This entry used to name sixty-three. The bound was not the boundary's: a
 generated client declared its response buffer as a local array, so the reply
@@ -412,29 +412,121 @@ Two of those handler arrays had been written `static` to keep them off the
 stack, which two concurrent calls would have shared -- handlers run on their
 own threads. They are allocated now, with the rest.
 
-That leaves four declarations whose callers ask for more rows than a megabyte
-holds:
+Then the count read four, then six, each from a different partial measurement,
+and both were wrong in their numbers as well as their count. What follows is
+from one measurement that resolves the constants each row struct is written in
+terms of, and each caller's ceiling whether it is a literal, a constant from a
+header, or one from the calling source file:
 
-    row type                     bytes/row   rows per reply   caller asks for   n
-    project_info_t                    4265              245               512   2
-    css_migration_unit_t              4405              238              1024   1
-    db2_org_spend_row_t                338             3102              4096   1
-    db2_evidence_vector_row_t         8357              125               512   1
-    db2_kb_convention_row_t           9536              109               500   1
+    declaration                             row type               bytes/row  fit  asks
+    db2_css_component_unresolved            css_unresolved_hit_t        4480  234   512
+    db2_css_dead_rules                      css_dead_rule_hit_t         5380  194   512
+    db2_css_graph_duplicate_declarations    css_dup_decl_t              5508  190   512
+    db2_css_graph_duplicate_selectors       css_dup_selector_t          5380  194   512
+    db2_css_graph_specificity_conflicts     css_spec_conflict_t         6536  160   512
+    db2_css_high_specificity                css_high_spec_t             5392  194   512
+    db2_css_important_audit                 css_important_t             4484  233  2000
+    db2_css_migration_list                  css_migration_unit_t        4396  238  1024
+    db2_css_unused_custom_properties        css_unused_var_t            4484  233  2000
+    db2_evidence_vectors_list               db2_evidence_vector_row_t   8357  125   512
+    db2_kb_documents_list_convention_ca...  db2_kb_convention_row_t     9536  109   500
+    db2_lessons_list_outcomes               db2_lessons_outcome_row_t   1068  981  5000
 
-Each is wide for its own reason -- a project row carries a 4KB path, a CSS
-migration unit carries two -- and each caller's number is the size of an array
-it declared, which is a ceiling it chose rather than a count it needs. The
-honest options are unchanged and now apply to six operations rather than
-sixty-three: page the reply, narrow the row to the fields the caller reads, or
-establish that the caller's array is larger than any real result.
+Nine of the twelve are CSS insights, and they are wide for one reason: every
+CSS row carries a `file_path[MAX_PATH_LEN]`, four kilobytes, and most carry a
+`selector[CSS_SELECTOR_MAX]` of one more.
 
-The last two arrived with the field cap. They were unmeasurable while a utf8
-field could not exceed 4096 bytes, because the row they carry could not be
-described at all; describing it is what showed they do not fit either.
+Narrowing that field would bring all nine under the ceiling, and it would be
+treating the symptom. Each of these rows carries a path because each read
+re-materialises, as text, a file the graph already keys by `file_id` -- the
+CSS tables reference `files(id)` and every one of these reads joins
+`files -> projects`. The path is denormalised at the C boundary and nowhere
+else. The section below says why there are nine bespoke list operations here
+at all when no other language needs any.
 
-Eighteen more could not be measured because their row type is not a plain
-struct of scalars and fixed strings; they need reading one at a time.
+Two are wide for the other reason -- an 8192-byte content or embedding column,
+which is content rather than a worst case -- and need paging or a narrower
+projection. `db2_lessons_list_outcomes` is neither: its row is small and its
+caller simply asks for five thousand of them.
+
+Each caller's number is the size of an array it declared, which is a ceiling it
+chose rather than a count it needs, so a third option for any of them is to
+establish that the array is larger than any real result.
+
+`canonical_index_list_projects` was on the earlier list and is not on this one.
+Its caller caps at a hundred rows, well inside the two hundred and forty-five
+that fit; the earlier entry read a ceiling that was not its caller's.
+
+Two limits on what this measured. A caller that reaches the declaration through
+a passthrough -- `db2_code_index_project_list` is called only through
+`index_list_projects` -- has its ceiling one level further out than the
+measurement looks, so that one is unmeasured rather than shown to fit. And
+seven row types are not plain structs of scalars and fixed strings; four of
+those return bare `int64_t` arrays, which the envelope has a shape for and
+which need only a bound.
+
+There was a second ceiling, on one field rather than one message: a utf8 field
+could be bounded at 4096 bytes at most. Six DB2 row structs carry an
+8192-byte content or schema buffer, so six declarations could only have crossed
+by declaring a bound that truncates -- silently, at the boundary, rather than
+at the code's own limit. That cap is 8192 now.
+
+What made the old number safe was never the number. It was that no message
+could grow past the wire when its fields were that small, and nothing said so:
+the whole-reply bound existed only for row lists, and there was no bound at all
+on a request. Both are checked now against the megabyte the row lists are
+checked against, which is what the per-field cap had been standing in for.
+
+## CSS is a parsed language that never reaches the graph
+
+`src/code_treesitter.c` registers `.css` against `tree_sitter_css`, alongside
+the other twelve languages. What it takes from a CSS file is one construct:
+
+    /* CSS has no functions/types; the one named, referenceable construct is a
+     * @keyframes animation. Surface its name as a "type"; selectors (rule_set)
+     * are not symbols. */
+
+and `code_treesitter_calls` returns -1 for CSS outright -- no reference
+extraction, "defer to the hand-rolled path". So on the path every other
+language travels, a stylesheet contributes at most a few `@keyframes` names and
+no edges at all.
+
+The CSS that matters is extracted instead by `src/modules/css/css_analyze.c`
+into `css_rules`, `css_declarations` and `css_component_styles`. Those tables
+are keyed into the graph properly -- `css_rules.file_id REFERENCES files(id)`,
+and all eight insight reads join `files -> projects` with the same
+`lifecycle_state = 'current' AND generation = current_generation` predicates the
+canonical index uses. Two tables are not: `css_migration_units` and
+`css_render_snapshots` key by `(project, generation, unit_path)` as text, a
+second file identity beside the graph's.
+
+What is missing is the projection. `db2_code_projection_sync_project` walks
+files and calls and emits `defines`, `calls` and `imports` edges into
+`entity_edges`; the string "css" does not appear in that file. So a selector is
+never a node, a class token is never a node, and `css_component_styles` -- a
+component file joined to the rule that styles it, which is precisely a
+frontend-to-stylesheet edge -- stays a private table rather than becoming an
+edge anything else can traverse.
+
+That is why CSS needs nine bespoke list operations where no other language
+needs any. Every CSS question is answered by its own query against its own
+tables, returning its own wide rows, because there is nothing in the graph to
+ask instead. A selector that resolves to a component, and a component that a
+backend handler renders, are two hops that cannot be joined today: the first
+edge is in a table outside the graph and the second was never extracted.
+
+The shape this wants is the one every other language already has: CSS
+constructs projected as nodes and edges in the unified graph -- rule, selector,
+class token, custom property -- so that a frontend token and a backend symbol
+sit in one traversable structure. `code-graph-route-storage-orientation-residual`
+already asks for first-class route and storage node kinds with `handles` and
+`touches` edges; this is the same request one language over, and the two want
+deciding together rather than separately.
+
+That is a decision for whoever owns the code graph, not for a migration moving
+existing calls onto a bus, and it is recorded here because the migration is
+what surfaced it: nine oversized list operations are the shape of a language
+that had to build its own index.
 
 ## An answer that is a list and a summary has nowhere to go
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "00d114a64ef871918072454948a41ae9fc7551b2",
+  "source_revision": "89dc0077115026a8339065a9ef01d10fe07db598",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
@@ -10,8 +10,8 @@
     "production_consumers": 151,
     "test_consumers": 154,
     "include_directives": 996,
-    "outbound_dependency_rows": 164,
-    "outbound_include_directives": 164
+    "outbound_dependency_rows": 574,
+    "outbound_include_directives": 574
   },
   "source_files": {
     "c": [
@@ -6128,6 +6128,97 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/admin_grant.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/admin_grant.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/admin_grant.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/agent_hints.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/agent_hints.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/agent_hints.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/agent_outcomes.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/agent_outcomes.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/agent_outcomes.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/anti_patterns.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/anti_patterns.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/anti_patterns.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/anti_patterns.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/artifacts.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6149,10 +6240,52 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/artifacts.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/artifacts.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/artifacts.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/artifacts.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/bandit.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/bandit.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/bandit.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6167,6 +6300,20 @@
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/calibration.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/calibration.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6192,6 +6339,13 @@
     },
     {
       "source": "src/modules/db2/c/canonical_index.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
       "header": "index.h",
       "resolved": "src/headers/index.h",
       "classification": "host-api",
@@ -6202,6 +6356,27 @@
       "header": "modules/memory/memory_ontology.h",
       "resolved": "src/modules/memory/memory_ontology.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6240,6 +6415,27 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/code_audit.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_audit.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_audit.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/code_index.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6262,6 +6458,27 @@
     },
     {
       "source": "src/modules/db2/c/code_index.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.c",
       "header": "util.h",
       "resolved": "src/headers/util.h",
       "classification": "host-api",
@@ -6275,10 +6492,38 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/code_index.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/code_index_ops.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index_ops.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index_ops.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index_ops.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6289,10 +6534,66 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/code_project_lifecycle.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_project_lifecycle.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_project_lifecycle.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_project_lifecycle.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/code_projection.c",
       "header": "modules/memory/memory_ontology.h",
       "resolved": "src/modules/memory/memory_ontology.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_projection.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_projection.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_projection.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_projection.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6310,10 +6611,52 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/collab_rules.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/collab_rules.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/collab_rules.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/collab_rules.h",
       "header": "../headers/collab_rules.h",
       "resolved": "src/headers/collab_rules.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_jobs.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_jobs.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_jobs.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6332,9 +6675,44 @@
     },
     {
       "source": "src/modules/db2/c/corpus_structural.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.c",
       "header": "util.h",
       "resolved": "src/headers/util.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6349,6 +6727,41 @@
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_build.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_build.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_build.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_build.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_classify.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6373,10 +6786,52 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/cross_repo_deps.h",
       "header": "index.h",
       "resolved": "src/headers/index.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6391,6 +6846,20 @@
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_identity.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_identity.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6401,6 +6870,20 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/cross_repo_resolver.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_resolver.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/cross_repo_review.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -6412,6 +6895,27 @@
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_review.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_review.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_review.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6429,6 +6933,20 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/cross_repo_route.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_route.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/cross_repo_stats.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -6440,6 +6958,48 @@
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_stats.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_stats.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_stats.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_stats.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_graph.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_graph.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6457,10 +7017,66 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/css_graph.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_insights.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_insights.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_insights.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_insights.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/css_migration.c",
       "header": "../support/db2_runtime_config.h",
       "resolved": "src/modules/db2/support/db2_runtime_config.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_migration.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_migration.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_migration.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6471,10 +7087,129 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/css_migration.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/css_render.c",
       "header": "../support/db2_runtime_config.h",
       "resolved": "src/modules/db2/support/db2_runtime_config.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_render.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_render.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_render.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_render.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_gaps.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_gaps.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_gaps.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_gaps.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_terms.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_terms.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_terms.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_terms.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curator_terms.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curiosity.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curiosity.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curiosity.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6485,6 +7220,13 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/curiosity.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_hardening.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -6492,10 +7234,52 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db2_hardening.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_hardening.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_hardening.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_init.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_init.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_init.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_init.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6513,10 +7297,59 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db2_learning.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_pool.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_pool.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_pool.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_reembed.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_reembed.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_reembed.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_reembed.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6527,10 +7360,31 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db2_tenant.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_tenant.h",
       "header": "kb_identity.h",
       "resolved": "src/headers/kb_identity.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_tenant.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_test_shim.c",
+      "header": "assert.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/assert.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6562,6 +7416,13 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db2_vault_witness_provider.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_witness_checkpoint.c",
       "header": "modules/vault/vault_witness_checkpoint.h",
       "resolved": "src/modules/vault/vault_witness_checkpoint.h",
@@ -6590,6 +7451,34 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_witness_emit.c",
       "header": "modules/vault/vault_witness_checkpoint.h",
       "resolved": "src/modules/vault/vault_witness_checkpoint.h",
@@ -6604,10 +7493,73 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db2_witness_emit.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_emit.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_emit.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_witness_emit.h",
       "header": "modules/vault/vault_witness_export.h",
       "resolved": "src/modules/vault/vault_witness_export.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_emit.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_postgres.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_postgres.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_postgres.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_postgres.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_postgres.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6625,6 +7577,48 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db_schema.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_schema.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_schema.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/decision_log.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/decision_log.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/decision_log.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/demotion.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6636,6 +7630,34 @@
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/demotion.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/demotion.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/demotion.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/demotion.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6653,6 +7675,27 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/enrollments.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/enrollments.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/enrollments.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/entity_edges.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6667,6 +7710,62 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/entity_edges.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_edges.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_edges.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_edges.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_nodes.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_nodes.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_nodes.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_profiles.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/entity_registry.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6674,10 +7773,87 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/entity_registry.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_registry.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_registry.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_registry.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/epistemic_directives.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/epistemic_directives.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/epistemic_directives.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/epistemic_directives.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/epistemic_directives.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/evidence_vectors.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/evidence_vectors.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/evidence_vectors.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6720,6 +7896,20 @@
       "header": "../headers/rel_types.h",
       "resolved": "src/headers/rel_types.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_lifecycle.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_lifecycle.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6737,6 +7927,20 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/fact_recall.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_recall.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/feature_rows.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6744,10 +7948,45 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/feature_rows.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/feature_rows.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/feedback.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/feedback.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/feedback.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/feedback.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6762,6 +8001,34 @@
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6779,10 +8046,73 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/kb_audit_worm.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_audit_worm.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_docs.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_docs.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_docs.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_docs.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_docs.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/kb_maintenance.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_maintenance.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_maintenance.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6814,10 +8144,80 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/kb_payload.h",
       "header": "../headers/sketch.h",
       "resolved": "src/headers/sketch.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_releases.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_releases.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_releases.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_releases.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_releases.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6828,6 +8228,20 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/kb_runtime_state.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_runtime_state.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/kb_service_backend.c",
       "header": "../support/db2_runtime_config.h",
       "resolved": "src/modules/db2/support/db2_runtime_config.h",
@@ -6842,6 +8256,20 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/kb_service_backend.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/kb_service_backend.h",
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
@@ -6849,10 +8277,45 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/kb_service_backend.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/kb_service_backend_ingest.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_ingest.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_ingest.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_ingest.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_vectors.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6870,10 +8333,80 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/learning.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/learning.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/learning_synth_ops.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/learning_synth_ops.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/lessons.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/lessons.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/lessons.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/lifecycle.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/management_action_journal.c",
       "header": "platform_random.h",
       "resolved": "src/headers/platform_random.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_action_journal.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_action_journal.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6884,10 +8417,59 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/management_action_journal.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_client_instance.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_client_instance.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_client_instance.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_client_instance.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_identity_journal.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/management_identity_journal.h",
       "header": "kb_identity.h",
       "resolved": "src/headers/kb_identity.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_identity_journal.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6898,6 +8480,41 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/management_intent_fields.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_intent_fields.h",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_intent_fields.h",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_jwks_publication.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_jwks_publication.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/management_jwks_publication.h",
       "header": "kb_mgmt_jwks_publication.h",
       "resolved": "src/headers/kb_mgmt_jwks_publication.h",
@@ -6905,10 +8522,45 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/management_jwks_publication.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_jwks_runtime.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_jwks_runtime.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/management_read_journal.c",
       "header": "platform_random.h",
       "resolved": "src/headers/platform_random.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_read_journal.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_read_journal.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6926,6 +8578,76 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/management_read_journal.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_status_key.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_status_provision.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_status_provision.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_status_provision.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_status_runtime.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_status_runtime.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_status_runtime.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_token_authority.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_token_authority.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/management_token_authority.h",
       "header": "kb_mgmt_token_authority.h",
       "resolved": "src/headers/kb_mgmt_token_authority.h",
@@ -6937,6 +8659,20 @@
       "header": "kb_mgmt_token_authority_ipc.h",
       "resolved": "src/headers/kb_mgmt_token_authority_ipc.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_token_roots.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_token_roots.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6954,10 +8690,73 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/membership.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/membership.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/membership.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_briefing.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_briefing.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_briefing.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/memory_conflicts.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_conflicts.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_conflicts.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_conflicts.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6968,10 +8767,52 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/memory_entity_graph.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_entity_graph.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/memory_export.c",
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_export.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_export.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_export.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_export.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6982,10 +8823,80 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/memory_health.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_health.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_health.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lifecycle.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lifecycle.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lifecycle.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/memory_lint.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lint.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lint.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lint.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lint.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -6996,10 +8907,87 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/memory_payload.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_payload.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_payload.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_payload.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_promotion.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_promotion.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_promotion.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/memory_query.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_query.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_query.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_query.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_query.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7010,10 +8998,38 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/memory_query_bookkeeping.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_query_bookkeeping.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/memory_relations.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_relations.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_relations.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7024,10 +9040,73 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/memory_row_mapper_pg.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_row_mapper_pg.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scenes.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scenes.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scenes.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scenes.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/memory_scope_query.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scope_query.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scope_query.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scope_query.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7038,10 +9117,115 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/memory_score_fields.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_score_fields.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_vectors.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_vectors.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/mining.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/mining.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/mining.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/notes.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/notes.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/notes.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/notes.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/notes.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/oidc_jwks.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/oidc_jwks.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/oidc_jwks.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/oidc_jwks.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7052,10 +9236,59 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/ontology_evolution.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/ontology_evolution.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/ontology_evolution.h",
       "header": "../headers/rel_types.h",
       "resolved": "src/headers/rel_types.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_budget.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_budget.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_budget.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_egress.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_egress.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7073,6 +9306,153 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/org_model_catalog.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_model_catalog.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_model_catalog.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_rate.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_rate.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_rate.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_spend.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_spend.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_spend.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_telemetry.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_telemetry.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_telemetry.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_telemetry_fmt.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_telemetry_fmt.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_token_audit.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_token_audit.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_key_use.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_key_use.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rewrap.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rewrap.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rewrap.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/org_vault_rewrap.h",
       "header": "vault_crypto.h",
       "resolved": "src/modules/vault/vault_crypto.h",
@@ -7084,6 +9464,48 @@
       "header": "vault_reseal_receipt.h",
       "resolved": "src/modules/vault/vault_reseal_receipt.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rotation.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rotation.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rotation.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_kb_service.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_kb_service.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_kb_service.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7101,6 +9523,55 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/pgvec_transport.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_transport.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_transport.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_transport.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_verify.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_verify.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_verify.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/project.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -7108,10 +9579,59 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/project.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/project.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/project.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/prospective_memories.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/prospective_memories.c",
+      "header": "ctype.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/ctype.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/prospective_memories.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/prospective_memories.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/prospective_memories.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7133,6 +9653,20 @@
       "header": "modules/memory/memory_pii_gate.h",
       "resolved": "src/modules/memory/memory_pii_gate.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rel_types_store.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rel_types_store.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7154,6 +9688,20 @@
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/report_enrichments.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/report_enrichments.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7185,10 +9733,101 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/rules.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rules.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rules.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/server_registry.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/server_registry.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/server_registry.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/shadow_delta.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/shadow_delta.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/shadow_delta.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/sketch.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/sketch.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/sketch.h",
       "header": "../headers/sketch.h",
       "resolved": "src/headers/sketch.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/sketch.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/stopwords.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7199,10 +9838,87 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/tasks.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/tasks.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/tasks.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/team.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/team.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/team.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/team.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/tool_registry.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/tool_registry.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/trace_mining.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/typed_facts.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/typed_facts.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7213,10 +9929,87 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/typed_facts.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_status_runtime.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_status_runtime.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_status_runtime.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_status_runtime.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/vault_pg.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "stdlib.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdlib.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7255,10 +10048,80 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/vector_index_ops.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vector_index_ops.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vector_index_ops.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/vector_status.h",
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vector_verify.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/workflow_patterns.c",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/workflow_patterns.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/workflow_patterns.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/workflow_patterns.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/write_tier_grant.c",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/write_tier_grant.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
       "count": 1
     },
     {
@@ -7267,7 +10130,14 @@
       "resolved": "src/headers/kb_identity_token.h",
       "classification": "host-api",
       "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/write_tier_grant.h",
+      "header": "stdint.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdint.h",
+      "classification": "vendored-system-api",
+      "count": 1
     }
   ],
-  "fingerprint": "22f8a3057c97893187d03e2a431d81d114907f993d7847da6527b29eb153b019"
+  "fingerprint": "98c6116c19e93f30b7b71a34410336baf5c9a57d5bfdc75af13a833b7ccaed9e"
 }
